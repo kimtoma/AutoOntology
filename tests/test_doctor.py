@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+import pytest
+
 from autoontology import doctor
 from autoontology.config import Settings
 from autoontology.doctor import Check, exit_code, format_checks
@@ -329,3 +331,36 @@ def test_ollama_chat_model_without_router_prefix_warns(isolated_env, monkeypatch
     assert check.status == "WARN" and "openai/ prefix" in check.detail
     monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_CHAT_MODEL", "openai/qwen3:8b")
     assert doctor.check_profile(Settings.from_env()).status == "OK"
+
+
+def _boom(*_a, **_k):
+    raise RuntimeError("unexpected")
+
+
+@pytest.mark.parametrize("chat", ["ollama", "claude", "openai"])
+def test_every_fail_or_warn_row_has_a_remedy(isolated_env, monkeypatch, chat):
+    """Whatever goes wrong, each FAIL/WARN row says what to do."""
+    from autoontology.web.providers import router
+
+    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", chat)
+    monkeypatch.setenv("POSTGRES_PORT", "1")  # nothing listens there
+    monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_ENDPOINT", "http://127.0.0.1:1/v1")
+    for name in ("check_node", "check_kordoc", "check_ocr_models", "check_embed_provider"):
+        monkeypatch.setattr(doctor, name, _boom)
+    monkeypatch.setenv("AUTOONTOLOGY_VISION_MODEL", "gemma4:e4b")
+    monkeypatch.setattr(
+        router.Registry,
+        "status",
+        lambda self, *a, **k: router.ProviderStatus(chat, False, False, "down", ""),
+    )
+    checks = doctor.run_checks(Settings.from_env(), skip_models=True)
+    bad = [c for c in checks if c.status in ("FAIL", "WARN")]
+    assert bad, checks
+    assert [c.name for c in bad if not c.remedy.strip()] == []
+    vision = doctor._guard("vision model", _boom, doctor.VISION_REMEDY)
+    assert vision.remedy
+
+
+def test_missing_env_file_points_at_init(isolated_env):
+    check = doctor.check_env_file()
+    assert check.status == "WARN" and "autoontology init" in check.remedy

@@ -79,7 +79,7 @@ def check_env_file() -> Check:
         ".env",
         "WARN",
         f"{path} missing: using the built-in defaults",
-        "cp .env.example .env (optional)",
+        "uv run autoontology init (writes .env; or cp .env.example .env)",
     )
 
 
@@ -295,6 +295,8 @@ def check_profile(settings: Settings) -> Check:
 
 
 SETUP_OLLAMA = "uv run autoontology setup"
+NODE_REMEDY = "install Node.js 20+ (only needed for HWP/PDF/DOCX/PPTX/XLSX documents)"
+VISION_REMEDY = "start Ollama (`ollama serve`) and check AUTOONTOLOGY_VISION_MODEL in .env"
 
 
 def check_chat_provider(settings: Settings) -> Check:
@@ -310,7 +312,12 @@ def check_chat_provider(settings: Settings) -> Check:
             f"{chat} {settings.effective_chat_model} via {settings.llm_proxy_endpoint} "
             f"(from {origin}): {st.detail}"
         )
-        return Check("chat provider", "OK" if st.ok else "FAIL", detail, st.remedy)
+        return Check(
+            "chat provider",
+            "OK" if st.ok else "FAIL",
+            detail,
+            st.remedy or "uv run autoontology provider status",
+        )
     target = (
         settings.ollama_endpoint
         if chat == "ollama"
@@ -547,7 +554,7 @@ def run_checks(settings: Settings, *, skip_models: bool = False) -> list[Check]:
     checks = [check_env_file()]
     checks += check_postgres(settings)
     checks += check_ports(settings)
-    checks.append(_guard("node", check_node))
+    checks.append(_guard("node", check_node, NODE_REMEDY))
     checks.append(
         _guard("kordoc", lambda: check_kordoc(settings), "uv run autoontology tools install-kordoc")
     )
@@ -558,12 +565,22 @@ def run_checks(settings: Settings, *, skip_models: bool = False) -> list[Check]:
             "uv run autoontology tools install-kordoc",
         )
     )
-    checks.append(_guard("vision model", lambda: check_vision_model(settings)))
+    checks.append(_guard("vision model", lambda: check_vision_model(settings), VISION_REMEDY))
     profile = check_profile(settings)
     checks.append(profile)
-    provider = _guard("chat provider", lambda: check_chat_provider(settings))
+    provider = _guard(
+        "chat provider",
+        lambda: check_chat_provider(settings),
+        "uv run autoontology provider status",
+    )
     checks.append(provider)
-    checks.append(_guard("embed provider", lambda: check_embed_provider(settings)))
+    checks.append(
+        _guard(
+            "embed provider",
+            lambda: check_embed_provider(settings),
+            "check AUTOONTOLOGY_EMBED_PROVIDER and its model in .env (see .env.example)",
+        )
+    )
     blocked = profile.status == "FAIL" or provider.status == "FAIL"
     if "ollama" in (settings.chat_provider, settings.embed_provider):
         ollama = check_ollama(settings)

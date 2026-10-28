@@ -167,6 +167,8 @@ def setup(
         typer.echo(
             f"vision model: {settings.vision_model} present" + (" (pulled)" if pulled else "")
         )
+    elif settings.vision_model:
+        typer.echo(f"vision model: {settings.vision_model} skipped (--skip-models)")
     if docs:
         _install_kordoc(
             settings,

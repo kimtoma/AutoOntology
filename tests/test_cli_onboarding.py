@@ -311,3 +311,16 @@ def test_provider_use_warns_about_a_shell_override(isolated_env, monkeypatch):
     assert res.exit_code == 0, res.output
     assert "your shell sets AUTOONTOLOGY_CHAT_PROVIDER=ollama" in res.output
     assert "unset AUTOONTOLOGY_CHAT_PROVIDER" in res.output
+
+
+def test_setup_names_the_vision_model_even_when_models_are_skipped(isolated_env, monkeypatch):
+    from autoontology.engine import migrate
+
+    monkeypatch.setenv("AUTOONTOLOGY_VISION_MODEL", "gemma4:e4b")
+    monkeypatch.setattr(pg, "setup_database", lambda s: "database ok")
+    monkeypatch.setattr(migrate, "run_migrations", lambda s: None)
+    monkeypatch.setattr(migrate, "current_revision", lambda s: "abc")
+    monkeypatch.setattr(migrate, "head_revision", lambda: "abc")
+    res = runner.invoke(app, ["setup", "--skip-models"])
+    assert res.exit_code == 0, res.output
+    assert "vision model: gemma4:e4b skipped (--skip-models)" in res.output
