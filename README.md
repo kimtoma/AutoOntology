@@ -180,7 +180,9 @@ run succeeds and exits 0.
   `information_schema` for Postgres. If the database cannot be read, or it is MySQL or
   Snowflake (no bundled driver), its steps always run again.
 - align, merge and snapshot also run again when the set of registered sources changed.
-- A resumed align judges a concept again when its candidate Terms changed.
+- align runs again when the upstream Terms changed (a name, description, synonym or table
+  edited, or a Term added or removed; its own synonym and description writes do not count),
+  and judges again only the concepts whose candidate Terms changed.
 
 ## HTTP API
 

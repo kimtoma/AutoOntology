@@ -19,7 +19,8 @@ changed since it ran (:func:`input_fingerprint`: the files' contents, kordoc's
 availability, or the database locator plus its live schema -- an unreachable database is
 never reused) or something it depends on runs again (a step of the same source, or -- for
 align/merge/snapshot -- any step), and align/merge/snapshot also run again when the set of
-registered sources changed since that run (:func:`source_set`). Unchanged inputs are no-ops
+registered sources changed since that run (:func:`source_set`); an align step also runs
+again when the upstream Terms moved since it ran (:data:`TERMS_KEY`). Unchanged inputs are no-ops
 inside the steps too (file manifests, document hashes, the consolidation fingerprint, the
 judge cache), so a plain re-run does no LLM work for what did not change.
 
@@ -292,7 +293,7 @@ class _Build:
                 return {"skipped": f"documents source {src.name!r} has no concepts"}
             if not self.reuse_concepts:
                 self._forget_concept_steps(src)
-            return align_job.align_pass(
+            detail = align_job.align_pass(
                 settings=self.settings,
                 store=self.store,
                 run=self.run,
@@ -305,6 +306,9 @@ class _Build:
                 min_conf=self.run.params.get("min_conf"),
                 top_k=int(self.run.params.get("top_k") or align_job.al.DEFAULT_TOP_K),
             )
+            # the Terms as apply left them: --resume re-aligns once they move upstream
+            detail[TERMS_KEY] = align_job.terms_fingerprint(self.store, self.client, structured)
+            return detail
 
         return run
 
@@ -476,6 +480,30 @@ def _resume_reuse(
     return already, changed
 
 
+#: ``align:<docs>`` step detail: :func:`align_job.terms_fingerprint` after the pass.
+TERMS_KEY = "terms_fingerprint"
+
+
+def _terms_moved(
+    store: Store, run: Run, sources: list[Source], client: BackendClient, already: set[str]
+) -> set[str]:
+    """The reusable ``align:<docs>`` steps whose recorded Terms fingerprint differs from the
+    upstream Terms now (a Term edited, added or removed); unreadable means moved."""
+    rows = {s.name: s for s in store.get_steps(run.id)}
+    names = [
+        n for n in sorted(already) if n.startswith("align:") and "skipped" not in rows[n].detail
+    ]
+    if not names:
+        return set()
+    structured = [s for s in sources if s.kind in STRUCTURED_KINDS and s.catalog_database_id]
+    try:
+        current = align_job.terms_fingerprint(store, client, structured) if structured else ""
+    except Exception:  # noqa: BLE001 - cannot compare: align again
+        logger.warning("--resume: could not read the upstream Terms: aligning again")
+        current = ""
+    return {n for n in names if not current or rows[n].detail.get(TERMS_KEY) != current}
+
+
 def _align_params() -> dict[str, Any]:
     from autoontology.unstructured import align as al
 
@@ -578,6 +606,14 @@ def _run_held(
             )
             already = {n for n in already if not n.startswith("align:")}
             reuse_concepts = False
+        moved = _terms_moved(store, previous, registered, client, already)
+        if moved:
+            logger.info(
+                "--resume: upstream Terms changed since run %s: aligning again (%s)",
+                previous.id,
+                ", ".join(sorted(moved)),
+            )
+            already -= moved
         if previous.params.get("source_set") != params["source_set"]:
             logger.info(
                 "--resume: the registered sources changed since run %s: aligning, merging "

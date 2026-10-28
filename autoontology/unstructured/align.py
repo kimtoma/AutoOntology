@@ -186,6 +186,54 @@ def candidate_payload(t: TermInfo) -> dict[str, Any]:
     }
 
 
+def _judged_term(
+    c: dict[str, Any],
+    auto_added: dict[str, Sequence[str]] | None,
+    auto_descriptions: dict[str, set[str]] | None,
+) -> dict[str, Any]:
+    """A candidate payload as the judge cache sees it: id, name, columns, description and
+    synonyms minus what ``apply`` wrote (see :func:`judge_key`)."""
+    tid = c.get("id")
+    mine = {alias_key(a) for a in (auto_added or {}).get(tid, ())}
+    description = str(c.get("description") or "").strip()
+    auto = (auto_descriptions or {}).get(tid, set())
+    if (
+        ANY_DESCRIPTION in auto
+        or description in auto
+        or description.startswith(FALLBACK_TERM_PREFIX)  # what apply may replace
+    ):
+        description = ""
+    return {
+        **{k: c.get(k) for k in ("id", "name", "columns")},
+        "description": description,
+        "synonyms": [x for x in c.get("synonyms") or [] if alias_key(x) not in mine],
+    }
+
+
+def terms_fingerprint(
+    terms: Sequence[TermInfo],
+    auto_added: dict[str, Sequence[str]] | None = None,
+    auto_descriptions: dict[str, set[str]] | None = None,
+) -> str:
+    """A hash of the upstream Terms align judges against (sorted by id: name, columns,
+    description, synonyms, tables), minus apply's own writes as in :func:`judge_key`, so a
+    Term edited, added or removed upstream changes it and apply alone does not."""
+    rows = sorted(
+        (
+            {
+                **_judged_term(candidate_payload(t), auto_added, auto_descriptions),
+                "tables": sorted(
+                    f"{x.get('schema') or ''}.{x.get('name') or ''}" for x in t.tables
+                ),
+            }
+            for t in terms
+        ),
+        key=lambda r: str(r["id"]),
+    )
+    blob = json.dumps(rows, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
 def judge_key(
     concept: dict[str, Any],
     candidates: list[dict[str, Any]],
@@ -201,27 +249,7 @@ def judge_key(
     set (*auto_descriptions*: term id -> texts; :data:`ANY_DESCRIPTION` when the text was
     not recorded) or the upstream fallback it replaces, so a re-run does not re-judge because of its own writes but a manual
     or upstream change of either re-judges."""
-    added = auto_added or {}
-    descriptions = auto_descriptions or {}
-    terms = []
-    for c in candidates:
-        tid = c.get("id")
-        mine = {alias_key(a) for a in added.get(tid, ())}
-        description = str(c.get("description") or "").strip()
-        auto = descriptions.get(tid, set())
-        if (
-            ANY_DESCRIPTION in auto
-            or description in auto
-            or description.startswith(FALLBACK_TERM_PREFIX)  # what apply may replace
-        ):
-            description = ""
-        terms.append(
-            {
-                **{k: c.get(k) for k in ("id", "name", "columns")},
-                "description": description,
-                "synonyms": [x for x in c.get("synonyms") or [] if alias_key(x) not in mine],
-            }
-        )
+    terms = [_judged_term(c, auto_added, auto_descriptions) for c in candidates]
     blob = json.dumps(
         {
             "v": prompts.ALIGN_PROMPT_VERSION,

@@ -971,6 +971,16 @@ def _retry_pending_refreshes(
     return out
 
 
+def terms_fingerprint(store: Store, client: BackendClient, structured: list[Source]) -> str:
+    """The upstream Terms of *structured* now (:func:`al.terms_fingerprint`), what
+    ``build --resume`` compares to decide whether an ``align:<docs>`` step is reusable."""
+    aligns = AlignmentStore(store)
+    snap = combine([fetch_snapshot(client, s) for s in structured])
+    return al.terms_fingerprint(
+        list(snap.term_map().values()), aligns.alias_additions(), aligns.auto_descriptions()
+    )
+
+
 def align_pass(
     *,
     settings: Settings,

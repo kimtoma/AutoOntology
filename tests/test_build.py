@@ -509,6 +509,25 @@ def test_align_rejudges_when_the_candidate_description_changed(env):
     assert judged() == 1
 
 
+def test_resume_runs_align_again_when_an_upstream_term_changed(env):
+    """Follow-up of recheck #2: with unchanged inputs `--resume` used to keep the whole
+    align step, so an edited upstream Term was never re-judged. The step records a
+    fingerprint of the Terms (apply's own writes left out) and runs again when it moved."""
+    add_structured(env)
+    add_documents(env)
+    client = env["client"]
+    first = run(env)
+    assert first.status == "succeeded"
+    kept = run(env, resume=True)
+    assert "align:hanbit-docs" not in kept.details  # nothing changed, apply's writes included
+    client.terms["t-contract"]["description"] = "판매 계약을 제외한 고용 계약"
+    again = run(env, resume=True)
+    assert again.run_id == first.run_id and again.status == "succeeded", again.problems
+    assert again.details["align:hanbit-docs"]["judged"] == 1
+    assert "merge" in again.details and "snapshot" in again.details
+    assert "align:hanbit-docs" not in run(env, resume=True).details
+
+
 def test_build_records_the_documents_source_on_the_aliases_it_adds(env):
     add_structured(env)
     add_documents(env)
