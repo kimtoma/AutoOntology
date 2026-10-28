@@ -12,7 +12,7 @@ export function mockFetch(routes: Record<string, unknown | Handler>) {
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
-    const path = url.replace(/^\/api\/autoontology/, "").split("?")[0]
+    const path = url.replace(/^\/api(?=\/)/, "").split("?")[0]
     calls.push({ method, path, init })
     const route = routes[`${method} ${path}`]
     if (route === undefined) {

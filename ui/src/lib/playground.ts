@@ -1,8 +1,8 @@
-/* Pure helpers of the 플레이그라운드 page (unit-tested in src/test/playground.test.ts). */
+/* Pure helpers of the Playground page (unit-tested in src/test/playground.test.tsx). */
 
-export const ELEMENT_KO: Record<string, string> = {
-  term: "Term", concept: "개념", rule: "규칙", process: "절차", individual: "개체",
-  relation: "관계", evidence: "근거",
+export const ELEMENT_LABEL: Record<string, string> = {
+  term: "Term", concept: "Concept", rule: "Rule", process: "Process", individual: "Individual",
+  relation: "Relation", evidence: "Evidence",
 }
 
 export function cell(v: unknown): string {

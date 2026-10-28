@@ -32,3 +32,16 @@ describe("dev proxy Origin rewrite", () => {
     expect(proxy.send({})).toEqual({})
   })
 })
+
+describe("dev proxy target", () => {
+  afterEach(() => { vi.unstubAllEnvs(); vi.resetModules() })
+
+  it("defaults to 127.0.0.1:7800 and follows the SERVICE env", async () => {
+    vi.stubEnv("SERVICE", "")
+    vi.resetModules()
+    expect((await import("../../dev-proxy")).SERVICE).toBe("http://127.0.0.1:7800")
+    vi.stubEnv("SERVICE", "http://127.0.0.1:7810/")
+    vi.resetModules()
+    expect((await import("../../dev-proxy")).SERVICE).toBe("http://127.0.0.1:7810")
+  })
+})

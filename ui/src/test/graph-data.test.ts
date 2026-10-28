@@ -1,6 +1,7 @@
 import type { GraphJson } from "@/lib/api"
 import {
-  buildGraph, degreeVal, MAX_VAL, MIN_VAL, neighbours, reuseNodes, TYPE_COLORS,
+  buildGraph, degreeVal, isLayerView, layersFor, MAX_VAL, MIN_VAL, neighbours, ORIGIN_COLORS,
+  originCounts, reuseNodes, TYPE_COLORS,
 } from "@/lib/graph-data"
 import { hasWebGL } from "@/lib/webgl"
 
@@ -13,7 +14,7 @@ const G: GraphJson = {
   layer: "all", warnings: [], structured_sources: ["hanbit"], documents_sources: ["docs"],
   counts: { nodes: 7, edges: 6 },
   nodes: [
-    node("t1", "structured", { origin: "structured", kind: "term", source: "hanbit", synonyms: ["계약"] }),
+    node("t1", "structured", { origin: "aligned", kind: "term", source: "hanbit", synonyms: ["계약"] }),
     node("t2", "structured", { origin: "structured", kind: "term", source: "hanbit" }),
     node("c1", "documents"),
     node("c2", "documents", { kind: "metric" }),
@@ -27,7 +28,7 @@ const G: GraphJson = {
     { id: "sub", source: "c2", target: "c1", type: "subclass_of", label: "subClassOf", layer: "documents" },
     { id: "same", source: "f1", target: "t1", type: "aligned_same", label: "same", layer: "aligned", relation: "same" },
     { id: "brd", source: "c1", target: "t2", type: "subclass_of", label: "subClassOf", layer: "aligned", relation: "broader" },
-    { id: "ev", source: "c1", target: "d1", type: "evidence", label: "근거", layer: "evidence", count: 2 },
+    { id: "ev", source: "c1", target: "d1", type: "evidence", label: "evidence", layer: "evidence", count: 2 },
   ],
 }
 
@@ -78,6 +79,31 @@ describe("buildGraph", () => {
     expect(bySource.legend.map((l) => [l.label, l.count])).toEqual([["docs", 3], ["hanbit", 2]])
     const colors = new Set(bySource.nodes.map((n) => n.color))
     expect(colors.size).toBe(2)
+  })
+
+  it("colours by origin by default, rings the aligned Terms", () => {
+    const g = buildGraph(G, { layers: layersFor("all", true), colorMode: "origin" })
+    expect(g.legend.map((l) => [l.key, l.count])).toEqual([
+      ["structured", 1], ["document", 4], ["aligned", 1], ["source_document", 1],
+    ])
+    const by = Object.fromEntries(g.nodes.map((n) => [n.id, n]))
+    expect(by.t1).toMatchObject({ color: ORIGIN_COLORS.aligned, ring: true, labelled: true })
+    expect(by.t2).toMatchObject({ color: ORIGIN_COLORS.structured, ring: false })
+    expect(by.f1.color).toBe(ORIGIN_COLORS.document)  // a folded concept stays a document concept
+    expect(by.d1.color).toBe(ORIGIN_COLORS.source_document)
+    expect(originCounts(g.nodes)).toEqual({ aligned: 1, structured: 1, document: 4 })
+  })
+
+  it("maps the layer picker to API layers", () => {
+    expect(layersFor("all", false)).toEqual(["structured", "documents", "aligned"])
+    expect(layersFor("aligned", true)).toEqual(["aligned", "evidence"])
+    expect(isLayerView("documents")).toBe(true)
+    expect(isLayerView("evidence")).toBe(false)
+    expect(isLayerView(null)).toBe(false)
+    // aligned only: the folded concept and both ends of every alignment link
+    const aligned = buildGraph(G, { layers: layersFor("aligned", false), colorMode: "origin" })
+    expect(aligned.nodes.map((n) => n.id).sort()).toEqual(["c1", "f1", "t1", "t2"])
+    expect(aligned.links.map((l) => l.id).sort()).toEqual(["brd", "same"])
   })
 
   it("shows only the expanded nodes and their neighbours", () => {

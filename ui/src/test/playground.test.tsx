@@ -15,14 +15,19 @@ const SOURCES = {
       uploaded: false, created_at: "", last_run: null, active_run: null, documents: 5, concepts: 85 },
   ],
 }
-const PROVIDERS = {
-  selection: { chat_provider: "claude", chat_model: "sonnet", embed_provider: "ollama", origin: {} },
-  settings_file: {}, choices: { chat_provider: [], embed_provider: [] }, providers: [],
-  applied: { chat_provider: "claude", chat_model: "sonnet", embed_provider: "ollama" },
-  restart_required: false,
+const STATUS = {
+  status: "ok", version: "0.1.0", kordoc_available: true, service_url: "", checks: {}, doctor: "",
+  providers: { chat_provider: "ollama", chat_model: "openai/qwen3:8b", embed_provider: "ollama",
+               embed_model: "bge-m3", openai_base_url: "" },
 }
+const ONTOLOGY = { revision: 2, created_at: "", run_id: "b", workspace: "default", base_iri: "",
+                   sources: [], counts: {}, alignment: {} }
+const INDEX = { workspace: "default", scope: ["hanbit", "hanbit-docs"], warnings: [], revision: 2,
+                index: null, stale: true }
 const CHIP = { type: "term", id: "term-t-c", label: "Contracts", link: "/concepts?concept=abc",
                graph_link: "/graph?focus=term-t-c" }
+const EVIDENCE_CHIP = { type: "evidence", id: "ev-1", label: "계약관리규정 p. 2", link: "/concepts?concept=abc",
+                        graph_link: "/graph?focus=concept-abc" }
 
 function sse(events: [string, unknown][]) {
   const text = events.map(([e, d]) => `event: ${e}\r\ndata: ${JSON.stringify(d)}\r\n\r\n`).join("")
@@ -58,9 +63,10 @@ describe("playground helpers", () => {
 
   it("renders citation tokens as chips, text escaped", () => {
     renderPage(<CitedText text={'계약은 <b>약정</b> [E1]. 모름 [E1, E9]'} citations={{ E1: CHIP }} />)
+    // outside the playground (no concept opener) a chip links to the Ontology page
     const chips = screen.getAllByRole("link", { name: /Contracts/ })
-    expect(chips[0]).toHaveAttribute("href", "/concepts?concept=abc")
-    expect(screen.getAllByRole("link", { name: "Contracts 그래프에서 보기" })[0])
+    expect(chips[0]).toHaveAttribute("href", "/ontology?concept=term-t-c")
+    expect(screen.getAllByRole("link", { name: "Show Contracts in the graph" })[0])
       .toHaveAttribute("href", "/graph?focus=term-t-c")
     expect(screen.getByText(/<b>약정<\/b>/)).toBeInTheDocument()
     expect(screen.getByText("[E9]")).toBeInTheDocument()
@@ -68,27 +74,27 @@ describe("playground helpers", () => {
 
   it("omits the graph link of an element that is not a graph node", () => {
     renderPage(<CitedText text="값 [E1]" citations={{ E1: { ...CHIP, graph_link: "" } }} />)
-    expect(screen.getByRole("link", { name: /Contracts/ })).toHaveAttribute("href", "/concepts?concept=abc")
-    expect(screen.queryByRole("link", { name: "Contracts 그래프에서 보기" })).toBeNull()
+    expect(screen.getByRole("link", { name: /Contracts/ })).toHaveAttribute("href", "/ontology?concept=term-t-c")
+    expect(screen.queryByRole("link", { name: "Show Contracts in the graph" })).toBeNull()
   })
 
   it("streams a POST SSE endpoint and raises ApiError before the stream", async () => {
     mockFetch({
       "POST /playground/chat": () => sse([["delta", { text: "a" }], ["done", {}]]),
-      "POST /playground/tests/run": () => new Response(JSON.stringify({ error: "playground_busy", detail: "busy" }),
-                                                      { status: 409, headers: { "content-type": "application/json" } }),
+      "POST /playground/sql": () => new Response(JSON.stringify({ error: "playground_busy", detail: "busy" }),
+                                                 { status: 409, headers: { "content-type": "application/json" } }),
     })
     const got: string[] = []
-    await api.playground.chat({ source: "s", question: "q" }, (e) => got.push(e.event))
+    await api.playground.chat({ question: "q" }, (e) => got.push(e.event))
     expect(got).toEqual(["delta", "done"])
-    const err = await api.playground.runTests({ source: "s" }, () => {}).catch((e) => e)
+    const err = await api.playground.sql({ question: "q" }, () => {}).catch((e) => e)
     expect(err).toMatchObject({ status: 409, code: "playground_busy", message: "busy" })
   })
 
   it("treats a stream that ends without done/error as truncated, never as success", async () => {
     mockFetch({ "POST /playground/chat": () => sse([["delta", { text: "부분" }]]) })
     const got: string[] = []
-    const err = await api.playground.chat({ source: "s", question: "q" }, (e) => got.push(e.event))
+    const err = await api.playground.chat({ question: "q" }, (e) => got.push(e.event))
       .catch((e) => e)
     expect(got).toEqual(["delta", "stream_truncated"])
     expect(err).toMatchObject({ status: 502, code: "stream_truncated" })
@@ -97,65 +103,90 @@ describe("playground helpers", () => {
   it("accepts an error event as a terminal event", async () => {
     mockFetch({ "POST /playground/chat": () => sse([["error", { error: "x", detail: "d" }]]) })
     const got: string[] = []
-    await api.playground.chat({ source: "s", question: "q" }, (e) => got.push(e.event))
+    await api.playground.chat({ question: "q" }, (e) => got.push(e.event))
     expect(got).toEqual(["error"])
   })
 })
 
 describe("playground page", () => {
-  it("shows the provider, asks the ontology and renders the cited answer", async () => {
+  const BASE = {
+    "GET /sources": SOURCES,
+    "GET /status": STATUS,
+    "GET /ontology": ONTOLOGY,
+    "GET /playground/index": INDEX,
+  }
+
+  it("has exactly the Chat, SQL and SPARQL tabs", async () => {
+    mockFetch(BASE)
+    renderPage(<PlaygroundPage />, "/playground")
+    const tabs = await screen.findAllByRole("tab")
+    expect(tabs.map((t) => t.textContent?.trim())).toEqual(["Chat", "SQL", "SPARQL"])
+    expect(await screen.findByText(/ollama · openai\/qwen3:8b/)).toBeInTheDocument()
+  })
+
+  it("asks the ontology, renders the cited answer, and a citation opens the concept sheet", async () => {
     const { calls } = mockFetch({
-      "GET /sources": SOURCES,
-      "GET /providers": PROVIDERS,
-      "GET /playground/index": { source: "hanbit-docs", scope: ["hanbit", "hanbit-docs"], warnings: [],
-                                 revision: 3, index: null, stale: true },
+      ...BASE,
       "POST /playground/chat": () => sse([
-        ["status", { phase: "index", provider: "claude", model: "sonnet", scope: [] }],
+        ["status", { phase: "index", provider: "ollama", model: "qwen3", scope: [] }],
         ["retrieved", { elements: [{ ref: "E1", score: 0.81, via: "retrieval", ...CHIP }], index: {} }],
-        ["delta", { text: "계약은 고객과의 " }], ["delta", { text: "약정입니다 [E1]." }],
-        ["citations", { citations: { E1: CHIP }, unknown: [] }],
+        ["delta", { text: "계약은 고객과의 " }], ["delta", { text: "약정입니다 [E1][E2]." }],
+        ["citations", { citations: { E1: CHIP, E2: EVIDENCE_CHIP }, unknown: [] }],
         ["done", { conversation_id: "c".repeat(32), message_id: 2 }],
       ]),
+      "GET /ontology/concepts/concept-abc": {
+        id: "concept-abc", name: "계약", kind: "entity", origin: "document", source: "hanbit-docs",
+        definition: "", synonyms: [], merged_concepts: [], folded_into: { id: "term-t-c", name: "Contracts" },
+        enriched_by: "", evidence_count: 1, alignment: { counts: {}, best: null }, revision: 2,
+        description: "", definitions: [], tables: [], individual_type: null, attributes: [], relations: [],
+        alignments: [], evidence: [{ quote: "계약은 승인 후 체결", verified: true, page: 2, document: "규정", path: "" }],
+      },
     })
     renderPage(<PlaygroundPage />, "/playground")
-    expect(await screen.findByText(/claude · sonnet/)).toBeInTheDocument()
-    expect(await screen.findByText(/범위: hanbit \+ hanbit-docs/)).toBeInTheDocument()
-    await userEvent.type(screen.getByLabelText("질문"), "계약이란?")
-    await userEvent.click(screen.getByRole("button", { name: /보내기/ }))
+    expect(await screen.findByText(/Scope: revision 2 · hanbit \+ hanbit-docs/)).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText("Question"), "계약이란?")
+    await userEvent.click(screen.getByRole("button", { name: /Send/ }))
     const answer = await screen.findByText(/약정입니다/)
     const bubble = answer.closest("[data-role=assistant]") as HTMLElement
-    await waitFor(() => expect(within(bubble).getAllByRole("link", { name: /Contracts/ }).length).toBeGreaterThan(0))
+    await waitFor(() => expect(within(bubble).getAllByRole("button", { name: /계약관리규정/ }).length).toBeGreaterThan(0))
     const body = JSON.parse(String(calls.find((c) => c.path === "/playground/chat")!.init!.body))
-    expect(body).toMatchObject({ source: "hanbit-docs", question: "계약이란?", conversation_id: null })
+    expect(body).toEqual({ question: "계약이란?", conversation_id: null })
+    await userEvent.click(within(bubble).getAllByRole("button", { name: /계약관리규정/ })[0])
+    const sheet = await screen.findByRole("dialog")
+    expect(await within(sheet).findByText("“계약은 승인 후 체결”")).toBeInTheDocument()
+    expect(within(sheet).getByText(/Folded into the Term/)).toBeInTheDocument()
   })
 
   it("marks a truncated answer as incomplete and shows the error", async () => {
-    mockFetch({
-      "GET /sources": SOURCES,
-      "GET /providers": PROVIDERS,
-      "GET /playground/index": { source: "hanbit-docs", scope: ["hanbit-docs"], warnings: [],
-                                 revision: 3, index: null, stale: true },
-      "POST /playground/chat": () => sse([["delta", { text: "계약은 고객과" }]]),
-    })
+    mockFetch({ ...BASE, "POST /playground/chat": () => sse([["delta", { text: "계약은 고객과" }]]) })
     renderPage(<PlaygroundPage />, "/playground")
-    await userEvent.type(await screen.findByLabelText("질문"), "계약이란?")
-    await userEvent.click(screen.getByRole("button", { name: /보내기/ }))
-    expect(await screen.findByText("미완료 답변")).toBeInTheDocument()
-    expect(screen.getByRole("alert")).toHaveTextContent(/끊겼습니다/)
+    await userEvent.type(await screen.findByLabelText("Question"), "계약이란?")
+    await userEvent.click(screen.getByRole("button", { name: /Send/ }))
+    expect(await screen.findByText("Incomplete answer")).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent(/ended without a completion marker/)
   })
 
-  it("runs an example SPARQL query and shows the rows", async () => {
-    mockFetch({
-      "GET /sources": SOURCES,
-      "GET /providers": PROVIDERS,
+  it("runs a SPARQL query on the snapshot and shows the rows", async () => {
+    const { calls } = mockFetch({
+      ...BASE,
       "GET /playground/sparql/examples": { examples: [
-        { id: "classes", title: "클래스 목록", description: "모든 클래스", query: "SELECT ?c WHERE { ?c a owl:Class }" }] },
-      "POST /playground/sparql": { type: "SELECT", columns: ["c"], rows: [["os:term-1"], ["os:term-2"]],
-                                   total: 2, truncated: false, export: "20261028T000000Z-abcdef", triples: 10 },
+        { id: "classes", title: "Classes", description: "All classes", query: "SELECT ?c WHERE { ?c a owl:Class }" }] },
+      "POST /playground/sparql": { type: "SELECT", columns: ["c"], rows: [["ao:term-1"], ["ao:term-2"]],
+                                   total: 2, truncated: false, triples: 10, revision: 2, ttl: "ontology.ttl" },
     })
-    renderPage(<PlaygroundPage />, "/playground?tab=sparql&source=hanbit-docs")
-    await userEvent.click(await screen.findByRole("button", { name: /실행/ }))
-    expect(await screen.findByText("os:term-2")).toBeInTheDocument()
-    expect(screen.getByText(/20261028T000000Z-abcdef/)).toBeInTheDocument()
+    renderPage(<PlaygroundPage />, "/playground?tab=sparql")
+    await userEvent.click(await screen.findByRole("button", { name: /Run/ }))
+    expect(await screen.findByText("ao:term-2")).toBeInTheDocument()
+    expect(screen.getByText(/ontology.ttl/)).toBeInTheDocument()
+    const body = JSON.parse(String(calls.find((c) => c.path === "/playground/sparql")!.init!.body))
+    expect(Object.keys(body).sort()).toEqual(["limit", "query"])
+  })
+
+  it("sends to Build when there is no snapshot", async () => {
+    mockFetch({ ...BASE, "GET /ontology": () => new Response(
+      JSON.stringify({ error: "no_snapshot", detail: "no" }),
+      { status: 404, headers: { "content-type": "application/json" } }) })
+    renderPage(<PlaygroundPage />, "/playground")
+    expect(await screen.findByText("No ontology yet")).toBeInTheDocument()
   })
 })

@@ -5,7 +5,9 @@
    own; any other Origin (a foreign site posting to localhost:5173) is forwarded untouched
    and still refused by the service. Sec-Fetch-Site is never touched. */
 
-export const SERVICE = 'http://127.0.0.1:7800'
+/** The service the dev server proxies to: `SERVICE=http://127.0.0.1:7810 pnpm dev`. */
+const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+export const SERVICE = (env?.SERVICE || 'http://127.0.0.1:7800').replace(/\/+$/, '')
 export const DEV_PORT = 5173
 
 export function devOrigins(port: number = DEV_PORT): string[] {

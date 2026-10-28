@@ -1,4 +1,4 @@
-/* 데이터 질의: upstream's NL->SQL agent, relayed as SSE (steps, SQL, result table). */
+/* SQL: upstream's NL->SQL agent over a structured source, relayed as SSE (steps, SQL, result table). */
 
 import { CheckCircle2, Loader2, Send, Square } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -21,7 +21,8 @@ interface SqlAnswer {
 const newConversation = () =>
   (globalThis.crypto?.randomUUID?.() ?? "00000000-0000-4000-8000-" + Date.now().toString(16).padStart(12, "0").slice(-12))
 
-export function SqlTab({ source }: { source: string }) {
+/** *source*: the structured source to query; null = the snapshot's first one. */
+export function SqlTab({ source }: { source: string | null }) {
   const [question, setQuestion] = useState("")
   const [asked, setAsked] = useState("")
   const [steps, setSteps] = useState<Step[]>([])
@@ -58,7 +59,7 @@ export function SqlTab({ source }: { source: string }) {
         const a = (d.answer ?? {}) as SqlAnswer
         setAnswer(a)
         if (a.sql_code) setSql(a.sql_code)
-      } else if (ev.event === "error") setError(String(d.detail ?? d.message ?? d.error ?? "오류"))
+      } else if (ev.event === "error") setError(String(d.detail ?? d.message ?? d.error ?? "error"))
     }
     try {
       await api.playground.sql({ source, question: q.trim(), conversation_id: conversationId }, onEvent, ctrl.signal)
@@ -72,11 +73,11 @@ export function SqlTab({ source }: { source: string }) {
 
   const table = answer ? tabulate(answer.sql_response_from_db, answer.sql_columns ?? []) : null
   return (
-    <div className="grid gap-4" id="playground-sql">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4" id="playground-sql">
       <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); run(question) }}>
         <Textarea id="sql-input" value={question} onChange={(e) => setQuestion(e.target.value)} rows={2}
-                  aria-label="데이터 질문" maxLength={2000}
-                  placeholder="예: 고객 수는? / 계약금액이 가장 큰 계약 5건은?"
+                  aria-label="Data question" maxLength={2000}
+                  placeholder="e.g. How many customers are there? / The 5 largest contracts by amount (계약금액)"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault()
@@ -85,12 +86,12 @@ export function SqlTab({ source }: { source: string }) {
                   }} />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
-            업스트림 text-to-SQL 에이전트가 정형 소스의 시맨틱 레이어로 SQL을 만들고 실행합니다. 로컬 모델은 수 분 걸릴 수 있습니다.
+            The upstream text-to-SQL agent writes SQL from the structured source's semantic layer and runs it. Local models can take a few minutes.
           </p>
           <div className="flex gap-2">
-            {busy && <Button type="button" variant="outline" onClick={() => abort.current?.abort()}><Square aria-hidden /> 중지</Button>}
+            {busy && <Button type="button" variant="outline" onClick={() => abort.current?.abort()}><Square aria-hidden /> Stop</Button>}
             <Button type="submit" id="sql-send" disabled={busy || !question.trim()}>
-              {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />} 질의
+              {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />} Ask
             </Button>
           </div>
         </div>
@@ -98,7 +99,7 @@ export function SqlTab({ source }: { source: string }) {
       {notices.map((n) => <p key={n} className="text-xs text-amber-700 dark:text-amber-300">{n}</p>)}
       {(steps.length > 0 || busy) && (
         <Card className="gap-2 py-4">
-          <CardHeader><CardTitle className="text-sm">추론 단계 · {asked}</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm break-words">Agent steps · {asked}</CardTitle></CardHeader>
           <CardContent>
             <ol className="grid gap-1 text-sm" id="sql-steps">
               {steps.map((s, i) => (
@@ -108,7 +109,7 @@ export function SqlTab({ source }: { source: string }) {
                   {s.label}
                 </li>
               ))}
-              {busy && !steps.length && <li className="text-muted-foreground">에이전트 시작 중…</li>}
+              {busy && !steps.length && <li className="text-muted-foreground">Starting the agent…</li>}
             </ol>
           </CardContent>
         </Card>
@@ -116,7 +117,7 @@ export function SqlTab({ source }: { source: string }) {
       {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive break-words">{error}</p>}
       {answer?.response && (
         <Card className="gap-2 py-4" id="sql-answer">
-          <CardHeader><CardTitle className="text-sm">답변</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">Answer</CardTitle></CardHeader>
           <CardContent><p className="text-sm whitespace-pre-wrap break-words">{answer.response}</p></CardContent>
         </Card>
       )}
@@ -124,7 +125,7 @@ export function SqlTab({ source }: { source: string }) {
         <Card className="gap-2 py-4" id="sql-code">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm">SQL</CardTitle>
-            <CopyButton text={sql} label="SQL 복사" />
+            <CopyButton text={sql} label="Copy SQL" />
           </CardHeader>
           <CardContent>
             <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs"><code>{sql}</code></pre>

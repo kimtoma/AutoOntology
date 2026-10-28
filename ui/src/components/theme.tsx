@@ -15,16 +15,16 @@ export function ThemeToggle() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="테마 바꾸기">
+        <Button variant="ghost" size="icon" aria-label="Change theme">
           <Sun className="size-4 dark:hidden" aria-hidden />
           <Moon className="hidden size-4 dark:block" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuRadioGroup value={theme ?? "system"} onValueChange={setTheme}>
-          <DropdownMenuRadioItem value="light"><Sun aria-hidden /> 밝게</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="dark"><Moon aria-hidden /> 어둡게</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="system"><Monitor aria-hidden /> 시스템</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="light"><Sun aria-hidden /> Light</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="dark"><Moon aria-hidden /> Dark</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="system"><Monitor aria-hidden /> System</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

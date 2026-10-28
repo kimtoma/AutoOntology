@@ -1,4 +1,4 @@
-/* 온톨로지 대화: RAG over the merged ontology, answers with clickable citation chips. */
+/* Chat: RAG over the latest ontology snapshot, answers with clickable citation chips. */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, Loader2, MessageSquarePlus, Send, Square } from "lucide-react"
@@ -26,8 +26,8 @@ interface Msg {
   incomplete?: boolean
 }
 
-const EXAMPLES = ["계약은 어떤 승인 절차를 거치나요?", "고객과 계약은 어떻게 연결되나요?",
-                  "청구서의 수납 상태에는 무엇이 있나요?"]
+const EXAMPLES = ["What approval does a contract (계약) need?", "How are customers and contracts linked?",
+                  "Which payment states (수납상태) can an invoice have?"]
 
 function Retrieved({ items }: { items: RetrievedElement[] }) {
   const [open, setOpen] = useState(false)
@@ -36,7 +36,7 @@ function Retrieved({ items }: { items: RetrievedElement[] }) {
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
               className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
         <ChevronDown className={open ? "size-3.5 rotate-180" : "size-3.5"} aria-hidden />
-        검색된 요소 {items.length}개
+        {items.length} retrieved element{items.length === 1 ? "" : "s"}
       </button>
       {open && (
         <ul className="mt-2 flex flex-wrap gap-1.5" data-retrieved={items.length}>
@@ -44,7 +44,7 @@ function Retrieved({ items }: { items: RetrievedElement[] }) {
             <li key={e.id} className="inline-flex items-center gap-1">
               <ChipLink chip={e} refName={e.ref} />
               <span className="text-muted-foreground tabular-nums">
-                {e.score === null ? "이웃" : e.score.toFixed(2)}
+                {e.score === null ? "neighbour" : e.score.toFixed(2)}
               </span>
             </li>
           ))}
@@ -54,7 +54,7 @@ function Retrieved({ items }: { items: RetrievedElement[] }) {
   )
 }
 
-export function ChatTab({ source }: { source: string }) {
+export function ChatTab() {
   const [messages, setMessages] = useState<Msg[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [input, setInput] = useState("")
@@ -62,10 +62,8 @@ export function ChatTab({ source }: { source: string }) {
   const abort = useRef<AbortController | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
   const qc = useQueryClient()
-  const index = useQuery({ queryKey: ["playground-index", source],
-                           queryFn: () => api.playground.index(source) })
+  const index = useQuery({ queryKey: ["playground-index"], queryFn: api.playground.index })
 
-  // the page mounts one ChatTab per source (key), so another source = a new conversation
   useEffect(() => () => abort.current?.abort(), [])
   useEffect(() => { bottom.current?.scrollIntoView?.({ block: "end" }) }, [messages])
 
@@ -78,14 +76,14 @@ export function ChatTab({ source }: { source: string }) {
     setInput("")
     setBusy(true)
     setMessages((prev) => [...prev, { role: "user", content: q },
-                           { role: "assistant", content: "", pending: true, phase: "검색 중" }])
+                           { role: "assistant", content: "", pending: true, phase: "Searching" }])
     const ctrl = new AbortController()
     abort.current = ctrl
     const onEvent = (ev: SseEvent) => {
       const d = ev.data as Record<string, unknown>
-      if (ev.event === "status") patchLast((m) => ({ ...m, phase: "온톨로지 인덱스 확인·검색 중" }))
+      if (ev.event === "status") patchLast((m) => ({ ...m, phase: "Checking the ontology index and searching" }))
       else if (ev.event === "retrieved") {
-        patchLast((m) => ({ ...m, retrieved: d.elements as RetrievedElement[], phase: "답변 생성 중" }))
+        patchLast((m) => ({ ...m, retrieved: d.elements as RetrievedElement[], phase: "Writing the answer" }))
       } else if (ev.event === "delta") patchLast((m) => ({ ...m, content: m.content + String(d.text ?? "") }))
       else if (ev.event === "citations") {
         patchLast((m) => ({ ...m, citations: d.citations as Record<string, ElementChip>,
@@ -97,7 +95,7 @@ export function ChatTab({ source }: { source: string }) {
       else if (ev.event === "error") patchLast((m) => ({ ...m, pending: false, error: String(d.detail ?? d.error) }))
     }
     try {
-      await api.playground.chat({ source, question: q, conversation_id: conversationId }, onEvent,
+      await api.playground.chat({ question: q, conversation_id: conversationId }, onEvent,
                                 ctrl.signal)
     } catch (err) {
       if ((err as Error).name !== "AbortError") patchLast((m) => ({ ...m, error: errorMessage(err) }))
@@ -105,34 +103,35 @@ export function ChatTab({ source }: { source: string }) {
       patchLast((m) => ({ ...m, pending: false }))
       setBusy(false)
       abort.current = null
-      qc.invalidateQueries({ queryKey: ["playground-index", source] })
+      qc.invalidateQueries({ queryKey: ["playground-index"] })
     }
   }
 
   const idx = index.data?.index
   return (
-    <div className="grid gap-4" id="playground-chat">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4" id="playground-chat">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
-          범위: {index.data?.scope.join(" + ") ?? source}
-          {idx ? ` · 요소 ${idx.elements.toLocaleString()}개 (${idx.model})` : " · 인덱스는 첫 질문에 만들어집니다"}
-          {index.data?.stale && idx && " · 온톨로지가 바뀌어 다음 질문에 갱신"}
+          Scope: {index.data ? `revision ${index.data.revision} · ${index.data.scope.join(" + ")}` : "the latest ontology"}
+          {idx ? ` · ${idx.elements.toLocaleString()} elements (${idx.model})` : " · the index is built on the first question"}
+          {index.data?.stale && idx && " · the ontology changed: re-indexed on the next question"}
         </span>
         <Button type="button" size="sm" variant="ghost" disabled={busy || !messages.length}
                 onClick={() => { setMessages([]); setConversationId(null) }}>
-          <MessageSquarePlus aria-hidden /> 새 대화
+          <MessageSquarePlus aria-hidden /> New chat
         </Button>
       </div>
       {index.data?.warnings.map((w) => <p key={w} className="text-xs text-amber-700 dark:text-amber-300">{w}</p>)}
 
       <div className="grid gap-3" aria-live="polite" id="chat-messages">
         {!messages.length && (
-          <EmptyState title="온톨로지에 질문해 보세요"
-                      hint="답은 검색된 온톨로지 요소만 근거로 하며, 근거 칩을 누르면 개념 상세나 그래프로 이동합니다."
+          <EmptyState title="Ask the ontology"
+                      hint="Answers use only the retrieved ontology elements. Click a citation to open the concept, or the graph icon to see it in the graph."
                       action={
                         <div className="flex flex-wrap justify-center gap-2">
                           {EXAMPLES.map((e) => (
-                            <Button key={e} type="button" size="sm" variant="outline" onClick={() => ask(e)}>{e}</Button>
+                            <Button key={e} type="button" size="sm" variant="outline" onClick={() => ask(e)}
+                                    className="h-auto max-w-full py-1.5 whitespace-normal">{e}</Button>
                           ))}
                         </div>
                       } />
@@ -149,15 +148,15 @@ export function ChatTab({ source }: { source: string }) {
                     <Loader2 className="size-4 animate-spin" aria-hidden /> {m.phase}
                   </span>
                 )}
-                {m.incomplete && <Badge variant="outline" className="mt-2 font-normal">미완료 답변</Badge>}
+                {m.incomplete && <Badge variant="outline" className="mt-2 font-normal">Incomplete answer</Badge>}
                 {m.error && <p role="alert" className="mt-2 text-sm text-destructive break-words">{m.error}</p>}
                 {!m.pending && m.citations && (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs" data-citations={Object.keys(m.citations).length}>
-                    {Object.keys(m.citations).length ? <span className="text-muted-foreground">근거</span>
-                      : <Badge variant="outline" className="font-normal">인용 없음</Badge>}
+                    {Object.keys(m.citations).length ? <span className="text-muted-foreground">Sources</span>
+                      : <Badge variant="outline" className="font-normal">No citations</Badge>}
                     {Object.entries(m.citations).map(([ref, chip]) => <ChipLink key={ref} chip={chip} refName={ref} />)}
                     {!!m.unknown?.length && (
-                      <span className="text-amber-700 dark:text-amber-300">없는 인용 {m.unknown.join(", ")}</span>
+                      <span className="text-amber-700 dark:text-amber-300">Unknown citations {m.unknown.join(", ")}</span>
                     )}
                   </div>
                 )}
@@ -171,8 +170,8 @@ export function ChatTab({ source }: { source: string }) {
 
       <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); ask(input) }}>
         <Textarea id="chat-input" value={input} onChange={(e) => setInput(e.target.value)} rows={2}
-                  placeholder="예: 계약 승인 권한은 금액에 따라 어떻게 달라지나요? (Enter 전송, Shift+Enter 줄바꿈)"
-                  aria-label="질문" maxLength={2000}
+                  placeholder="e.g. Who approves a contract above a given amount? (Enter sends, Shift+Enter adds a line)"
+                  aria-label="Question" maxLength={2000}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault()
@@ -182,11 +181,11 @@ export function ChatTab({ source }: { source: string }) {
         <div className="flex justify-end gap-2">
           {busy && (
             <Button type="button" variant="outline" onClick={() => abort.current?.abort()}>
-              <Square aria-hidden /> 중지
+              <Square aria-hidden /> Stop
             </Button>
           )}
           <Button type="submit" id="chat-send" disabled={busy || !input.trim()}>
-            {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />} 보내기
+            {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />} Send
           </Button>
         </div>
       </form>

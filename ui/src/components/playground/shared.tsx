@@ -1,33 +1,45 @@
-/* Pieces shared by the 플레이그라운드 tabs: citation chips, answer text with [E1] tokens,
-   a capped result table with CSV download, a copy button. Every model / ontology string is
-   rendered as text (React escapes it), never as HTML. */
+/* Pieces shared by the Playground tabs: citation chips, answer text with [E1] tokens, a capped
+   result table with CSV download, a copy button. Every model / ontology string is rendered as
+   text (React escapes it), never as HTML. */
 
 import { Check, Copy, Download, Network } from "lucide-react"
-import { useState } from "react"
+import { useContext, useState } from "react"
 import { Link } from "react-router"
 
-import { Badge } from "@/components/ui/badge"
+import { ConceptOpener } from "@/components/playground/concept-opener"
 import { Button } from "@/components/ui/button"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import type { ElementChip } from "@/lib/api"
-import { cell, ELEMENT_KO, toCsv } from "@/lib/playground"
+import { conceptIdOfChip, type ElementChip } from "@/lib/api"
+import { cell, ELEMENT_LABEL, toCsv } from "@/lib/playground"
 import { cn } from "@/lib/utils"
+
+const CHIP_CLASS = "inline-flex min-w-0 items-center gap-1 rounded-md border bg-muted/60 px-1.5 py-0.5 text-xs font-medium hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none"
 
 export function ChipLink({ chip, refName, className }: {
   chip: ElementChip; refName?: string; className?: string
 }) {
+  const open = useContext(ConceptOpener)
+  const conceptId = conceptIdOfChip(chip)
+  const title = `${ELEMENT_LABEL[chip.type] ?? chip.type}: ${chip.label}`
+  const body = (
+    <>
+      {refName && <span className="text-muted-foreground tabular-nums">{refName}</span>}
+      <span className="truncate">{chip.label}</span>
+    </>
+  )
   return (
     <span className={cn("inline-flex max-w-full items-center gap-0.5 align-baseline", className)}
-          data-citation={refName ?? chip.id}>
-      <Link to={chip.link} title={`${ELEMENT_KO[chip.type] ?? chip.type}: ${chip.label}`}
-            className="inline-flex min-w-0 items-center gap-1 rounded-md border bg-muted/60 px-1.5 py-0.5 text-xs font-medium hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none">
-        {refName && <span className="text-muted-foreground tabular-nums">{refName}</span>}
-        <span className="truncate">{chip.label}</span>
-      </Link>
+          data-citation={refName ?? chip.id} data-concept={conceptId ?? undefined}>
+      {conceptId && open ? (
+        <button type="button" title={title} className={CHIP_CLASS} onClick={() => open(conceptId)}>{body}</button>
+      ) : (
+        <Link to={conceptId ? `/ontology?concept=${encodeURIComponent(conceptId)}` : chip.graph_link || "/graph"}
+              title={title} className={CHIP_CLASS}>{body}</Link>
+      )}
       {chip.graph_link && (
-        <Link to={chip.graph_link} aria-label={`${chip.label} 그래프에서 보기`} title="그래프에서 보기"
+        <Link to={chip.graph_link} aria-label={`Show ${chip.label} in the graph`} title="Show in graph"
               className="rounded p-0.5 text-muted-foreground hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none">
           <Network className="size-3" aria-hidden />
         </Link>
@@ -60,7 +72,7 @@ export function CitedText({ text, citations }: {
   return <div className="whitespace-pre-wrap break-words leading-relaxed">{parts}</div>
 }
 
-export function CopyButton({ text, label = "복사" }: { text: string; label?: string }) {
+export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [done, setDone] = useState(false)
   return (
     <Button type="button" size="sm" variant="ghost" aria-label={label}
@@ -70,7 +82,7 @@ export function CopyButton({ text, label = "복사" }: { text: string; label?: s
                 window.setTimeout(() => setDone(false), 1500)
               }).catch(() => {})
             }}>
-      {done ? <Check aria-hidden /> : <Copy aria-hidden />} {done ? "복사됨" : label}
+      {done ? <Check aria-hidden /> : <Copy aria-hidden />} {done ? "Copied" : label}
     </Button>
   )
 }
@@ -92,7 +104,7 @@ export function ResultTable({ columns, rows, max = 200, csvName, id }: {
     <div className="grid gap-2" id={id}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span data-rows={rows.length}>
-          {rows.length.toLocaleString()}행{rows.length > max && ` (처음 ${max}행 표시)`}
+          {rows.length.toLocaleString()} row{rows.length === 1 ? "" : "s"}{rows.length > max && ` (first ${max} shown)`}
         </span>
         {csvName && rows.length > 0 && (
           <Button type="button" size="sm" variant="outline"
@@ -123,13 +135,4 @@ export function ResultTable({ columns, rows, max = 200, csvName, id }: {
       </div>
     </div>
   )
-}
-
-export function VerdictBadge({ verdict }: { verdict: string | null | undefined }) {
-  if (!verdict) return <Badge variant="outline" className="font-normal text-muted-foreground">미실행</Badge>
-  const tone = verdict === "pass" ? "border-success/30 bg-success/10 text-success"
-    : verdict === "fail" ? "border-destructive/30 bg-destructive/10 text-destructive"
-      : "border-warning/40 bg-warning/10 text-amber-700 dark:text-amber-300"
-  const ko = verdict === "pass" ? "통과" : verdict === "fail" ? "실패" : "불확실"
-  return <Badge variant="outline" data-verdict={verdict} className={cn("font-normal", tone)}>{ko}</Badge>
 }

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Database, Loader2, Plus, Trash2 } from "lucide-react"
+import { Database, FileText, Hammer, Loader2, Plus, Trash2 } from "lucide-react"
 import { useState, type FormEvent } from "react"
+import { Link } from "react-router"
 import { toast } from "sonner"
 
 import { EmptyState, ErrorState } from "@/components/empty-state"
@@ -26,29 +27,40 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { keys, useSources, useStatus } from "@/hooks/queries"
 import { api, errorMessage, type Source, type SourceKind } from "@/lib/api"
-import { fmtBytes, fmtTime, KIND_KO, RUN_KO, sourceState } from "@/lib/labels"
+import { familyOf, FAMILY_LABEL, fmtBytes, fmtTime, KIND_LABEL, RUN_LABEL, sourceState } from "@/lib/labels"
+import { cn } from "@/lib/utils"
 
 /** Server default of AUTOONTOLOGY_UPLOAD_MAX_MB when /status has not answered yet. */
 const DEFAULT_UPLOAD_MAX_MB = 200
 
+/** File types the upload accepts (structured/loaders.py SUPPORTED_SUFFIXES, unstructured/readers.py). */
 const ACCEPT = {
-  documents: ".hwp,.hwpx,.hwpml,.pdf,.docx,.pptx,.xlsx,.md,.markdown,.txt,.html,.htm,.png,.jpg,.jpeg",
   files: ".csv,.tsv,.xlsx,.xlsm,.parquet,.pq,.json,.jsonl,.ndjson,.sqlite,.sqlite3,.db",
+  documents: ".md,.markdown,.txt,.html,.htm,.hwp,.hwpx,.hml,.hwpml,.pdf,.docx,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.webp",
 }
 
 export function KindBadge({ kind }: { kind: string }) {
-  return <Badge variant="secondary" className="font-normal">{KIND_KO[kind] ?? kind}</Badge>
+  const family = familyOf(kind)
+  const Icon = family === "documents" ? FileText : Database
+  return (
+    <Badge variant="outline" data-kind={family}
+           className={cn("font-normal", family === "documents"
+             ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+             : "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300")}>
+      <Icon aria-hidden /> {FAMILY_LABEL[family]}
+    </Badge>
+  )
 }
 
 function LastRun({ s }: { s: Source }) {
   if (s.active_run) {
-    return <StatusChip status="running" label={`${RUN_KO[s.active_run.kind]} 실행 중`} />
+    return <StatusChip status="running" label={`${RUN_LABEL[s.active_run.kind] ?? s.active_run.kind} running`} />
   }
   if (!s.last_run) return <span className="text-muted-foreground">-</span>
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span>{RUN_KO[s.last_run.kind] ?? s.last_run.kind}</span>
+        <span>{RUN_LABEL[s.last_run.kind] ?? s.last_run.kind}</span>
         <StatusChip status={s.last_run.status} />
       </div>
       <span className="text-xs text-muted-foreground">{fmtTime(s.last_run.finished_at)}</span>
@@ -64,64 +76,74 @@ export default function SourcesPage() {
   return (
     <>
       <PageHeader
-        title="소스"
-        description={<>정형 소스(CSV·XLSX·Parquet·DB)는 <b>빌드</b>로 upstream Term과 시맨틱 FK를
-          만들고, 문서 소스(HWP·PDF·DOCX·MD 등)는 <b>문서 추출</b>로 개념·관계·근거를 만듭니다.</>}
+        title="Sources"
+        description={<>Register <b>structured</b> data (CSV, XLSX, SQLite, Parquet, a database) and
+          {" "}<b>documents</b> (Markdown, text, HTML, and HWP/PDF/DOCX/PPTX with kordoc). One
+          {" "}<Link to="/build" className="underline underline-offset-4">build</Link> turns all of
+          them into a single ontology.</>}
         actions={<Button onClick={() => setAdding(true)} id="btn-new-source">
-          <Plus aria-hidden /> 새 소스</Button>}
+          <Plus aria-hidden /> Add source</Button>}
       />
       {error ? <ErrorState error={error} onRetry={() => refetch()} />
         : isPending ? <Skeleton className="h-48 w-full" />
         : !sources.length ? (
-          <EmptyState icon={Database} title="등록된 소스가 없습니다"
-                      hint="새 소스로 파일을 올리거나 디렉터리·DB URL을 지정하세요."
-                      action={<Button onClick={() => setAdding(true)}><Plus aria-hidden /> 새 소스</Button>} />
+          <EmptyState icon={Database} title="No sources yet"
+                      hint="Add a folder of CSV files, a database URL or a folder of documents."
+                      action={<Button onClick={() => setAdding(true)}><Plus aria-hidden /> Add source</Button>} />
         ) : (
-          <Card className="py-0">
-            <CardContent className="px-0">
-              <Table id="sources-table">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="pl-4">이름</TableHead>
-                    <TableHead>종류</TableHead>
-                    <TableHead className="hidden lg:table-cell">위치</TableHead>
-                    <TableHead className="hidden md:table-cell">상태</TableHead>
-                    <TableHead className="hidden sm:table-cell">최근 실행</TableHead>
-                    <TableHead className="w-12 pr-4"><span className="sr-only">작업</span></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sources.map((s) => (
-                    <TableRow key={s.name} data-source={s.name}>
-                      <TableCell className="max-w-48 pl-4 whitespace-normal">
-                        <div className="font-medium">{s.name}</div>
-                        {s.database && <div className="text-xs text-muted-foreground">{s.database}</div>}
-                        <div className="text-xs text-muted-foreground md:hidden">{sourceState(s)}</div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap items-center gap-1">
-                          <KindBadge kind={s.kind} />
-                          {s.uploaded && <span className="text-xs text-muted-foreground">업로드</span>}
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden max-w-72 lg:table-cell">
-                        <span className="block truncate font-mono text-xs" title={s.locator}>{s.locator}</span>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">{sourceState(s)}</TableCell>
-                      <TableCell className="hidden sm:table-cell"><LastRun s={s} /></TableCell>
-                      <TableCell className="pr-4 text-right">
-                        <Button variant="ghost" size="icon" aria-label={`${s.name} 삭제`}
-                                data-delete={s.name} disabled={!!s.active_run}
-                                onClick={() => setRemoving(s)}>
-                          <Trash2 aria-hidden />
-                        </Button>
-                      </TableCell>
+          <>
+            <Card className="py-0">
+              <CardContent className="px-0">
+                <Table id="sources-table">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="pl-4">Name</TableHead>
+                      <TableHead>Kind</TableHead>
+                      <TableHead className="hidden lg:table-cell">Location</TableHead>
+                      <TableHead className="hidden md:table-cell">State</TableHead>
+                      <TableHead className="hidden sm:table-cell">Last run</TableHead>
+                      <TableHead className="w-12 pr-4"><span className="sr-only">Actions</span></TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {sources.map((s) => (
+                      <TableRow key={s.name} data-source={s.name}>
+                        <TableCell className="max-w-48 pl-4 whitespace-normal">
+                          <div className="font-medium break-all">{s.name}</div>
+                          {s.database && <div className="text-xs break-all text-muted-foreground">{s.database}</div>}
+                          <div className="text-xs text-muted-foreground md:hidden">{sourceState(s)}</div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col items-start gap-1">
+                            <KindBadge kind={s.kind} />
+                            <span className="text-xs text-muted-foreground">
+                              {KIND_LABEL[s.kind]}{s.uploaded ? " · uploaded" : ""}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden max-w-72 lg:table-cell">
+                          <span className="block truncate font-mono text-xs" title={s.locator}>{s.locator}</span>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">{sourceState(s)}</TableCell>
+                        <TableCell className="hidden sm:table-cell"><LastRun s={s} /></TableCell>
+                        <TableCell className="pr-4 text-right">
+                          <Button variant="ghost" size="icon" aria-label={`Delete ${s.name}`}
+                                  data-delete={s.name} disabled={!!s.active_run}
+                                  onClick={() => setRemoving(s)}>
+                            <Trash2 aria-hidden />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+            <p className="mt-4 text-sm text-muted-foreground">
+              Next: <Link to="/build" className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4">
+                <Hammer className="size-3.5" aria-hidden /> build the ontology</Link> from every source.
+            </p>
+          </>
         )}
       <NewSourceDialog open={adding} onOpenChange={setAdding} />
       <DeleteSourceDialog key={removing?.name ?? ""} source={removing} onClose={() => setRemoving(null)} />
@@ -129,8 +151,15 @@ export default function SourcesPage() {
   )
 }
 
-type Kind = SourceKind
-type Mode = "upload" | "path"
+type Family = "structured" | "documents"
+type Mode = "upload" | "path" | "database"
+
+/** What the add dialog sends: an upload (files/documents) or a locator (path or DB URL). */
+function sourceRequest(family: Family, mode: Mode): { kind: SourceKind; upload: boolean } {
+  if (family === "documents") return { kind: "documents", upload: mode === "upload" }
+  if (mode === "database") return { kind: "database", upload: false }
+  return { kind: "files", upload: mode === "upload" }
+}
 
 export function NewSourceDialog({ open, onOpenChange }: {
   open: boolean
@@ -138,37 +167,39 @@ export function NewSourceDialog({ open, onOpenChange }: {
 }) {
   const qc = useQueryClient()
   const [name, setName] = useState("")
-  const [kind, setKind] = useState<Kind>("files")
+  const [family, setFamily] = useState<Family>("structured")
   const [mode, setMode] = useState<Mode>("upload")
   const [files, setFiles] = useState<File[]>([])
   const [locator, setLocator] = useState("")
   const [recursive, setRecursive] = useState(false)
   const [error, setError] = useState("")
-  const effectiveMode: Mode = kind === "database" ? "path" : mode
+  const effectiveMode: Mode = family === "documents" && mode === "database" ? "upload" : mode
+  const { kind, upload } = sourceRequest(family, effectiveMode)
 
   const reset = () => {
-    setName(""); setKind("files"); setMode("upload"); setFiles([]); setLocator("")
+    setName(""); setFamily("structured"); setMode("upload"); setFiles([]); setLocator("")
     setRecursive(false); setError("")
   }
 
   const status = useStatus()
   const limitMb = status.data?.upload_max_mb ?? DEFAULT_UPLOAD_MAX_MB
+  const kordoc = status.data?.kordoc_available
   const totalBytes = files.reduce((sum, f) => sum + f.size, 0)
   const tooLarge = totalBytes > limitMb * 1024 * 1024
 
   const add = useMutation({
     mutationFn: () => {
-      if (effectiveMode === "upload") {
-        if (!files.length) throw new Error("파일을 하나 이상 선택하세요")
+      if (upload) {
+        if (!files.length) throw new Error("Choose at least one file")
         if (tooLarge) {
-          throw new Error(`파일 합계 ${fmtBytes(totalBytes)}가 한도 ${limitMb} MB를 넘습니다 (AUTOONTOLOGY_UPLOAD_MAX_MB)`)
+          throw new Error(`The files total ${fmtBytes(totalBytes)}, over the ${limitMb} MB limit (AUTOONTOLOGY_UPLOAD_MAX_MB)`)
         }
         return api.addSourceUpload(name.trim(), kind as "files" | "documents", files)
       }
       return api.addSourceLocator({ name: name.trim(), kind, locator: locator.trim(), recursive })
     },
     onSuccess: (s) => {
-      toast.success(`소스 '${s.name}'를 등록했습니다`)
+      toast.success(`Added source “${s.name}”`, { description: "Build the ontology to include it." })
       qc.invalidateQueries({ queryKey: keys.sources })
       onOpenChange(false)
       reset()
@@ -185,73 +216,79 @@ export function NewSourceDialog({ open, onOpenChange }: {
   return (
     <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset() }}>
       <DialogContent className="sm:max-w-lg">
-        <form onSubmit={submit} className="grid gap-4" id="form-source">
+        <form onSubmit={submit} className="grid min-w-0 gap-4" id="form-source">
           <DialogHeader>
-            <DialogTitle>새 소스</DialogTitle>
-            <DialogDescription>정형 파일·문서를 올리거나 디렉터리 경로·DB URL을 지정합니다.</DialogDescription>
+            <DialogTitle>Add source</DialogTitle>
+            <DialogDescription>Upload files, point at a folder, or give a database URL.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="source-name">이름</Label>
-            <Input id="source-name" required value={name} onChange={(e) => setName(e.target.value)}
-                   pattern="[a-z0-9][a-z0-9_\-]*" autoComplete="off"
-                   placeholder="예: hanbit (정형은 소문자·숫자·_, 문서는 - 도 가능)" />
+            <Label>Kind</Label>
+            <Tabs value={family} onValueChange={(v) => setFamily(v as Family)}>
+              <TabsList className="w-full" id="source-kind">
+                <TabsTrigger value="structured" data-family="structured"><Database aria-hidden /> Structured</TabsTrigger>
+                <TabsTrigger value="documents" data-family="documents"><FileText aria-hidden /> Documents</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <p className="text-xs text-muted-foreground" id="source-kind-hint">
+              {family === "structured"
+                ? "CSV, TSV, XLSX, SQLite, Parquet or JSON files (one table per file), or a PostgreSQL / SQLite database URL."
+                : kordoc
+                  ? "Markdown, text and HTML are read natively; HWP, HWPX, PDF, DOCX and PPTX through kordoc (installed)."
+                  : <>Markdown, text and HTML are read natively. HWP, HWPX, PDF, DOCX and PPTX need kordoc:
+                    {" "}<code className="rounded bg-muted px-1">uv run autoontology setup --docs</code>.</>}
+            </p>
           </div>
           <div className="grid gap-2">
-            <Label>종류</Label>
-            <Tabs value={kind} onValueChange={(v) => setKind(v as Kind)}>
+            <Label htmlFor="source-name">Name</Label>
+            <Input id="source-name" required value={name} onChange={(e) => setName(e.target.value)}
+                   pattern={family === "documents" ? "[a-z0-9][a-z0-9_\\-]*" : "[a-z0-9_]+"} autoComplete="off"
+                   placeholder={family === "documents" ? "e.g. hanbit-docs (a-z, 0-9, _ and -)" : "e.g. hanbit (a-z, 0-9 and _)"} />
+          </div>
+          <div className="grid gap-2">
+            <Label>From</Label>
+            <Tabs value={effectiveMode} onValueChange={(v) => setMode(v as Mode)}>
               <TabsList className="w-full">
-                <TabsTrigger value="files">정형 파일</TabsTrigger>
-                <TabsTrigger value="documents">문서</TabsTrigger>
-                <TabsTrigger value="database">DB URL</TabsTrigger>
+                <TabsTrigger value="upload">Upload</TabsTrigger>
+                <TabsTrigger value="path">Folder</TabsTrigger>
+                {family === "structured" && <TabsTrigger value="database">DB URL</TabsTrigger>}
               </TabsList>
             </Tabs>
           </div>
-          {kind !== "database" && (
+          {upload ? (
             <div className="grid gap-2">
-              <Label>가져오기</Label>
-              <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
-                <TabsList className="w-full">
-                  <TabsTrigger value="upload">파일 업로드</TabsTrigger>
-                  <TabsTrigger value="path">디렉터리 경로</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-          )}
-          {effectiveMode === "upload" ? (
-            <div className="grid gap-2">
-              <Label htmlFor="source-files">파일</Label>
+              <Label htmlFor="source-files">Files</Label>
               <Input id="source-files" type="file" multiple accept={ACCEPT[kind as "files" | "documents"]}
                      onChange={(e) => setFiles([...(e.target.files ?? [])])} />
               <p className={tooLarge ? "text-xs text-destructive" : "text-xs text-muted-foreground"}
                  id="upload-limit">
-                {files.length > 0 && `${files.length}개 선택됨 · 합계 ${fmtBytes(totalBytes)} · `}
-                한 번에 최대 {limitMb} MB
+                {files.length > 0 && `${files.length} selected · ${fmtBytes(totalBytes)} total · `}
+                up to {limitMb} MB per upload
               </p>
             </div>
           ) : (
             <>
               <div className="grid gap-2">
-                <Label htmlFor="source-locator">위치</Label>
+                <Label htmlFor="source-locator">{effectiveMode === "database" ? "Database URL" : "Folder or file path"}</Label>
                 <Input id="source-locator" required value={locator}
                        onChange={(e) => setLocator(e.target.value)} autoComplete="off"
                        className="font-mono text-xs"
-                       placeholder={kind === "database" ? "postgresql://user:pass@host:5432/db"
-                         : "/path/to/data (절대 경로)"} />
+                       placeholder={effectiveMode === "database" ? "postgresql://user:pass@host:5432/db"
+                         : "/absolute/path/to/folder"} />
               </div>
-              {kind !== "database" && (
+              {effectiveMode === "path" && (
                 <div className="flex items-center gap-2">
                   <Switch id="source-recursive" checked={recursive} onCheckedChange={setRecursive} />
-                  <Label htmlFor="source-recursive">하위 폴더 포함</Label>
+                  <Label htmlFor="source-recursive">Include subfolders</Label>
                 </div>
               )}
             </>
           )}
-          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm break-words text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>취소</Button>
-            <Button type="submit" disabled={add.isPending || (effectiveMode === "upload" && tooLarge)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={add.isPending || (upload && tooLarge)}>
               {add.isPending && <Loader2 className="animate-spin" aria-hidden />}
-              {add.isPending ? "등록 중…" : "등록"}
+              {add.isPending ? "Adding…" : "Add"}
             </Button>
           </DialogFooter>
         </form>
@@ -266,42 +303,42 @@ function DeleteSourceDialog({ source, onClose }: { source: Source | null; onClos
   const remove = useMutation({
     mutationFn: (s: Source) => api.deleteSource(s.name, s.kind === "files" && dropDb),
     onSuccess: (r) => {
-      toast.success(`소스 '${r.removed}'를 삭제했습니다`, {
-        description: r.messages.length ? r.messages.join(" · ") : undefined,
+      toast.success(`Deleted source “${r.removed}”`, {
+        description: r.messages.length ? r.messages.join(" · ") : "Rebuild to drop it from the ontology.",
       })
       setDropDb(false)  // a prop-driven close fires no onOpenChange
       onClose()
     },
-    onError: (e) => toast.error("삭제 실패", { description: errorMessage(e) }),
+    onError: (e) => toast.error("Delete failed", { description: errorMessage(e) }),
     onSettled: () => qc.invalidateQueries({ queryKey: keys.sources }),
   })
-  const what = source?.kind === "documents" ? "문서·청크·개념·관계·근거"
-    : "upstream 연결과 인제스트된 그래프, 실행 기록"
+  const what = source?.kind === "documents" ? "its documents, chunks, concepts, relations and evidence"
+    : "its upstream connection, ingested graph and run history"
   return (
     <AlertDialog open={!!source} onOpenChange={(o) => { if (!o && !remove.isPending) { onClose(); setDropDb(false) } }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>소스 '{source?.name}'를 삭제할까요?</AlertDialogTitle>
+          <AlertDialogTitle>Delete source “{source?.name}”?</AlertDialogTitle>
           <AlertDialogDescription>
-            {what}가 함께 삭제됩니다. 되돌릴 수 없습니다.
-            {remove.isPending && " 그래프 정리를 기다리는 동안 최대 2분 걸릴 수 있습니다."}
+            This also deletes {what}. It cannot be undone.
+            {remove.isPending && " Waiting for the graph cleanup can take up to 2 minutes."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {source?.kind === "files" && (
           <div className="flex items-start gap-3 rounded-md border p-3">
             <Switch id="drop-db" checked={dropDb} onCheckedChange={setDropDb} />
             <Label htmlFor="drop-db" className="grid gap-1 leading-snug">
-              <span>데이터베이스도 삭제(DROP)</span>
-              <span className="font-mono text-xs font-normal text-muted-foreground">{source.database}</span>
+              <span>Also drop the database</span>
+              <span className="font-mono text-xs font-normal break-all text-muted-foreground">{source.database}</span>
             </Label>
           </div>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={remove.isPending}>취소</AlertDialogCancel>
+          <AlertDialogCancel disabled={remove.isPending}>Cancel</AlertDialogCancel>
           <Button variant="destructive" disabled={remove.isPending}
                   onClick={() => source && remove.mutate(source)}>
             {remove.isPending && <Loader2 className="animate-spin" aria-hidden />}
-            {remove.isPending ? "삭제 중…" : "삭제"}
+            {remove.isPending ? "Deleting…" : "Delete"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

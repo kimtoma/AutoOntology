@@ -2,21 +2,22 @@ import { useQuery } from "@tanstack/react-query"
 import { ExternalLink, Focus, X } from "lucide-react"
 import { Link } from "react-router"
 
-import { Chips, ConceptBody, RelationChip, Section } from "@/components/concept-sheet"
+import { Chips, ConceptBody, OriginBadge, Section } from "@/components/concept-sheet"
 import { ErrorState } from "@/components/empty-state"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { keys } from "@/hooks/queries"
+import { keys, retryServerErrors } from "@/hooks/queries"
 import { api } from "@/lib/api"
-import { type GNode, TYPE_LABELS } from "@/lib/graph-data"
+import type { GNode } from "@/lib/graph-data"
+import { CKIND_LABEL } from "@/lib/labels"
 
-const TYPE_KO: Record<string, string> = {
-  class: "클래스", concept: "정렬된 개념", individual: "개체", document: "문서",
+const TYPE_LABEL: Record<string, string> = {
+  class: "Class", concept: "Folded concept", individual: "Individual", document: "Source document",
 }
 
-/** Detail of a graph node: the node's own fields, then the concept detail (alignment chips,
-    relations, evidence quotes) of the document concept behind it, if any. */
+/** Detail of a graph node: its own fields, then the concept detail (`/api/ontology/concepts/{id}`:
+    alignments, relations, evidence quotes) of the node, when it is a concept. */
 export function GraphDetail({ node, neighbours, onSelect, onExpand, onClose }: {
   node: GNode
   neighbours: GNode[]
@@ -24,75 +25,69 @@ export function GraphDetail({ node, neighbours, onSelect, onExpand, onClose }: {
   onExpand: (id: string) => void
   onClose?: () => void
 }) {
-  const conceptId = node.concept_ids?.[0] ?? null
+  const conceptId = node.type !== "document" && /^(term|concept)-/.test(node.id) ? node.id : null
   const q = useQuery({
     queryKey: keys.concept(conceptId ?? ""),
     queryFn: () => api.concept(conceptId!),
     enabled: !!conceptId,
+    retry: retryServerErrors,
   })
-  const term = node.origin === "structured"
   return (
-    <div className="grid gap-5" id="graph-detail" data-node={node.id}>
+    <div className="grid min-w-0 gap-5" id="graph-detail" data-node={node.id} data-origin={node.origin}>
       <div className="flex items-start gap-2">
         <div className="grid min-w-0 flex-1 gap-1.5">
           <h2 className="text-base leading-tight font-semibold break-words">{node.label}</h2>
           <div className="flex flex-wrap gap-1.5">
+            {node.type !== "document" && <OriginBadge origin={node.origin} />}
             <Badge variant="outline" className="font-normal">
               <span className="size-2 rounded-full" style={{ background: node.color }} aria-hidden />
-              {TYPE_LABELS[node.group] ?? node.group}
+              {TYPE_LABEL[node.type] ?? node.type}
+              {node.type !== "document" && node.kind ? ` · ${CKIND_LABEL[node.kind] ?? node.kind}` : ""}
             </Badge>
-            <Badge variant="outline" className="font-normal">{TYPE_KO[node.type] ?? node.type}</Badge>
             {node.source && <Badge variant="secondary" className="font-normal">{node.source}</Badge>}
             {node.enriched_by && <Badge variant="secondary" className="font-normal">+ {node.enriched_by}</Badge>}
-            <Badge variant="outline" className="font-normal">연결 {node.degree}</Badge>
+            <Badge variant="outline" className="font-normal">{node.degree} links</Badge>
           </div>
         </div>
         {onClose && (
           <Button variant="ghost" size="icon" className="-mt-1 -mr-2 shrink-0" onClick={onClose}
-                  aria-label="상세 닫기">
+                  aria-label="Close detail">
             <X aria-hidden />
           </Button>
         )}
       </div>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onClick={() => onExpand(node.id)} id="graph-expand">
-          <Focus aria-hidden /> 이웃만 보기
+          <Focus aria-hidden /> Neighbours only
         </Button>
         {conceptId && (
           <Button size="sm" variant="outline" asChild>
-            <Link to={`/concepts?concept=${encodeURIComponent(conceptId)}`} id="graph-concept-link">
-              <ExternalLink aria-hidden /> 개념 상세
+            <Link to={`/ontology?concept=${encodeURIComponent(conceptId)}`} id="graph-concept-link">
+              <ExternalLink aria-hidden /> Concept detail
             </Link>
           </Button>
         )}
       </div>
       {node.type === "document" ? (
-        <Section title="문서">
+        <Section title="Document">
           <p className="text-sm break-all">{node.path || node.label}</p>
-          <p className="text-xs text-muted-foreground">근거로 연결된 노드 {node.degree}개</p>
+          <p className="text-xs text-muted-foreground">Evidence for {node.degree} node{node.degree === 1 ? "" : "s"}</p>
         </Section>
       ) : (
-        (term || !conceptId) && (
-          <>
-            <Section title="정의"><p className="text-sm leading-relaxed">{node.definition || "-"}</p></Section>
-            {!!node.synonyms?.length && <Section title="동의어"><Chips items={node.synonyms} /></Section>}
-            {!!node.attributes?.length && <Section title="속성"><Chips items={node.attributes} /></Section>}
-            {!!node.tables?.length && <Section title="테이블"><Chips items={node.tables} /></Section>}
-          </>
-        )
-      )}
-      {node.folded_into && (
-        <Section title="정렬">
-          <div><RelationChip relation="same" term={neighbours.find((n) => n.id === node.folded_into)?.label} /></div>
-        </Section>
+        <>
+          <Section title="Definition" id="definition"><p className="text-sm leading-relaxed">{node.definition || "-"}</p></Section>
+          {!!node.synonyms?.length && <Section title="Synonyms" id="synonyms"><Chips items={node.synonyms} /></Section>}
+          {!!node.tables?.length && <Section title="Tables" id="tables"><Chips items={node.tables} /></Section>}
+          {!!node.attributes?.length && !conceptId && <Section title="Attributes"><Chips items={node.attributes} /></Section>}
+        </>
       )}
       {conceptId && (
         q.error ? <ErrorState error={q.error} onRetry={() => q.refetch()} />
           : !q.data ? <div className="grid gap-3"><Skeleton className="h-5 w-1/2" /><Skeleton className="h-20" /></div>
-            : <ConceptBody c={q.data} omitBasics={term} />
+            : <ConceptBody c={q.data} omitBasics onOpen={onSelect} />
       )}
       {neighbours.length > 0 && (
-        <Section title={`이웃 (${neighbours.length})`}>
+        <Section title={`Neighbours (${neighbours.length})`}>
           <div className="flex flex-wrap gap-1.5">
             {neighbours.slice(0, 40).map((n) => (
               <button key={n.id} type="button" onClick={() => onSelect(n.id)}

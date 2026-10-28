@@ -1,13 +1,14 @@
-/* 그래프: the merged ontology as a 3D force-directed WebGL graph (2D canvas fallback).
-   Lazy-loaded from App, the canvases are lazy too (three.js lives in its own chunk). */
+/* Graph: the unified ontology as a 3D force-directed WebGL graph (2D canvas fallback, or
+   forced with ?renderer=2d). Lazy-loaded from App, the canvases are lazy too (three.js lives
+   in its own chunk). URL: ?layer=all|structured|documents|aligned, ?evidence=1, ?focus=<id>. */
 
 import { useQuery } from "@tanstack/react-query"
 import {
-  Expand, LocateFixed, Network, RotateCw, Search, Shrink, SlidersHorizontal, X,
+  Expand, Hammer, LocateFixed, Network, RotateCw, Search, Shrink, SlidersHorizontal, X,
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "react-router"
+import { Link, useSearchParams } from "react-router"
 
 import { GraphDetail } from "@/components/graph/graph-detail"
 import type { GraphHandle } from "@/components/graph/types"
@@ -24,12 +25,13 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { keys } from "@/hooks/queries"
+import { keys, retryServerErrors } from "@/hooks/queries"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { api, type GraphLayer } from "@/lib/api"
+import { api, isNoSnapshot } from "@/lib/api"
 import {
-  buildGraph, type ColorMode, DEFAULT_LAYERS, type GNode, LAYERS, type LegendItem, neighbours,
-  nodeGroup, reuseNodes, searchKeywords, TYPE_LABELS,
+  buildGraph, type ColorMode, type GNode, isLayerView, LAYER_VIEWS, type LayerView, layersFor,
+  type LegendItem, neighbours, ORIGIN_COLORS, ORIGIN_LABELS, originGroup, reuseNodes, RING_COLOR,
+  originCounts, searchKeywords,
 } from "@/lib/graph-data"
 import { cn } from "@/lib/utils"
 import { hasWebGL } from "@/lib/webgl"
@@ -40,7 +42,10 @@ const Graph2D = lazy(() => import("@/components/graph/graph-2d"))
 declare global {
   interface Window {
     /** node/link counts of what the canvas shows (read by the Playwright test) */
-    __autoontologyGraphStats?: { nodes: number; links: number; renderer: "3d" | "2d"; layers: string[] }
+    __autoontologyGraphStats?: {
+      nodes: number; links: number; renderer: "3d" | "2d"; layers: string[]
+      origins: Record<string, number>; rings: number
+    }
   }
 }
 
@@ -61,10 +66,11 @@ function useSize<T extends HTMLElement>() {
 
 function Legend({ items }: { items: LegendItem[] }) {
   return (
-    <ul id="graph-legend" aria-label="범례" className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+    <ul id="graph-legend" aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
       {items.map((i) => (
         <li key={i.key} className="inline-flex items-center gap-1.5" data-legend={i.key}>
-          <span className="size-2.5 rounded-full" style={{ background: i.color }} aria-hidden />
+          <span className="size-2.5 rounded-full" aria-hidden
+                style={{ background: i.color, boxShadow: i.key === "aligned" ? `0 0 0 2px var(--background), 0 0 0 3.5px ${RING_COLOR}` : undefined }} />
           <span>{i.label}</span>
           <span className="text-muted-foreground tabular-nums">{i.count}</span>
         </li>
@@ -75,20 +81,22 @@ function Legend({ items }: { items: LegendItem[] }) {
 
 function LinkKey() {
   return (
-    <ul className="grid gap-1 text-xs text-muted-foreground" aria-label="링크 범례">
-      <li className="flex items-center gap-2"><span className="w-5 border-t border-current" aria-hidden />관계 (객체 속성)</li>
+    <ul className="grid gap-1 text-xs text-muted-foreground" aria-label="Link legend">
+      <li className="flex items-center gap-2"><span className="w-5 border-t border-current" aria-hidden />Relation (object property)</li>
       <li className="flex items-center gap-2"><span className="w-5 border-t border-current" aria-hidden />▸ subClassOf</li>
-      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#16a34a]" aria-hidden />정렬: 같음 (입자)</li>
-      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#0ea5e9]" aria-hidden />정렬: 상위·하위</li>
-      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#8b5cf6]" aria-hidden />정렬: 관련</li>
-      <li className="flex items-center gap-2"><span className="w-5 border-t border-[#b45309]" aria-hidden />근거 → 문서</li>
+      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#16a34a]" aria-hidden />Alignment: same (particles)</li>
+      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#0ea5e9]" aria-hidden />Alignment: broader / narrower</li>
+      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#8b5cf6]" aria-hidden />Alignment: related</li>
+      <li className="flex items-center gap-2"><span className="w-5 border-t border-[#b45309]" aria-hidden />Evidence → document</li>
     </ul>
   )
 }
 
-function Controls({ layers, toggleLayer, colorMode, setColorMode, legend, ground, setGround }: {
-  layers: Set<GraphLayer>
-  toggleLayer: (l: GraphLayer, on: boolean) => void
+function Controls({ view, setView, evidence, setEvidence, colorMode, setColorMode, legend, ground, setGround }: {
+  view: LayerView
+  setView: (v: LayerView) => void
+  evidence: boolean
+  setEvidence: (on: boolean) => void
   /** null = no 3D view (2D fallback): no grid switch */
   ground: boolean | null
   setGround: (on: boolean) => void
@@ -96,33 +104,40 @@ function Controls({ layers, toggleLayer, colorMode, setColorMode, legend, ground
   setColorMode: (m: ColorMode) => void
   legend: LegendItem[]
 }) {
+  const segment = (on: boolean) => cn(
+    "flex-1 rounded px-2 py-1 text-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+    on ? "bg-primary text-primary-foreground" : "hover:bg-accent")
   return (
     <div className="grid gap-4" id="graph-controls">
       <fieldset className="grid gap-2">
-        <legend className="mb-1 text-xs font-medium text-muted-foreground">레이어</legend>
-        {LAYERS.map((l) => (
-          <div key={l.key} className="flex items-center justify-between gap-3">
-            <Label htmlFor={`layer-${l.key}`} className="font-normal">{l.label}</Label>
-            <Switch id={`layer-${l.key}`} data-layer={l.key} checked={layers.has(l.key)}
-                    onCheckedChange={(on) => toggleLayer(l.key, on)} />
-          </div>
-        ))}
+        <legend className="mb-1 text-xs font-medium text-muted-foreground">Layer</legend>
+        <div className="grid grid-cols-2 gap-0.5 rounded-md border p-0.5" role="radiogroup" aria-label="Layer" id="graph-layers">
+          {LAYER_VIEWS.map((l) => (
+            <button key={l.key} type="button" role="radio" aria-checked={view === l.key}
+                    data-layer={l.key} id={`layer-${l.key}`} onClick={() => setView(l.key)}
+                    className={segment(view === l.key)}>
+              {l.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="layer-evidence" className="font-normal">Evidence (source documents)</Label>
+          <Switch id="layer-evidence" data-layer="evidence" checked={evidence} onCheckedChange={setEvidence} />
+        </div>
         {ground !== null && (
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="layer-ground" className="font-normal">바닥 격자</Label>
+            <Label htmlFor="layer-ground" className="font-normal">Ground grid</Label>
             <Switch id="layer-ground" checked={ground} onCheckedChange={setGround} />
           </div>
         )}
       </fieldset>
       <fieldset className="grid gap-2">
-        <legend className="mb-1 text-xs font-medium text-muted-foreground">색상</legend>
-        <div className="inline-flex rounded-md border p-0.5" role="radiogroup" aria-label="색상 기준">
-          {(["type", "source"] as const).map((m) => (
+        <legend className="mb-1 text-xs font-medium text-muted-foreground">Colour by</legend>
+        <div className="inline-flex rounded-md border p-0.5" role="radiogroup" aria-label="Colour by">
+          {(["origin", "type", "source"] as const).map((m) => (
             <button key={m} type="button" role="radio" aria-checked={colorMode === m}
-                    data-color-mode={m} onClick={() => setColorMode(m)}
-                    className={cn("flex-1 rounded px-3 py-1 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                                  colorMode === m ? "bg-primary text-primary-foreground" : "hover:bg-accent")}>
-              {m === "type" ? "유형" : "소스"}
+                    data-color-mode={m} onClick={() => setColorMode(m)} className={segment(colorMode === m)}>
+              {{ origin: "Origin", type: "Kind", source: "Source" }[m]}
             </button>
           ))}
         </div>
@@ -134,13 +149,30 @@ function Controls({ layers, toggleLayer, colorMode, setColorMode, legend, ground
 }
 
 export default function GraphPage() {
-  const q = useQuery({ queryKey: keys.graph, queryFn: api.graph })
+  const q = useQuery({ queryKey: keys.graph, queryFn: api.graph, retry: retryServerErrors })
   const { resolvedTheme } = useTheme()
   const dark = resolvedTheme === "dark"
   const isMobile = useIsMobile()
-  const webgl = useMemo(() => hasWebGL(), [])
-  const [layers, setLayers] = useState<Set<GraphLayer>>(() => new Set(DEFAULT_LAYERS))
-  const [colorMode, setColorMode] = useState<ColorMode>("type")
+  const [params, setParams] = useSearchParams()
+  const forced2d = params.get("renderer") === "2d"
+  const webgl = useMemo(() => !forced2d && hasWebGL(), [forced2d])
+  const viewParam = params.get("layer")
+  const view: LayerView = isLayerView(viewParam) ? viewParam : "all"
+  const evidence = params.get("evidence") === "1"
+  const setParam = useCallback((patch: Record<string, string | null>) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      for (const [k, v] of Object.entries(patch)) {
+        if (v) next.set(k, v)
+        else next.delete(k)
+      }
+      return next
+    }, { replace: true })
+  }, [setParams])
+  const setView = (v: LayerView) => setParam({ layer: v === "all" ? null : v })
+  const setEvidence = (on: boolean) => setParam({ evidence: on ? "1" : null })
+  const layers = useMemo(() => layersFor(view, evidence), [view, evidence])
+  const [colorMode, setColorMode] = useState<ColorMode>("origin")
   const [expanded, setExpanded] = useState<string[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [autoRotate, setAutoRotate] = useState(false)
@@ -174,7 +206,8 @@ export default function GraphPage() {
     if (!built) return
     window.__autoontologyGraphStats = {
       nodes: built.stats.nodes, links: built.stats.links, renderer: webgl ? "3d" : "2d",
-      layers: [...layers],
+      layers: [...layers], origins: originCounts(built.nodes),
+      rings: built.nodes.filter((n) => n.ring).length,
     }
   }, [built, webgl, layers])
   useEffect(() => () => { delete window.__autoontologyGraphStats }, [])
@@ -211,15 +244,6 @@ export default function GraphPage() {
     else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {})
   }
 
-  const toggleLayer = (l: GraphLayer, on: boolean) => {
-    setLayers((prev) => {
-      const next = new Set(prev)
-      if (on) next.add(l)
-      else next.delete(l)
-      return next
-    })
-  }
-
   const expand = useCallback((id: string) => {
     setExpanded((prev) => (prev.includes(id) ? prev : [...prev, id]))
     setSelectedId(id)
@@ -248,7 +272,7 @@ export default function GraphPage() {
     if (!nodeById.has(id)) {
       setExpanded([])
       const n = q.data?.nodes.find((x) => x.id === id)
-      if (n) setLayers((prev) => new Set([...prev, n.layer]))
+      if (n) setParam({ layer: null, evidence: n.layer === "evidence" ? "1" : params.get("evidence") })
       setSelectedId(id)
       // the canvas retries until the layout has placed the newly shown node
       window.setTimeout(() => handle.current?.focus(id), 0)
@@ -257,9 +281,8 @@ export default function GraphPage() {
     select(id)
   }
 
-  // ?focus=<node id> (citation chips of the 플레이그라운드): select and fly to that node once
-  // the data and the canvas are there
-  const [params] = useSearchParams()
+  // ?focus=<node id> (Ontology "Show in graph", playground chips): select and fly to that
+  // node once the data and the canvas are there
   const focusParam = params.get("focus")
   const focusedParam = useRef<string | null>(null)
   useEffect(() => {
@@ -273,13 +296,13 @@ export default function GraphPage() {
   const Canvas = webgl ? Graph3D : Graph2D
   const legend = built?.legend ?? []
   const controls = (
-    <Controls layers={layers} toggleLayer={toggleLayer} colorMode={colorMode}
+    <Controls view={view} setView={setView} evidence={evidence} setEvidence={setEvidence} colorMode={colorMode}
               setColorMode={setColorMode} legend={legend}
               ground={webgl ? showGround : null} setGround={setShowGround} />
   )
   // the mobile sheet brings its own close button
   const detail = selected && (
-    <GraphDetail node={selected} neighbours={selectedNeighbours} onSelect={(id) => select(id)}
+    <GraphDetail node={selected} neighbours={selectedNeighbours} onSelect={(id) => pickSearch(id)}
                  onExpand={expand} onClose={isMobile ? undefined : () => setSelectedId(null)} />
   )
 
@@ -287,16 +310,21 @@ export default function GraphPage() {
     <div className={cn("relative h-[calc(100svh-3.5rem)] w-full overflow-hidden bg-background",
                        fullscreen && "fixed inset-0 z-40 h-svh")}
          id="graph-page" data-renderer={webgl ? "3d" : "2d"}>
-      <h1 className="sr-only">그래프</h1>
+      <h1 className="sr-only">Graph</h1>
       <div ref={canvasRef} className="absolute inset-0" id="graph-canvas">
-        {q.error ? (
+        {isNoSnapshot(q.error) ? (
+          <div className="p-6">
+            <EmptyState icon={Hammer} title="No ontology yet" hint="Build the ontology to see its graph."
+                        action={<Button asChild><Link to="/build"><Hammer aria-hidden /> Go to Build</Link></Button>} />
+          </div>
+        ) : q.error ? (
           <div className="p-6"><ErrorState error={q.error} onRetry={() => q.refetch()} /></div>
         ) : !built ? (
           <div className="grid h-full place-items-center"><Skeleton className="size-48 rounded-full" /></div>
         ) : !q.data!.nodes.length ? (
           <div className="p-6">
-            <EmptyState icon={Network} title="보여줄 그래프가 없습니다"
-                        hint="소스를 빌드하거나 문서를 추출한 뒤 다시 열어 보세요." />
+            <EmptyState icon={Network} title="The graph is empty"
+                        hint="The latest build produced no classes. Add sources and build again." />
           </div>
         ) : size.width > 0 && (
           <Suspense fallback={<div className="grid h-full place-items-center"><Skeleton className="size-48 rounded-full" /></div>}>
@@ -312,45 +340,45 @@ export default function GraphPage() {
       <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start gap-2 p-3">
         <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-lg border bg-background/90 p-1 shadow-sm backdrop-blur">
           <Button variant="ghost" size="sm" onClick={() => setSearchOpen(true)} id="graph-search-open">
-            <Search aria-hidden /> <span className="hidden sm:inline">노드 검색</span>
+            <Search aria-hidden /> <span className="hidden sm:inline">Find node</span>
             <kbd className="hidden rounded border px-1 text-[10px] text-muted-foreground sm:inline">/</kbd>
           </Button>
           {isMobile && (
             <Button variant="ghost" size="sm" onClick={() => setControlsOpen(true)} id="graph-controls-open">
-              <SlidersHorizontal aria-hidden /> 보기
+              <SlidersHorizontal aria-hidden /> View
             </Button>
           )}
           {webgl && (
             <Button variant={autoRotate ? "secondary" : "ghost"} size="icon" aria-pressed={autoRotate}
-                    onClick={() => setAutoRotate((v) => !v)} aria-label="자동 회전" title="자동 회전" id="graph-rotate">
+                    onClick={() => setAutoRotate((v) => !v)} aria-label="Auto-rotate" title="Auto-rotate" id="graph-rotate">
               <RotateCw aria-hidden />
             </Button>
           )}
           <Button variant="ghost" size="icon" onClick={() => handle.current?.reset()}
-                  aria-label="카메라 초기화" title="카메라 초기화" id="graph-reset">
+                  aria-label="Reset camera" title="Reset camera" id="graph-reset">
             <LocateFixed aria-hidden />
           </Button>
           <Button variant="ghost" size="icon" onClick={toggleFullscreen} aria-pressed={fullscreen}
-                  aria-label={fullscreen ? "전체 화면 끝내기" : "전체 화면"} title="전체 화면" id="graph-fullscreen">
+                  aria-label={fullscreen ? "Exit full screen" : "Full screen"} title="Full screen" id="graph-fullscreen">
             {fullscreen ? <Shrink aria-hidden /> : <Expand aria-hidden />}
           </Button>
         </div>
         <div className="pointer-events-auto flex flex-wrap items-center gap-1.5" id="graph-badges" aria-live="polite">
           {built && (
             <Badge variant="secondary" className="font-normal tabular-nums" id="graph-stats">
-              노드 {built.stats.nodes} · 링크 {built.stats.links}
+              {built.stats.nodes} nodes · {built.stats.links} links
             </Badge>
           )}
-          {!webgl && <Badge variant="outline" className="border-warning/40 bg-warning/10" id="graph-2d-badge">2D 폴백</Badge>}
+          {!webgl && <Badge variant="outline" className="border-warning/40 bg-warning/10" id="graph-2d-badge">{forced2d ? "2D view" : "2D fallback"}</Badge>}
           {q.data?.truncated && (
             <Badge variant="outline" className="border-warning/40 bg-warning/10 font-normal" id="graph-truncated">
-              노드 {q.data.counts.total_nodes}개 중 연결 많은 {q.data.counts.nodes}개만 표시
+              Showing the {q.data.counts.nodes} best-connected of {q.data.counts.total_nodes} nodes
             </Badge>
           )}
           {expanded.length > 0 && (
             <Badge variant="outline" className="gap-1 pr-1 font-normal" id="graph-expanded">
-              이웃만 보기 · {expanded.map((id) => cache.get(id)?.label ?? id).join(", ")}
-              <button type="button" onClick={() => setExpanded([])} aria-label="전체 보기"
+              Neighbours only · {expanded.map((id) => cache.get(id)?.label ?? id).join(", ")}
+              <button type="button" onClick={() => setExpanded([])} aria-label="Show all"
                       className="rounded p-0.5 hover:bg-accent"><X className="size-3" aria-hidden /></button>
             </Badge>
           )}
@@ -367,7 +395,7 @@ export default function GraphPage() {
         </div>
       )}
       {!isMobile && detail && (
-        <aside aria-label="노드 상세"
+        <aside aria-label="Node detail"
                className="absolute top-3 right-3 bottom-3 flex w-[min(24rem,calc(100%-17rem))] flex-col rounded-lg border bg-background/95 shadow-sm backdrop-blur">
           <ScrollArea className="min-h-0 flex-1"><div className="p-4">{detail}</div></ScrollArea>
         </aside>
@@ -379,8 +407,8 @@ export default function GraphPage() {
           <Sheet open={controlsOpen} onOpenChange={setControlsOpen}>
             <SheetContent side="bottom" className="max-h-[75svh]">
               <SheetHeader>
-                <SheetTitle>그래프 보기</SheetTitle>
-                <SheetDescription>레이어, 색상, 범례</SheetDescription>
+                <SheetTitle>Graph view</SheetTitle>
+                <SheetDescription>Layers, colours, legend</SheetDescription>
               </SheetHeader>
               <ScrollArea className="min-h-0 flex-1"><div className="px-4 pb-4">{controls}</div></ScrollArea>
             </SheetContent>
@@ -388,8 +416,8 @@ export default function GraphPage() {
           <Sheet open={!!detail} onOpenChange={(o) => { if (!o) setSelectedId(null) }}>
             <SheetContent side="bottom" className="max-h-[70svh] gap-0" onOpenAutoFocus={(e) => e.preventDefault()}>
               <SheetHeader className="sr-only">
-                <SheetTitle>{selected?.label ?? "노드 상세"}</SheetTitle>
-                <SheetDescription>{selected ? TYPE_LABELS[selected.group] : ""}</SheetDescription>
+                <SheetTitle>{selected?.label ?? "Node detail"}</SheetTitle>
+                <SheetDescription>{selected ? ORIGIN_LABELS[selected.originGroup] : ""}</SheetDescription>
               </SheetHeader>
               <ScrollArea className="min-h-0 flex-1"><div className="p-4 pr-10">{detail}</div></ScrollArea>
             </SheetContent>
@@ -402,20 +430,20 @@ export default function GraphPage() {
         </>
       )}
 
-      <CommandDialog open={searchOpen} onOpenChange={setSearchOpen} title="노드 검색"
-                     description="이름, 동의어, 테이블로 노드를 찾고 카메라를 옮깁니다">
-        <CommandInput placeholder="노드 이름, 동의어, 테이블…" id="graph-search-input" />
+      <CommandDialog open={searchOpen} onOpenChange={setSearchOpen} title="Find node"
+                     description="Find a node by name, synonym or table and move the camera to it">
+        <CommandInput placeholder="Node name, synonym, table…" id="graph-search-input" />
         <CommandList>
-          <CommandEmpty>결과 없음</CommandEmpty>
-          <CommandGroup heading="노드">
+          <CommandEmpty>No results</CommandEmpty>
+          <CommandGroup heading="Nodes">
             {(q.data?.nodes ?? []).map((n) => (
               <CommandItem key={n.id} value={`${n.label} ${n.id}`} keywords={searchKeywords(n)}
                            data-node-id={n.id} onSelect={() => pickSearch(n.id)}>
                 <span className="size-2 shrink-0 rounded-full"
-                      style={{ background: cache.get(n.id)?.color ?? "#94a3b8" }} aria-hidden />
+                      style={{ background: cache.get(n.id)?.color ?? ORIGIN_COLORS[originGroup(n)] }} aria-hidden />
                 <span className="truncate">{n.label}</span>
                 <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                  {TYPE_LABELS[nodeGroup(n)] ?? n.kind}
+                  {ORIGIN_LABELS[originGroup(n)] ?? n.kind}
                 </span>
               </CommandItem>
             ))}

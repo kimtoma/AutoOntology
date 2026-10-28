@@ -5,9 +5,15 @@ import { RunSheet } from "@/components/run-sheet"
 import { mockFetch, renderPage } from "@/test/utils"
 
 const RUN = {
-  id: "20261027T202922Z-34f08b", kind: "build", source: "hanbit", status: "succeeded",
+  id: "20261027T202922Z-34f08b", kind: "build", source: null, status: "succeeded",
   started_at: "2026-10-27T20:29:22Z", finished_at: null, error: null, params: {}, managed: false,
-  steps: [{ name: "load", status: "succeeded", started_at: null, finished_at: null, detail: {} }],
+  steps: [
+    { name: "structured:hanbit:load", status: "succeeded", started_at: "2026-10-27T20:29:22Z",
+      finished_at: "2026-10-27T20:29:24Z", detail: {} },
+    { name: "documents:hanbit-docs:extract", status: "pending", started_at: null, finished_at: null, detail: {} },
+    { name: "align:hanbit-docs", status: "succeeded", started_at: null, finished_at: null, detail: {} },
+    { name: "snapshot", status: "succeeded", started_at: null, finished_at: null, detail: {} },
+  ],
   progress: {},
 }
 
@@ -42,10 +48,16 @@ describe("run sheet", () => {
         : RUN,
     })
     renderPage(<RunSheet runId={RUN.id} onClose={() => {}} />)
-    expect(await screen.findByText(/실행 정보를 불러오지 못했습니다: boom/)).toBeInTheDocument()
+    expect(await screen.findByText(/Could not load the run: boom/)).toBeInTheDocument()
     fail = false
-    await user.click(screen.getByRole("button", { name: "다시 시도" }))
-    expect(await screen.findByText("적재 · 성공")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Try again" }))
+    expect(await screen.findByText("Load · Succeeded · 2.0 s")).toBeInTheDocument()
+    // grouped as the build runs them; a step still pending in a finished run did not run
+    expect(screen.getByText("Structured · hanbit")).toBeInTheDocument()
+    expect(screen.getByText("Documents · hanbit-docs")).toBeInTheDocument()
+    expect(screen.getByText("Extract · not run")).toBeInTheDocument()
+    expect(screen.getByText("hanbit-docs · Succeeded")).toBeInTheDocument()
+    expect(screen.getByText(/all sources/)).toBeInTheDocument()
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
@@ -56,6 +68,6 @@ describe("run sheet", () => {
     const es = FakeEventSource.instances[0]
     es.readyState = FakeEventSource.CLOSED
     es.onerror?.()
-    expect(await screen.findByText(/실시간 로그 스트림을 열지 못했습니다/)).toBeInTheDocument()
+    expect(await screen.findByText(/Could not open the live log stream/)).toBeInTheDocument()
   })
 })

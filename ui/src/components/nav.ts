@@ -1,17 +1,15 @@
 import {
-  Activity, BookOpen, Database, Download, FlaskConical, Network, PlayCircle, Settings,
-  type LucideIcon,
+  Activity, BookOpen, Database, Download, FlaskConical, Hammer, Network, type LucideIcon,
 } from "lucide-react"
 
-export interface NavItem { path: string; label: string; icon: LucideIcon }
+export interface NavItem { path: string; label: string; icon: LucideIcon; hint: string }
 
 export const NAV: NavItem[] = [
-  { path: "/sources", label: "소스", icon: Database },
-  { path: "/runs", label: "실행", icon: PlayCircle },
-  { path: "/concepts", label: "개념", icon: BookOpen },
-  { path: "/graph", label: "그래프", icon: Network },
-  { path: "/playground", label: "플레이그라운드", icon: FlaskConical },
-  { path: "/exports", label: "내보내기", icon: Download },
-  { path: "/settings", label: "설정", icon: Settings },
-  { path: "/status", label: "상태", icon: Activity },
+  { path: "/sources", label: "Sources", icon: Database, hint: "Structured data and documents" },
+  { path: "/build", label: "Build", icon: Hammer, hint: "One pipeline over every source" },
+  { path: "/ontology", label: "Ontology", icon: BookOpen, hint: "The unified concept list" },
+  { path: "/graph", label: "Graph", icon: Network, hint: "3D view of the ontology" },
+  { path: "/playground", label: "Playground", icon: FlaskConical, hint: "Chat, SQL and SPARQL" },
+  { path: "/exports", label: "Exports", icon: Download, hint: "Turtle, JSON-LD, Ossie, OKF" },
+  { path: "/status", label: "Status", icon: Activity, hint: "Service health" },
 ]

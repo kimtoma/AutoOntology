@@ -1,4 +1,4 @@
-/* SPARQL 콘솔 over the source's latest exported ontology.ttl. */
+/* SPARQL console over the latest snapshot (its exported ontology.ttl, or a cache file). */
 
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Loader2, Play } from "lucide-react"
@@ -18,24 +18,24 @@ const DEFAULT = `SELECT ?class ?label WHERE {
 }
 LIMIT 20`
 
-export function SparqlTab({ source }: { source: string }) {
+export function SparqlTab() {
   const examples = useQuery({ queryKey: ["sparql-examples"], queryFn: api.playground.sparqlExamples,
                               staleTime: Infinity })
   const [query, setQuery] = useState(DEFAULT)
   const [example, setExample] = useState("")
-  const run = useMutation({ mutationFn: (q: string) => api.playground.sparql({ source, query: q, limit: 500 }) })
+  const run = useMutation({ mutationFn: (q: string) => api.playground.sparql({ query: q, limit: 500 }) })
   const res = run.data
 
   return (
-    <div className="grid gap-4" id="playground-sparql">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4" id="playground-sparql">
       <div className="flex flex-wrap items-center gap-2">
         <Select value={example} onValueChange={(id) => {
           setExample(id)
           const ex = examples.data?.find((e) => e.id === id)
           if (ex) { setQuery(ex.query); run.mutate(ex.query) }
         }}>
-          <SelectTrigger className="w-full sm:w-64" aria-label="예시 쿼리" id="sparql-example">
-            <SelectValue placeholder="예시 쿼리 고르기" />
+          <SelectTrigger className="w-full sm:w-64" aria-label="Example query" id="sparql-example">
+            <SelectValue placeholder="Pick an example query" />
           </SelectTrigger>
           <SelectContent>
             {(examples.data ?? []).map((e) => (
@@ -49,7 +49,7 @@ export function SparqlTab({ source }: { source: string }) {
       </div>
       <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); run.mutate(query) }}>
         <Textarea id="sparql-query" value={query} onChange={(e) => setQuery(e.target.value)} rows={10}
-                  spellCheck={false} aria-label="SPARQL 쿼리"
+                  spellCheck={false} aria-label="SPARQL query"
                   className="font-mono text-xs leading-relaxed"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -59,10 +59,10 @@ export function SparqlTab({ source }: { source: string }) {
                   }} />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
-            접두사 owl·rdfs·rdf·skos·prov·dcterms·xsd·os 는 미리 선언되어 있습니다. SELECT·ASK·CONSTRUCT·DESCRIBE만, 10초 제한. ⌘/Ctrl+Enter 실행.
+            Prefixes owl, rdfs, rdf, skos, prov, dcterms, xsd and ao are declared. SELECT, ASK, CONSTRUCT and DESCRIBE only, 10 s limit. ⌘/Ctrl+Enter runs.
           </p>
           <Button type="submit" id="sparql-run" disabled={run.isPending || !query.trim()}>
-            {run.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />} 실행
+            {run.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />} Run
           </Button>
         </div>
       </form>
@@ -75,14 +75,14 @@ export function SparqlTab({ source }: { source: string }) {
       {res && (
         <div className="grid gap-2" id="sparql-result" data-type={res.type}>
           <p className="text-xs text-muted-foreground">
-            내보내기 <code>{res.export}</code> · 트리플 {res.triples.toLocaleString()}개 · 결과 {res.total.toLocaleString()}{res.truncated && "+"}
-            {res.truncated && " (잘림)"}
+            Revision {res.revision} · <code className="break-all">{res.ttl}</code> · {res.triples.toLocaleString()} triples · {res.total.toLocaleString()}{res.truncated && "+"} results
+            {res.truncated && " (truncated)"}
           </p>
           {res.type === "ASK" ? (
             <Badge variant="outline" className="w-fit">{res.boolean ? "true" : "false"}</Badge>
           ) : res.turtle !== undefined ? (
             <div className="grid gap-2">
-              <div className="flex justify-end"><CopyButton text={res.turtle} label="Turtle 복사" /></div>
+              <div className="flex justify-end"><CopyButton text={res.turtle} label="Copy Turtle" /></div>
               <pre className="max-h-[28rem] overflow-auto rounded-md border bg-muted p-3 text-xs">{res.turtle}</pre>
             </div>
           ) : (

@@ -17,21 +17,31 @@ import { cn } from "@/lib/utils"
 function StatusBadge() {
   const { data, isError, isPending } = useStatus()
   const tone = isError ? "error" : data?.status ?? "pending"
-  const label = isPending ? "확인 중…" : isError ? "서비스 응답 없음"
-    : `${{ ok: "정상", warn: "주의", error: "문제 있음" }[data.status] ?? data.status}`
+  const label = isPending ? "Checking…" : isError ? "Service unreachable"
+    : `${{ ok: "Healthy", warn: "Warning", error: "Problem" }[data.status] ?? data.status}`
   const dot: Record<string, string> = {
     ok: "bg-success", warn: "bg-warning", error: "bg-destructive", pending: "bg-muted-foreground",
   }
   return (
     <Link to="/status" id="status-badge" data-status={tone}
-          title="서비스 상태"
-          aria-label={`서비스 상태: ${label}`}
+          title="Service status"
+          aria-label={`Service status: ${label}`}
           className="inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-medium
                      outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50">
       <span className={cn("size-2 rounded-full", dot[tone])} aria-hidden />
       <span>{label}</span>
-      {data && <span className="hidden text-muted-foreground sm:inline">· {data.chat_provider}</span>}
+      {data?.providers && <span className="hidden text-muted-foreground sm:inline">· {data.providers.chat_provider}</span>}
     </Link>
+  )
+}
+
+function ServiceFooter() {
+  const { data } = useStatus()
+  const host = data?.service_url ? data.service_url.replace(/^https?:\/\//, "") : "127.0.0.1"
+  return (
+    <p className="px-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+      {host} · local only{data?.version ? ` · v${data.version}` : ""}
+    </p>
   )
 }
 
@@ -39,7 +49,7 @@ function AppSidebar() {
   const { pathname } = useLocation()
   const { setOpenMobile, isMobile } = useSidebar()
   return (
-    <Sidebar collapsible="icon" aria-label="주 메뉴">
+    <Sidebar collapsible="icon" aria-label="Main menu">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -52,7 +62,7 @@ function AppSidebar() {
                 <span className="grid flex-1 text-left leading-tight">
                   <span className="font-semibold">AutoOntology</span>
                   <span className="truncate text-xs text-muted-foreground">
-                    데이터와 문서를 하나의 온톨로지로
+                    Data and documents, one ontology
                   </span>
                 </span>
               </Link>
@@ -81,9 +91,7 @@ function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <p className="px-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-          127.0.0.1:7800 · 로컬 전용
-        </p>
+        <ServiceFooter />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -101,7 +109,7 @@ function Crumbs() {
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden sm:inline-flex" />
         <BreadcrumbItem>
-          <BreadcrumbPage>{item?.label ?? "페이지 없음"}</BreadcrumbPage>
+          <BreadcrumbPage>{item?.label ?? "Not found"}</BreadcrumbPage>
         </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>
@@ -118,7 +126,7 @@ export function AppShell() {
       <SidebarInset className="min-w-0">
         <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b
                            bg-background/95 px-4 backdrop-blur">
-          <SidebarTrigger className="-ml-1" aria-label="메뉴 열기·닫기" />
+          <SidebarTrigger className="-ml-1" aria-label="Toggle menu" />
           <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
           <Crumbs />
           <div className="ml-auto flex items-center gap-1">

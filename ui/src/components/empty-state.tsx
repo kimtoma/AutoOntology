@@ -27,12 +27,12 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   return (
     <div role="alert"
          className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
-      <p className="font-medium text-destructive">불러오지 못했습니다</p>
+      <p className="font-medium text-destructive">Could not load</p>
       <p className="mt-1 break-words text-muted-foreground">{message}</p>
       {onRetry && (
         <button type="button" onClick={onRetry}
                 className="mt-2 text-sm font-medium underline underline-offset-4">
-          다시 시도
+          Try again
         </button>
       )}
     </div>

@@ -5,7 +5,7 @@ import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d"
 
 import { applyForces } from "@/components/graph/forces"
 import { escapeHtml, type GraphCanvasProps, whenPlaced } from "@/components/graph/types"
-import { type GLink, type GNode, linkEnds } from "@/lib/graph-data"
+import { type GLink, type GNode, linkEnds, RING_COLOR } from "@/lib/graph-data"
 
 type Methods = ForceGraphMethods<GNode, GLink>
 
@@ -63,6 +63,15 @@ export default function Graph2D({
       nodeColor={(n) => (isOn(n.id) ? n.color : dim)}
       nodeCanvasObjectMode={() => "after"}
       nodeCanvasObject={(n, ctx, scale) => {
+        if (n.ring && n.x != null && n.y != null) {  // aligned Term: a ring around the dot
+          ctx.beginPath()
+          ctx.arc(n.x, n.y, Math.sqrt(n.val) * 3 + 2.5, 0, 2 * Math.PI)
+          ctx.strokeStyle = RING_COLOR
+          ctx.lineWidth = 1.6
+          ctx.globalAlpha = isOn(n.id) ? 1 : 0.35
+          ctx.stroke()
+          ctx.globalAlpha = 1
+        }
         const show = n.id === hoverId || n.id === selectedId || (active ? active.has(n.id) : n.labelled)
         if (!show || n.x == null || n.y == null) return
         const size = 11 / scale

@@ -9,14 +9,14 @@ import ForceGraph3D, { type ForceGraphMethods } from "react-force-graph-3d"
 import SpriteText from "three-spritetext"
 import {
   AmbientLight, BufferGeometry, Color, DirectionalLight, Float32BufferAttribute, FogExp2,
-  GridHelper, Group, Line, type LineBasicMaterial, LineDashedMaterial, Mesh, MeshStandardMaterial, type Object3D,
-  type PerspectiveCamera, SphereGeometry, Vector3,
+  GridHelper, Group, Line, type LineBasicMaterial, LineDashedMaterial, Mesh, MeshBasicMaterial,
+  MeshStandardMaterial, type Object3D, type PerspectiveCamera, SphereGeometry, TorusGeometry, Vector3,
 } from "three"
 
 import { applyForces } from "@/components/graph/forces"
 import { labelOpacity, obliqueView, PITCH, YAW } from "@/components/graph/camera"
 import { escapeHtml, type GraphCanvasProps, whenPlaced } from "@/components/graph/types"
-import { type GLink, type GNode, linkEnds } from "@/lib/graph-data"
+import { type GLink, type GNode, linkEnds, RING_COLOR } from "@/lib/graph-data"
 
 type Methods = ForceGraphMethods<GNode, GLink>
 
@@ -25,6 +25,8 @@ interface NodeObj {
   mesh: Mesh<SphereGeometry, MeshStandardMaterial>
   holder: Group
   label: SpriteText
+  /** aligned Terms: a camera-facing ring around the sphere */
+  ring: Mesh<TorusGeometry, MeshBasicMaterial> | null
 }
 interface OrbitLike {
   target: Vector3
@@ -66,6 +68,10 @@ function styleNodes(nodes: GNode[], objects: Map<string, NodeObj>, opts: {
     obj.mesh.material.opacity = on ? 0.95 : 0.35
     const r = Math.cbrt(n.val) * NODE_REL
     obj.mesh.scale.setScalar(r)
+    if (obj.ring) {
+      obj.ring.scale.setScalar(r)
+      obj.ring.material.opacity = on ? 0.95 : 0.3
+    }
     obj.holder.position.set(0, r + 6, 0)
     const forced = n.id === opts.hoverId || n.id === opts.selectedId
     obj.label.userData.forced = forced
@@ -228,7 +234,15 @@ export default function Graph3D({
     holder.add(label)
     const group = new Group()
     group.add(mesh, holder)
-    objects.current.set(node.id, { group, mesh, holder, label })
+    let ring: NodeObj["ring"] = null
+    if (node.ring) {
+      ring = new Mesh(new TorusGeometry(1.55, 0.14, 8, 40),
+                      new MeshBasicMaterial({ color: RING_COLOR, transparent: true, opacity: 0.95 }))
+      ring.onBeforeRender = (_r, _s, camera) => { ring!.quaternion.copy(camera.quaternion) }
+      ring.raycast = () => {}  // the sphere takes the clicks
+      group.add(ring)
+    }
+    objects.current.set(node.id, { group, mesh, holder, label, ring })
     styleNodes([node], objects.current, styleRef.current)  // created when the node enters
     return group
   }, [])

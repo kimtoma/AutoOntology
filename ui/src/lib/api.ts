@@ -1,5 +1,6 @@
 /* The one client for the AutoOntology REST API (/api/*). Errors are
-   `{error, detail}` with a matching HTTP status; they surface as ApiError. */
+   `{error, detail}` with a matching HTTP status; they surface as ApiError. The payloads
+   mirror autoontology/web/api.py, web/concepts.py, web/graph.py and web/playground_api.py. */
 
 export const API = "/api"
 
@@ -14,13 +15,18 @@ export class ApiError extends Error {
   }
 }
 
+export const NETWORK_HINT = "Cannot reach the AutoOntology service (uv run autoontology up)"
+
+/* --- sources ------------------------------------------------------------------------------ */
+
+/** files / database = structured sources; documents = unstructured. */
 export type SourceKind = "files" | "database" | "documents"
-export type RunKind = "build" | "extract" | "align" | "export" | "ingest"
+export type RunKind = "build" | "export"
 export type RunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "skipped"
 
 export interface RunRef {
   id: string
-  kind: RunKind
+  kind: string
   status?: RunStatus
   finished_at?: string | null
 }
@@ -34,10 +40,12 @@ export interface Source {
   uploaded: boolean
   created_at: string
   last_run: RunRef | null
-  active_run: { id: string; kind: RunKind } | null
+  active_run: { id: string; kind: string } | null
   documents?: number
   concepts?: number
 }
+
+/* --- runs --------------------------------------------------------------------------------- */
 
 export interface Step {
   name: string
@@ -51,7 +59,7 @@ export type Progress = Record<string, Partial<Record<RunStatus, number>>>
 
 export interface Run {
   id: string
-  kind: RunKind
+  kind: RunKind | string
   source: string | null
   status: RunStatus
   started_at: string | null
@@ -63,32 +71,63 @@ export interface Run {
   progress: Progress
 }
 
-export interface BuildOptions { resume?: boolean; skip_compile?: boolean; skip_export?: boolean }
-export interface ExtractOptions { resume?: boolean; workers?: number | null; max_chunks?: number | null }
-export interface AlignOptions {
-  structured_source?: string | null
-  dry_run?: boolean
-  resume?: boolean
-  threshold?: number | null
-  min_conf?: number | null
+export type ExportFormat = "all" | "rdf" | "ossie" | "okf"
+/** `POST /api/runs` (RunIn in api.py). */
+export type RunRequest =
+  | { kind: "build"; sources?: string[] | null; resume?: boolean }
+  | { kind: "export"; revision?: number | null; format?: ExportFormat }
+
+/* --- ontology snapshot -------------------------------------------------------------------- */
+
+export type Origin = "structured" | "document" | "aligned"
+
+export interface SnapshotSource {
+  name: string
+  kind: "structured" | "documents"
+  source_kind: SourceKind
+  included: boolean
+  counts: Record<string, number>
+  database?: string
+  documents?: number
 }
-export interface ExportOptions { sources?: string[] | null }
-export type RunOptions = BuildOptions | ExtractOptions | AlignOptions | ExportOptions
+
+export interface OntologySummary {
+  revision: number
+  created_at: string
+  run_id: string
+  workspace: string
+  base_iri: string
+  sources: SnapshotSource[]
+  counts: Record<string, number | Record<string, unknown>>
+  alignment: Record<string, number>
+}
+
+export interface AlignmentLink {
+  relation: "same" | "broader" | "narrower" | "related" | string
+  with: string
+  label: string
+  confidence: number | null
+  accepted: boolean
+}
 
 export interface ConceptItem {
   id: string
   name: string
-  name_en: string | null
+  /** term | entity | metric | attribute | process | rule | other */
   kind: string
-  source: string | null
+  origin: Origin
+  source: string
   definition: string
   synonyms: string[]
+  merged_concepts: string[]
+  folded_into: { id: string; name: string } | null
+  enriched_by: string
   evidence_count: number
-  verified_count: number
-  alignment: { relation: string; term: string | null; accepted: boolean; dry_run: boolean } | null
+  alignment: { counts: Record<string, number>; best: AlignmentLink | null }
 }
 
 export interface ConceptPage {
+  revision: number
   items: ConceptItem[]
   total: number
   page: number
@@ -100,140 +139,43 @@ export interface Evidence {
   quote: string
   verified: boolean
   page: number | null
-  section: string | null
-  document: string | null
-  path: string | null
+  document: string
+  path: string
 }
 
-export interface Alignment {
-  relation: string
-  term: string | null
-  term_id: string | null
-  structured_source: string | null
-  confidence: number | null
-  similarity: number | null
-  accepted: boolean
-  dry_run: boolean
-  rationale: string | null
+export interface ConceptAttribute {
+  id: string
+  label: string
+  range: string
+  source: string
+  column: string
+  datatype: string
+  description: string
 }
 
 export interface ConceptRelation {
-  subject: string
-  predicate: string
-  object: string
-  label?: string | null
-}
-
-export interface ConceptDetail {
   id: string
-  name: string
-  name_en: string | null
-  kind: string
-  source: string | null
-  definition: string
-  synonyms: string[]
-  attributes: string[]
-  merged_from: unknown
-  evidence_count: number
-  verified_count: number
-  evidence: Evidence[]
-  relations: ConceptRelation[]
-  alignments: Alignment[]
-}
-
-export interface ExportFile { name: string; bytes: number }
-export interface ExportEntry {
+  direction: "out" | "in"
+  predicate: string
+  label: string
+  other: string
+  other_label: string
   source: string
-  run_id: string
-  kind: RunKind | null
-  status: RunStatus | null
-  created_at: string
-  files: ExportFile[]
 }
 
-export type CheckStatus = "ok" | "warn" | "error"
-export interface StatusCheck { status: CheckStatus; detail?: string; remedy?: string }
-export interface ServiceStatus {
-  status: CheckStatus
-  version: string
-  model_profile: string
-  chat_provider: string
-  embed_provider: string
-  chat_model: string
-  embed_model: string
-  service_url: string
-  checks: Record<string, StatusCheck>
-  doctor: string
-  /** AUTOONTOLOGY_UPLOAD_MAX_MB: cap per upload request (all files together). */
-  upload_max_mb?: number
+export interface ConceptDetail extends ConceptItem {
+  revision: number
+  description: string
+  definitions: string[]
+  tables: string[]
+  individual_type: string | null
+  attributes: ConceptAttribute[]
+  relations: ConceptRelation[]
+  alignments: AlignmentLink[]
+  evidence: Evidence[]
 }
 
-export type ProviderName = "ollama" | "claude" | "codex" | "nvidia"
-export interface ProviderRow {
-  name: ProviderName
-  role: string
-  ok: boolean
-  available: boolean
-  logged_in: boolean
-  detail: string
-  remedy: string
-  models: string[]
-  model: string
-  last_test: { at: string; ok: boolean; model?: string | null } | null
-}
-export interface Selection {
-  chat_provider: string
-  chat_model: string
-  embed_provider: string
-  upstream_chat_model?: string
-  origin: Record<string, string>
-}
-export interface ProviderUsage {
-  calls: number
-  errors: number
-  prompt_tokens: number
-  completion_tokens: number
-  cost_usd: number
-  seconds: number
-}
-export interface ProvidersOverview {
-  selection: Selection
-  settings_file: Record<string, string>
-  choices: { chat_provider: string[]; embed_provider: string[] }
-  providers: ProviderRow[]
-  applied: { chat_provider: string; chat_model: string; embed_provider: string }
-  restart_required: boolean
-  usage?: Record<string, ProviderUsage>
-}
-export interface ProviderCall {
-  ok: boolean
-  seconds?: number
-  answer?: string
-  error?: string
-  usage?: Record<string, number>
-  cost_usd?: number | null
-}
-export interface ProviderTestResult {
-  at: string
-  results: Record<string, {
-    ok: boolean | null
-    note?: string
-    model?: string
-    via?: string
-    router?: ProviderCall
-    chatopenai?: ProviderCall
-  }>
-}
-export interface ApplyResult {
-  outcome: "applied" | "rolled_back" | "down"
-  detail: string
-  backend_pid: number | null
-  backend_health: { status: string; detail: string }
-  log: string[]
-  applied: { chat_provider: string; chat_model: string; embed_provider: string }
-  service_restart_required: boolean
-  remedy: string
-}
+/* --- graph -------------------------------------------------------------------------------- */
 
 export type GraphLayer = "structured" | "documents" | "aligned" | "evidence"
 export interface GraphNodeJson {
@@ -244,7 +186,7 @@ export interface GraphNodeJson {
   source: string
   /** term | entity | metric | attribute | process | rule | other | document */
   kind: string
-  origin: "structured" | "document"
+  origin: Origin
   layer: GraphLayer
   synonyms?: string[]
   definition?: string
@@ -276,9 +218,10 @@ export interface GraphEdgeJson {
 export interface GraphJson {
   name?: string
   layer: string
+  revision?: number
   nodes: GraphNodeJson[]
   edges: GraphEdgeJson[]
-  counts: { nodes: number; edges: number; total_nodes?: number }
+  counts: { nodes: number; edges: number; total_nodes?: number; origins?: Record<string, number> }
   truncated?: boolean
   max_nodes?: number
   warnings: string[]
@@ -286,13 +229,49 @@ export interface GraphJson {
   documents_sources: string[]
 }
 
-/* --- 플레이그라운드 ---------------------------------------------------------------------- */
+/* --- exports ------------------------------------------------------------------------------ */
+
+export interface ExportFile { name: string; bytes: number }
+export interface ExportDir { name: string; files: string[]; bytes: number }
+export interface ExportEntry {
+  revision: number
+  /** r0002 */
+  dir: string
+  created_at: string
+  files: ExportFile[]
+  /** the sub-folders (upstream/, ossie/, okf/) with their files, relative to the folder */
+  dirs: ExportDir[]
+}
+
+/* --- status ------------------------------------------------------------------------------- */
+
+export type CheckStatus = "ok" | "warn" | "error"
+export interface StatusCheck { status: CheckStatus; detail?: string; remedy?: string }
+export interface ServiceStatus {
+  status: CheckStatus
+  version: string
+  providers: {
+    chat_provider: string
+    chat_model: string
+    embed_provider: string
+    embed_model: string
+    openai_base_url: string
+  }
+  kordoc_available: boolean
+  service_url: string
+  checks: Record<string, StatusCheck>
+  doctor: string
+  /** AUTOONTOLOGY_UPLOAD_MAX_MB: cap per upload request (all files together). */
+  upload_max_mb?: number
+}
+
+/* --- playground --------------------------------------------------------------------------- */
 
 export interface ElementChip {
   type: string
   id: string
   label: string
-  /** client route of the UI, e.g. /concepts?concept=<id> */
+  /** client route of the UI, e.g. /concepts?concept=<store id> (legacy) or /graph?focus=… */
   link: string
   graph_link: string
 }
@@ -302,26 +281,6 @@ export interface RetrievedElement extends ElementChip {
   via: "retrieval" | "neighbour"
 }
 export interface ChatTurn { role: "user" | "assistant"; content: string }
-export interface Conversation {
-  id: string
-  source_id: string
-  title: string
-  created_at: string
-  updated_at: string
-  messages: number
-}
-export interface ConversationMessage {
-  id: number
-  role: "user" | "assistant"
-  content: string
-  retrieved: string[]
-  citations: Record<string, ElementChip>
-  provider: string
-  model: string
-  /** the provider stream ended without [DONE]: partial text, never graded */
-  incomplete: boolean
-  created_at: string
-}
 export interface SparqlExample { id: string; title: string; description: string; query: string }
 export interface SparqlResult {
   type: "SELECT" | "ASK" | "CONSTRUCT" | "DESCRIBE"
@@ -331,45 +290,13 @@ export interface SparqlResult {
   truncated: boolean
   boolean?: boolean
   turtle?: string
-  export: string
   triples: number
-}
-export interface CompetencyTest {
-  id: number
-  question: string
-  expected_elements: string[]
-  expected_answer_hint: string
-  created_at: string
-}
-export type Verdict = "pass" | "fail" | "unsure"
-export interface TestRunRow {
-  id: number
-  test_id: number
-  run_at: string
-  answer: string
-  citations: Record<string, ElementChip>
-  verdict: Verdict
-  score: number
-  rationale: string
-  provider: string
-  model: string
-}
-export interface TestHistory extends CompetencyTest {
-  runs: TestRunRow[]
-  last: TestRunRow | null
-  previous: TestRunRow | null
-  regression: boolean
-  improved: boolean
-}
-export interface Suggestion {
-  question: string
-  expected_elements: string[]
-  dropped_elements: string[]
-  expected_answer_hint: string
-  expected: ElementChip[]
+  revision: number
+  /** the Turtle file queried (the export's ontology.ttl or a cache file) */
+  ttl: string
 }
 export interface IndexStatus {
-  source: string
+  workspace: string
   scope: string[]
   warnings: string[]
   revision: number
@@ -413,7 +340,7 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
     resp = await fetch(API + path, { ...json("POST", body), signal })
   } catch (err) {
     if ((err as Error).name === "AbortError") throw err
-    throw new ApiError("서비스에 연결할 수 없습니다 (uv run autoontology up)", 0, "network")
+    throw new ApiError(NETWORK_HINT, 0, "network")
   }
   if (!resp.ok || !resp.body) {
     let detail = `HTTP ${resp.status}`
@@ -439,7 +366,7 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
   }
   parseSse(buffer + "\n\n", emit)
   if (!terminal) {
-    const detail = "응답 스트림이 완료 표시 없이 끊겼습니다 (부분 답변은 미완료)"
+    const detail = "The answer stream ended without a completion marker (partial answer, incomplete)"
     onEvent({ event: "stream_truncated", data: { detail } })
     throw new ApiError(detail, 502, "stream_truncated")
   }
@@ -450,7 +377,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   try {
     resp = await fetch(API + path, init)
   } catch {
-    throw new ApiError("서비스에 연결할 수 없습니다 (uv run autoontology up)", 0, "network")
+    throw new ApiError(NETWORK_HINT, 0, "network")
   }
   const type = resp.headers.get("content-type") || ""
   const body: unknown = type.includes("json") ? await resp.json() : await resp.text()
@@ -469,6 +396,18 @@ const json = (method: string, body: unknown): RequestInit => ({
 })
 
 const enc = encodeURIComponent
+/** An export file path keeps its "/" separators; every segment is encoded (Hangul names). */
+const encPath = (p: string) => p.split("/").map(enc).join("/")
+
+export interface ConceptQuery {
+  q?: string
+  kind?: string
+  origin?: string
+  source?: string
+  page?: number
+  size?: number
+  revision?: number | null
+}
 
 export const api = {
   status: () => request<ServiceStatus>("/status"),
@@ -487,41 +426,30 @@ export const api = {
       `/sources/${enc(name)}${dropDb ? "?drop_db=true" : ""}`, { method: "DELETE" }),
   runs: (limit = 40) => request<{ runs: Run[] }>(`/runs?limit=${limit}`).then((r) => r.runs),
   run: (id: string) => request<Run>(`/runs/${enc(id)}`),
-  startRun: (kind: Exclude<RunKind, "ingest">, source: string, options: RunOptions = {}) =>
-    request<{ run_id: string }>("/runs", json("POST", { kind, source, options })),
+  startRun: (body: RunRequest) => request<{ run_id: string }>("/runs", json("POST", body)),
   cancelRun: (id: string) =>
     request<{ run_id: string; cancel_requested: boolean }>(`/runs/${enc(id)}/cancel`, { method: "POST" }),
   runEventsUrl: (id: string) => `${API}/runs/${enc(id)}/events`,
-  concepts: (params: { q?: string; kind?: string; source?: string; page?: number; size?: number }) => {
+  ontology: () => request<OntologySummary>("/ontology"),
+  concepts: (params: ConceptQuery) => {
     const sp = new URLSearchParams({ page: String(params.page ?? 1), size: String(params.size ?? 30) })
-    if (params.q) sp.set("q", params.q)
-    if (params.kind) sp.set("kind", params.kind)
-    if (params.source) sp.set("source", params.source)
-    return request<ConceptPage>(`/concepts?${sp}`)
+    for (const k of ["q", "kind", "origin", "source"] as const) {
+      if (params[k]) sp.set(k, params[k]!)
+    }
+    if (params.revision) sp.set("revision", String(params.revision))
+    return request<ConceptPage>(`/ontology/concepts?${sp}`)
   },
-  concept: (id: string) => request<ConceptDetail>(`/concepts/${enc(id)}`),
-  /** The whole merged graph with the 근거 layer; the page filters layers client-side. */
-  graph: () => request<GraphJson>("/graph?layer=all&evidence=true"),
+  concept: (id: string, revision?: number | null) =>
+    request<ConceptDetail>(`/ontology/concepts/${enc(id)}${revision ? `?revision=${revision}` : ""}`),
+  /** The whole unified graph with the evidence layer; the page filters layers client-side. */
+  graph: () => request<GraphJson>("/ontology/graph?layer=all&evidence=true"),
   exports: () => request<{ exports: ExportEntry[] }>("/exports").then((r) => r.exports),
-  exportFileUrl: (runId: string, file: string) => `${API}/exports/${enc(runId)}/${enc(file)}`,
-  exportText: (runId: string, file: string) =>
-    request<string>(`/exports/${enc(runId)}/${enc(file)}?inline=true`),
-  providers: () => request<ProvidersOverview>("/providers"),
-  saveProviders: (body: { chat_provider?: string; chat_model?: string; embed_provider?: string }) =>
-    request<ProvidersOverview>("/providers", json("PUT", body)),
-  testProvider: (provider: string) =>
-    request<ProviderTestResult>("/providers/test", json("POST", { provider })),
-  applyProviders: (force = false) =>
-    request<ApplyResult>("/providers/apply", json("POST", { force })),
+  exportFileUrl: (dir: string, file: string) => `${API}/exports/${enc(dir)}/${encPath(file)}`,
+  exportText: (dir: string, file: string) =>
+    request<string>(`/exports/${enc(dir)}/${encPath(file)}?inline=true`),
   playground: {
-    index: (source: string) => request<IndexStatus>(`/playground/index?source=${enc(source)}`),
-    conversations: (source: string) =>
-      request<{ conversations: Conversation[] }>(`/playground/conversations?source=${enc(source)}`)
-        .then((r) => r.conversations),
-    conversation: (id: string) =>
-      request<Conversation & { messages: ConversationMessage[] }>(`/playground/conversations/${enc(id)}`),
-    chat: (body: { source: string; question: string; history?: ChatTurn[]; top_k?: number;
-                   conversation_id?: string | null },
+    index: () => request<IndexStatus>("/playground/index"),
+    chat: (body: { question: string; history?: ChatTurn[]; top_k?: number; conversation_id?: string | null },
            onEvent: (ev: SseEvent) => void, signal?: AbortSignal) =>
       streamSse("/playground/chat", body, onEvent, signal),
     sql: (body: { source?: string | null; question: string; conversation_id?: string },
@@ -529,27 +457,34 @@ export const api = {
       streamSse("/playground/sql", body, onEvent, signal),
     sparqlExamples: () =>
       request<{ examples: SparqlExample[] }>("/playground/sparql/examples").then((r) => r.examples),
-    sparql: (body: { source: string; query: string; limit?: number }) =>
+    sparql: (body: { query: string; limit?: number }) =>
       request<SparqlResult>("/playground/sparql", json("POST", body)),
-    tests: (source: string) =>
-      request<{ tests: CompetencyTest[] }>(`/playground/tests?source=${enc(source)}`).then((r) => r.tests),
-    addTest: (body: { source: string; question: string; expected_elements: string[];
-                      expected_answer_hint: string }) =>
-      request<CompetencyTest>("/playground/tests", json("POST", body)),
-    deleteTest: (id: number) =>
-      request<{ deleted: number }>(`/playground/tests/${id}`, { method: "DELETE" }),
-    history: (source: string) =>
-      request<{ tests: TestHistory[] }>(`/playground/tests/history?source=${enc(source)}`)
-        .then((r) => r.tests),
-    runTests: (body: { source: string; test_ids?: number[] | null },
-               onEvent: (ev: SseEvent) => void, signal?: AbortSignal) =>
-      streamSse("/playground/tests/run", body, onEvent, signal),
-    suggest: (source: string) =>
-      request<{ suggestions: Suggestion[]; provider: string; model: string }>(
-        "/playground/tests/suggest", json("POST", { source })),
   },
 }
 
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** 404 `no_snapshot`: nothing built yet (the pages show "Build first" instead of an error). */
+export function isNoSnapshot(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404 && err.code === "no_snapshot"
+}
+
+const CONCEPT_ID = /^(term|concept)-[a-z0-9_-]{1,100}$/
+
+/** The `/api/ontology/concepts/{id}` id behind a playground citation chip, or null when the
+    element is not a concept (a relation without an owner, a literal). Chip ids of Terms,
+    document classes and individuals are the model locals already; relations and evidence
+    point at their concept through `link` (`/concepts?concept=<store id>`) or `graph_link`. */
+export function conceptIdOfChip(chip: ElementChip): string | null {
+  if (CONCEPT_ID.test(chip.id)) return chip.id
+  const query = (link: string) => new URLSearchParams(link.split("?")[1] ?? "")
+  const legacy = query(chip.link).get("concept")
+  if (legacy) {
+    const id = CONCEPT_ID.test(legacy) ? legacy : `concept-${legacy}`
+    if (CONCEPT_ID.test(id)) return id
+  }
+  const focus = query(chip.graph_link).get("focus")
+  return focus && CONCEPT_ID.test(focus) ? focus : null
 }

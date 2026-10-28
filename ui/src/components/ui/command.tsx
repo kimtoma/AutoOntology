@@ -30,8 +30,8 @@ function Command({
 }
 
 function CommandDialog({
-  title = "명령 검색",
-  description = "명령을 검색하세요",
+  title = "Command palette",
+  description = "Search for a command",
   children,
   className,
   showCloseButton = true,

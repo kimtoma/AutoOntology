@@ -5,14 +5,12 @@ import { NAV } from "@/components/nav"
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command"
-import { useSources } from "@/hooks/queries"
 
-/** ⌘K / Ctrl+K: jump to a page or a source's runs, or search concepts. */
+/** ⌘K / Ctrl+K: jump to a page or search the ontology's concepts. */
 export function CommandMenu() {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
   const navigate = useNavigate()
-  const sources = useSources()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
@@ -25,33 +23,27 @@ export function CommandMenu() {
   }, [])
   const go = (to: string) => { setOpen(false); setText(""); navigate(to) }
   return (
-    <CommandDialog open={open} onOpenChange={setOpen} title="이동·검색" description="페이지로 이동하거나 개념을 검색합니다">
-      <CommandInput placeholder="페이지, 소스, 개념 검색…" value={text} onValueChange={setText} />
+    <CommandDialog open={open} onOpenChange={setOpen} title="Go to"
+                   description="Jump to a page or search concepts">
+      <CommandInput placeholder="Pages, concepts…" value={text} onValueChange={setText} />
       <CommandList>
-        <CommandEmpty>결과 없음</CommandEmpty>
+        <CommandEmpty>No results</CommandEmpty>
         {text.trim() && (
-          <CommandGroup heading="개념">
-            <CommandItem value={`concept-search ${text}`} onSelect={() => go(`/concepts?q=${encodeURIComponent(text.trim())}`)}>
-              개념에서 '{text.trim()}' 검색
+          <CommandGroup heading="Concepts">
+            <CommandItem value={`concept-search ${text}`}
+                         onSelect={() => go(`/ontology?q=${encodeURIComponent(text.trim())}`)}>
+              Search the ontology for “{text.trim()}”
             </CommandItem>
           </CommandGroup>
         )}
-        <CommandGroup heading="페이지">
+        <CommandGroup heading="Pages">
           {NAV.map((n) => (
-            <CommandItem key={n.path} value={n.label} onSelect={() => go(n.path)}>
+            <CommandItem key={n.path} value={`${n.label} ${n.hint}`} onSelect={() => go(n.path)}>
               <n.icon aria-hidden /> {n.label}
+              <span className="ml-auto text-xs text-muted-foreground">{n.hint}</span>
             </CommandItem>
           ))}
         </CommandGroup>
-        {!!sources.data?.length && (
-          <CommandGroup heading="소스 실행">
-            {sources.data.map((s) => (
-              <CommandItem key={s.name} value={`source ${s.name}`} onSelect={() => go("/runs")}>
-                {s.name}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
       </CommandList>
     </CommandDialog>
   )

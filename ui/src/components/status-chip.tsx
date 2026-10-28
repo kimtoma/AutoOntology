@@ -1,7 +1,7 @@
 import { CheckCircle2, CircleDashed, Loader2, MinusCircle, XCircle } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { STATUS_KO } from "@/lib/labels"
+import { STATUS_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 
 const TONE: Record<string, string> = {
@@ -22,7 +22,7 @@ const ICON: Record<string, typeof CheckCircle2> = {
   skipped: MinusCircle,
 }
 
-/** Run / step status as a colored chip (label defaults to the Korean status name). */
+/** Run / step status as a colored chip (label defaults to the status name). */
 export function StatusChip({ status, label, className }: {
   status: string | null | undefined
   label?: string
@@ -33,7 +33,7 @@ export function StatusChip({ status, label, className }: {
   return (
     <Badge variant="outline" data-status={key} className={cn("font-normal", TONE[key], className)}>
       <Icon className={cn(key === "running" && "animate-spin")} aria-hidden />
-      {label ?? STATUS_KO[key] ?? key}
+      {label ?? STATUS_LABEL[key] ?? key}
     </Badge>
   )
 }

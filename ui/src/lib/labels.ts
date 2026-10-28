@@ -1,51 +1,86 @@
-import type { Progress, RunKind, Source } from "@/lib/api"
+import type { Progress, Source, Step } from "@/lib/api"
 
-export const KIND_KO: Record<string, string> = {
-  files: "정형 파일", database: "데이터베이스", documents: "문서",
+export const KIND_LABEL: Record<string, string> = {
+  files: "Structured files", database: "Database", documents: "Documents",
 }
-export const RUN_KO: Record<string, string> = {
-  build: "빌드", extract: "문서 추출", align: "정렬", export: "내보내기", ingest: "인제스트",
+/** The two source families of the Sources page. */
+export const FAMILY_LABEL: Record<string, string> = { structured: "Structured", documents: "Documents" }
+export const familyOf = (kind: string) => (kind === "documents" ? "documents" : "structured")
+
+export const RUN_LABEL: Record<string, string> = { build: "Build", export: "Export" }
+export const STATUS_LABEL: Record<string, string> = {
+  pending: "Pending", running: "Running", succeeded: "Succeeded", failed: "Failed",
+  cancelled: "Cancelled", skipped: "Skipped",
 }
-export const STATUS_KO: Record<string, string> = {
-  pending: "대기", running: "실행 중", succeeded: "성공", failed: "실패",
-  cancelled: "취소됨", skipped: "건너뜀",
+export const STEP_LABEL: Record<string, string> = {
+  load: "Load", register: "Register", ingest: "Ingest", compile: "Compile",
+  read: "Read", extract: "Extract", consolidate: "Consolidate",
+  align: "Align", merge: "Merge", snapshot: "Snapshot",
+  collect: "Collect", serialize: "Serialize", upstream: "Upstream files", ossie: "Ossie",
+  okf: "OKF", report: "Report",
 }
-export const STEP_KO: Record<string, string> = {
-  load: "적재", register_connection: "연결 등록", ingest: "인제스트", compile: "컴파일",
-  export: "내보내기", read: "읽기", extract: "추출", consolidate: "병합", report: "보고서",
-  terms: "Term 수집", candidates: "후보 검색", judge: "판정", apply: "적용", collect: "수집",
-  serialize: "직렬화", upstream: "upstream 파일",
+export const CKIND_LABEL: Record<string, string> = {
+  term: "Term", entity: "Entity", metric: "Metric", attribute: "Attribute", process: "Process",
+  rule: "Rule", other: "Other",
 }
-export const CKIND_KO: Record<string, string> = {
-  entity: "엔터티", metric: "지표", attribute: "속성", process: "프로세스", rule: "규칙",
-  other: "기타", term: "Term",
+export const ORIGIN_LABEL: Record<string, string> = {
+  structured: "Structured", document: "Document", aligned: "Aligned",
 }
-export const REL_KO: Record<string, string> = {
-  same: "같음", broader: "상위", narrower: "하위", related: "관련", none: "없음", skipped: "건너뜀",
+export const REL_LABEL: Record<string, string> = {
+  same: "Same as", broader: "Broader", narrower: "Narrower", related: "Related", none: "None",
 }
-export const CHECK_KO: Record<string, string> = { ok: "정상", warn: "주의", error: "오류" }
-export const CHECK_NAME_KO: Record<string, string> = {
-  backend: "upstream 백엔드", node: "Node.js", kordoc: "kordoc 문서 엔진",
-  profile: "모델 프로파일", ollama: "Ollama 별칭",
-}
-export const PROVIDER_KO: Record<string, string> = {
-  ollama: "Ollama (로컬)", claude: "Claude (구독)", codex: "Codex (ChatGPT 구독)",
-  nvidia: "NVIDIA API",
-}
-export const ORIGIN_KO: Record<string, string> = {
-  shell: "셸 환경변수", "settings.json": "settings.json(UI)", ".env": ".env",
-  AUTOONTOLOGY_MODEL_PROFILE: "모델 프로파일", default: "기본값",
+export const CHECK_LABEL: Record<string, string> = { ok: "OK", warn: "Warning", error: "Error" }
+export const CHECK_NAME: Record<string, string> = {
+  backend: "Upstream backend", postgres: "Postgres", ollama: "Ollama models", kordoc: "kordoc",
 }
 
-export function actionsFor(s: Source): Exclude<RunKind, "ingest">[] {
-  return s.kind === "documents" ? ["extract", "align", "export"] : ["build", "export"]
+/** One step group of a build run: `structured:<name>`, `documents:<name>`, `align`, `merge`,
+    `snapshot` (export runs: one group per step). */
+export interface StepGroup { key: string; title: string; steps: (Step & { short: string })[] }
+
+/** `structured:hanbit:load` -> group `structured:hanbit`, short name `load`;
+    `align:hanbit-docs` -> group `align`, short `hanbit-docs`. */
+export function splitStep(name: string): { group: string; title: string; short: string } {
+  const parts = name.split(":")
+  if ((parts[0] === "structured" || parts[0] === "documents") && parts.length >= 3) {
+    return {
+      group: `${parts[0]}:${parts[1]}`,
+      title: `${FAMILY_LABEL[parts[0]]} · ${parts[1]}`,
+      short: parts.slice(2).join(":"),
+    }
+  }
+  if (parts[0] === "align" && parts.length >= 2) {
+    return { group: "align", title: STEP_LABEL.align, short: parts.slice(1).join(":") }
+  }
+  return { group: name, title: STEP_LABEL[name] ?? name, short: name }
+}
+
+export function groupSteps(steps: Step[]): StepGroup[] {
+  const groups: StepGroup[] = []
+  const byKey = new Map<string, StepGroup>()
+  for (const s of steps) {
+    const { group, title, short } = splitStep(s.name)
+    let g = byKey.get(group)
+    if (!g) {
+      g = { key: group, title, steps: [] }
+      byKey.set(group, g)
+      groups.push(g)
+    }
+    g.steps.push({ ...s, short })
+  }
+  return groups
+}
+
+/** The short label of a step inside its group. */
+export function stepLabel(short: string): string {
+  return STEP_LABEL[short] ?? short
 }
 
 export function sourceState(s: Source): string {
   if (s.kind === "documents") {
-    return s.concepts ? `문서 ${s.documents}개 · 개념 ${s.concepts}개` : "추출 전"
+    return s.concepts ? `${s.documents} documents · ${s.concepts} concepts` : "Not extracted yet"
   }
-  return s.built ? "빌드됨" : "빌드 전"
+  return s.built ? "Built" : "Not built yet"
 }
 
 export function fmtTime(iso: string | null | undefined): string {
@@ -53,7 +88,7 @@ export function fmtTime(iso: string | null | undefined): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime())
     ? iso
-    : d.toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })
+    : d.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })
 }
 
 export function fmtBytes(n: number): string {
@@ -62,13 +97,22 @@ export function fmtBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
+export function fmtDuration(start: string | null, end: string | null): string {
+  if (!start || !end) return ""
+  const s = (new Date(end).getTime() - new Date(start).getTime()) / 1000
+  if (!Number.isFinite(s) || s < 0) return ""
+  if (s < 60) return `${s.toFixed(1)} s`
+  const m = Math.floor(s / 60)
+  return `${m} min ${Math.round(s - m * 60)} s`
+}
+
 export function progressText(progress: Progress | undefined, withFailed = true): string {
   return Object.entries(progress || {})
     .map(([label, counts]) => {
       const total = Object.values(counts).reduce((a, b) => a + (b || 0), 0)
       const done = counts.succeeded || 0
-      const failed = withFailed && counts.failed ? `, 실패 ${counts.failed}` : ""
-      return `${label === "chunks" ? "청크" : "개념"} ${done}/${total}${failed}`
+      const failed = withFailed && counts.failed ? `, ${counts.failed} failed` : ""
+      return `${label} ${done}/${total}${failed}`
     })
     .join(" · ")
 }

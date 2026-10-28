@@ -2,10 +2,12 @@ import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { Toaster } from "sonner"
 
-import ConceptsPage from "@/pages/concepts"
-import SettingsPage from "@/pages/settings"
+import BuildPage from "@/pages/build"
+import ExportsPage from "@/pages/exports"
+import OntologyPage from "@/pages/ontology"
 import SourcesPage from "@/pages/sources"
-import { mockFetch, renderPage } from "@/test/utils"
+import StatusPage from "@/pages/status"
+import { mockFetch, renderPage, renderRouted } from "@/test/utils"
 
 const SOURCES = {
   sources: [
@@ -19,42 +21,50 @@ const SOURCES = {
   ],
 }
 
-const PROVIDERS = {
-  selection: { chat_provider: "ollama", chat_model: "openai/qwen3:8b", embed_provider: "ollama",
-               origin: { chat_provider: "settings.json", embed_provider: "shell" } },
-  settings_file: { chat_provider: "ollama" },
-  choices: { chat_provider: ["ollama", "claude", "codex", "nvidia"], embed_provider: ["ollama", "nvidia"] },
-  providers: [
-    { name: "ollama", role: "chat+embed", ok: true, available: true, logged_in: true,
-      detail: "localhost has qwen3", remedy: "", models: ["qwen3:8b"], model: "openai/qwen3:8b", last_test: null },
-    { name: "claude", role: "chat", ok: true, available: true, logged_in: true,
-      detail: "logged in (claude.ai, max)", remedy: "", models: ["sonnet", "opus"],
-      model: "claude-sonnet-5-5", last_test: { at: "2026-10-27T21:07:01Z", ok: true } },
-    { name: "codex", role: "chat", ok: false, available: true, logged_in: false,
-      detail: "not logged in", remedy: "codex login", models: [], model: "gpt-6-astra", last_test: null },
-    { name: "nvidia", role: "chat+embed", ok: false, available: true, logged_in: false,
-      detail: "no NVIDIA API key", remedy: "set DEFAULT_MODELS_API_KEY", models: [], model: "", last_test: null },
-  ],
-  applied: { chat_provider: "ollama", chat_model: "openai/qwen3:8b", embed_provider: "ollama" },
-  restart_required: false,
-  usage: {},
+const STATUS = {
+  status: "ok", version: "0.1.0", kordoc_available: false, service_url: "http://127.0.0.1:7810",
+  providers: { chat_provider: "ollama", chat_model: "openai/qwen3:8b", embed_provider: "ollama",
+               embed_model: "bge-m3", openai_base_url: "" },
+  checks: { backend: { status: "ok", detail: "http://127.0.0.1:3111" },
+            postgres: { status: "error", detail: "OperationalError", remedy: "docker compose up -d" } },
+  doctor: "uv run autoontology doctor", upload_max_mb: 1,
 }
 
-describe("소스 page", () => {
-  it("lists the sources with kind and state", async () => {
+const ONTOLOGY = {
+  revision: 2, created_at: "2026-10-28T11:11:30+00:00", run_id: "b", workspace: "default",
+  base_iri: "http://example.com/autoontology#",
+  sources: [{ name: "hanbit", kind: "structured" }, { name: "hanbit-docs", kind: "documents" }],
+  counts: { classes_structured: 3, classes_document: 58, individuals: 24, object_properties: 69,
+            merged_concepts: 3, evidence: 304 },
+  alignment: { same: 3 },
+}
+
+const ITEM = (id: string, origin: string, extra: object = {}) => ({
+  id, name: id === "term-c" ? "Contracts" : "계약상태", kind: id.startsWith("term") ? "term" : "entity",
+  origin, source: id.startsWith("term") ? "hanbit" : "hanbit-docs", definition: "정의", synonyms: ["계약"],
+  merged_concepts: [], folded_into: null, enriched_by: "", evidence_count: 2,
+  alignment: { counts: {}, best: null }, ...extra,
+})
+
+const no_snapshot = () => new Response(JSON.stringify({ error: "no_snapshot", detail: "no ontology yet" }),
+                                       { status: 404, headers: { "content-type": "application/json" } })
+
+describe("Sources page", () => {
+  it("lists both kinds with a kind badge and state", async () => {
     mockFetch({ "GET /sources": SOURCES })
     renderPage(<SourcesPage />)
     const table = await screen.findByRole("table")
     expect(within(table).getByText("hanbit")).toBeInTheDocument()
     expect(within(table).getByText("autoontology_src_hanbit")).toBeInTheDocument()
-    expect(within(table).getAllByText("문서").length).toBeGreaterThan(0)
-    expect(within(table).getAllByText("문서 5개 · 개념 85개").length).toBeGreaterThan(0)
+    expect(table.querySelector("[data-source=hanbit] [data-kind=structured]")).not.toBeNull()
+    expect(table.querySelector("[data-source=hanbit-docs] [data-kind=documents]")).not.toBeNull()
+    expect(within(table).getAllByText("5 documents · 85 concepts").length).toBeGreaterThan(0)
   })
 
   it("shows the empty state with the next action", async () => {
     mockFetch({ "GET /sources": { sources: [] } })
     renderPage(<SourcesPage />)
-    expect(await screen.findByText("등록된 소스가 없습니다")).toBeInTheDocument()
+    expect(await screen.findByText("No sources yet")).toBeInTheDocument()
   })
 
   it("deletes with drop_db only when the switch is on", async () => {
@@ -64,105 +74,204 @@ describe("소스 page", () => {
       "DELETE /sources/hanbit": { removed: "hanbit", messages: [] },
     })
     renderPage(<><SourcesPage /><Toaster /></>)
-    await user.click(await screen.findByRole("button", { name: "hanbit 삭제" }))
+    await user.click(await screen.findByRole("button", { name: "Delete hanbit" }))
     await user.click(await screen.findByRole("switch"))
-    await user.click(screen.getByRole("button", { name: "삭제" }))
+    await user.click(screen.getByRole("button", { name: "Delete" }))
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE")).toBe(true))
-    const fetchFn = vi.mocked(fetch)
-    const del = fetchFn.mock.calls.find(([, init]) => init?.method === "DELETE")
+    const del = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "DELETE")
     expect(String(del?.[0])).toBe("/api/sources/hanbit?drop_db=true")
   })
 
-  it("resets the DROP switch for the next delete (regression)", async () => {
+  it("picks the kind in the add dialog, with the kordoc hint for documents", async () => {
     const user = userEvent.setup()
-    const files = { ...SOURCES, sources: [SOURCES.sources[0], { ...SOURCES.sources[0], name: "second",
-      database: "autoontology_src_second" }] }
-    mockFetch({
-      "GET /sources": files,
-      "DELETE /sources/hanbit": { removed: "hanbit", messages: [] },
+    const { calls } = mockFetch({
+      "GET /sources": SOURCES,
+      "GET /status": STATUS,
+      "POST /sources": (_u: string, init?: RequestInit) => ({ ...SOURCES.sources[1], ...JSON.parse(String(init?.body)) }),
     })
     renderPage(<><SourcesPage /><Toaster /></>)
-    await user.click(await screen.findByRole("button", { name: "hanbit 삭제" }))
-    await user.click(await screen.findByRole("switch"))
-    expect(screen.getByRole("switch")).toBeChecked()
-    await user.click(screen.getByRole("button", { name: "삭제" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
-    await user.click(screen.getByRole("button", { name: "second 삭제" }))
-    const next = await screen.findByRole("switch")
-    expect(next).not.toBeChecked()
+    await user.click(await screen.findByRole("button", { name: "Add source" }))
+    await screen.findByText(/up to 1 MB per upload/)
+    expect(screen.getByRole("tab", { name: /DB URL/ })).toBeInTheDocument()
+    await user.click(screen.getByRole("tab", { name: /Documents/ }))
+    expect(screen.queryByRole("tab", { name: /DB URL/ })).toBeNull()
+    expect(screen.getByText(/need kordoc/)).toBeInTheDocument()
+    await user.click(screen.getByRole("tab", { name: "Folder" }))
+    await user.type(screen.getByLabelText("Name"), "docs-2")
+    await user.type(screen.getByLabelText("Folder or file path"), "/data/docs")
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true))
+    const post = calls.find((c) => c.method === "POST")!
+    expect(JSON.parse(String(post.init?.body))).toEqual(
+      { name: "docs-2", kind: "documents", locator: "/data/docs", recursive: false })
   })
 
   it("refuses an upload over the limit before sending it", async () => {
     const user = userEvent.setup()
-    const { calls } = mockFetch({
-      "GET /sources": SOURCES,
-      "GET /status": { status: "ok", checks: {}, upload_max_mb: 1 },
-    })
+    const { calls } = mockFetch({ "GET /sources": SOURCES, "GET /status": STATUS })
     renderPage(<SourcesPage />)
-    await user.click(await screen.findByRole("button", { name: "새 소스" }))
-    expect(await screen.findByText(/한 번에 최대 1 MB/)).toBeInTheDocument()
-    await user.type(screen.getByLabelText("이름"), "big")
+    await user.click(await screen.findByRole("button", { name: "Add source" }))
+    expect(await screen.findByText(/up to 1 MB per upload/)).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Name"), "big")
     const big = new File([new Uint8Array(2 * 1024 * 1024)], "big.csv", { type: "text/csv" })
-    await user.upload(screen.getByLabelText("파일"), big)
-    expect(screen.getByText(/합계 2.0 MB/)).toHaveClass("text-destructive")
-    expect(screen.getByRole("button", { name: "등록" })).toBeDisabled()
+    await user.upload(screen.getByLabelText("Files"), big)
+    expect(screen.getByText(/2.0 MB total/)).toHaveClass("text-destructive")
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled()
     expect(calls.some((c) => c.method === "POST")).toBe(false)
   })
 })
 
-describe("개념 page", () => {
-  const PAGE = (source: string | null) => ({
-    items: [{ id: "a".repeat(32), name: "계약", name_en: null, kind: "entity", source,
-              definition: "정의", synonyms: [], evidence_count: 1, verified_count: 1, alignment: null }],
-    total: 1, page: 1, size: 30, pages: 1,
-  })
+describe("Build page", () => {
+  class FakeEventSource {
+    static CLOSED = 2
+    readyState = 0
+    onopen = null
+    onerror = null
+    addEventListener() {}
+    close() {}
+  }
 
-  it("follows the URL q (⌘K search while on the page)", async () => {
-    mockFetch({ "GET /concepts": PAGE("docs"), "GET /sources": { sources: [] } })
-    const { router } = await import("@/test/utils").then((m) => m.renderRouted(<ConceptsPage />, "/concepts?q=계약"))
-    const input = await screen.findByRole("searchbox", { name: "개념 검색" })
-    expect(input).toHaveValue("계약")
-    await act(() => router.navigate("/concepts?q=고객"))
-    await waitFor(() => expect(input).toHaveValue("고객"))
-  })
-
-  it("renders no source badge for a concept without a source", async () => {
-    mockFetch({ "GET /concepts": PAGE(null), "GET /sources": { sources: [] } })
-    renderPage(<ConceptsPage />, "/concepts")
-    const item = await screen.findByRole("button", { name: /계약/ })
-    expect(item.querySelectorAll("[data-slot=badge]")).toHaveLength(1) // the kind only
+  it("starts a build and an export with the unified bodies", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource)
+    const user = userEvent.setup()
+    const { calls } = mockFetch({
+      "GET /sources": SOURCES,
+      "GET /ontology": ONTOLOGY,
+      "GET /runs": { runs: [] },
+      "POST /runs": { run_id: "20261028T000000Z-abcdef" },
+      "GET /runs/20261028T000000Z-abcdef": {
+        id: "20261028T000000Z-abcdef", kind: "build", source: null, status: "running", started_at: null,
+        finished_at: null, error: null, params: { sources: null }, managed: true, progress: {},
+        steps: [{ name: "structured:hanbit:load", status: "succeeded", started_at: null, finished_at: null, detail: {} },
+                { name: "align:hanbit-docs", status: "pending", started_at: null, finished_at: null, detail: {} },
+                { name: "merge", status: "pending", started_at: null, finished_at: null, detail: {} }],
+      },
+    })
+    renderPage(<BuildPage />, "/build")
+    expect(await screen.findByText("No runs yet")).toBeInTheDocument()
+    await user.click(await screen.findByRole("button", { name: /Build ontology/ }))
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1))
+    // the run sheet opens with the steps grouped
+    const steps = await screen.findByRole("list", { name: "Steps" })
+    expect(steps.querySelector("[data-group='structured:hanbit']")).not.toBeNull()
+    expect(within(steps).getByText("Structured · hanbit")).toBeInTheDocument()
+    expect(steps.querySelector("[data-group=align]")).not.toBeNull()
+    expect(steps.querySelector("[data-group=merge]")).not.toBeNull()
+    await user.keyboard("{Escape}")
+    await user.click(await screen.findByRole("button", { name: /^Export$/ }))
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(2))
+    expect(calls.filter((c) => c.method === "POST").map((c) => JSON.parse(String(c.init?.body))))
+      .toEqual([{ kind: "build" }, { kind: "export" }])
   })
 })
 
-describe("설정 page", () => {
-  it("renders a card per provider and the precedence note", async () => {
-    mockFetch({ "GET /providers": PROVIDERS })
-    renderPage(<SettingsPage />)
-    expect(await screen.findByText("Claude (구독)")).toBeInTheDocument()
-    for (const name of ["ollama", "claude", "codex", "nvidia"]) {
-      expect(document.querySelector(`[data-provider="${name}"]`)).not.toBeNull()
-    }
-    expect(screen.getByText(/셸 환경변수 > settings.json/)).toBeInTheDocument()
-    // embed provider comes from the shell: its control is locked
-    expect(screen.getByRole("combobox", { name: "임베딩 프로바이더" })).toBeDisabled()
+describe("Ontology page", () => {
+  it("shows the snapshot header and the unified list with origin badges", async () => {
+    mockFetch({
+      "GET /ontology": ONTOLOGY,
+      "GET /ontology/concepts": { revision: 2, total: 2, page: 1, size: 30, pages: 1,
+        items: [ITEM("term-c", "aligned", { merged_concepts: ["계약"] }), ITEM("concept-x", "document")] },
+    })
+    renderPage(<OntologyPage />, "/ontology")
+    expect(await screen.findByText("Revision 2")).toBeInTheDocument()
+    expect(screen.getByText("Workspace default")).toBeInTheDocument()
+    const list = await screen.findByRole("list")
+    expect(list.querySelector("[data-concept=term-c][data-origin=aligned]")).not.toBeNull()
+    expect(within(list).getByText("Aligned")).toBeInTheDocument()
+    expect(within(list).getByText("계약상태")).toBeInTheDocument()
+    expect(within(list).getByText("Merged: 계약")).toBeInTheDocument()
   })
 
-  it("tests a provider and saves a selection", async () => {
-    const user = userEvent.setup()
-    const { calls } = mockFetch({
-      "GET /providers": PROVIDERS,
-      "POST /providers/test": { at: "now", results: { claude: { ok: true, model: "openai/claude:sonnet",
-        router: { ok: true, seconds: 2.5, answer: "pong" }, chatopenai: { ok: true } } } },
-      "PUT /providers": { ...PROVIDERS, restart_required: true,
-        selection: { ...PROVIDERS.selection, chat_provider: "claude", chat_model: "claude-sonnet-5-5" } },
+  it("filters by origin through the URL and follows a ⌘K search", async () => {
+    mockFetch({
+      "GET /ontology": ONTOLOGY,
+      "GET /ontology/concepts": { revision: 2, total: 0, page: 1, size: 30, pages: 1, items: [] },
     })
-    renderPage(<><SettingsPage /><Toaster /></>)
-    await user.click(await screen.findByRole("button", { name: "Claude (구독) 테스트" }))
-    expect(await screen.findByText("Claude (구독) 테스트 성공")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Claude (구독) 저장" }))
-    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true))
-    const put = calls.find((c) => c.method === "PUT")
-    expect(JSON.parse(String(put?.init?.body))).toEqual({ chat_provider: "claude", chat_model: "" })
-    expect(await screen.findByText("재시작 필요")).toBeInTheDocument()
+    const { router } = renderRouted(<OntologyPage />, "/ontology?origin=structured&q=계약")
+    const input = await screen.findByRole("searchbox", { name: "Search concepts" })
+    expect(input).toHaveValue("계약")
+    await screen.findByText("No matching concepts")
+    const url = vi.mocked(fetch).mock.calls.map(([u]) => String(u)).find((u) => u.includes("/concepts?"))!
+    expect(new URL(url, "http://x").searchParams.get("origin")).toBe("structured")
+    await act(() => router.navigate("/ontology?q=고객"))
+    await waitFor(() => expect(input).toHaveValue("고객"))
+  })
+
+  it("links to Build when there is no snapshot yet", async () => {
+    mockFetch({ "GET /ontology": no_snapshot, "GET /ontology/concepts": no_snapshot })
+    renderPage(<OntologyPage />, "/ontology")
+    expect(await screen.findByText("No ontology yet")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Go to Build/ })).toHaveAttribute("href", "/build")
+  })
+
+  it("opens the concept sheet with evidence and a graph link", async () => {
+    mockFetch({
+      "GET /ontology": ONTOLOGY,
+      "GET /ontology/concepts": { revision: 2, total: 0, page: 1, size: 30, pages: 1, items: [] },
+      "GET /ontology/concepts/term-c": {
+        ...ITEM("term-c", "aligned", { merged_concepts: ["계약"] }), revision: 2, description: "",
+        definitions: ["계약은 승인 후 체결한다."], tables: ["public.contracts"], individual_type: null,
+        attributes: [{ id: "a", label: "계약금액", range: "xsd:decimal", source: "structured",
+                       column: "계약금액", datatype: "numeric", description: "" }],
+        relations: [{ id: "fk", direction: "out", predicate: "semantic_fk", label: "customers",
+                      other: "term-d", other_label: "Customers", source: "semantic_fk" }],
+        alignments: [{ relation: "same", with: "concept-a", label: "계약", confidence: 0.95, accepted: true }],
+        evidence: [{ quote: "계약은 담당자가 작성한다", verified: true, page: 2, document: "계약관리규정", path: "x.md" }],
+      },
+    })
+    renderPage(<OntologyPage />, "/ontology?concept=term-c")
+    const sheet = await screen.findByRole("dialog")
+    expect(await within(sheet).findByText("“계약은 담당자가 작성한다”")).toBeInTheDocument()
+    expect(within(sheet).getByText("public.contracts")).toBeInTheDocument()
+    expect(within(sheet).getByText("Same as")).toBeInTheDocument()
+    expect(within(sheet).getByRole("link", { name: /Show in graph/ })).toHaveAttribute("href", "/graph?focus=term-c")
+  })
+})
+
+describe("Exports page", () => {
+  it("lists the revision folder with ossie/ and okf/ groups and validation badges", async () => {
+    const user = userEvent.setup()
+    mockFetch({
+      "GET /exports": { exports: [{
+        revision: 2, dir: "r0002", created_at: "2026-10-28T12:06:24+00:00",
+        files: [{ name: "ontology.ttl", bytes: 100 }, { name: "export.json", bytes: 10 },
+                { name: "ossie/ontology.yaml", bytes: 50 }, { name: "ossie/validation.json", bytes: 5 },
+                { name: "okf/index.md", bytes: 5 }, { name: "okf/concepts/계약상태.md", bytes: 7 },
+                { name: "okf/validation.json", bytes: 5 }],
+        dirs: [{ name: "okf", files: ["concepts/계약상태.md", "index.md", "validation.json"], bytes: 17 },
+               { name: "ossie", files: ["ontology.yaml", "validation.json"], bytes: 55 }],
+      }] },
+      "GET /exports/r0002/ossie/validation.json": () => new Response(JSON.stringify(
+        { semantic_model: "ok", roundtrip: "ok", ontology: "ok", mapping: "ok", warnings: ["w"] }),
+        { headers: { "content-type": "text/plain" } }),
+      "GET /exports/r0002/okf/validation.json": () => new Response(JSON.stringify(
+        { okf_version: "0.2", ok: true, files: 95, errors: [], warnings: [] }),
+        { headers: { "content-type": "text/plain" } }),
+      [`GET /exports/r0002/okf/concepts/${encodeURIComponent("계약상태.md")}`]: () =>
+        new Response("---\ntype: Business Concept\n---\n# 계약상태", { headers: { "content-type": "text/plain" } }),
+    })
+    renderPage(<ExportsPage />)
+    const card = await screen.findByText("exports/r0002/")
+    const root = card.closest("[data-export]") as HTMLElement
+    expect(root.querySelector("[data-dir=ossie]")).not.toBeNull()
+    expect(root.querySelector("[data-dir=okf]")).not.toBeNull()
+    await waitFor(() => expect(root.querySelectorAll("[data-validation=ossie][data-ok=true]").length).toBeGreaterThan(0))
+    await waitFor(() => expect(root.querySelectorAll("[data-validation=okf][data-ok=true]").length).toBeGreaterThan(0))
+    expect(within(root).getAllByText("Ossie ok · 1 warning").length).toBeGreaterThan(0)
+    await user.click(within(root).getByRole("button", { name: "Preview okf/concepts/계약상태.md" }))
+    expect(await screen.findByText(/type: Business Concept/)).toBeInTheDocument()
+  })
+})
+
+describe("Status page", () => {
+  it("is read-only: checks, providers and the kordoc hint", async () => {
+    mockFetch({ "GET /status": STATUS })
+    renderPage(<StatusPage />)
+    const table = await screen.findByRole("table")
+    expect(table.querySelector("[data-check=postgres][data-status=error]")).not.toBeNull()
+    expect(within(table).getByText("docker compose up -d")).toBeInTheDocument()
+    expect(table.querySelector("[data-check=kordoc][data-status=warn]")).not.toBeNull()
+    expect(screen.getByText("ollama · openai/qwen3:8b")).toBeInTheDocument()
+    expect(screen.queryByRole("combobox")).toBeNull()
   })
 })
