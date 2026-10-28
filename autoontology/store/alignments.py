@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Alignment tables (the align step of ``autoontology build``): cached Term embeddings and one verdict row per
 document concept. Shares :class:`autoontology.store.db.Store`'s connection helper.
 

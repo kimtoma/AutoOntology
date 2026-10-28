@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """kordoc (https://github.com/chrisryugj/kordoc, MIT, npm ``kordoc``, Node >= 20): the
 document engine for HWP/HWPX/HWPML, PDF, DOCX, PPTX, XLS/XLSX and images.
 

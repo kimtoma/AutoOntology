@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The unified build end to end on the samples: real Postgres, upstream backend and models.
 
 Run with (the service must be up on the ``.env`` ports: ``uv run autoontology up``):

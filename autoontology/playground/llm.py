@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The active chat provider for playground calls: the service's own ``/v1`` router
 (Ollama or OpenAI-compatible passthrough), called over HTTP with the model name upstream
 would send (``Settings.upstream_chat_model``), so the playground goes through exactly the

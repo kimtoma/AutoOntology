@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """SQLite job/source store at ``<home>/autoontology.db`` (stdlib ``sqlite3``, WAL mode).
 
 The schema is a list of numbered migrations applied in order and recorded in

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """REST API behind the web UI (``/api/*``), against a temp home and fake jobs."""
 
 import json

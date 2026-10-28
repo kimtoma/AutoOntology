@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Background run manager for the web API (``POST /api/runs``).
 
 Each run executes one of the CLI job functions (``build.run_build``,

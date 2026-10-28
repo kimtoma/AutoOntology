@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Playground orchestration: scope, element index and RAG chat.
 
 One :class:`Playground` per service process (``web/playground_api.py``). The scope is the

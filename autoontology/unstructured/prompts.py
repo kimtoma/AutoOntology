@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Prompts for document extraction and the concept merge judge.
 
 Document text is untrusted: it only ever appears inside the human message, framed as an

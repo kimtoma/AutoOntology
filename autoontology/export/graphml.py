@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """GraphML writer for the merged ontology (``xml.etree``, no extra dependency).
 
 Nodes: classes, properties, individuals, documents, plus one ``concept`` node per document

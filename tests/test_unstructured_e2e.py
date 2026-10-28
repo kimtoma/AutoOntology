@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Integration: the real kordoc engine (``<home>/kordoc``, from ``autoontology tools
 install-kordoc``) on the HWP fixture and the generated PDF/DOCX, and the real
 ``autoontology extract hanbit-docs samples/unstructured`` against the local Ollama.

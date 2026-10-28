@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Ollama: raw OpenAI-compatible passthrough (the default chat provider).
 
 Ollama 0.40.11 enforces a ``response_format`` json_schema on thinking-capable models only

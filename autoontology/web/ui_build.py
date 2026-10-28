@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """``autoontology tools build-ui``: rebuild the committed web UI (``ui/`` -> ``web/static/dist``).
 
 Only needed after changing ``ui/``; the service serves the committed build without Node.

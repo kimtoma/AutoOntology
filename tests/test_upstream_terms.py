@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Pins the upstream internals ``autoontology align`` writes Term synonyms through
 (``autoontology/engine/upstream_terms.py``), against the vendored source. If upstream changes
 any of these, this fails instead of the write silently doing nothing."""

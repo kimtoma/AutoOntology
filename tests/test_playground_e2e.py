@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Playground end to end against the live service and its latest ontology snapshot
 (``hanbit`` + ``hanbit-docs``, built by ``tests/test_build_e2e.py``) with whatever
 chat/embed provider is active.

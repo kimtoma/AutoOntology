@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import pytest
 from dotenv import dotenv_values
 

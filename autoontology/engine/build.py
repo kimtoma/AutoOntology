@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """``autoontology build``: one run over every registered source -> one ontology snapshot.
 
 Steps, in order (each persisted as a ``steps`` row of the single ``build`` run):

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The align step of ``autoontology build``: link a documents source's concepts to the
 upstream Terms of every structured source and enrich the Terms.
 

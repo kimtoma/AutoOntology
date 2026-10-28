@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The unified ontology model: structured Terms (upstream) and document concepts
 (AutoOntology store) joined through the alignment verdicts.
 

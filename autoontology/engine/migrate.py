@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Alembic migrations for the upstream catalog schema (run inside the submodule)."""
 
 from __future__ import annotations

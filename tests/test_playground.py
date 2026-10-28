@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Playground: element index, retrieval, prompts, citations, SPARQL, judge, store, REST."""
 
 import hashlib

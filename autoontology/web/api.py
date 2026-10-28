@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """REST API behind the web UI, under ``/api/`` (upstream owns ``/api/*`` on the
 backend port; the UI never calls it directly).
 

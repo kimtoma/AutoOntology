@@ -1,3 +1,13 @@
 # Committed build of ui/ (uv run autoontology tools build-ui)
 autoontology/web/static/dist/** linguist-generated=true -diff
 ui/pnpm-lock.yaml linguist-generated=true
+uv.lock linguist-generated=true
+docs/licenses/ui-bundle.md linguist-generated=true
+
+# Binary samples and fixtures
+*.hwp binary
+*.hwpx binary
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.png binary

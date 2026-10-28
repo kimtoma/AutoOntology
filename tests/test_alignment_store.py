@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import pytest
 
 from autoontology.store.alignments import AlignmentRecord, AlignmentStore

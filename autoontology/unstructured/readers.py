@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Document readers: ``path -> Document(sections)``.
 
 Markdown, plain text and HTML are read natively (markdown-it-py heading tree, bs4).

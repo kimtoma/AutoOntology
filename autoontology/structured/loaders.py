@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Load local tabular files into a per-source Postgres database ``autoontology_src_<name>``.
 
 DuckDB (in-process) sniffs and types every file; rows then stream into Postgres with

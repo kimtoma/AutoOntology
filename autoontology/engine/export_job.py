@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """``autoontology export``: the latest (or a given) ontology snapshot as Turtle, JSON-LD
 and GraphML, an Apache Ossie bundle and an OKF bundle, plus ``report.md`` and the
 structured sources' upstream exports.

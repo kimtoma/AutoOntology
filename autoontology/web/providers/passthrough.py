@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Raw OpenAI-compatible passthrough shared by the ``ollama`` and ``openai`` providers.
 
 The request body is forwarded as JSON (``response_format`` and tools included), streaming

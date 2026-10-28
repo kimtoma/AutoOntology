@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """AutoOntology service (:7800): the web UI (``/ui/``) and its REST API
 (``/api/*``, ``autoontology/web/api.py``), plus the upstream shims below.
 

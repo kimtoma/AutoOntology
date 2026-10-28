@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Turtle and JSON-LD writers for the merged ontology (rdflib)."""
 
 from __future__ import annotations

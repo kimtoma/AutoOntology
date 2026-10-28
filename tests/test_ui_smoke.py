@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Playwright smoke test of the web UI (``ui/`` build served at ``/ui/``) against the live
 service (``uv run autoontology up``) and a built ontology (e.g. ``hanbit`` + ``hanbit-docs``,
 built and exported once).

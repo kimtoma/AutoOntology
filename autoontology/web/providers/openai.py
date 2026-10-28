@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Generic OpenAI-compatible chat provider (``AUTOONTOLOGY_CHAT_PROVIDER=openai``).
 
 Upstream sends ``openai/<model>`` (the prefix selects its ChatOpenAI client); the

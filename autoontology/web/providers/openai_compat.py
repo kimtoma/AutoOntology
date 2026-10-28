@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """OpenAI chat-completions wire format <-> :class:`ChatRequest`/:class:`ChatResponse`.
 
 Upstream (LangChain ``ChatOpenAI``) asks for structured output in one of two ways:

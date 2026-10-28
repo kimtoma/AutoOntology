@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """LLM output schemas for document extraction and the fail-closed post-validation that
 runs on every result before anything is stored."""
 

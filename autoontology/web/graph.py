@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The UI graph view of the unified ontology (``GET /api/ontology/graph``).
 
 Built from the same :class:`~autoontology.ontology.model.MergedOntology` the exporters write,

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Loaders against a real, temporary Postgres database (integration marker)."""
 
 import datetime as dt

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """AutoOntology command-line interface."""
 
 from __future__ import annotations

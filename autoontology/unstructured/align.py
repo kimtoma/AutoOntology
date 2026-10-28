@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Alignment of document concepts to upstream Terms (the align step of ``autoontology build``).
 
 1. Candidate retrieval: every entity/metric/attribute concept is embedded as a query

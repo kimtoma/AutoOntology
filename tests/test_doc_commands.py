@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Every `autoontology ...` command the docs show must exist with the options it uses.
 
 Parses fenced code blocks and inline code spans of README.md, walks

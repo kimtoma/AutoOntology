@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Provider protocol and the schema helpers shared by the chat providers."""
 
 from __future__ import annotations

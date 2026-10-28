@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The unified build (``engine/build.py``), the snapshot store and the export from a
 snapshot, with fake upstream/LLM backends."""
 

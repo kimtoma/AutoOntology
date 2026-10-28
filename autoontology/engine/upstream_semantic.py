@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Invalidating one database's upstream semantic layer when its schema changed.
 
 Upstream's scoped reset (``dal/reset.py:delete_semantic_layer``) deletes a database's

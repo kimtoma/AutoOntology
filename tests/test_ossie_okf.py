@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The Apache Ossie and OKF exporters (``export/ossie.py``, ``export/okf.py``) over a
 fixture snapshot: Korean names, a folded ``same``, a ``narrower``, an attached attribute, an
 unattached metric, a compound key, declared and semantic FKs."""

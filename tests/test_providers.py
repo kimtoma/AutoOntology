@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The service's /v1 chat router: Ollama and generic OpenAI-compatible passthroughs, the
 OpenAI wire-format helpers and the schema checks."""
 

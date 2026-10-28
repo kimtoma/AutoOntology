@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Real local Postgres + Ollama. Run with: AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration"""
 
 import httpx

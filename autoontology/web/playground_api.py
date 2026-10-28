@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """REST + SSE routes of the Playground page, under ``/api/playground/``.
 
 * ``POST /chat`` (SSE): RAG over the latest ontology snapshot (``playground.service``).

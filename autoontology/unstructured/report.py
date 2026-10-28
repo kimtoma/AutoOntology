@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """``report.md`` for an ``extract`` run (English, user-facing)."""
 
 from __future__ import annotations

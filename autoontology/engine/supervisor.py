@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Supervise the two AutoOntology child processes: upstream ``backend`` and our ``service``.
 
 ``up``/``down``/``status`` keep PID files in ``<home>/run`` and logs in

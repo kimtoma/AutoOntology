@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Source registration for the structured pipeline (``autoontology source add``).
 
 A source is either ``files`` (local files loaded into ``autoontology_src_<name>``) or

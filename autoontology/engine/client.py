@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """HTTP client for the upstream auto-ontology backend (``/api/...`` on :3101)."""
 
 from __future__ import annotations

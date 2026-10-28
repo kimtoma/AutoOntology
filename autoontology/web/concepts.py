@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The concept list and detail of ``GET /api/ontology/concepts[/{id}]``: Terms and document
 concepts of one snapshot model in one list.
 

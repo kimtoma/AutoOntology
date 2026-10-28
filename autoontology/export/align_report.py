@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """``align-report.md`` for the align step of ``autoontology build`` (English, like the other reports)."""
 
 from __future__ import annotations

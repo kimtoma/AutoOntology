@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Open Knowledge Format (OKF v0.2) bundle of an ontology snapshot: ``exports/r<rev>/okf/``.
 
 Layout (every path below is bundle-relative; links inside the bundle are bundle-absolute,

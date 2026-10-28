@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """``autoontology doctor``: environment checks with remedies."""
 
 from __future__ import annotations

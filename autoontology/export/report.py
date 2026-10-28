@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """``report.md`` of ``autoontology export`` (English)."""
 
 from __future__ import annotations

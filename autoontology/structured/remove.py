@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Remove a registered source (``autoontology source rm`` and ``DELETE /api/sources``).
 
 Structured sources: delete the upstream connection, wait until the service has torn down

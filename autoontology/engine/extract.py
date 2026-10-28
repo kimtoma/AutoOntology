@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The documents steps of ``autoontology build``: documents -> chunks -> LLM
 concepts/relations -> consolidated concepts in the store.
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Structured-source steps and the shared job machinery (logging, leases, stale runs,
 the step executor).
 

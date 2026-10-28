@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Cross-chunk consolidation: per-chunk concepts -> one deduplicated concept set.
 
 1. Exact merge (no LLM): candidates whose casefolded name or any synonym matches are one

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The playground's retrieval units: one :class:`Element` per element of the merged
 ontology (``ontology.model.MergedOntology``), with the text that gets embedded, a UI link and
 its 1-hop neighbours.

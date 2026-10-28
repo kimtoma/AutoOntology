@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Playground tables: element index and conversations.
 
 Shares :class:`autoontology.store.db.Store`'s connection helper, like ``AlignmentStore``."""

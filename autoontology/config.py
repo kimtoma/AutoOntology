@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """AutoOntology settings.
 
 This module must stay importable without importing ``auto_ontology``: upstream reads

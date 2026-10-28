@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Regenerate the binary samples in samples/unstructured/ from the Markdown sources.
 
     uv run --group dev python scripts/gen_unstructured_samples.py

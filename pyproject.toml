@@ -5,6 +5,7 @@ description = "Turn structured and unstructured enterprise data into one ontolog
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
+license-files = ["LICENSE", "NOTICE.md", "THIRD_PARTY_NOTICES.md"]
 dependencies = [
     "auto-ontology-server>=1.1.0",
     "beautifulsoup4>=4.15.0",

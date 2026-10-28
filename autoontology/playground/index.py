@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Element index: the embedded :class:`~autoontology.playground.elements.Element` texts of one
 source's merged ontology, persisted in ``playground_index`` and refreshed when the ontology
 revision (or the embedding model) changes; an element whose text and model are unchanged

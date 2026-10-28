@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """LLM extraction of concepts/relations from chunks, through upstream's LLM helpers.
 
 Two paths per chunk:

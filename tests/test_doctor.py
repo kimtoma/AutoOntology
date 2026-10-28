@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 from autoontology import doctor
 from autoontology.config import Settings
 from autoontology.doctor import Check, exit_code, format_checks

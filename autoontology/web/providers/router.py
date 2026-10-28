@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """``/v1/chat/completions`` + ``/v1/models`` on the service port.
 
 Upstream sends the model name verbatim and uses ChatOpenAI only for names starting with

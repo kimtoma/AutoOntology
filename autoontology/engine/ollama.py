@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Local Ollama setup for the ``ollama`` model profile (part of ``autoontology setup``).
 
 The profile talks to an alias model, ``openai/qwen3:8b``, built from ``qwen3:8b`` with:

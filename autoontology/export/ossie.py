@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Apache Ossie bundle of an ontology snapshot: ``exports/r<rev>/ossie/``.
 
 Three documents of Ossie spec ``0.2.0.dev0`` plus a validation record:

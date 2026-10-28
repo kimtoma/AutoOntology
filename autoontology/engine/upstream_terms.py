@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Writes to upstream Terms that the public API cannot make.
 
 ``PATCH /api/terms/{id}`` (``auto_ontology/server/terms/router.py:34`` ``TermUpdate``)

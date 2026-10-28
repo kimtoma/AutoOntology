@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Documents-pipeline tables (the documents step of ``autoontology build``): documents, chunks, concepts,
 relations, evidence. Shares :class:`autoontology.store.db.Store`'s connection helper.
 

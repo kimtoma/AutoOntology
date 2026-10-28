@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Section-aware chunking: ``Document -> [Chunk]``.
 
 1. A section within ``max_tokens`` is one piece. A larger one is split on paragraph

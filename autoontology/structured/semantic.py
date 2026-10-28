@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Read-only snapshot of a structured source's upstream semantic layer: its Terms (with
 synonyms, REPRESENTS tables and column attributes) and SEMANTIC_FK references.
 

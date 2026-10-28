@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Postgres helpers (psycopg). Never imports ``auto_ontology``."""
 
 from __future__ import annotations

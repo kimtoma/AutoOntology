@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Prompts, context assembly, citation parsing and the structured-output schemas of the
 playground chat.
 

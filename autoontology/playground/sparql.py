@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """SPARQL console over the latest exported ``ontology.ttl`` (rdflib, in-process).
 
 * The parsed Graph is cached per export run id (LRU, ``CACHE_SIZE``).
