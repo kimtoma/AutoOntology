@@ -197,6 +197,21 @@ describe("Ontology page", () => {
     await waitFor(() => expect(input).toHaveValue("고객"))
   })
 
+  it("moves a stale ?page past the end to the last page", async () => {
+    mockFetch({
+      "GET /ontology": ONTOLOGY,
+      "GET /ontology/concepts": (url: string) => {
+        const page = Number(new URL(url, "http://x").searchParams.get("page"))
+        return { revision: 2, total: 31, page, size: 30, pages: 2,
+                 items: page === 2 ? [ITEM("term-c", "aligned")] : [] }
+      },
+    })
+    const { router } = renderRouted(<OntologyPage />, "/ontology?page=5")
+    await waitFor(() => expect(router.state.location.search).toBe("?page=2"))
+    expect(await screen.findByText("2 / 2")).toBeInTheDocument()
+    await waitFor(() => expect(document.querySelector("[data-concept=term-c]")).not.toBeNull())
+  })
+
   it("links to Build when there is no snapshot yet", async () => {
     mockFetch({ "GET /ontology": no_snapshot, "GET /ontology/concepts": no_snapshot })
     renderPage(<OntologyPage />, "/ontology")

@@ -99,6 +99,12 @@ export default function OntologyPage() {
     retry: retryServerErrors,
   })
   const noSnapshot = isNoSnapshot(ontology.error) || isNoSnapshot(concepts.error)
+  // a stale ?page past the end (the list shrank after a rebuild): go to the last page
+  const lastPage = concepts.data && !concepts.isPlaceholderData ? Math.max(1, concepts.data.pages) : null
+  useEffect(() => {
+    if (lastPage !== null && page > lastPage) update({ page: lastPage > 1 ? String(lastPage) : null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastPage, page])
 
   return (
     <>
