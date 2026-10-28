@@ -239,7 +239,7 @@ function RunSheetBody({ runId }: { runId: string }) {
         {!live && !error && <Skeleton className="h-6 w-2/3" />}
         {live && (
           <>
-            <StepList steps={live.steps} ended={live.ended || live.status !== "running"} />
+            <StepList steps={live.steps} ended={live.ended || !["pending", "running"].includes(live.status)} />
             <p id="live-progress" className="text-xs text-muted-foreground" role="status" aria-live="polite">
               {progressText(live.progress)}
             </p>

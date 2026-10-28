@@ -28,8 +28,22 @@ class FakeEventSource {
     this.url = url
     FakeEventSource.instances.push(this)
   }
-  addEventListener() {}
+  listeners = new Map<string, ((e: MessageEvent<string>) => void)[]>()
+  addEventListener(type: string, fn: (e: MessageEvent<string>) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn])
+  }
+  emit(type: string, data: unknown, lastEventId = "") {
+    const raw = typeof data === "string" ? data : JSON.stringify(data)
+    for (const fn of this.listeners.get(type) ?? []) fn(new MessageEvent(type, { data: raw, lastEventId }))
+  }
   close() { this.readyState = FakeEventSource.CLOSED }
+}
+
+async function openStream(run: object) {
+  mockFetch({ [`GET /runs/${RUN.id}`]: run })
+  renderPage(<RunSheet runId={RUN.id} onClose={() => {}} />)
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+  return FakeEventSource.instances[0]
 }
 
 beforeEach(() => {
@@ -69,5 +83,11 @@ describe("run sheet", () => {
     es.readyState = FakeEventSource.CLOSED
     es.onerror?.()
     expect(await screen.findByText(/Could not open the live log stream/)).toBeInTheDocument()
+  })
+
+  it("shows the steps of a pending run as pending, not as not run", async () => {
+    await openStream({ ...RUN, status: "pending" })
+    expect(await screen.findByText("Extract · Pending")).toBeInTheDocument()
+    expect(screen.queryByText(/not run/)).toBeNull()
   })
 })
