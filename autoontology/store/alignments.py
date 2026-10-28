@@ -248,13 +248,25 @@ class AlignmentStore:
     def _note_legacy_descriptions(self, conn: Any, rows: list[Any]) -> None:
         """Every Term with a ``description_set`` record that lacks the text gets a
         ``term_legacy_descriptions`` row (once; migration v4 notes the ones present at
-        upgrade), so the state outlives the record when apply replaces its ``applied``."""
+        upgrade), so the state outlives the record when apply replaces its ``applied``; a
+        record confirmed under store v3 (``description_baseline``) confirms the row with
+        its text."""
         for (raw,) in rows:
             applied = json.loads(raw or "{}")
             term_id = applied.get("term_id")
             if not applied.get("description_set") or not term_id:
                 continue
-            if str(applied.get("description") or "").strip():
+            text = str(applied.get("description") or "").strip()
+            if applied.get("description_baseline"):  # confirmed under store v3
+                conn.execute(
+                    "INSERT INTO term_legacy_descriptions (term_id, noted_at, baseline, "
+                    "confirmed_at) VALUES (?, ?, ?, ?) ON CONFLICT (term_id) DO UPDATE SET "
+                    "baseline = excluded.baseline, confirmed_at = excluded.confirmed_at "
+                    "WHERE term_legacy_descriptions.confirmed_at IS NULL",
+                    (term_id, now_iso(), text, now_iso()),
+                )
+                continue
+            if text:
                 continue
             conn.execute(
                 "INSERT INTO term_legacy_descriptions (term_id, noted_at) VALUES (?, ?) "

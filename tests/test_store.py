@@ -227,6 +227,13 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
             {"term_id": "t-old", "description_set": True},
             {"term_id": "t-new", "description_set": True, "description": "정의"},
             {"term_id": "t-none", "description_set": False},
+            # confirmed under v3: the baseline text sat in applied_json
+            {
+                "term_id": "t-conf",
+                "description_set": True,
+                "description": "기준 설명",
+                "description_baseline": True,
+            },
         ]
     ):
         conn.execute(
@@ -236,7 +243,24 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
         )
     conn.commit()
     conn.close()
-    assert Store(path).schema_version() == 4
+    store = Store(path)
+    assert store.schema_version() == 4 and store.migrate() == 4  # idempotent
+
+    def legacy():
+        with sqlite3.connect(path) as conn:
+            return conn.execute(
+                "SELECT term_id, baseline, confirmed_at IS NOT NULL "
+                "FROM term_legacy_descriptions ORDER BY term_id"
+            ).fetchall()
+
+    assert legacy() == [("t-conf", "기준 설명", 1), ("t-old", None, 0)]
+    # a store already at v4 without the row: the read path backfills it the same way
     with sqlite3.connect(path) as conn:
-        rows = conn.execute("SELECT term_id, confirmed_at FROM term_legacy_descriptions").fetchall()
-    assert rows == [("t-old", None)]
+        conn.execute("DELETE FROM term_legacy_descriptions")
+    from autoontology.store.alignments import AlignmentStore
+    from autoontology.unstructured.align import ANY_DESCRIPTION, LEGACY_BASELINE
+
+    described = AlignmentStore(store).auto_descriptions()
+    assert described["t-conf"] == {LEGACY_BASELINE, "기준 설명"}
+    assert described["t-old"] == {ANY_DESCRIPTION}
+    assert legacy() == [("t-conf", "기준 설명", 1), ("t-old", None, 0)]

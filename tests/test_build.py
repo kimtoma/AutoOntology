@@ -622,6 +622,50 @@ def test_upgrade_rejudges_the_second_source_after_the_first_rewrites_the_descrip
     assert "align:hanbit-docs" not in kept.details and "align:b-docs" not in kept.details
 
 
+def test_v4_migration_keeps_a_baseline_confirmed_under_v3(env, tmp_path):
+    """Round 7: under store v3 the confirmed baseline lived in ``applied_json``
+    (``description_baseline`` with the text). An upgrade interrupted after the first
+    documents source confirmed it, before the second was judged: the v4 migration moves
+    the confirmed state into ``term_legacy_descriptions``, so the second source's
+    pre-upgrade verdict is still judged once more."""
+    import json as _json
+    import sqlite3
+
+    add_structured(env)
+    add_documents(env)
+    other = tmp_path / "docs-b"
+    shutil.copytree(env["docs"], other)
+    ex.ensure_documents_source(env["store"], "b-docs", other)
+    first = run(env)
+    assert first.status == "succeeded", first.problems
+    path = env["store"].path
+    with sqlite3.connect(path) as conn:  # the v3 state of a confirmed baseline
+        rows = conn.execute(
+            "SELECT id, applied_json FROM alignments WHERE applied_json LIKE '%description_set%'"
+        ).fetchall()
+        assert rows
+        for row_id, raw in rows:
+            applied = _json.loads(raw)
+            if applied.get("description_set"):
+                applied["description_baseline"] = True  # its text kept as the baseline
+                conn.execute(
+                    "UPDATE alignments SET applied_json = ? WHERE id = ?",
+                    (_json.dumps(applied), row_id),
+                )
+        conn.execute("DROP TABLE term_legacy_descriptions")
+        conn.execute("DELETE FROM schema_version WHERE version = 4")
+    env["store"] = Store(path)  # migrates v3 -> v4
+    with sqlite3.connect(path) as conn:
+        legacy = conn.execute(
+            "SELECT term_id, baseline, confirmed_at FROM term_legacy_descriptions"
+        ).fetchall()
+    assert [(t, b) for t, b, _ in legacy] == [("t-customer", "고객의 정의")]
+    assert all(c for _, _, c in legacy)  # confirmed, with its baseline text
+    again = run(env, resume=True)
+    assert again.status == "succeeded", again.problems
+    assert again.details["align:b-docs"]["judged"] >= 1
+
+
 def test_resume_runs_align_again_when_an_upstream_term_changed(env):
     """Follow-up of recheck #2: with unchanged inputs `--resume` used to keep the whole
     align step, so an edited upstream Term was never re-judged. The step records a

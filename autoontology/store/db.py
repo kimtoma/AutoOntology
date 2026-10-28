@@ -352,7 +352,9 @@ MIGRATIONS: list[tuple[int, str]] = [
         # Schema v4: term_legacy_descriptions = Terms whose description an older apply set
         # without recording the text. The judge step confirms each one's baseline (the
         # description its first judge call saw); apply never writes this table, so the
-        # state survives an apply that replaces the old record's applied_json.
+        # state survives an apply that replaces the old record's applied_json. A baseline
+        # confirmed under v3 (applied_json.description_baseline, its text) moves over as
+        # confirmed; a record without the text is noted unconfirmed.
         """
         CREATE TABLE IF NOT EXISTS term_legacy_descriptions (
             term_id TEXT PRIMARY KEY,
@@ -360,6 +362,17 @@ MIGRATIONS: list[tuple[int, str]] = [
             baseline TEXT,
             confirmed_at TEXT
         );
+        INSERT INTO term_legacy_descriptions (term_id, noted_at, baseline, confirmed_at)
+            SELECT json_extract(applied_json, '$.term_id'), datetime('now'),
+                   max(trim(COALESCE(json_extract(applied_json, '$.description'), ''))),
+                   datetime('now')
+            FROM alignments
+            WHERE json_valid(applied_json)
+              AND json_extract(applied_json, '$.description_set')
+              AND json_extract(applied_json, '$.description_baseline')
+              AND json_extract(applied_json, '$.term_id') IS NOT NULL
+            GROUP BY json_extract(applied_json, '$.term_id')
+        ON CONFLICT (term_id) DO NOTHING;
         INSERT INTO term_legacy_descriptions (term_id, noted_at)
             SELECT DISTINCT json_extract(applied_json, '$.term_id'), datetime('now')
             FROM alignments
