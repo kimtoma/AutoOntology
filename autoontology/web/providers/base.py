@@ -84,11 +84,34 @@ class ChatProvider(Protocol):
     def models(self) -> list[str]: ...
 
 
+def _home_dirs() -> list[str]:
+    """The user's home directory spellings (``$HOME``, ``Path.home()``, the password
+    entry and their real paths), longest first."""
+    raw = [os.environ.get("HOME", ""), str(Path.home())]
+    try:
+        import pwd
+
+        raw.append(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError, OSError):
+        pass
+    homes: set[str] = set()
+    for home in raw:
+        for spelling in (home, os.path.realpath(home) if home else ""):
+            spelling = spelling.rstrip("/")
+            if spelling:  # never "/" (it would turn every path into "~")
+                homes.add(spelling)
+    return sorted(homes, key=len, reverse=True)
+
+
 def scrub(text: str, limit: int = 400) -> str:
-    """CLI output for an error message: account e-mails and ids masked, capped."""
+    """CLI output for an error message: account e-mails and ids masked, the home directory
+    shown as ``~`` (no user name in status payloads), capped."""
     from autoontology.web.api import mask
 
     text = _UUID_RE.sub("<id>", _EMAIL_RE.sub("<email>", text or ""))
+    for home in _home_dirs():
+        # not a sibling such as /Users/name2 or /Users/name.old
+        text = re.sub(re.escape(home) + r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_-])", "~", text)
     text = mask(text.strip())
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
@@ -431,11 +454,13 @@ class CLIProvider:
         caller is cancelled (client disconnect)."""
         timeout = provider_timeout_s() if timeout is None else timeout
         start = time.monotonic()
+        # child_env may touch files under a lock (codex: the private CODEX_HOME)
+        env = {**(await asyncio.to_thread(self.child_env)), **(extra_env or {})}
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
                 cwd=str(cwd),
-                env={**self.child_env(), **(extra_env or {})},
+                env=env,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

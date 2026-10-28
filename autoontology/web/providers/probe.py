@@ -14,9 +14,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import fcntl
 import json
 import os
 import socket
+import tempfile
 import threading
 import time
 from collections.abc import Iterator
@@ -37,6 +39,7 @@ PING_SCHEMA = {
 PING_PROMPT = "Return answer='pong'."
 LAST_TEST_FILE = "providers-last-test.json"
 DEFAULT_TEST_TIMEOUT_S = 330.0
+_SAVE_LOCK = threading.Lock()
 
 
 def _mask(text: str) -> str:
@@ -206,14 +209,28 @@ def last_test(settings: Settings, provider: str | None = None) -> dict[str, Any]
 
 
 def save_result(settings: Settings, result: dict[str, Any]) -> None:
-    previous = last_tests(settings)
-    previous[result["provider"]] = {
+    entry = {
         k: result.get(k)
         for k in ("at", "ok", "model", "seconds", "status", "error", "remedy")
         if result.get(k) not in (None, "")
     }
     path = _path(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(previous, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    # read-modify-write under a lock (the doctor and the service may both test), written
+    # through a unique temp file
+    with _SAVE_LOCK, open(path.with_name(f"{LAST_TEST_FILE}.lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            current = last_tests(settings)
+            current[result["provider"]] = entry
+            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{LAST_TEST_FILE}.")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(json.dumps(current, indent=2))
+                os.replace(tmp, path)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
+                raise
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)

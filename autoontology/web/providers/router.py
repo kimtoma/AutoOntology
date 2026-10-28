@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import logging
 from typing import Any
@@ -108,10 +109,10 @@ class Registry:
 
     def status(self, name: str | None = None, *, refresh: bool = False) -> ProviderStatus:
         provider = self.active if name is None else self.get(name)
-        try:
+        params = inspect.signature(provider.status).parameters.values()
+        if any(p.name == "refresh" or p.kind is p.VAR_KEYWORD for p in params):
             return provider.status(refresh=refresh)
-        except TypeError:
-            return provider.status()
+        return provider.status()  # providers without a status cache (Ollama, OpenAI)
 
     def resolve(self, model_name: str) -> tuple[Any, str]:
         """(provider, model) serving *model_name*; 400 ``provider_not_active`` when the name
@@ -150,26 +151,35 @@ class ClientGone(Exception):
     """The HTTP client disconnected before the answer was ready."""
 
 
-DISCONNECT_POLL_S = 0.5
+async def _disconnected(request: Request) -> None:
+    """Return when the client hangs up. The body has been read, so the next ASGI message
+    is ``http.disconnect``. (``Request.is_disconnected()`` cannot be polled here: behind
+    the ``@app.middleware("http")`` wrapper it never reports a disconnect.)"""
+    while True:
+        message = await request.receive()
+        if message.get("type") == "http.disconnect":
+            return
 
 
 async def until_disconnected(request: Request, coro: Any) -> Any:
     """Await *coro*, cancelling it (which kills the CLI) if the client disconnects: upstream
     retries after its own timeout, and an abandoned call would keep a slot busy."""
     task = asyncio.ensure_future(coro)
+    watcher = asyncio.ensure_future(_disconnected(request))
     try:
-        while True:
-            done, _ = await asyncio.wait({task}, timeout=DISCONNECT_POLL_S)
-            if done:
-                return task.result()
-            if await request.is_disconnected():
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await task
-                raise ClientGone()
+        done, _ = await asyncio.wait({task, watcher}, return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            return task.result()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        raise ClientGone()
     finally:
-        if not task.done():
-            task.cancel()
+        for pending in (task, watcher):
+            if not pending.done():
+                pending.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await watcher
 
 
 def _error(exc: ProviderError) -> JSONResponse:
@@ -226,7 +236,8 @@ def build_router(
                 )
             )
         try:
-            chat = parse_request(body, model)
+            # schema admission (meta-validation, cycle walk): off the event loop
+            chat = await asyncio.to_thread(parse_request, body, model)
             resp = await until_disconnected(request, provider.complete(chat))
         except ClientGone:
             logger.info("%s call (%s) cancelled: the client disconnected", provider.name, model)

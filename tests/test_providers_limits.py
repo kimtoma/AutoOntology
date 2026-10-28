@@ -83,12 +83,9 @@ def test_until_disconnected_cancels_the_call():
     cancelled = threading.Event()
 
     class Req:
-        def __init__(self):
-            self.polls = 0
-
-        async def is_disconnected(self):
-            self.polls += 1
-            return self.polls >= 2
+        async def receive(self):
+            await asyncio.sleep(0.05)  # the client hangs up a moment after the body
+            return {"type": "http.disconnect"}
 
     async def slow():
         try:
@@ -101,14 +98,7 @@ def test_until_disconnected_cancels_the_call():
         with pytest.raises(ClientGone):
             await until_disconnected(Req(), slow())
 
-    import autoontology.web.providers.router as router
-
-    old = router.DISCONNECT_POLL_S
-    router.DISCONNECT_POLL_S = 0.01
-    try:
-        asyncio.run(go())
-    finally:
-        router.DISCONNECT_POLL_S = old
+    asyncio.run(go())
     assert cancelled.is_set()
 
 

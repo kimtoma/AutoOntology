@@ -521,7 +521,13 @@ class Api:
         from autoontology.web.providers.base import scrub
 
         out["detail"] = scrub(out["detail"], 300)
-        out["last_test"] = probe.last_test(s)
+        last = probe.last_test(s)
+        # entries written before home paths were scrubbed may still carry one
+        out["last_test"] = (
+            {k: scrub(v, 300) if isinstance(v, str) else v for k, v in last.items()}
+            if last
+            else last
+        )
         return out
 
     async def test_provider(self, app: Any) -> dict[str, Any]:

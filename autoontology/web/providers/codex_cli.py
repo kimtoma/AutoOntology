@@ -25,15 +25,20 @@ property required); any other schema is described in the prompt and validated he
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import fcntl
 import json
+import logging
 import os
-import shutil
+import re
+import tempfile
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from autoontology.config import CLI_KNOWN_MODELS
+from autoontology.config import CLI_KNOWN_MODELS, CODEX_REASONING_EFFORTS, codex_reasoning_effort
 from autoontology.web.providers.base import (
     CLIProvider,
     ProviderStatus,
@@ -74,7 +79,15 @@ DISABLED_FEATURES: tuple[str, ...] = (
 #: effect) vs command_execution, file_change, mcp_tool_call, web_search, collab_tool_call
 #: (strings in the 0.153.4 binary).
 ALLOWED_ITEMS: frozenset[str] = frozenset({"agent_message", "reasoning", "error", "todo_list"})
-_HOME_LOCK = threading.Lock()
+#: Lock file next to the user's ``auth.json``: every AutoOntology home (several checkouts on
+#: one machine) takes it while writing that file back.
+USER_SYNC_LOCK = ".autoontology-sync.lock"
+_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_THREAD_LOCKS_GUARD = threading.Lock()
+_STATUS_401_RE = re.compile(r"\b401\b")
+_STATUS_429_RE = re.compile(r"\b429\b")
+
+logger = logging.getLogger("autoontology.providers")
 
 
 def user_codex_home() -> Path:
@@ -82,41 +95,105 @@ def user_codex_home() -> Path:
     return Path(raw).expanduser() if raw else Path.home() / ".codex"
 
 
+def codex_home_dir(home: Path) -> Path:
+    return Path(home).resolve() / "run" / "codex-home"
+
+
+@contextlib.contextmanager
+def _locked(path: Path) -> Iterator[None]:
+    """Exclusive lock on *path*: threads of this process (one lock per path), then other
+    processes (``flock``; the CLI doctor vs the service, other AutoOntology homes)."""
+    with _THREAD_LOCKS_GUARD:
+        thread_lock = _THREAD_LOCKS.setdefault(str(path), threading.Lock())
+    with thread_lock, open(path, "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def ensure_codex_home(home: Path) -> Path:
     """``<home>/run/codex-home`` holding only ``auth.json`` -> the user's login.
 
-    If codex replaced the symlink with a file (token refresh written via rename), the newer
-    tokens are copied back to the user's ``auth.json`` first so the user's own codex keeps a
-    valid refresh token, then the symlink is restored.
+    A refreshed private copy (see :func:`sync_codex_home`) is written back first; if that
+    fails the private copy stays in place (it holds the only valid refresh token) and codex
+    keeps using it until a later write-back succeeds.
     """
-    target = Path(home).resolve() / "run" / "codex-home"
+    target = codex_home_dir(home)
     target.mkdir(parents=True, exist_ok=True)
-    # threads of this process, then other AutoOntology processes (CLI doctor vs the service)
-    with _HOME_LOCK, open(target / ".lock", "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        try:
-            return _ensure_codex_home(target)
-        finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+    with _locked(target / ".lock"):
+        return _ensure_codex_home(target)
 
 
 def _ensure_codex_home(target: Path) -> Path:
-    source = user_codex_home() / "auth.json"
+    _sync_back(target)
     link = target / "auth.json"
-    if link.exists() and not link.is_symlink():
-        try:
-            if not source.exists() or link.stat().st_mtime > source.stat().st_mtime:
-                tmp = source.with_name(".auth.json.autoontology-tmp")
-                shutil.copy2(link, tmp)
-                os.chmod(tmp, 0o600)
-                os.replace(tmp, source)
-        finally:
-            link.unlink(missing_ok=True)
-    if not link.is_symlink():
-        link.symlink_to(source)
+    if not link.is_symlink() and not link.exists():
+        link.symlink_to(user_codex_home() / "auth.json")
     for stray in ("AGENTS.md", "config.toml", "hooks.json"):
         (target / stray).unlink(missing_ok=True)
     return target
+
+
+def sync_codex_home(home: Path) -> bool:
+    """Write a refreshed private ``auth.json`` back to the user's login.
+
+    codex refreshes its token by renaming a new file over ``auth.json``, which replaces the
+    private symlink with a file holding a new, rotated refresh token; the user's own codex
+    needs it, or its next refresh fails ("refresh token already used"). Runs right after
+    every codex call, at ``status()`` and at service shutdown. True when nothing is left to
+    write back."""
+    target = codex_home_dir(home)
+    if not target.is_dir():
+        return True
+    with _locked(target / ".lock"):
+        return _sync_back(target)
+
+
+def _sync_back(target: Path) -> bool:
+    link = target / "auth.json"
+    if link.is_symlink() or not link.exists():
+        return True
+    source = user_codex_home() / "auth.json"
+    try:
+        with _locked(source.parent / USER_SYNC_LOCK):
+            newer = not source.exists() or link.stat().st_mtime > source.stat().st_mtime
+            if newer:
+                _replace_with_copy(link, source)
+    except OSError as exc:
+        # keep the private copy: it holds the only valid refresh token (no content logged)
+        logger.warning(
+            "codex refreshed its login, but writing it back to the user's codex auth.json "
+            "failed (%s, errno %s); the private copy is kept and the write-back is retried "
+            "before the next codex call",
+            type(exc).__name__,
+            exc.errno,
+        )
+        return False
+    # written back, or older than the user's own (their codex refreshed later): relink
+    link.unlink(missing_ok=True)
+    link.symlink_to(source)
+    return True
+
+
+def _replace_with_copy(src: Path, dest: Path) -> None:
+    """Atomically replace *dest* by a copy of *src*: a 0600 temp file from creation
+    (``mkstemp``) next to *dest*, fsynced, with *src*'s mtime, then ``os.replace``."""
+    data = src.read_bytes()
+    stat = src.stat()
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".auth.json.")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.utime(tmp, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        os.replace(tmp, dest)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def strict_compatible(schema: Any) -> bool:
@@ -202,8 +279,16 @@ class CodexCLIProvider(CLIProvider):
         for feature in DISABLED_FEATURES:
             argv += ["--disable", feature]
         argv += ["-o", str(workdir / "last.txt")]
-        effort = os.environ.get("AUTOONTOLOGY_CODEX_REASONING_EFFORT", "").strip()
+        effort = codex_reasoning_effort()
         if effort:
+            if effort not in CODEX_REASONING_EFFORTS:
+                raise ProviderError(
+                    400,
+                    "invalid_reasoning_effort",
+                    f"AUTOONTOLOGY_CODEX_REASONING_EFFORT {effort[:40]!r} is not one of "
+                    f"{', '.join(CODEX_REASONING_EFFORTS)}",
+                    "fix or unset AUTOONTOLOGY_CODEX_REASONING_EFFORT in .env and restart",
+                )
             argv += ["-c", f'model_reasoning_effort="{effort}"']
         if schema_file is not None:
             argv += ["--output-schema", str(schema_file)]
@@ -213,6 +298,16 @@ class CodexCLIProvider(CLIProvider):
         env = super().child_env()
         env["CODEX_HOME"] = str(ensure_codex_home(self.home))
         return env
+
+    def sync_login(self) -> None:
+        """Write a token refresh of the last call back to the user's login (never raises)."""
+        try:
+            sync_codex_home(self.home)
+        except OSError as exc:
+            logger.warning("codex login write-back skipped: %s", type(exc).__name__)
+
+    def on_shutdown(self) -> None:
+        self.sync_login()
 
     async def call(self, request: ChatRequest, *, timeout: float) -> ChatResponse:
         binary = self.require_binary()
@@ -238,6 +333,8 @@ class CodexCLIProvider(CLIProvider):
             content = last.read_text(encoding="utf-8") if last.is_file() else ""
         finally:
             remove_workdir(workdir)
+            # the child has exited (or was killed): a token it refreshed goes back now
+            await asyncio.to_thread(self.sync_login)
         events = _events(result.stdout)
         used = _tool_items(events)
         if used:
@@ -323,13 +420,13 @@ def _failure(events: list[dict[str, Any]], stderr: str) -> str:
 
 def _error(message: str, model: str, returncode: int) -> ProviderError:
     lowered = message.lower()
-    if "401" in lowered or "unauthorized" in lowered or "not logged in" in lowered:
+    if _STATUS_401_RE.search(lowered) or "unauthorized" in lowered or "not logged in" in lowered:
         return ProviderError(401, "not_logged_in", "codex CLI is not logged in", LOGIN_REMEDY)
     if "model_not_found" in lowered or "model is not supported" in lowered:
         return ProviderError(
             400, "model_not_found", f"codex cannot use model {model!r} with this account"
         )
-    if "429" in lowered or "usage limit" in lowered or "rate limit" in lowered:
+    if _STATUS_429_RE.search(lowered) or "usage limit" in lowered or "rate limit" in lowered:
         return ProviderError(
             429,
             "usage_limit",

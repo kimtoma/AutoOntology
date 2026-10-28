@@ -151,8 +151,10 @@ source has been ingested (see Troubleshooting).
 
 AutoOntology can send its chat calls through the `claude` (Claude Code) or `codex`
 (Codex CLI) command-line tool you are already logged in to, so a Claude or ChatGPT
-subscription is used instead of an API key. AutoOntology never reads the login tokens
-itself; it runs the CLI as a subprocess for every call.
+subscription is used instead of an API key. AutoOntology runs the CLI as a subprocess
+for every call and never sends or logs the login tokens; for codex it only links the
+login file into a private codex home and, after codex refreshes the token there, copies
+that file back to your `auth.json` (mode 0600, atomic replace).
 
 1. Install the CLI and log in once, as the user that runs AutoOntology:
    - Claude: `claude auth login` (or start `claude` and type `/login`). `claude auth

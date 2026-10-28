@@ -152,6 +152,7 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _recover_exports(settings, state.store)  # (state: api.install below)
         yield
+        _shutdown_providers(registry)
         sparql = getattr(app.state, "sparql", None)
         if sparql is not None:  # stop its worker processes, running queries included
             sparql.close()
@@ -221,6 +222,17 @@ def create_app(
         return {"status": "accepted"}
 
     return app
+
+
+def _shutdown_providers(registry: Any) -> None:
+    """Provider shutdown hooks (codex: write a refreshed login back to the user's)."""
+    for provider in getattr(registry, "providers", {}).values():
+        hook = getattr(provider, "on_shutdown", None)
+        if callable(hook):
+            try:
+                hook()
+            except Exception:  # noqa: BLE001 - never block the shutdown
+                logger.exception("%s shutdown hook failed", getattr(provider, "name", "?"))
 
 
 def _sweep_provider_workdirs(settings: Settings) -> None:

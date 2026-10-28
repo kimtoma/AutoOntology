@@ -28,7 +28,7 @@ SCHEMA = {
 FMT = {"type": "json_schema", "json_schema": {"name": "Ping", "schema": SCHEMA, "strict": True}}
 
 FAKE_CLAUDE = r"""
-import json, os, sys, time
+import json, os, subprocess, sys, time
 log = os.environ["FAKE_LOG"]
 stdin = sys.stdin.read()
 argv = sys.argv[1:]
@@ -38,6 +38,7 @@ with open(log, "a") as fh:
     fh.write(json.dumps({"argv": argv, "stdin": stdin, "system": system, "pid": os.getpid(),
                          "env": {k: os.environ.get(k) for k in
                                  ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY",
+                                  "ANTHROPIC_AUTH_TOKEN", "NO_COLOR",
                                   "CLAUDE_CODE_DISABLE_FILE_MENTIONS",
                                   "CLAUDE_CODE_DISABLE_ATTACHMENTS",
                                   "CLAUDE_CODE_DISABLE_CLAUDE_MDS",
@@ -45,6 +46,15 @@ with open(log, "a") as fh:
                                   "CLAUDE_CODE_MAX_OUTPUT_TOKENS")},
                          "cwd": os.getcwd()}) + "\n")
 mode = os.environ.get("FAKE_MODE", "ok")
+if mode == "homepath":  # a Node-style failure naming a file under the user's home
+    sys.stderr.write("Error: ENOENT: no such file " + os.path.expanduser("~")
+                     + "/.local/share/claude/versions/x.json\n")
+    sys.exit(1)
+if mode == "grandchild":  # a helper process in the CLI's group outlives a plain kill()
+    child = subprocess.Popen(["sleep", "60"])
+    with open(os.environ["FAKE_GRANDCHILD"], "w") as fh:
+        fh.write(str(child.pid))
+    time.sleep(60)
 if sys.argv[1:3] == ["auth", "status"]:
     print(json.dumps({"loggedIn": mode != "notlogged", "authMethod": "claude.ai",
                       "email": "someone@example.com", "subscriptionType": "max"}))
@@ -88,7 +98,9 @@ with open(log, "a") as fh:
     fh.write(json.dumps({"argv": args, "stdin": stdin, "cwd": os.getcwd(),
                          "codex_home": sorted(os.listdir(os.environ["CODEX_HOME"])),
                          "codex_home_path": os.environ["CODEX_HOME"],
-                         "env": {k: os.environ.get(k) for k in ("OPENAI_API_KEY", "CLAUDECODE")}}) + "\n")
+                         "env": {k: os.environ.get(k) for k in
+                                 ("OPENAI_API_KEY", "CODEX_API_KEY", "CLAUDECODE", "NO_COLOR")}})
+             + "\n")
 mode = os.environ.get("FAKE_MODE", "ok")
 if args[:2] == ["login", "status"]:
     print("Not logged in" if mode == "notlogged" else "Logged in using ChatGPT")
@@ -98,6 +110,11 @@ if mode == "notlogged":
     print(json.dumps({"type": "error", "message": "Reconnecting... 2/5 (unexpected status 401 Unauthorized: Missing bearer)"}))
     print(json.dumps({"type": "turn.failed", "error": {"message": "unexpected status 401 Unauthorized"}}))
     sys.exit(1)
+if mode == "refresh":  # a token refresh: codex replaces the auth.json symlink by rename
+    auth = os.path.join(os.environ["CODEX_HOME"], "auth.json")
+    with open(auth + ".new", "w") as fh:
+        fh.write(json.dumps({"tokens": {"refresh_token": "rotated"}}))
+    os.replace(auth + ".new", auth)
 if mode == "todo":
     print(json.dumps({"type": "item.completed", "item": {"id": "t1", "type": "todo_list",
                                                          "items": [{"text": "answer"}]}}))
@@ -131,6 +148,12 @@ def fakes(isolated_env, monkeypatch):
     monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_BIN", str(_install(tmp, "claude", FAKE_CLAUDE)))
     monkeypatch.setenv("AUTOONTOLOGY_CODEX_BIN", str(_install(tmp, "codex", FAKE_CODEX)))
     monkeypatch.setenv("FAKE_ANSWERS", json.dumps([{"answer": "pong"}]))
+    # never the developer's own codex login: a private user CODEX_HOME per test
+    user = tmp / "user-codex"
+    user.mkdir(exist_ok=True)
+    (user / "auth.json").write_text(json.dumps({"tokens": {"refresh_token": "old"}}))
+    (user / "auth.json").chmod(0o600)
+    monkeypatch.setenv("CODEX_HOME", str(user))
 
     def calls():
         if not log.is_file():
@@ -225,6 +248,8 @@ def test_claude_json_schema_call(fakes, monkeypatch):
         "CLAUDECODE": None,
         "CLAUDE_CODE_ENTRYPOINT": None,
         "ANTHROPIC_API_KEY": None,
+        "ANTHROPIC_AUTH_TOKEN": None,
+        "NO_COLOR": "1",
         "CLAUDE_CODE_DISABLE_FILE_MENTIONS": "1",
         "CLAUDE_CODE_DISABLE_ATTACHMENTS": "1",
         "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1",

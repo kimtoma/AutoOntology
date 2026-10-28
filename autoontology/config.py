@@ -605,6 +605,15 @@ def model_profile_warnings(settings: Settings) -> list[str]:
     return warnings
 
 
+#: Values codex accepts for ``model_reasoning_effort`` (AUTOONTOLOGY_CODEX_REASONING_EFFORT).
+CODEX_REASONING_EFFORTS: tuple[str, ...] = ("minimal", "low", "medium", "high", "xhigh")
+
+
+def codex_reasoning_effort() -> str:
+    """AUTOONTOLOGY_CODEX_REASONING_EFFORT as set ("" = codex's default)."""
+    return os.environ.get("AUTOONTOLOGY_CODEX_REASONING_EFFORT", "").strip()
+
+
 def validate_model_profile(settings: Settings) -> list[str]:
     """Problems with the selected providers' configuration (empty list = valid)."""
     problems: list[str] = []
@@ -632,4 +641,10 @@ def validate_model_profile(settings: Settings) -> list[str]:
             problems.append(
                 f"{CLI_MODEL_VARS[settings.chat_provider]} {model!r} is not a valid model name"
             )
+    effort = codex_reasoning_effort()
+    if settings.chat_provider == "codex" and effort and effort not in CODEX_REASONING_EFFORTS:
+        problems.append(
+            f"AUTOONTOLOGY_CODEX_REASONING_EFFORT {effort[:40]!r} is not one of "
+            + ", ".join(CODEX_REASONING_EFFORTS)
+        )
     return problems
