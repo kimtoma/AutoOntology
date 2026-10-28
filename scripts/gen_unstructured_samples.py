@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Regenerate the binary samples in samples/unstructured/ from the Markdown sources.
+"""Regenerate the binary samples in samples/quickstart/documents/ from the Markdown sources.
 
     uv run --group dev python scripts/gen_unstructured_samples.py
 
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SAMPLES = ROOT / "samples" / "unstructured"
+SAMPLES = ROOT / "samples" / "quickstart" / "documents"
 FONT = Path("/System/Library/Fonts/Supplemental/AppleGothic.ttf")
 
 

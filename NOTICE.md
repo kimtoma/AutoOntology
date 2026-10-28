@@ -15,7 +15,8 @@ This repository also contains, unmodified and under their own licenses:
 
 - the Apache Ossie JSON Schemas (Apache License 2.0) in `third_party/ossie/` and
   `autoontology/export/schemas/ossie/`, with their `LICENSE` and `NOTICE` files;
-- a sample HWP file from rhwp (MIT) in `samples/unstructured/` and `tests/fixtures/hwp/`,
+- a sample HWP file from rhwp (MIT) in `samples/quickstart/documents/`,
+  `samples/hanbit/documents/` and `tests/fixtures/hwp/`,
   with its license text;
 - shadcn/ui component sources (MIT, Copyright (c) 2023 shadcn), adapted, in
   `ui/src/components/ui/`, with the licence text in `ui/src/components/ui/LICENSE.md`;

@@ -5,7 +5,8 @@ Run with (the service must be up on the ``.env`` ports: ``uv run autoontology up
 
     AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_build_e2e.py -s
 
-Registers ``hanbit`` (samples/structured) and ``hanbit-docs`` (samples/unstructured) when
+Registers ``hanbit`` (samples/quickstart/structured) and ``hanbit-docs``
+(samples/quickstart/documents) when
 missing, runs ``build`` (a first run on the local qwen3:8b profile takes ~30-45 min; a
 re-run only redoes the cheap steps), ``export``, then checks the unified ontology through
 the API of the running service.
@@ -41,9 +42,9 @@ def live():
         pytest.skip("upstream backend not running (uv run autoontology up)")
     store = Store.for_home(settings.home)
     if store.get_source(STRUCTURED) is None:
-        pipeline.add_source(store, str(REPO_ROOT / "samples" / "structured"), name=STRUCTURED)
+        pipeline.add_source(store, str(REPO_ROOT / "samples" / "quickstart" / "structured"), name=STRUCTURED)
     if store.get_source(DOCS) is None:
-        ensure_documents_source(store, DOCS, REPO_ROOT / "samples" / "unstructured")
+        ensure_documents_source(store, DOCS, REPO_ROOT / "samples" / "quickstart" / "documents")
     setup_job_logging(settings, console=True)
     return settings, store
 
