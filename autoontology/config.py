@@ -464,6 +464,19 @@ def resolve_triplet_field(models: dict[str, str], prefix: str, field_name: str) 
     )
 
 
+def model_profile_warnings(settings: Settings) -> list[str]:
+    """Configurations that run but probably not as intended (doctor shows them as WARN)."""
+    warnings: list[str] = []
+    model = settings.ollama_chat_model
+    if settings.chat_provider == "ollama" and not model.startswith("openai/"):
+        warnings.append(
+            f"AUTOONTOLOGY_OLLAMA_CHAT_MODEL {model!r} lacks the openai/ prefix: upstream then "
+            "uses its ChatNVIDIA client (60 s timeout) instead of ChatOpenAI; name an Ollama "
+            "alias such as openai/qwen3:8b"
+        )
+    return warnings
+
+
 def validate_model_profile(settings: Settings) -> list[str]:
     """Problems with the selected providers' configuration (empty list = valid)."""
     problems: list[str] = []

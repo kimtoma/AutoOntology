@@ -319,3 +319,12 @@ def test_kordoc_row_ok_and_omit_optional(isolated_env, monkeypatch):
     (settings.home / "kordoc" / "kordoc.version").write_text("4.24.13\nomit=optional\n")
     check = doctor.check_kordoc(settings)
     assert check.status == "WARN" and "PDF/OCR unavailable" in check.detail
+
+
+def test_ollama_chat_model_without_router_prefix_warns(isolated_env, monkeypatch):
+    """Review M-7: upstream picks ChatNVIDIA (60 s timeout) for names without openai/."""
+    monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_CHAT_MODEL", "qwen3:8b")
+    check = doctor.check_profile(Settings.from_env())
+    assert check.status == "WARN" and "openai/ prefix" in check.detail
+    monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_CHAT_MODEL", "openai/qwen3:8b")
+    assert doctor.check_profile(Settings.from_env()).status == "OK"

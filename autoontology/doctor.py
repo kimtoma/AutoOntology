@@ -15,6 +15,7 @@ from autoontology.config import (
     Settings,
     env_file_path,
     expand_model_profile,
+    model_profile_warnings,
     resolve_triplet_field,
     validate_model_profile,
 )
@@ -234,7 +235,17 @@ def check_profile(settings: Settings) -> Check:
     models = expand_model_profile(settings)
     chat = resolve_triplet_field(models, "REASONING", "MODEL") or "(upstream default)"
     embed = resolve_triplet_field(models, "EMBED", "MODEL") or "(upstream default)"
-    return Check(f"model profile {settings.model_profile}", "OK", f"chat {chat}, embed {embed}")
+    detail = f"chat {chat}, embed {embed}"
+    warnings = model_profile_warnings(settings)
+    if warnings:
+        return Check(
+            f"model profile {settings.model_profile}",
+            "WARN",
+            f"{detail}; " + "; ".join(warnings),
+            "set AUTOONTOLOGY_OLLAMA_CHAT_MODEL to an openai/<name> Ollama alias "
+            "(`uv run autoontology setup` creates openai/qwen3:8b)",
+        )
+    return Check(f"model profile {settings.model_profile}", "OK", detail)
 
 
 SETUP_OLLAMA = "uv run autoontology setup"
