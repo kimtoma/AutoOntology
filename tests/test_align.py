@@ -856,10 +856,11 @@ def test_identity_case4_auto_added_alias_is_no_evidence(approver_env):
 
 def _bad_first_run(settings, store, client, monkeypatch):
     """A run under the old rules: the 0.99 same was accepted and its aliases applied."""
-    monkeypatch.setattr(al, "apply_identity_policy", lambda v, *a, **k: (v, {}))
     judge = ApproverJudge()
-    first = _align(settings, store, client, judge, [])
-    monkeypatch.undo()
+    # a nested context: monkeypatch.undo() would also undo conftest's env isolation
+    with monkeypatch.context() as patch:
+        patch.setattr(al, "apply_identity_policy", lambda v, *a, **k: (v, {}))
+        first = _align(settings, store, client, judge, [])
     rows = {
         a.concept_name: a for a in AlignmentStore(store).list(store.get_source("hanbit-docs").id)
     }

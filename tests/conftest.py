@@ -33,6 +33,20 @@ _ISOLATED_VARS = [
     *upstream_model_var_names(),
 ]
 
+#: Every developer/shell variable the package or upstream reads, by prefix: unit tests
+#: start from none of them (integration tests keep the real environment).
+_SCRUBBED_PREFIXES = ("AUTOONTOLOGY_", "KORDOC_", "POSTGRES_", "LLM_", "SEMANTIC_LLM_")
+_SCRUBBED_NAMES = {"BACKEND_PORT", "INGESTION_SERVICE_URL", "APP_URL", *_ISOLATED_VARS}
+_KEPT = {"AUTOONTOLOGY_INTEGRATION"}
+
+
+def _scrub_env(monkeypatch) -> None:
+    for name in list(os.environ):
+        if name in _KEPT:
+            continue
+        if name in _SCRUBBED_NAMES or name.startswith(_SCRUBBED_PREFIXES):
+            monkeypatch.delenv(name)
+
 
 def pytest_collection_modifyitems(config, items):
     if os.environ.get("AUTOONTOLOGY_INTEGRATION") == "1":
@@ -51,6 +65,7 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
     if request.node.get_closest_marker("integration") is not None:
         return
     base = tmp_path_factory.mktemp("home")
+    _scrub_env(monkeypatch)
     # nor the repo's .env (it may point at a live service, e.g. the integration ports)
     monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(base / "absent.env"))
     monkeypatch.setenv("AUTOONTOLOGY_HOME", str(base / "home"))
@@ -60,6 +75,7 @@ def _isolated_home(request, tmp_path_factory, monkeypatch):
 @pytest.fixture
 def isolated_env(tmp_path, monkeypatch):
     """No repo .env and no model/AutoOntology vars from the developer's shell."""
+    _scrub_env(monkeypatch)
     monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(tmp_path / "absent.env"))
     for name in _ISOLATED_VARS:
         # setenv first so monkeypatch records the original state even when unset

@@ -168,3 +168,27 @@ def test_derived_keys_from_a_parent_are_not_user_settings(isolated_env, monkeypa
     assert "REASONING_MODEL" not in s.upstream_models
     assert "LLM_INVOKE_TIMEOUT_S" not in s.llm_limits
     assert expand_model_profile(s)["LLM_INVOKE_TIMEOUT_S"] == "180"
+
+
+def test_unit_tests_never_see_the_developer_env():
+    """Review M-6: no shell or repo-.env value reaches a unit test (run the suite with
+    e.g. POSTGRES_PORT=1 KORDOC_CLI=x AUTOONTOLOGY_CHAT_PROVIDER=openai to check)."""
+    import os
+
+    from autoontology.config import Settings, env_file_path
+
+    assert not env_file_path().is_file()
+    leaked = [
+        k
+        for k in os.environ
+        if k.startswith(("KORDOC_", "POSTGRES_", "LLM_"))
+        or k in {"BACKEND_PORT", "INGESTION_SERVICE_URL", "APP_URL"}
+        or (
+            k.startswith("AUTOONTOLOGY_")
+            and k not in {"AUTOONTOLOGY_HOME", "AUTOONTOLOGY_EXPORTS_DIR", "AUTOONTOLOGY_ENV_FILE"}
+            and k != "AUTOONTOLOGY_INTEGRATION"
+        )
+    ]
+    assert leaked == []
+    s = Settings.from_env()
+    assert (s.chat_provider, s.postgres_port, s.backend_port) == ("ollama", 5432, 3101)
