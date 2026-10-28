@@ -82,3 +82,24 @@ it("links to Build when there is no snapshot", async () => {
                                                  { status: 404, headers: { "content-type": "application/json" } }))
   expect(await screen.findByText("No ontology yet")).toBeInTheDocument()
 })
+
+it("says so when the ?focus node is not in the graph the server sent", async () => {
+  webgl.value = false
+  await renderGraph("/graph?focus=t9")
+  expect(await screen.findByText(/“t9” is not among the 2 best-connected nodes shown/)).toBeInTheDocument()
+  expect(document.getElementById("graph-detail")).toBeNull()
+})
+
+it("switches to all layers, and says so, when the ?focus node is in another layer", async () => {
+  webgl.value = false
+  const graph = {
+    ...GRAPH, truncated: false, counts: { nodes: 3, edges: 1, total_nodes: 3 },
+    nodes: [...GRAPH.nodes, { id: "c1", label: "Payment state", type: "concept", source: "docs",
+                              kind: "concept", origin: "document", layer: "documents" }],
+  }
+  await renderGraph("/graph?layer=structured&focus=c1", graph)
+  expect(await screen.findByText(/Switched to all layers to show “Payment state”/)).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByRole("radio", { name: "All" })).toHaveAttribute("aria-checked", "true"))
+  expect((await screen.findByText("Payment state", { selector: "h2" })).closest("#graph-detail"))
+    .toHaveAttribute("data-node", "c1")
+})

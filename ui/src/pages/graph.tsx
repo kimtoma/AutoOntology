@@ -285,13 +285,23 @@ export default function GraphPage() {
   // node once the data and the canvas are there
   const focusParam = params.get("focus")
   const focusedParam = useRef<string | null>(null)
+  // why the ?focus node is not where the link promised: absent from the graph, or only in
+  // another layer (the view then switches to all layers)
+  const [focusNote, setFocusNote] = useState<string | null>(null)
   useEffect(() => {
-    if (!focusParam || !q.data || size.width === 0 || focusedParam.current === focusParam) return
-    if (!q.data.nodes.some((n) => n.id === focusParam)) return
+    if (!focusParam || !q.data || !built || size.width === 0 || focusedParam.current === focusParam) return
     focusedParam.current = focusParam
+    const node = q.data.nodes.find((n) => n.id === focusParam)
+    if (!node) {
+      setFocusNote(q.data.truncated
+        ? `“${focusParam}” is not among the ${q.data.counts.nodes} best-connected nodes shown`
+        : `“${focusParam}” is not in the graph`)
+      return
+    }
+    setFocusNote(nodeById.has(focusParam) ? null : `Switched to all layers to show “${node.label}”`)
     pickSearch(focusParam)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusParam, q.data, size.width])
+  }, [focusParam, q.data, built, size.width])
 
   const Canvas = webgl ? Graph3D : Graph2D
   const legend = built?.legend ?? []
@@ -373,6 +383,14 @@ export default function GraphPage() {
           {q.data?.truncated && (
             <Badge variant="outline" className="border-warning/40 bg-warning/10 font-normal" id="graph-truncated">
               Showing the {q.data.counts.nodes} best-connected of {q.data.counts.total_nodes} nodes
+            </Badge>
+          )}
+          {focusNote && (
+            <Badge variant="outline" className="max-w-full gap-1 border-warning/40 bg-warning/10 pr-1 font-normal"
+                   id="graph-focus-note" role="status">
+              <span className="truncate">{focusNote}</span>
+              <button type="button" onClick={() => setFocusNote(null)} aria-label="Dismiss"
+                      className="rounded p-0.5 hover:bg-accent"><X className="size-3" aria-hidden /></button>
             </Badge>
           )}
           {expanded.length > 0 && (
