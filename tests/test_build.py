@@ -459,6 +459,31 @@ def test_resumed_align_rejudges_when_the_candidate_term_changed(env):
     assert "t-contract" not in accepted().values()
 
 
+def test_align_rejudges_when_the_candidate_description_changed(env):
+    """Recheck #2: the judge sees the candidate's description and synonyms, so a manual
+    change of either re-judges the concept (judged=1) instead of reusing the cached
+    verdict; what apply itself wrote (its synonyms) does not."""
+    add_structured(env)
+    add_documents(env)
+    client = env["client"]
+    assert run(env).status == "succeeded"
+
+    def judged():
+        result = run(env)
+        assert result.status == "succeeded", result.problems
+        return result.details["align:hanbit-docs"]["judged"]
+
+    assert judged() == 0  # only apply's own synonyms changed since: the cache holds
+    client.terms["t-contract"]["description"] = "판매 계약을 제외한 고용 계약"
+    assert judged() == 1
+    assert judged() == 0
+    client.terms["t-contract"]["synonyms"] = [
+        *client.terms["t-contract"].get("synonyms", []),
+        "고용 약정",
+    ]
+    assert judged() == 1
+
+
 def test_build_records_the_documents_source_on_the_aliases_it_adds(env):
     add_structured(env)
     add_documents(env)

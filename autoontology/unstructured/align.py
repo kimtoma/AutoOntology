@@ -186,11 +186,42 @@ def candidate_payload(t: TermInfo) -> dict[str, Any]:
     }
 
 
-def judge_key(concept: dict[str, Any], candidates: list[dict[str, Any]], model: str) -> str:
-    """Cache key of one judge call: same concept, same candidate Terms (id, name, columns),
-    model and prompt version = same verdict. Term synonyms and descriptions are left out on
-    purpose: ``apply`` itself changes them, and a re-run must not re-judge because of that."""
-    terms = [{k: c.get(k) for k in ("id", "name", "columns")} for c in candidates]
+def judge_key(
+    concept: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    model: str,
+    *,
+    auto_added: dict[str, Sequence[str]] | None = None,
+    auto_descriptions: dict[str, set[str]] | None = None,
+) -> str:
+    """Cache key of one judge call: same concept, same candidate Terms (id, name, columns,
+    description, synonyms), model and prompt version = same verdict. Only what ``apply``
+    itself wrote is left out, by recorded provenance: the synonyms AutoOntology added
+    (*auto_added*: term id -> aliases, compared by :func:`alias_key`) and a description it
+    set (*auto_descriptions*: term id -> texts; :data:`ANY_DESCRIPTION` when the text was
+    not recorded) or the upstream fallback it replaces, so a re-run does not re-judge because of its own writes but a manual
+    or upstream change of either re-judges."""
+    added = auto_added or {}
+    descriptions = auto_descriptions or {}
+    terms = []
+    for c in candidates:
+        tid = c.get("id")
+        mine = {alias_key(a) for a in added.get(tid, ())}
+        description = str(c.get("description") or "").strip()
+        auto = descriptions.get(tid, set())
+        if (
+            ANY_DESCRIPTION in auto
+            or description in auto
+            or description.startswith(FALLBACK_TERM_PREFIX)  # what apply may replace
+        ):
+            description = ""
+        terms.append(
+            {
+                **{k: c.get(k) for k in ("id", "name", "columns")},
+                "description": description,
+                "synonyms": [x for x in c.get("synonyms") or [] if alias_key(x) not in mine],
+            }
+        )
     blob = json.dumps(
         {
             "v": prompts.ALIGN_PROMPT_VERSION,
@@ -203,6 +234,9 @@ def judge_key(concept: dict[str, Any], candidates: list[dict[str, Any]], model: 
     )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
+
+#: :func:`judge_key`: a Term whose description apply set before the text was recorded.
+ANY_DESCRIPTION = "\0any"
 
 Judge = Callable[[dict[str, Any], list[dict[str, Any]]], AlignmentVerdict]
 
@@ -657,4 +691,5 @@ def apply_patch(patch: TermPatch, writer: TermWriter) -> dict[str, Any]:
     if patch.description is not None:
         writer.patch_description(patch.term_id, patch.description)
         result["description_set"] = True
+        result["description"] = patch.description  # provenance for the judge cache
     return result

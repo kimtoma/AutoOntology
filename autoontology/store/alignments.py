@@ -229,6 +229,24 @@ class AlignmentStore:
                     (now_iso(), term_id, alias),
                 )
 
+    def auto_descriptions(self) -> dict[str, set[str]]:
+        """term id -> the descriptions apply set on it (``applied.description``); a record
+        from before the text was kept yields ``ANY_DESCRIPTION`` for its Term."""
+        from autoontology.unstructured.align import ANY_DESCRIPTION
+
+        out: dict[str, set[str]] = {}
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT applied_json FROM alignments WHERE applied_json LIKE '%description_set%'"
+            ).fetchall()
+        for (raw,) in rows:
+            applied = json.loads(raw or "{}")
+            if not applied.get("description_set") or not applied.get("term_id"):
+                continue
+            text = str(applied.get("description") or "").strip()
+            out.setdefault(applied["term_id"], set()).add(text or ANY_DESCRIPTION)
+        return out
+
     def reassign_alias_source(self, term_id: str, alias: str, source_id: str) -> None:
         """``source rm``: a live alias the removed source added that *source_id* still
         supports becomes that source's, so its own removal later takes the alias off."""

@@ -313,6 +313,7 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
     stats = {"judged": 0, "cached": 0, "resumed": 0, "failed": 0, "proposals": 0}
     failed: list[dict[str, str]] = []
     auto_added = ctx.aligns.alias_additions()  # synonyms AutoOntology wrote: never evidence
+    auto_descriptions = ctx.aligns.auto_descriptions()  # left out of the judge key too
 
     def guard(
         raw: al.ValidatedVerdict, concept: al.ConceptInfo
@@ -344,7 +345,11 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
         ]
         key = (
             al.judge_key(
-                al.concept_payload(concept), [al.candidate_payload(t) for t in cand_terms], model
+                al.concept_payload(concept),
+                [al.candidate_payload(t) for t in cand_terms],
+                model,
+                auto_added=auto_added,
+                auto_descriptions=auto_descriptions,
             )
             if found
             else None
