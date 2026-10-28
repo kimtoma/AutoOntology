@@ -32,7 +32,7 @@ def test_public_patch_still_has_no_synonyms_field():
 
 def test_term_table_has_a_synonyms_text_array():
     schema = _src("dal/schema.py")
-    block = schema[schema.index('term = Table(\n    "term",'):]
+    block = schema[schema.index('term = Table(\n    "term",') :]
     block = block[: block.index("\n)\n")]
     assert re.search(r'Column\("synonyms", ARRAY\(Text\)', block)
     assert "*_edited()" in block  # the `modified` column the write stamps
@@ -83,7 +83,7 @@ def test_store_conn_has_query_write():
 
 def test_term_edited_columns_include_modified_by():
     block = _src("dal/schema.py")
-    edited = block[block.index("def _edited()"):]
+    edited = block[block.index("def _edited()") :]
     edited = edited[: edited.index("\ndef ")]
     assert 'Column("modified", DateTime' in edited and 'Column("modified_by", Text' in edited
 
@@ -121,13 +121,24 @@ def test_add_synonyms_merges_inside_the_transaction(upstream_env, monkeypatch):
         yield
         log.append("commit")
 
-    monkeypatch.setattr(ut, "require_internals", lambda: {
-        **real, "store": lambda: fake, "write_transaction": tx,
-        "refresh_term_embeddings": lambda term_id, refresh_dependent_attrs: log.append(
-            ("refresh", term_id, refresh_dependent_attrs))})
+    monkeypatch.setattr(
+        ut,
+        "require_internals",
+        lambda: {
+            **real,
+            "store": lambda: fake,
+            "write_transaction": tx,
+            "refresh_term_embeddings": lambda term_id, refresh_dependent_attrs: log.append(
+                ("refresh", term_id, refresh_dependent_attrs)
+            ),
+        },
+    )
     out = ut.add_term_synonyms(upstream_env, "t1", ["계약", "계약서", "contracts"])
-    assert out == {"synonyms": ["계약", "약정", "계약서"], "added": ["계약서"],
-                   "embeddings_refreshed": True}
+    assert out == {
+        "synonyms": ["계약", "약정", "계약서"],
+        "added": ["계약서"],
+        "embeddings_refreshed": True,
+    }
     assert log[0] == "begin" and log[1] == ("select", True)  # FOR UPDATE, in the tx
     kind, params = log[2]
     assert kind == "update" and params["synonyms"] == ["계약", "약정", "계약서"]
@@ -148,8 +159,7 @@ def test_refresh_failure_is_reported_not_raised(upstream_env, monkeypatch):
     def boom(term_id, refresh_dependent_attrs):
         raise RuntimeError("vdb down")
 
-    monkeypatch.setattr(ut, "require_internals",
-                        lambda: {**real, "refresh_term_embeddings": boom})
+    monkeypatch.setattr(ut, "require_internals", lambda: {**real, "refresh_term_embeddings": boom})
     assert ut.refresh_term(upstream_env, "t1") is False
 
 
@@ -184,14 +194,29 @@ def _catalog_sqlite():
             "CREATE TABLE column__foreign_key (source_column_id TEXT, target_column_id TEXT)",
         ):
             c.execute(sa.text(ddl))
-        c.execute(sa.text("INSERT INTO catalog_database VALUES ('dA', 'autoontology_src_a'), "
-                          "('dB', 'autoontology_src_b')"))
-        c.execute(sa.text("INSERT INTO catalog_schema VALUES ('sA', 'dA', 'public'), "
-                          "('sB', 'dB', 'public')"))
-        c.execute(sa.text("INSERT INTO catalog_table VALUES ('tA', 'sA', 'customers'), "
-                          "('tB', 'sB', 'customers')"))
-        c.execute(sa.text("INSERT INTO catalog_column VALUES ('c1', 'tA', 'id', 'bigint'), "
-                          "('c2', 'tA', 'name', 'text')"))
+        c.execute(
+            sa.text(
+                "INSERT INTO catalog_database VALUES ('dA', 'autoontology_src_a'), "
+                "('dB', 'autoontology_src_b')"
+            )
+        )
+        c.execute(
+            sa.text(
+                "INSERT INTO catalog_schema VALUES ('sA', 'dA', 'public'), ('sB', 'dB', 'public')"
+            )
+        )
+        c.execute(
+            sa.text(
+                "INSERT INTO catalog_table VALUES ('tA', 'sA', 'customers'), "
+                "('tB', 'sB', 'customers')"
+            )
+        )
+        c.execute(
+            sa.text(
+                "INSERT INTO catalog_column VALUES ('c1', 'tA', 'id', 'bigint'), "
+                "('c2', 'tA', 'name', 'text')"
+            )
+        )
         c.execute(sa.text("INSERT INTO column__foreign_key VALUES ('c2', 'c1')"))
         c.execute(sa.text("INSERT INTO term VALUES ('shared', 'Customers'), ('gone', 'Old')"))
         c.execute(sa.text("INSERT INTO table__term VALUES ('tA', 'shared'), ('tB', 'shared')"))
@@ -212,9 +237,14 @@ def test_reset_statements_detach_shared_terms_and_drop_orphans(upstream_env):
     with engine.begin() as c:
         rows = [dict(r._mapping) for r in c.execute(us.snapshot_statement(s, "autoontology_src_a"))]
         snap = us.snapshot_from_rows(rows)
-        assert snap == {"public.customers": {"id": "tA", "columns": {"id": "bigint",
-                                                                     "name": "text"},
-                                             "terms": ["shared"], "fk_columns": ["name"]}}
+        assert snap == {
+            "public.customers": {
+                "id": "tA",
+                "columns": {"id": "bigint", "name": "text"},
+                "terms": ["shared"],
+                "fk_columns": ["name"],
+            }
+        }
         detached = c.execute(us.detach_statement(s, "autoontology_src_a")).fetchall()
         assert [r[0] for r in detached] == ["shared"]
         links = c.execute(sa.text("SELECT table_id, term_id FROM table__term")).fetchall()
@@ -237,8 +267,7 @@ def test_reset_order_and_blank_name(upstream_env, monkeypatch):
     from autoontology.engine import upstream_semantic as us
 
     calls = []
-    monkeypatch.setattr(reset, "delete_semantic_layer",
-                        lambda db: calls.append(("reset", db)) or 2)
+    monkeypatch.setattr(reset, "delete_semantic_layer", lambda db: calls.append(("reset", db)) or 2)
 
     class _Conn:
         def query_write(self, stmt):
@@ -248,8 +277,12 @@ def test_reset_order_and_blank_name(upstream_env, monkeypatch):
     monkeypatch.setattr(session, "store", lambda: _Conn())
     monkeypatch.setattr(session, "write_transaction", contextlib.nullcontext)
     out = us.reset_database_semantics(upstream_env, "autoontology_src_a", stale_table_ids=["t"])
-    assert calls == [("reset", "autoontology_src_a"), ("write", "table__term"),
-                     ("write", "term"), ("write", "column_attribute")]
+    assert calls == [
+        ("reset", "autoontology_src_a"),
+        ("write", "table__term"),
+        ("write", "term"),
+        ("write", "column_attribute"),
+    ]
     assert out["detached_terms"] == ["shared"] and out["vectors_removed"] == 2
     with pytest.raises(ValueError):
         us.reset_database_semantics(upstream_env, " ")
@@ -281,14 +314,25 @@ def test_remove_synonyms_is_a_reviewed_repair_with_refresh(upstream_env, monkeyp
         yield
         log.append("commit")
 
-    monkeypatch.setattr(ut, "require_internals", lambda: {
-        **real, "store": lambda: fake, "write_transaction": tx,
-        "refresh_term_embeddings": lambda term_id, refresh_dependent_attrs: log.append(
-            ("refresh", term_id, refresh_dependent_attrs))})
+    monkeypatch.setattr(
+        ut,
+        "require_internals",
+        lambda: {
+            **real,
+            "store": lambda: fake,
+            "write_transaction": tx,
+            "refresh_term_embeddings": lambda term_id, refresh_dependent_attrs: log.append(
+                ("refresh", term_id, refresh_dependent_attrs)
+            ),
+        },
+    )
     out = ut.remove_term_synonyms(upstream_env, "t1", ["승인권자", "승인자", "승인담당자"])
     # "승인자 목록" contains 승인자 but is a different alias: kept (no substring removal)
-    assert out == {"synonyms": ["계약서", "승인자 목록"],
-                   "removed": ["승인권자", "승인자", "승인 담당자"], "embeddings_refreshed": True}
+    assert out == {
+        "synonyms": ["계약서", "승인자 목록"],
+        "removed": ["승인권자", "승인자", "승인 담당자"],
+        "embeddings_refreshed": True,
+    }
     assert log[:2] == ["begin", ("select", True)]
     assert log[2][0] == "update" and log[2][1]["synonyms"] == ["계약서", "승인자 목록"]
     assert log[3] == "commit" and log[4] == ("refresh", "t1", False)

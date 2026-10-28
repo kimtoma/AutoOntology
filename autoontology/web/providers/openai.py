@@ -28,8 +28,9 @@ class OpenAIProvider(PassthroughProvider):
     name = "openai"
     label = "the OpenAI-compatible endpoint"
 
-    def __init__(self, settings: Settings,
-                 transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None
+    ) -> None:
         super().__init__(settings.openai_base_url, transport)
         self.settings = settings
         self._key = settings.openai_api_key
@@ -54,9 +55,19 @@ class OpenAIProvider(PassthroughProvider):
 
     def status(self, *, refresh: bool = False) -> ProviderStatus:
         if not self.base:
-            return ProviderStatus(self.name, False, False, "AUTOONTOLOGY_OPENAI_BASE_URL is "
-                                  "not set", "set AUTOONTOLOGY_OPENAI_BASE_URL in .env")
+            return ProviderStatus(
+                self.name,
+                False,
+                False,
+                "AUTOONTOLOGY_OPENAI_BASE_URL is not set",
+                "set AUTOONTOLOGY_OPENAI_BASE_URL in .env",
+            )
         detail = f"{self.base} model {self.settings.openai_chat_model or '(unset)'}"
-        return ProviderStatus(self.name, True, bool(self._key), detail,
-                              "" if self._key else "set AUTOONTOLOGY_OPENAI_API_KEY in .env",
-                              self.models())
+        return ProviderStatus(
+            self.name,
+            True,
+            bool(self._key),
+            detail,
+            "" if self._key else "set AUTOONTOLOGY_OPENAI_API_KEY in .env",
+            self.models(),
+        )

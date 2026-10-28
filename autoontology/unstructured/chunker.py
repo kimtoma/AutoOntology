@@ -55,6 +55,7 @@ def count_tokens(text: str) -> int:
 def env_sizes() -> tuple[int, int, int]:
     """``(max, overlap, pack)`` from ``AUTOONTOLOGY_CHUNK_TOKENS`` /
     ``AUTOONTOLOGY_CHUNK_OVERLAP_TOKENS`` / ``AUTOONTOLOGY_CHUNK_PACK_TOKENS``."""
+
     def read(name: str, default: int) -> int:
         raw = os.environ.get(name, "").strip()
         try:
@@ -65,9 +66,11 @@ def env_sizes() -> tuple[int, int, int]:
             raise ValueError(f"{name} must be >= 0, got {value}")
         return value
 
-    return (read("AUTOONTOLOGY_CHUNK_TOKENS", DEFAULT_MAX_TOKENS),
-            read("AUTOONTOLOGY_CHUNK_OVERLAP_TOKENS", DEFAULT_OVERLAP_TOKENS),
-            read("AUTOONTOLOGY_CHUNK_PACK_TOKENS", DEFAULT_PACK_TOKENS))
+    return (
+        read("AUTOONTOLOGY_CHUNK_TOKENS", DEFAULT_MAX_TOKENS),
+        read("AUTOONTOLOGY_CHUNK_OVERLAP_TOKENS", DEFAULT_OVERLAP_TOKENS),
+        read("AUTOONTOLOGY_CHUNK_PACK_TOKENS", DEFAULT_PACK_TOKENS),
+    )
 
 
 @dataclass
@@ -122,8 +125,11 @@ def _split_text(text: str, max_tokens: int, overlap: int) -> list[str]:
             units.append(paragraph)
             continue
         for sentence in _sentences(paragraph):
-            units.extend([sentence] if count_tokens(sentence) <= max_tokens
-                         else _hard_split(sentence, max_tokens))
+            units.extend(
+                [sentence]
+                if count_tokens(sentence) <= max_tokens
+                else _hard_split(sentence, max_tokens)
+            )
     pieces: list[str] = []
     current: list[str] = []
     for unit in units:
@@ -146,11 +152,14 @@ def _split_text(text: str, max_tokens: int, overlap: int) -> list[str]:
 
 def _split_table(text: str, max_tokens: int) -> list[str]:
     lines = [line for line in text.split("\n") if line.strip()]
-    header = lines[:2] if len(lines) > 1 and set(lines[1].replace("|", "").strip()) <= set("-: ") \
+    header = (
+        lines[:2]
+        if len(lines) > 1 and set(lines[1].replace("|", "").strip()) <= set("-: ")
         else lines[:1]
+    )
     pieces: list[str] = []
     current = list(header)
-    for line in lines[len(header):]:
+    for line in lines[len(header) :]:
         if len(current) > len(header) and count_tokens("\n".join([*current, line])) > max_tokens:
             pieces.append("\n".join(current))
             current = list(header)
@@ -164,10 +173,14 @@ def _pieces(section: Section, max_tokens: int, overlap: int) -> list[_Piece]:
     tokens = count_tokens(section.text)
     if tokens <= max_tokens:
         return [_Piece(section.path, section.page, section.kind, section.text, tokens, True)]
-    parts = (_split_table(section.text, max_tokens) if section.kind == "table"
-             else _split_text(section.text, max_tokens, overlap))
-    return [_Piece(section.path, section.page, section.kind, p, count_tokens(p), False)
-            for p in parts]
+    parts = (
+        _split_table(section.text, max_tokens)
+        if section.kind == "table"
+        else _split_text(section.text, max_tokens, overlap)
+    )
+    return [
+        _Piece(section.path, section.page, section.kind, p, count_tokens(p), False) for p in parts
+    ]
 
 
 def _common_path(paths: list[str]) -> str:
@@ -187,20 +200,30 @@ def _with_heading(piece: _Piece) -> str:
     return f"### {leaf}\n{piece.text}"
 
 
-def chunk(document: Document, max_tokens: int = DEFAULT_MAX_TOKENS,
-          overlap_tokens: int = DEFAULT_OVERLAP_TOKENS,
-          pack_tokens: int = DEFAULT_PACK_TOKENS) -> list[Chunk]:
+def chunk(
+    document: Document,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    overlap_tokens: int = DEFAULT_OVERLAP_TOKENS,
+    pack_tokens: int = DEFAULT_PACK_TOKENS,
+) -> list[Chunk]:
     if max_tokens <= 0:
         raise ValueError("max_tokens must be > 0")
     pack_tokens = min(pack_tokens, max_tokens)
-    pieces = [p for s in document.sections if s.text.strip()
-              for p in _pieces(s, max_tokens, min(overlap_tokens, max_tokens // 2))]
+    pieces = [
+        p
+        for s in document.sections
+        if s.text.strip()
+        for p in _pieces(s, max_tokens, min(overlap_tokens, max_tokens // 2))
+    ]
     groups: list[list[_Piece]] = []
     for piece in pieces:
         last = groups[-1] if groups else None
-        if (last and piece.whole and all(p.whole for p in last)
-                and count_tokens("\n\n".join(_with_heading(p) for p in [*last, piece]))
-                <= pack_tokens):
+        if (
+            last
+            and piece.whole
+            and all(p.whole for p in last)
+            and count_tokens("\n\n".join(_with_heading(p) for p in [*last, piece])) <= pack_tokens
+        ):
             last.append(piece)
         else:
             groups.append([piece])
@@ -212,10 +235,16 @@ def chunk(document: Document, max_tokens: int = DEFAULT_MAX_TOKENS,
             path = _common_path([p.path for p in group])
             text = "\n\n".join(_with_heading(p) if p.path != path else p.text for p in group)
         kinds = {p.kind for p in group}
-        chunks.append(Chunk(index=len(chunks), total=0, section_path=path,
-                            page=next((p.page for p in group if p.page), None),
-                            kind=kinds.pop() if len(kinds) == 1 else "mixed", text=text,
-                            tokens=count_tokens(text)))
+        chunks.append(
+            Chunk(
+                index=len(chunks),
+                total=0,
+                section_path=path,
+                page=next((p.page for p in group if p.page), None),
+                kind=kinds.pop() if len(kinds) == 1 else "mixed",
+                text=text,
+                tokens=count_tokens(text),
+            )
+        )
     total = len(chunks)
-    return [Chunk(c.index, total, c.section_path, c.page, c.kind, c.text, c.tokens)
-            for c in chunks]
+    return [Chunk(c.index, total, c.section_path, c.page, c.kind, c.text, c.tokens) for c in chunks]

@@ -46,10 +46,18 @@ def test_dedupe_identifiers():
 
 @pytest.mark.parametrize(
     ("duck", "pg"),
-    [("BIGINT", "bigint"), ("VARCHAR", "text"), ("DATE", "date"), ("DOUBLE", "double precision"),
-     ("DECIMAL(10,2)", "numeric(10,2)"), ("BOOLEAN", "boolean"),
-     ("TIMESTAMP WITH TIME ZONE", "timestamptz"), ("STRUCT(a INTEGER)", "jsonb"),
-     ("INTEGER[]", "jsonb"), ("SOMETHING", "text")],
+    [
+        ("BIGINT", "bigint"),
+        ("VARCHAR", "text"),
+        ("DATE", "date"),
+        ("DOUBLE", "double precision"),
+        ("DECIMAL(10,2)", "numeric(10,2)"),
+        ("BOOLEAN", "boolean"),
+        ("TIMESTAMP WITH TIME ZONE", "timestamptz"),
+        ("STRUCT(a INTEGER)", "jsonb"),
+        ("INTEGER[]", "jsonb"),
+        ("SOMETHING", "text"),
+    ],
 )
 def test_duckdb_to_pg_type(duck, pg):
     con = duckdb.connect()
@@ -61,16 +69,20 @@ def test_duckdb_to_pg_type(duck, pg):
 
 def _write_samples(d):
     (d / "고객 목록.csv").write_bytes(
-        "﻿고객ID,고객 명,금액,등록일,금액\nC001,가나,1000,2024-01-02,3\nC002,다라,2500,2024-02-03,4\n"
-        .encode()
+        "﻿고객ID,고객 명,금액,등록일,금액\nC001,가나,1000,2024-01-02,3\nC002,다라,2500,2024-02-03,4\n".encode()
     )
     (d / "t.tsv").write_text("a\tb\n1\tx\n", encoding="utf-8")
     (d / "e.jsonl").write_text(
-        json.dumps({"id": 1, "meta": {"k": "v"}}) + "\n" + json.dumps({"id": 2, "meta": None}) + "\n"
+        json.dumps({"id": 1, "meta": {"k": "v"}})
+        + "\n"
+        + json.dumps({"id": 2, "meta": None})
+        + "\n"
     )
     pd.DataFrame({"x": [1.5, 2.5]}).to_parquet(d / "p.parquet")
     with pd.ExcelWriter(d / "book.xlsx") as xw:
-        pd.DataFrame({"이름": ["a", "b"], "값": [1, 2]}).to_excel(xw, sheet_name="시트1", index=False)
+        pd.DataFrame({"이름": ["a", "b"], "값": [1, 2]}).to_excel(
+            xw, sheet_name="시트1", index=False
+        )
         pd.DataFrame({"mixed": [1, "two"]}).to_excel(xw, sheet_name="Other", index=False)
     with sqlite3.connect(d / "s.sqlite") as c:
         c.execute("create table Orders (id integer, Name text)")
@@ -100,7 +112,10 @@ def test_read_tables_plans_types_and_names(tmp_path):
     assert set(plans) == {"고객_목록", "t", "e", "p", "book_시트1", "book_other", "orders"}
     cust = plans["고객_목록"]
     assert [(c.name, c.pg_type) for c in cust.columns] == [
-        ("고객id", "text"), ("고객_명", "text"), ("금액", "bigint"), ("등록일", "date"),
+        ("고객id", "text"),
+        ("고객_명", "text"),
+        ("금액", "bigint"),
+        ("등록일", "date"),
         ("금액_1", "bigint"),
     ]
     assert duck.execute(cust.select_sql).fetchall()[0][0] == "C001"
@@ -155,7 +170,13 @@ def test_duckdb_renames_duplicate_csv_headers_before_dedupe(tmp_path):
     path.write_text("금액,금액,Amount,amount,a b,a_b\n1,2,3,4,5,6\n", encoding="utf-8")
     (plan,) = read_tables([path], duckdb.connect(), [])
     assert [c.name for c in plan.columns] == [
-        "금액", "금액_1", "amount", "amount_1", "a_b", "a_b_2"]
+        "금액",
+        "금액_1",
+        "amount",
+        "amount_1",
+        "a_b",
+        "a_b_2",
+    ]
 
 
 def test_sqlite_nullable_integers_keep_precision(tmp_path):
@@ -163,8 +184,9 @@ def test_sqlite_nullable_integers_keep_precision(tmp_path):
     db = tmp_path / "big.sqlite"
     with sqlite3.connect(db) as conn:
         conn.execute("CREATE TABLE t (id INTEGER, ref INTEGER)")
-        conn.executemany("INSERT INTO t VALUES (?, ?)",
-                         [(1, 9007199254740993), (2, None), (3, 9007199254740992)])
+        conn.executemany(
+            "INSERT INTO t VALUES (?, ?)", [(1, 9007199254740993), (2, None), (3, 9007199254740992)]
+        )
     duck = duckdb.connect()
     (plan,) = read_tables([db], duck, [])
     assert {c.name: c.pg_type for c in plan.columns} == {"id": "bigint", "ref": "bigint"}
@@ -186,8 +208,11 @@ def test_manifest_and_diff(tmp_path):
     (tmp_path / "customers.csv").write_text("id,name,loyalty_score\n1,a,0.5\n")
     (tmp_path / "items.csv").write_text("sku\nx\n")
     new = table_manifest(read_tables(discover_files(tmp_path), duckdb.connect(), []))
-    assert diff_manifest(old, new) == {"added": ["items"], "removed": ["orders"],
-                                       "changed": ["customers"]}
+    assert diff_manifest(old, new) == {
+        "added": ["items"],
+        "removed": ["orders"],
+        "changed": ["customers"],
+    }
     assert diff_manifest(new, new) == {"added": [], "removed": [], "changed": []}
     retyped = {**new, "items": {**new["items"], "columns": {"sku": "bigint"}}}
     assert diff_manifest(new, retyped)["changed"] == ["items"]
@@ -199,12 +224,17 @@ def test_sqlite_blobs_stay_binary(tmp_path):
     db = tmp_path / "blob.sqlite"
     with sqlite3.connect(db) as conn:
         conn.execute("CREATE TABLE t (id INTEGER, payload BLOB, note TEXT)")
-        conn.executemany("INSERT INTO t VALUES (?, ?, ?)", [
-            (9007199254740993, b"abc", "a"), (None, b"\xff\x00", None), (2, None, "c")])
+        conn.executemany(
+            "INSERT INTO t VALUES (?, ?, ?)",
+            [(9007199254740993, b"abc", "a"), (None, b"\xff\x00", None), (2, None, "c")],
+        )
     duck = duckdb.connect()
     (plan,) = read_tables([db], duck, [])
     assert {c.name: c.pg_type for c in plan.columns} == {
-        "id": "bigint", "payload": "bytea", "note": "text"}
+        "id": "bigint",
+        "payload": "bytea",
+        "note": "text",
+    }
     rows = duck.execute(plan.select_sql).fetchall()
     assert rows == [(9007199254740993, b"abc", "a"), (None, b"\xff\x00", None), (2, None, "c")]
 
@@ -227,8 +257,13 @@ def test_xlsx_keeps_text_cells_and_exact_integers(tmp_path):
     duck = duckdb.connect()
     (plan,) = read_tables([path], duck, [])
     assert {c.name: c.pg_type for c in plan.columns} == {
-        "고객id": "text", "count": "bigint", "ratio": "double precision", "active": "boolean",
-        "since": "timestamp", "mixed": "text"}
+        "고객id": "text",
+        "count": "bigint",
+        "ratio": "double precision",
+        "active": "boolean",
+        "since": "timestamp",
+        "mixed": "text",
+    }
     rows = duck.execute(plan.select_sql).fetchall()
     assert [r[0] for r in rows] == ["9007199254740993", "9007199254740992", None]
     assert [r[1] for r in rows] == [123456789012345, None, 3]  # was float64 before
@@ -247,8 +282,14 @@ def test_xlsx_out_of_range_numbers_and_dates_load_exactly(tmp_path):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(["big", "valid_to", "valid_from", "plain_date"])
-    ws.append([100000000000000000000, dt.datetime(9999, 12, 31), dt.datetime(1600, 1, 1),
-               dt.datetime(2024, 1, 2)])
+    ws.append(
+        [
+            100000000000000000000,
+            dt.datetime(9999, 12, 31),
+            dt.datetime(1600, 1, 1),
+            dt.datetime(2024, 1, 2),
+        ]
+    )
     ws.append([None, None, dt.datetime(2020, 5, 6), None])
     path = tmp_path / "ranges.xlsx"
     wb.save(path)
@@ -272,7 +313,6 @@ def test_xlsx_out_of_range_numbers_and_dates_load_exactly(tmp_path):
     assert cast == "DATE" and series.tolist() == ["9999-12-31", None]
 
 
-
 def test_oversized_value_past_duckdbs_sample_keeps_the_planned_type(tmp_path):
     """Fix wave 4 #3: DuckDB types an object column from a sample (1000 rows); a value
     beyond int64 at row 1999 of 2001 must still plan numeric and load exactly."""
@@ -292,8 +332,10 @@ def test_oversized_value_past_duckdbs_sample_keeps_the_planned_type(tmp_path):
         conn.executemany("INSERT INTO b VALUES (?)", blobs)
     duck = duckdb.connect()
     plans = {p.name: p for p in read_tables([xlsx, db], duck, [])}
-    assert {c.name: c.pg_type for c in plans["late"].columns} == {"id": "bigint",
-                                                                  "amount": "numeric"}
+    assert {c.name: c.pg_type for c in plans["late"].columns} == {
+        "id": "bigint",
+        "amount": "numeric",
+    }
     rows = duck.execute(plans["late"].select_sql).fetchall()
     assert rows[1999] == (1999, 100000000000000000000) and rows[5] == (5, 5)
     assert [c.pg_type for c in plans["b"].columns] == ["bytea"]
@@ -343,10 +385,13 @@ class _CopyConn:
         return _Cur()
 
 
-@pytest.mark.parametrize(("headers", "names"), [
-    ([1, "1", "keep"], ["1", "1_2", "keep"]),
-    (["ID", "id", "keep"], ["id", "id_2", "keep"]),
-])
+@pytest.mark.parametrize(
+    ("headers", "names"),
+    [
+        ([1, "1", "keep"], ["1", "1_2", "keep"]),
+        (["ID", "id", "keep"], ["id", "id_2", "keep"]),
+    ],
+)
 def test_xlsx_colliding_headers_keep_every_column(tmp_path, headers, names):
     """Fix wave 5 #2: numeric header 1 vs text "1" lost a column, ID vs id (DuckDB is
     case-insensitive) copied one column's values into both."""

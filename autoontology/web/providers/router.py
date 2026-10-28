@@ -29,9 +29,12 @@ logger = logging.getLogger("autoontology.providers")
 class Registry:
     """The chat provider of one service process."""
 
-    def __init__(self, settings: Settings,
-                 transport: httpx.AsyncBaseTransport | None = None,
-                 providers: dict[str, PassthroughProvider] | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        providers: dict[str, PassthroughProvider] | None = None,
+    ) -> None:
         self.settings = settings
         if providers is not None:
             self.providers = dict(providers)
@@ -52,8 +55,11 @@ class Registry:
             raise ProviderError(400, "unknown_provider", f"no provider {name!r}") from None
 
 
-def build_router(settings: Settings, transport: httpx.AsyncBaseTransport | None = None,
-                 registry: Registry | None = None) -> APIRouter:
+def build_router(
+    settings: Settings,
+    transport: httpx.AsyncBaseTransport | None = None,
+    registry: Registry | None = None,
+) -> APIRouter:
     router = APIRouter()
     registry = registry or Registry(settings, transport)
     router.registry = registry  # type: ignore[attr-defined]
@@ -63,11 +69,25 @@ def build_router(settings: Settings, transport: httpx.AsyncBaseTransport | None 
         try:
             body = json.loads(await request.body())
         except ValueError:
-            return JSONResponse(status_code=400, content={"error": {
-                "message": "request body is not valid JSON", "type": "invalid_request"}})
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "request body is not valid JSON",
+                        "type": "invalid_request",
+                    }
+                },
+            )
         if not isinstance(body, dict):
-            return JSONResponse(status_code=400, content={"error": {
-                "message": "request body must be a JSON object", "type": "invalid_request"}})
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "request body must be a JSON object",
+                        "type": "invalid_request",
+                    }
+                },
+            )
         return await registry.active.forward(body, request)
 
     @router.get("/v1/models")
@@ -77,7 +97,8 @@ def build_router(settings: Settings, transport: httpx.AsyncBaseTransport | None 
             return await provider.list_models_raw(request)
         data: list[dict[str, Any]] = [
             {"id": f"openai/{m}", "object": "model", "owned_by": provider.name}
-            for m in provider.models()]
+            for m in provider.models()
+        ]
         return JSONResponse({"object": "list", "data": data})
 
     return router

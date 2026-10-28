@@ -18,19 +18,47 @@ ATTR = {"schema": "public", "table": "contracts"}
 
 
 def _snapshot():
-    contracts = TermInfo("t-c", "Contracts", "계약 관련 정보", ["Contract"], attributes=[
-        {"id": "a1", "name": "계약금액", "datatype": "bigint", "column": "계약금액", **ATTR,
-         "description": "총 금액"},
-        {"id": "a2", "name": "고객id", "datatype": "text", "column": "고객id", **ATTR}],
-        tables=[{"id": "tb-c", "name": "contracts", "schema": "public"}])
-    customers = TermInfo("t-k", "Customers", "Business entity represented by table customers",
-                         attributes=[{"id": "a3", "name": "고객id", "datatype": "text",
-                                      "column": "고객id", "schema": "public",
-                                      "table": "customers"}],
-                         tables=[{"id": "tb-k", "name": "customers", "schema": "public"}])
-    return StructuredSnapshot("hanbit", "db1", "autoontology_src_hanbit", [contracts, customers],
-                              [SemanticFK("t-c", "t-k", "a3", "고객id",
-                                          "public.contracts.고객id")])
+    contracts = TermInfo(
+        "t-c",
+        "Contracts",
+        "계약 관련 정보",
+        ["Contract"],
+        attributes=[
+            {
+                "id": "a1",
+                "name": "계약금액",
+                "datatype": "bigint",
+                "column": "계약금액",
+                **ATTR,
+                "description": "총 금액",
+            },
+            {"id": "a2", "name": "고객id", "datatype": "text", "column": "고객id", **ATTR},
+        ],
+        tables=[{"id": "tb-c", "name": "contracts", "schema": "public"}],
+    )
+    customers = TermInfo(
+        "t-k",
+        "Customers",
+        "Business entity represented by table customers",
+        attributes=[
+            {
+                "id": "a3",
+                "name": "고객id",
+                "datatype": "text",
+                "column": "고객id",
+                "schema": "public",
+                "table": "customers",
+            }
+        ],
+        tables=[{"id": "tb-k", "name": "customers", "schema": "public"}],
+    )
+    return StructuredSnapshot(
+        "hanbit",
+        "db1",
+        "autoontology_src_hanbit",
+        [contracts, customers],
+        [SemanticFK("t-c", "t-k", "a3", "고객id", "public.contracts.고객id")],
+    )
 
 
 def _concept(cid, name, kind, definition="정의", name_en="", synonyms=()):
@@ -38,8 +66,21 @@ def _concept(cid, name, kind, definition="정의", name_en="", synonyms=()):
 
 
 def _documents():
-    docs = [DocumentRow("d1", "src", "samples/계약.md", "계약관리규정", "text/markdown", "native",
-                        "ab" * 32, 10, None, "", "")]
+    docs = [
+        DocumentRow(
+            "d1",
+            "src",
+            "samples/계약.md",
+            "계약관리규정",
+            "text/markdown",
+            "native",
+            "ab" * 32,
+            10,
+            None,
+            "",
+            "",
+        )
+    ]
     concepts = [
         _concept("c1", "계약", "entity", "고객과 맺는 약정", "Contract", ["계약서"]),
         _concept("c2", "계약금액", "metric", "계약의 총 금액"),
@@ -55,21 +96,78 @@ def _documents():
         RelationRow("r3", "src", "승인", "governed_by", "승인 기준", "", 1),
         RelationRow("r4", "src", "담당자", "owns", "계약", "담당자가 계약을 관리", 1),
     ]
-    evidence = [{"id": i, "concept_id": cid, "relation_id": None, "quote": f"근거 {cid}",
-                 "verified": 1, "chunk_id": "k", "page": 2, "section_path": "", "doc_id": "d1"}
-                for i, cid in enumerate(["c1", "c2", "c3", "c4", "c5", "c6", "c7"], start=1)]
-    evidence += [{"id": 10 + i, "concept_id": None, "relation_id": rid, "quote": "관계 근거",
-                  "verified": 1, "chunk_id": "k", "page": None, "section_path": "",
-                  "doc_id": "d1"} for i, rid in enumerate(["r1", "r2", "r3", "r4"])]
+    evidence = [
+        {
+            "id": i,
+            "concept_id": cid,
+            "relation_id": None,
+            "quote": f"근거 {cid}",
+            "verified": 1,
+            "chunk_id": "k",
+            "page": 2,
+            "section_path": "",
+            "doc_id": "d1",
+        }
+        for i, cid in enumerate(["c1", "c2", "c3", "c4", "c5", "c6", "c7"], start=1)
+    ]
+    evidence += [
+        {
+            "id": 10 + i,
+            "concept_id": None,
+            "relation_id": rid,
+            "quote": "관계 근거",
+            "verified": 1,
+            "chunk_id": "k",
+            "page": None,
+            "section_path": "",
+            "doc_id": "d1",
+        }
+        for i, rid in enumerate(["r1", "r2", "r3", "r4"])
+    ]
     aligns = [
-        AlignmentRecord("src", "c1", "계약", "same", "run", "hanbit", "t-c", "Contracts", 0.8,
-                        0.92, "같음", accepted=True),
-        AlignmentRecord("src", "c2", "계약금액", "related", "run", "hanbit", "t-c", "Contracts",
-                        0.7, 0.8, "속성"),
-        AlignmentRecord("src", "c3", "신규 계약", "broader", "run", "hanbit", "t-c",
-                        "Contracts", 0.6, 0.9, "하위"),
-        AlignmentRecord("src", "c7", "담당자", "same", "run", "hanbit", "t-k", "Customers",
-                        0.56, 0.5, "낮음"),
+        AlignmentRecord(
+            "src",
+            "c1",
+            "계약",
+            "same",
+            "run",
+            "hanbit",
+            "t-c",
+            "Contracts",
+            0.8,
+            0.92,
+            "같음",
+            accepted=True,
+        ),
+        AlignmentRecord(
+            "src",
+            "c2",
+            "계약금액",
+            "related",
+            "run",
+            "hanbit",
+            "t-c",
+            "Contracts",
+            0.7,
+            0.8,
+            "속성",
+        ),
+        AlignmentRecord(
+            "src",
+            "c3",
+            "신규 계약",
+            "broader",
+            "run",
+            "hanbit",
+            "t-c",
+            "Contracts",
+            0.6,
+            0.9,
+            "하위",
+        ),
+        AlignmentRecord(
+            "src", "c7", "담당자", "same", "run", "hanbit", "t-k", "Customers", 0.56, 0.5, "낮음"
+        ),
         AlignmentRecord("src", "c5", "승인", "skipped", "run"),
     ]
     return merged.DocumentsInput("hanbit-docs", docs, concepts, relations, evidence, aligns)
@@ -84,15 +182,23 @@ def test_merged_model_structure(model):
     c = model.counts()
     # 2 Terms + 계약금액, 신규 계약, 계약상태, 담당자 (계약 is folded into Contracts)
     assert c["classes"] == 6 and c["classes_structured"] == 2 and c["merged_concepts"] == 1
-    assert (c["relation_properties"], c["relation_datatype_properties"],
-            c["column_properties"], c["semantic_fk_properties"]) == (2, 1, 3, 1)
-    assert c["by_source"]["hanbit"] == {"class:structured": 2,
-                                        "datatype_property:structured": 3,
-                                        "object_property:semantic_fk": 1}
+    assert (
+        c["relation_properties"],
+        c["relation_datatype_properties"],
+        c["column_properties"],
+        c["semantic_fk_properties"],
+    ) == (2, 1, 3, 1)
+    assert c["by_source"]["hanbit"] == {
+        "class:structured": 2,
+        "datatype_property:structured": 3,
+        "object_property:semantic_fk": 1,
+    }
     assert c["by_source"]["hanbit-docs"]["object_property:document"] == 2
     contracts = model.classes["term-t-c"]
     assert contracts.alt_labels == ["Contract", "계약", "계약서"]
-    assert contracts.definitions == ["고객과 맺는 약정"] and contracts.tables == ["public.contracts"]
+    assert contracts.definitions == ["고객과 맺는 약정"] and contracts.tables == [
+        "public.contracts"
+    ]
     assert model.fallback_terms == ["Customers"]
     assert "Metric" in model.classes["concept-c2"].extra_types
     assert {i.type for i in model.individuals.values()} == {"Process", "BusinessRule"}
@@ -102,12 +208,14 @@ def test_merged_model_structure(model):
     assert ("concept-c3", "subclass_of", "term-t-c", "document") in kinds  # is_a
     has_attr = model.properties["rel-r1"]
     assert (has_attr.kind, has_attr.domain, has_attr.value_concept) == (
-        "datatype", "term-t-c", "concept-c4")
+        "datatype",
+        "term-t-c",
+        "concept-c4",
+    )
     gov = model.properties["rel-r3"]
     assert (gov.kind, gov.domain, gov.range) == ("object", "Process", "BusinessRule")
     fk = next(p for p in model.properties.values() if p.source == "semantic_fk")
-    assert (fk.domain, fk.range, fk.label) == ("term-t-c", "term-t-k",
-                                               "고객id refers to Customers")
+    assert (fk.domain, fk.range, fk.label) == ("term-t-c", "term-t-k", "고객id refers to Customers")
     assert model.properties["attr-a1"].range == "xsd:integer"
     assert [e["name"] for e in model.low_confidence] == ["담당자"]
     assert {e["name"] for e in model.unaligned} == {"계약상태", "담당자"}
@@ -135,8 +243,11 @@ def test_turtle_and_jsonld_roundtrip_with_korean_labels(model, tmp_path):
     assert (os_["concept-c2"], RDF.type, os_["Metric"]) in g
     assert (os_["concept-c6"], RDF.type, os_["BusinessRule"]) in g
     assert (os_["ev-1"], RDF.type, PROV.Entity) in g
-    assert (os_["doc-d1"], Namespace("http://purl.org/dc/terms/")["identifier"],
-            Literal("ab" * 32)) in g
+    assert (
+        os_["doc-d1"],
+        Namespace("http://purl.org/dc/terms/")["identifier"],
+        Literal("ab" * 32),
+    ) in g
     assert (os_["rel-r4"], RDFS.subPropertyOf, os_["owns"]) in g
     assert (os_["rel-r4"], RDF.type, OWL.ObjectProperty) in g
     text = paths["ttl"].read_text(encoding="utf-8")
@@ -164,8 +275,14 @@ def test_graphml_writer(model, tmp_path):
     assert nodes["doc-d1"]["type"] == "document"
     assert nodes["concept-c1"]["type"] == "concept"
     types = {d["type"] for _, _, d in edges}
-    assert {"subclass_of", "object_property", "datatype_property", "aligned_same", "related",
-            "evidence"} <= types
+    assert {
+        "subclass_of",
+        "object_property",
+        "datatype_property",
+        "aligned_same",
+        "related",
+        "evidence",
+    } <= types
     assert all({"type", "label", "source"} <= set(d) for d in nodes.values())
     # every edge endpoint is a node, and the file is plain GraphML (key/graph/node/edge)
     assert all(u in nodes and v in nodes for u, v, _ in edges)
@@ -188,9 +305,12 @@ def test_graphml_parallel_edges_get_distinct_ids(tmp_path):
 
 
 def test_report(model):
-    text = export_report.render(model, run_id="r", files=[
-        {"name": "ontology.ttl", "bytes": 10, "sha256": "f" * 64}],
-        upstream=[{"name": "model.yaml", "origin": "copied"}])
+    text = export_report.render(
+        model,
+        run_id="r",
+        files=[{"name": "ontology.ttl", "bytes": 10, "sha256": "f" * 64}],
+        upstream=[{"name": "model.yaml", "origin": "copied"}],
+    )
     assert "# Merged ontology report — hanbit-docs" in text
     assert "| Classes (owl:Class) | 6 |" in text and "Customers" in text
     assert "| 계약 | entity | Contracts | 0.92 |" in text
@@ -211,17 +331,42 @@ def test_run_export_end_to_end(isolated_env, tmp_path):
     from tests.test_documents_store import C
 
     docs = DocumentStore(store)
-    doc, _ = docs.replace_document(source_id=docs_src.id, path="/x/a.md", title="A",
-                                   mime="text/markdown", engine="native", sha256="s",
-                                   size=1, pages=None, chunks=[C(0, "계약은 고객과 맺는다")])
+    doc, _ = docs.replace_document(
+        source_id=docs_src.id,
+        path="/x/a.md",
+        title="A",
+        mime="text/markdown",
+        engine="native",
+        sha256="s",
+        size=1,
+        pages=None,
+        chunks=[C(0, "계약은 고객과 맺는다")],
+    )
     ev = [EvidenceRecord(docs.chunks_for_document(doc.id)[0].id, "계약은 고객과 맺는다", True)]
-    docs.replace_ontology(docs_src.id, [ConceptRecord("계약", "entity", "약정", evidence=ev),
-                                        ConceptRecord("날씨", "entity", "무관", evidence=ev)],
-                          [])
+    docs.replace_ontology(
+        docs_src.id,
+        [
+            ConceptRecord("계약", "entity", "약정", evidence=ev),
+            ConceptRecord("날씨", "entity", "무관", evidence=ev),
+        ],
+        [],
+    )
     cid = {c.name: c.id for c in docs.list_concepts(docs_src.id)}
-    AlignmentStore(store).put(AlignmentRecord(docs_src.id, cid["계약"], "계약", "same", "r",
-                                              "hanbit", "t-contract", "Contracts",
-                                              0.9, 0.9, accepted=True))
+    AlignmentStore(store).put(
+        AlignmentRecord(
+            docs_src.id,
+            cid["계약"],
+            "계약",
+            "same",
+            "r",
+            "hanbit",
+            "t-contract",
+            "Contracts",
+            0.9,
+            0.9,
+            accepted=True,
+        )
+    )
     # an earlier build export to copy
     build = store.create_run(kind="build", source_id=structured.id)
     folder = settings.exports_dir / "hanbit" / build.id
@@ -229,13 +374,17 @@ def test_run_export_end_to_end(isolated_env, tmp_path):
     (folder / "model.yaml").write_text("model: 1\n")
     (folder / "ossie.zip").write_bytes(b"PK")
     client = FakeClient()
-    result = export_job.run_export("hanbit-docs", settings=settings, store=store,
-                                   client=client)
+    result = export_job.run_export("hanbit-docs", settings=settings, store=store, client=client)
     assert result.status == "succeeded"
     out = result.export_dir
     assert sorted(p.name for p in out.iterdir()) == [
-        "graph.graphml", "model.yaml", "ontology.jsonld", "ontology.ttl", "ossie.zip",
-        "report.md"]
+        "graph.graphml",
+        "model.yaml",
+        "ontology.jsonld",
+        "ontology.ttl",
+        "ossie.zip",
+        "report.md",
+    ]
     assert (out / "model.yaml").read_text() == "model: 1\n"
     rt = result.details["serialize"]["roundtrip"]
     assert rt["ok"] and rt["classes"] == 2 + 1  # 2 Terms + 날씨
@@ -243,11 +392,18 @@ def test_run_export_end_to_end(isolated_env, tmp_path):
     # explicit --sources and --out; no build export -> exported now through the client
     calls = []
     client.export_model = lambda ids, fmt="auto_ontology", include_ontology=False: (
-        calls.append(fmt) or b"x")
+        calls.append(fmt) or b"x"
+    )
     store.delete_source(structured.id)
     structured = store.add_source(name="hanbit", kind="files", locator="{}")
-    result = export_job.run_export("merged", settings=settings, store=store, client=client,
-                                   sources=["hanbit", "hanbit-docs"], out=tmp_path / "o")
+    result = export_job.run_export(
+        "merged",
+        settings=settings,
+        store=store,
+        client=client,
+        sources=["hanbit", "hanbit-docs"],
+        out=tmp_path / "o",
+    )
     assert result.export_dir == tmp_path / "o" and calls == ["auto_ontology", "ossie"]
     with pytest.raises(export_job.JobError, match="unknown source"):
         export_job.run_export("x", settings=settings, store=store, client=client)
@@ -268,21 +424,35 @@ def test_concept_without_evidence_warns_but_does_not_fail(tmp_path):
     docs.evidence = [e for e in docs.evidence if e["concept_id"] != "c7"]
     m = merged.build("hanbit-docs", structured=[_snapshot()], documents=[docs])
     paths = rdf.write(m, tmp_path)
-    check = rdf.roundtrip(paths["ttl"], m,
-                          expected_classes=merged.expected_class_count([_snapshot()], [docs]))
+    check = rdf.roundtrip(
+        paths["ttl"], m, expected_classes=merged.expected_class_count([_snapshot()], [docs])
+    )
     assert check["ok"] and check["concepts_without_evidence"] == [m.base + "concept-c7"]
     assert m.without_evidence == ["담당자"]
-    assert "Document concepts without evidence: 담당자" in export_report.render(m, run_id="r", files=[],
-                                                          upstream=[])
+    assert "Document concepts without evidence: 담당자" in export_report.render(
+        m, run_id="r", files=[], upstream=[]
+    )
 
 
 def test_same_reasons_source_missing_and_dry_run():
     docs = _documents()
     docs.alignments = [
-        AlignmentRecord("src", "c1", "계약", "same", "run", "other", "t-x", "Orders", 0.8,
-                        0.9, accepted=True),
-        AlignmentRecord("src", "c7", "담당자", "same", "run", "hanbit", "t-k", "Customers",
-                        0.8, 0.9, dry_run=True),
+        AlignmentRecord(
+            "src", "c1", "계약", "same", "run", "other", "t-x", "Orders", 0.8, 0.9, accepted=True
+        ),
+        AlignmentRecord(
+            "src",
+            "c7",
+            "담당자",
+            "same",
+            "run",
+            "hanbit",
+            "t-k",
+            "Customers",
+            0.8,
+            0.9,
+            dry_run=True,
+        ),
     ]
     m = merged.build("hanbit-docs", structured=[_snapshot()], documents=[docs])
     assert not m.merges  # neither is folded
@@ -290,18 +460,26 @@ def test_same_reasons_source_missing_and_dry_run():
     assert [e["name"] for e in m.dry_run_same] == ["담당자"] and not m.low_confidence
     assert merged.expected_class_count([_snapshot()], [docs]) == 2 + 5
     text = export_report.render(m, run_id="r", files=[], upstream=[])
-    assert "the Term source is not in the alignment targets" in text and "계약→Orders (other)" in text
+    assert (
+        "the Term source is not in the alignment targets" in text and "계약→Orders (other)" in text
+    )
     assert "not applied due to dry run" in text and "below the confidence threshold" not in text
 
 
 def test_alignment_counts_sum_over_documents_sources():
     """Review #17: each documents source used to replace the counts of the previous one."""
     a, b = _documents(), _documents()
-    a.alignments = [AlignmentRecord("src", "c3", "신규 계약", "broader", "run", "hanbit",
-                                    "t-c", "Contracts", 0.6, 0.9)]
+    a.alignments = [
+        AlignmentRecord(
+            "src", "c3", "신규 계약", "broader", "run", "hanbit", "t-c", "Contracts", 0.6, 0.9
+        )
+    ]
     b.source = "other-docs"
-    b.alignments = [AlignmentRecord("src", "c2", "계약금액", "related", "run", "hanbit",
-                                    "t-c", "Contracts", 0.7, 0.8)]
+    b.alignments = [
+        AlignmentRecord(
+            "src", "c2", "계약금액", "related", "run", "hanbit", "t-c", "Contracts", 0.7, 0.8
+        )
+    ]
     m = merged.build("x", structured=[_snapshot()], documents=[a, b])
     assert m.alignment_counts["broader"] == 1 and m.alignment_counts["related"] == 1
     assert m.alignment_counts["unaligned"] == 12  # 6 + 6
@@ -315,8 +493,10 @@ def test_graph_keeps_relations_between_individuals_and_classes():
     from autoontology.web.graph import to_view
 
     docs = _documents()
-    docs.relations = [*docs.relations,
-                      RelationRow("r5", "src", "승인", "approves", "계약", "승인이 계약을 확정", 1)]
+    docs.relations = [
+        *docs.relations,
+        RelationRow("r5", "src", "승인", "approves", "계약", "승인이 계약을 확정", 1),
+    ]
     m = merged.build("x", structured=[_snapshot()], documents=[docs])
     view = to_view(m)
     edges = {(e["source"], e["target"]) for e in view["edges"]}

@@ -20,15 +20,24 @@ SUPPORTED_EXTENSIONS: frozenset[str] = NATIVE_EXTENSIONS | kordoc.EXTENSIONS
 PATH_SEP = " > "
 
 MIME_TYPES: dict[str, str] = {
-    ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain",
-    ".html": "text/html", ".htm": "text/html", ".pdf": "application/pdf",
-    ".hwp": "application/x-hwp", ".hwpx": "application/hwp+zip", ".hml": "application/x-hwpml",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".txt": "text/plain",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".pdf": "application/pdf",
+    ".hwp": "application/x-hwp",
+    ".hwpx": "application/hwp+zip",
+    ".hml": "application/x-hwpml",
     ".hwpml": "application/x-hwpml",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".xls": "application/vnd.ms-excel", ".png": "image/png", ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg", ".webp": "image/webp",
+    ".xls": "application/vnd.ms-excel",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
 
 
@@ -68,21 +77,28 @@ def discover_documents(target: Path, *, recursive: bool = False) -> list[Path]:
     target = Path(target)
     if target.is_file():
         if not is_supported(target):
-            raise ReadError(f"unsupported document type {target.suffix or '(none)'}: {target} "
-                            f"(supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))})",
-                            code="UNSUPPORTED_FORMAT")
+            raise ReadError(
+                f"unsupported document type {target.suffix or '(none)'}: {target} "
+                f"(supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))})",
+                code="UNSUPPORTED_FORMAT",
+            )
         return [target]
     if not target.is_dir():
         raise ReadError(f"no such file or directory: {target}", code="FILE_NOT_FOUND")
     pattern = "**/*" if recursive else "*"
-    files = [p for p in target.glob(pattern)
-             if p.is_file() and is_supported(p)
-             and not any(part.startswith(".") for part in p.relative_to(target).parts)]
+    files = [
+        p
+        for p in target.glob(pattern)
+        if p.is_file()
+        and is_supported(p)
+        and not any(part.startswith(".") for part in p.relative_to(target).parts)
+    ]
     return sorted(files)
 
 
-def read_document(path: Path, *, home: Path | None = None,
-                  engine: kordoc.KordocEngine | None = None) -> Document:
+def read_document(
+    path: Path, *, home: Path | None = None, engine: kordoc.KordocEngine | None = None
+) -> Document:
     path = Path(path)
     ext = path.suffix.lower()
     mime = MIME_TYPES.get(ext, "application/octet-stream")
@@ -101,8 +117,9 @@ def read_document(path: Path, *, home: Path | None = None,
             except kordoc.KordocUnavailable as exc:
                 raise ReadError(f"{path.name}: {exc.message}", code=exc.code) from exc
         return read_with_kordoc(path, engine, mime)
-    raise ReadError(f"unsupported document type {ext or '(none)'}: {path.name}",
-                    code="UNSUPPORTED_FORMAT")
+    raise ReadError(
+        f"unsupported document type {ext or '(none)'}: {path.name}", code="UNSUPPORTED_FORMAT"
+    )
 
 
 def _read_text(path: Path) -> str:
@@ -142,10 +159,9 @@ def read_markdown(path: Path) -> Document:
         while stack and stack[-1][0] >= level:
             stack.pop()
         stack.append((level, title))
-        body = "\n".join(lines[line:bounds[index + 1]]).strip()
+        body = "\n".join(lines[line : bounds[index + 1]]).strip()
         if body:
-            sections.append(Section(PATH_SEP.join(t for _, t in stack), None, body,
-                                    offsets[line]))
+            sections.append(Section(PATH_SEP.join(t for _, t in stack), None, body, offsets[line]))
     h1 = next((t for _, lvl, t in headings if lvl == 1 and t), "")
     return Document(h1 or path.stem, path, MIME_TYPES[path.suffix.lower()], sections)
 
@@ -192,13 +208,20 @@ def read_html(path: Path) -> Document:
             buf.append(text)
         else:
             if el.name == "tr":
-                text = "| " + " | ".join(c.get_text(" ", strip=True)
-                                         for c in el.find_all(["td", "th"])) + " |"
+                text = (
+                    "| "
+                    + " | ".join(c.get_text(" ", strip=True) for c in el.find_all(["td", "th"]))
+                    + " |"
+                )
             buf.append(text)
     flush()
     h1 = soup.find("h1")
-    return Document(title or (h1.get_text(" ", strip=True) if h1 else "") or path.stem, path,
-                    MIME_TYPES[path.suffix.lower()], sections)
+    return Document(
+        title or (h1.get_text(" ", strip=True) if h1 else "") or path.stem,
+        path,
+        MIME_TYPES[path.suffix.lower()],
+        sections,
+    )
 
 
 # --- kordoc -----------------------------------------------------------------------------
@@ -219,9 +242,15 @@ def read_with_kordoc(path: Path, engine: kordoc.KordocEngine, mime: str) -> Docu
         text = _IMAGE_RE.sub("", chunk.text).strip()
         if not text:
             continue
-        sections.append(Section(PATH_SEP.join(c.strip() for c in chunk.breadcrumb if c.strip()),
-                                chunk.page, text, offset,
-                                "table" if chunk.type == "table" else "text"))
+        sections.append(
+            Section(
+                PATH_SEP.join(c.strip() for c in chunk.breadcrumb if c.strip()),
+                chunk.page,
+                text,
+                offset,
+                "table" if chunk.type == "table" else "text",
+            )
+        )
         offset += len(text) + 1
     pages = max((c.page for c in chunks if c.page), default=None)
     return Document(path.stem, path, mime, sections, engine="kordoc", pages=pages)

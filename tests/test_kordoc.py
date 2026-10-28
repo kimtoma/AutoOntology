@@ -96,8 +96,16 @@ def test_parse_chunks_offline_and_skips_malformed(engine, tmp_path, caplog):
 def test_parse_json(engine, tmp_path):
     data = kordoc.parse_json(engine, tmp_path / "a.pdf")
     assert data["success"] is True and data["pageCount"] == 2
-    assert data["args"] == ["--format", "json", "--no-images", "--table-format", "gfm",
-                            "--silent", "--", str((tmp_path / "a.pdf").resolve())]
+    assert data["args"] == [
+        "--format",
+        "json",
+        "--no-images",
+        "--table-format",
+        "gfm",
+        "--silent",
+        "--",
+        str((tmp_path / "a.pdf").resolve()),
+    ]
     assert kordoc.engine_version(engine) == "9.9.9"
 
 
@@ -131,25 +139,52 @@ def test_install_kordoc_argv_and_idempotence(tmp_path):
     runner = _Runner(home)
     result = kordoc.install_kordoc(home, npm="/x/npm", runner=runner, echo=lambda _: None)
     assert result.action == "installed" and result.version == kordoc.DEFAULT_VERSION == "4.24.13"
-    assert runner.calls == [["/x/npm", "install", "--prefix", str(home / "kordoc"),
-                             "--no-audit", "--no-fund", "kordoc@4.24.13"]]
+    assert runner.calls == [
+        [
+            "/x/npm",
+            "install",
+            "--prefix",
+            str(home / "kordoc"),
+            "--no-audit",
+            "--no-fund",
+            "kordoc@4.24.13",
+        ]
+    ]
     assert (home / "kordoc" / "kordoc.version").read_text() == "4.24.13\n"
     again = kordoc.install_kordoc(home, npm="/x/npm", runner=runner, echo=lambda _: None)
     assert again.action == "already installed" and len(runner.calls) == 1
-    kordoc.install_kordoc(home, version="4.24.12", omit_optional=True, npm="/x/npm",
-                          runner=runner, echo=lambda _: None)
+    kordoc.install_kordoc(
+        home,
+        version="4.24.12",
+        omit_optional=True,
+        npm="/x/npm",
+        runner=runner,
+        echo=lambda _: None,
+    )
     assert runner.calls[-1][-2:] == ["kordoc@4.24.12", "--omit=optional"]
     assert kordoc.read_version_file(home) == {"version": "4.24.12", "omit_optional": True}
-    kordoc.install_kordoc(home, version="4.24.12", omit_optional=True, force=True,
-                          npm="/x/npm", runner=runner, echo=lambda _: None)
+    kordoc.install_kordoc(
+        home,
+        version="4.24.12",
+        omit_optional=True,
+        force=True,
+        npm="/x/npm",
+        runner=runner,
+        echo=lambda _: None,
+    )
     assert len(runner.calls) == 3
 
 
 def test_install_kordoc_failures(tmp_path):
     home = tmp_path / "home"
     with pytest.raises(kordoc.KordocError, match="not a kordoc version"):
-        kordoc.install_kordoc(home, version="latest; rm -rf /", npm="/x/npm",
-                              runner=_Runner(home), echo=lambda _: None)
+        kordoc.install_kordoc(
+            home,
+            version="latest; rm -rf /",
+            npm="/x/npm",
+            runner=_Runner(home),
+            echo=lambda _: None,
+        )
     with pytest.raises(kordoc.KordocError, match="npm install failed"):
         kordoc.install_kordoc(home, npm="/x/npm", runner=_Runner(home, 1), echo=lambda _: None)
     assert not (Path(home) / "kordoc" / "kordoc.version").exists()

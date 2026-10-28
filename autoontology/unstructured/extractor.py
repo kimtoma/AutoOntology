@@ -65,8 +65,9 @@ class UpstreamBackend:
     def structured(self, system: str, human: str, schema: type[T]) -> T:
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        return self._structured(self.llm, [SystemMessage(content=system),
-                                           HumanMessage(content=human)], schema)
+        return self._structured(
+            self.llm, [SystemMessage(content=system), HumanMessage(content=human)], schema
+        )
 
     def text(self, prompt: str) -> str:
         return self._text(self.llm, prompt)
@@ -78,8 +79,9 @@ def pool_thread_prefix() -> str:
     return f"{threading.current_thread().name}:extract"
 
 
-def upstream_backend(settings: Settings, *, role: str = "reasoning",
-                     max_tokens: int = EXTRACT_MAX_TOKENS) -> UpstreamBackend:
+def upstream_backend(
+    settings: Settings, *, role: str = "reasoning", max_tokens: int = EXTRACT_MAX_TOKENS
+) -> UpstreamBackend:
     from autoontology.engine.jobs import prepare_upstream_env
 
     prepare_upstream_env(settings)
@@ -114,8 +116,11 @@ OLLAMA_DEFAULT_WORKERS = 1
 
 def workers_default(settings: Settings | None = None) -> int:
     raw = os.environ.get("AUTOONTOLOGY_LLM_WORKERS", "").strip()
-    fallback = (OLLAMA_DEFAULT_WORKERS if settings is not None
-                and settings.chat_provider == "ollama" else DEFAULT_WORKERS)
+    fallback = (
+        OLLAMA_DEFAULT_WORKERS
+        if settings is not None and settings.chat_provider == "ollama"
+        else DEFAULT_WORKERS
+    )
     try:
         value = int(raw) if raw else fallback
     except ValueError as exc:
@@ -123,8 +128,9 @@ def workers_default(settings: Settings | None = None) -> int:
     return max(1, value)
 
 
-def invoke_json(backend: LLMBackend, system: str, human: str, schema: type[T],
-                attempts: int = JSON_ATTEMPTS) -> tuple[T, int]:
+def invoke_json(
+    backend: LLMBackend, system: str, human: str, schema: type[T], attempts: int = JSON_ATTEMPTS
+) -> tuple[T, int]:
     """JSON-in-prompt call with validation feedback. Returns (object, attempts used)."""
     prompt = f"{system}\n\n{human}"
     last: Exception | None = None
@@ -134,10 +140,17 @@ def invoke_json(backend: LLMBackend, system: str, human: str, schema: type[T],
             return schema.model_validate(parse_json_object(answer)), attempt
         except (ValueError, ValidationError) as exc:  # JSONDecodeError is a ValueError
             last = exc
-            logger.info("JSON-mode answer for %s invalid (attempt %d/%d): %s",
-                        schema.__name__, attempt, attempts, str(exc).splitlines()[0][:200])
-            prompt = (f"{system}\n\n{human}\n\nYour previous answer:\n{answer[:4000]}\n\n"
-                      + prompts.json_retry_message(str(exc)))
+            logger.info(
+                "JSON-mode answer for %s invalid (attempt %d/%d): %s",
+                schema.__name__,
+                attempt,
+                attempts,
+                str(exc).splitlines()[0][:200],
+            )
+            prompt = (
+                f"{system}\n\n{human}\n\nYour previous answer:\n{answer[:4000]}\n\n"
+                + prompts.json_retry_message(str(exc))
+            )
     assert last is not None
     raise last
 
@@ -216,7 +229,8 @@ class Extractor:
     def _use_structured(self) -> bool:
         with self._lock:
             return self.mode == "structured" or (
-                self.mode == "auto" and self._fallback_streak < FALLBACK_STREAK_TO_SWITCH)
+                self.mode == "auto" and self._fallback_streak < FALLBACK_STREAK_TO_SWITCH
+            )
 
     def _record(self, structured_ok: bool) -> None:
         with self._lock:
@@ -225,12 +239,20 @@ class Extractor:
                 return
             self._fallback_streak += 1
             if self._fallback_streak == FALLBACK_STREAK_TO_SWITCH and self.mode == "auto":
-                logger.warning("structured output failed on %d chunks in a row; using JSON "
-                               "mode for the remaining chunks", FALLBACK_STREAK_TO_SWITCH)
+                logger.warning(
+                    "structured output failed on %d chunks in a row; using JSON "
+                    "mode for the remaining chunks",
+                    FALLBACK_STREAK_TO_SWITCH,
+                )
 
     def extract(self, job: ChunkJob) -> ChunkOutcome:
-        human = prompts.human_message(doc_title=job.doc_title, section_path=job.section_path,
-                                      index=job.index, total=job.total, chunk_text=job.text)
+        human = prompts.human_message(
+            doc_title=job.doc_title,
+            section_path=job.section_path,
+            index=job.index,
+            total=job.total,
+            chunk_text=job.text,
+        )
         started = time.monotonic()
         retries_before = self._retries.current()
         detail: dict[str, Any] = {}
@@ -238,13 +260,21 @@ class Extractor:
         outcome = self._extract(job, human, started, detail, raw)
         retries = self._retries.current() - retries_before
         timeout = llm_timeout_s()
-        outcome.detail.update(upstream_retries=retries, llm_timeout_s=timeout,
-                              over_timeout=bool(timeout and outcome.detail.get("seconds", 0)
-                                                > timeout))
+        outcome.detail.update(
+            upstream_retries=retries,
+            llm_timeout_s=timeout,
+            over_timeout=bool(timeout and outcome.detail.get("seconds", 0) > timeout),
+        )
         return outcome
 
-    def _extract(self, job: ChunkJob, human: str, started: float, detail: dict[str, Any],
-                 raw: ChunkExtraction | None) -> ChunkOutcome:
+    def _extract(
+        self,
+        job: ChunkJob,
+        human: str,
+        started: float,
+        detail: dict[str, Any],
+        raw: ChunkExtraction | None,
+    ) -> ChunkOutcome:
         if self._use_structured():
             try:
                 raw = self.backend.structured(prompts.SYSTEM_PROMPT, human, ChunkExtraction)
@@ -253,32 +283,53 @@ class Extractor:
             except Exception as exc:  # noqa: BLE001 - recorded; JSON mode may still work
                 detail["structured_error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
                 if self.mode == "structured" or _is_connection_error(exc):
-                    return ChunkOutcome(job, None, {**detail, "seconds": _since(started)},
-                                        detail["structured_error"])
+                    return ChunkOutcome(
+                        job,
+                        None,
+                        {**detail, "seconds": _since(started)},
+                        detail["structured_error"],
+                    )
                 self._record(False)
-                logger.warning("chunk %s: structured output failed (%s); trying JSON mode",
-                               job.key, detail["structured_error"][:160])
+                logger.warning(
+                    "chunk %s: structured output failed (%s); trying JSON mode",
+                    job.key,
+                    detail["structured_error"][:160],
+                )
         if raw is None:
             try:
-                raw, attempts = invoke_json(self.backend, prompts.json_mode_system_prompt(),
-                                            human, ChunkExtraction)
-                detail["path"] = "json" if self.mode == "json" or "structured_error" not in \
-                    detail else "json_fallback"
+                raw, attempts = invoke_json(
+                    self.backend, prompts.json_mode_system_prompt(), human, ChunkExtraction
+                )
+                detail["path"] = (
+                    "json"
+                    if self.mode == "json" or "structured_error" not in detail
+                    else "json_fallback"
+                )
                 detail["json_attempts"] = attempts
             except Exception as exc:  # noqa: BLE001
                 error = f"{type(exc).__name__}: {str(exc)[:300]}"
-                return ChunkOutcome(job, None, {**detail, "json_error": error,
-                                                "seconds": _since(started)}, error)
+                return ChunkOutcome(
+                    job, None, {**detail, "json_error": error, "seconds": _since(started)}, error
+                )
         validated = post_validate(raw, job.text, label=f"chunk {job.key}")
-        detail.update(seconds=_since(started), raw_concepts=len(raw.concepts),
-                      raw_relations=len(raw.relations), concepts=len(validated.concepts),
-                      relations=len(validated.relations),
-                      unverified_evidence=validated.stats.unverified_evidence)
+        detail.update(
+            seconds=_since(started),
+            raw_concepts=len(raw.concepts),
+            raw_relations=len(raw.relations),
+            concepts=len(validated.concepts),
+            relations=len(validated.relations),
+            unverified_evidence=validated.stats.unverified_evidence,
+        )
         return ChunkOutcome(job, validated, detail)
 
-    def run(self, jobs: Sequence[ChunkJob], *, workers: int,
-            on_start: Callable[[ChunkJob], None] | None = None,
-            on_done: Callable[[ChunkOutcome], None] | None = None) -> list[ChunkOutcome]:
+    def run(
+        self,
+        jobs: Sequence[ChunkJob],
+        *,
+        workers: int,
+        on_start: Callable[[ChunkJob], None] | None = None,
+        on_done: Callable[[ChunkOutcome], None] | None = None,
+    ) -> list[ChunkOutcome]:
         outcomes: list[ChunkOutcome] = []
 
         def one(job: ChunkJob) -> ChunkOutcome:
@@ -286,8 +337,9 @@ class Extractor:
                 on_start(job)
             return self.extract(job)
 
-        with ThreadPoolExecutor(max_workers=max(1, workers),
-                                thread_name_prefix=pool_thread_prefix()) as pool:
+        with ThreadPoolExecutor(
+            max_workers=max(1, workers), thread_name_prefix=pool_thread_prefix()
+        ) as pool:
             futures = [pool.submit(one, job) for job in jobs]
             for future in as_completed(futures):
                 outcome = future.result()
@@ -301,12 +353,21 @@ def _since(started: float) -> float:
     return round(time.monotonic() - started, 1)
 
 
-_NO_FALLBACK_ERRORS = frozenset({
-    "APIConnectionError", "ConnectError", "ConnectionError", "ConnectionRefusedError",
-    # a timed-out call (upstream already retried it) would only time out again in JSON mode
-    "APITimeoutError", "ReadTimeout", "TimeoutException", "ConnectTimeout", "Timeout",
-    "TimeoutError",
-})
+_NO_FALLBACK_ERRORS = frozenset(
+    {
+        "APIConnectionError",
+        "ConnectError",
+        "ConnectionError",
+        "ConnectionRefusedError",
+        # a timed-out call (upstream already retried it) would only time out again in JSON mode
+        "APITimeoutError",
+        "ReadTimeout",
+        "TimeoutException",
+        "ConnectTimeout",
+        "Timeout",
+        "TimeoutError",
+    }
+)
 
 
 def _is_connection_error(exc: BaseException) -> bool:
@@ -322,8 +383,9 @@ def _chain(exc: BaseException | None):
         seen += 1
 
 
-def make_judge(backend: LLMBackend, *, mode: str | None = None
-               ) -> Callable[[dict[str, Any], dict[str, Any]], MergeDecision]:
+def make_judge(
+    backend: LLMBackend, *, mode: str | None = None
+) -> Callable[[dict[str, Any], dict[str, Any]], MergeDecision]:
     """Merge judge over two candidate summaries (structured, JSON-mode fallback)."""
     mode = mode or extract_mode()
 
@@ -335,10 +397,8 @@ def make_judge(backend: LLMBackend, *, mode: str | None = None
             except Exception as exc:  # noqa: BLE001
                 if mode == "structured" or _is_connection_error(exc):
                     raise
-                logger.info("merge judge structured output failed (%s); JSON mode",
-                            str(exc)[:160])
-        decision, _ = invoke_json(backend, prompts.merge_json_system_prompt(), human,
-                                  MergeDecision)
+                logger.info("merge judge structured output failed (%s); JSON mode", str(exc)[:160])
+        decision, _ = invoke_json(backend, prompts.merge_json_system_prompt(), human, MergeDecision)
         return decision
 
     return judge

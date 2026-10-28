@@ -30,11 +30,17 @@ HUMAN_TEMPLATE = """\
 {chunk_text}"""
 
 
-def human_message(*, doc_title: str, section_path: str, index: int, total: int,
-                  chunk_text: str) -> str:
+def human_message(
+    *, doc_title: str, section_path: str, index: int, total: int, chunk_text: str
+) -> str:
     # str.format on the template only: braces inside the document text stay literal.
-    return HUMAN_TEMPLATE.format(doc_title=doc_title, section_path=section_path or "-",
-                                 i=index + 1, n=total, chunk_text=chunk_text)
+    return HUMAN_TEMPLATE.format(
+        doc_title=doc_title,
+        section_path=section_path or "-",
+        i=index + 1,
+        n=total,
+        chunk_text=chunk_text,
+    )
 
 
 def _schema_json(model: type) -> str:
@@ -53,8 +59,10 @@ def json_mode_system_prompt() -> str:
 
 
 def json_retry_message(error: str) -> str:
-    return ("Your previous answer was not a valid object for the schema. Errors:\n"
-            f"{error[:1500]}\nReturn the corrected JSON object only.")
+    return (
+        "Your previous answer was not a valid object for the schema. Errors:\n"
+        f"{error[:1500]}\nReturn the corrected JSON object only."
+    )
 
 
 MERGE_SYSTEM_PROMPT = """\
@@ -72,8 +80,12 @@ Return only the structured object."""
 
 def merge_message(a: dict[str, Any], b: dict[str, Any]) -> str:
     keys = ("name", "kind", "definition", "synonyms")
-    return ("Candidate A:\n" + json.dumps({k: a.get(k) for k in keys}, ensure_ascii=False)
-            + "\n\nCandidate B:\n" + json.dumps({k: b.get(k) for k in keys}, ensure_ascii=False))
+    return (
+        "Candidate A:\n"
+        + json.dumps({k: a.get(k) for k in keys}, ensure_ascii=False)
+        + "\n\nCandidate B:\n"
+        + json.dumps({k: b.get(k) for k in keys}, ensure_ascii=False)
+    )
 
 
 def merge_json_system_prompt() -> str:
@@ -106,9 +118,12 @@ Return only the structured object."""
 
 
 def align_message(concept: dict[str, Any], candidates: list[dict[str, Any]]) -> str:
-    return ("Concept:\n" + json.dumps(concept, ensure_ascii=False)
-            + "\n\nCandidate Terms:\n"
-            + "\n".join(json.dumps(c, ensure_ascii=False) for c in candidates))
+    return (
+        "Concept:\n"
+        + json.dumps(concept, ensure_ascii=False)
+        + "\n\nCandidate Terms:\n"
+        + "\n".join(json.dumps(c, ensure_ascii=False) for c in candidates)
+    )
 
 
 def align_json_system_prompt() -> str:

@@ -38,8 +38,10 @@ def _unexpected(command: str, exc: Exception, log_path) -> None:
         logging.getLogger("autoontology.cli").error("%s failed", command, exc_info=exc)
     from autoontology.engine.jobs import short_error
 
-    _fail(f"{command} failed: {short_error(exc)}\nlog: {log_path} "
-          "(AUTOONTOLOGY_DEBUG=1 shows the traceback)")
+    _fail(
+        f"{command} failed: {short_error(exc)}\nlog: {log_path} "
+        "(AUTOONTOLOGY_DEBUG=1 shows the traceback)"
+    )
 
 
 def _fail(message: str, code: int = 1) -> None:
@@ -71,12 +73,17 @@ def doctor(
 
 @app.command()
 def setup(
-    docs: bool = typer.Option(False, "--docs", help="Also install the kordoc document engine "
-                              "(HWP/PDF/DOCX/PPTX; needs Node.js 20+)."),
-    skip_models: bool = typer.Option(False, "--skip-models",
-                                     help="Skip the Ollama model pull/alias/probe."),
-    force_alias: bool = typer.Option(False, "--force-alias",
-                                     help="Rebuild the Ollama chat alias even if it exists."),
+    docs: bool = typer.Option(
+        False,
+        "--docs",
+        help="Also install the kordoc document engine (HWP/PDF/DOCX/PPTX; needs Node.js 20+).",
+    ),
+    skip_models: bool = typer.Option(
+        False, "--skip-models", help="Skip the Ollama model pull/alias/probe."
+    ),
+    force_alias: bool = typer.Option(
+        False, "--force-alias", help="Rebuild the Ollama chat alias even if it exists."
+    ),
 ) -> None:
     """Prepare everything (idempotent): database + extensions -> migrations -> models -> kordoc."""
     from autoontology.engine.migrate import (
@@ -100,8 +107,10 @@ def setup(
     if skip_models:
         typer.echo("models: skipped (--skip-models)")
     elif settings.chat_provider == "openai" and settings.embed_provider == "openai":
-        typer.echo("models: skipped (chat and embeddings use the openai provider; "
-                   "`uv run autoontology doctor` checks the endpoint)")
+        typer.echo(
+            "models: skipped (chat and embeddings use the openai provider; "
+            "`uv run autoontology doctor` checks the endpoint)"
+        )
     else:
         from autoontology.config import OLLAMA_DEFAULT_CHAT_MODEL
         from autoontology.engine.ollama import (
@@ -111,29 +120,39 @@ def setup(
             setup_ollama,
         )
 
-        if settings.chat_provider == "openai" or \
-                settings.ollama_chat_model != OLLAMA_DEFAULT_CHAT_MODEL:
+        if (
+            settings.chat_provider == "openai"
+            or settings.ollama_chat_model != OLLAMA_DEFAULT_CHAT_MODEL
+        ):
             # only the default alias is built here; any other model is pulled as-is
-            wanted = [settings.ollama_embed_model,
-                      *([settings.ollama_chat_model] if settings.chat_provider == "ollama"
-                        else [])]
+            wanted = [
+                settings.ollama_embed_model,
+                *([settings.ollama_chat_model] if settings.chat_provider == "ollama" else []),
+            ]
             try:
                 pulled = pull_models(settings.ollama_endpoint, wanted, echo=typer.echo)
             except OllamaSetupError as exc:
                 _fail(f"models: {exc}")
-            typer.echo(f"models: {', '.join(wanted)} present"
-                       + (f" (pulled {', '.join(pulled)})" if pulled else ""))
+            typer.echo(
+                f"models: {', '.join(wanted)} present"
+                + (f" (pulled {', '.join(pulled)})" if pulled else "")
+            )
         else:
             try:
-                result = setup_ollama(endpoint=settings.ollama_endpoint,
-                                      alias=settings.ollama_chat_model,
-                                      embed=settings.ollama_embed_model, force=force_alias,
-                                      echo=typer.echo)
+                result = setup_ollama(
+                    endpoint=settings.ollama_endpoint,
+                    alias=settings.ollama_chat_model,
+                    embed=settings.ollama_embed_model,
+                    force=force_alias,
+                    echo=typer.echo,
+                )
             except (OllamaSetupError, TemplatePatchError) as exc:
                 _fail(f"models: {exc}")
-            typer.echo(f"models: {result.alias} answers {result.answer!r} with "
-                       f"completion_tokens {result.completion_tokens} (thinking off); "
-                       f"embeddings {settings.ollama_embed_model}")
+            typer.echo(
+                f"models: {result.alias} answers {result.answer!r} with "
+                f"completion_tokens {result.completion_tokens} (thinking off); "
+                f"embeddings {settings.ollama_embed_model}"
+            )
     if docs:
         _install_kordoc(settings, version=None, omit_optional=False, force=False)
     else:
@@ -141,31 +160,35 @@ def setup(
     typer.echo("next: uv run autoontology up")
 
 
-def _install_kordoc(settings, *, version: str | None, omit_optional: bool,
-                    force: bool) -> None:
+def _install_kordoc(settings, *, version: str | None, omit_optional: bool, force: bool) -> None:
     from autoontology.unstructured import kordoc
 
     try:
-        result = kordoc.install_kordoc(settings.home, version=version or kordoc.DEFAULT_VERSION,
-                                       omit_optional=omit_optional, force=force,
-                                       echo=typer.echo)
-        engine = kordoc.KordocEngine(node=kordoc.require_node()[0], cli=result.cli,
-                                     origin="home")
+        result = kordoc.install_kordoc(
+            settings.home,
+            version=version or kordoc.DEFAULT_VERSION,
+            omit_optional=omit_optional,
+            force=force,
+            echo=typer.echo,
+        )
+        engine = kordoc.KordocEngine(node=kordoc.require_node()[0], cli=result.cli, origin="home")
         reported = kordoc.engine_version(engine)
     except kordoc.KordocError as exc:
         _fail(f"kordoc: install failed: {exc.message}")
     if reported != result.version:
         _fail(f"kordoc: {result.cli} reports {reported}, expected {result.version}")
-    typer.echo(f"kordoc: {result.action}: kordoc {reported} at {result.cli}"
-               + (" (optional deps omitted: PDF/OCR unavailable)" if result.omit_optional
-                  else ""))
+    typer.echo(
+        f"kordoc: {result.action}: kordoc {reported} at {result.cli}"
+        + (" (optional deps omitted: PDF/OCR unavailable)" if result.omit_optional else "")
+    )
 
 
 @tools_app.command("install-kordoc")
 def tools_install_kordoc(
     version: str = typer.Option(None, "--version", help="kordoc version (default: pinned)."),
     omit_optional: bool = typer.Option(
-        False, "--omit-optional", help="Skip optional deps (PDF/OCR then unavailable)."),
+        False, "--omit-optional", help="Skip optional deps (PDF/OCR then unavailable)."
+    ),
     force: bool = typer.Option(False, "--force", help="Reinstall even if present."),
 ) -> None:
     """Install the kordoc document engine into <home>/kordoc (npm, Node >= 20)."""
@@ -198,10 +221,14 @@ def tools_status() -> None:
     try:
         engine = kordoc.resolve_engine(settings.home)
         recorded = kordoc.read_version_file(settings.home) if engine.origin == "home" else None
-        note = (" (optional deps omitted: PDF/OCR unavailable)"
-                if recorded and recorded["omit_optional"] else "")
-        typer.echo(f"kordoc  {kordoc.engine_version(engine)}  {engine.cli} "
-                   f"(from {engine.origin}){note}")
+        note = (
+            " (optional deps omitted: PDF/OCR unavailable)"
+            if recorded and recorded["omit_optional"]
+            else ""
+        )
+        typer.echo(
+            f"kordoc  {kordoc.engine_version(engine)}  {engine.cli} (from {engine.origin}){note}"
+        )
     except kordoc.KordocError as exc:
         typer.echo(f"kordoc  missing  {exc.message}")
         raise typer.Exit(code=1) from None
@@ -273,8 +300,9 @@ def _table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
 @source_app.command("add")
 def source_add(
     target: str = typer.Argument(..., help="File, directory, or database URL."),
-    name: str = typer.Option(..., "--name", help="Source name: lowercase letters, digits, _ "
-                             "(documents may also use -)."),
+    name: str = typer.Option(
+        ..., "--name", help="Source name: lowercase letters, digits, _ (documents may also use -)."
+    ),
     kind: str = typer.Option("structured", "--kind", help="structured | documents."),
     recursive: bool = typer.Option(False, "--recursive", help="Scan directories recursively."),
 ) -> None:
@@ -294,8 +322,10 @@ def source_add(
         if not path.exists():
             _fail(f"source add failed: no such file or directory: {path}")
         if store.get_source(name):
-            _fail(f"source add failed: source {name!r} already exists "
-                  f"(remove it with `source rm {name}`)")
+            _fail(
+                f"source add failed: source {name!r} already exists "
+                f"(remove it with `source rm {name}`)"
+            )
         try:
             src = ensure_documents_source(store, name, path, recursive)
         except (JobError, ValueError) as exc:
@@ -307,8 +337,7 @@ def source_add(
             src = pipeline.add_source(store, target, name=name, recursive=recursive)
         except (LoadError, ValueError) as exc:
             _fail(f"source add failed: {exc}")
-        typer.echo(f"added source {src.name} ({src.kind}) -> "
-                   f"{pipeline.catalog_database_name(src)}")
+        typer.echo(f"added source {src.name} ({src.kind}) -> {pipeline.catalog_database_name(src)}")
         typer.echo(f"  locator: {pipeline.display_locator(src)}")
         if src.kind == "files":
             files = pipeline.files_locator(src).files()
@@ -327,11 +356,16 @@ def source_list() -> None:
     rows = []
     for src in store.list_sources():
         last = store.latest_run(src.id)
-        rows.append((src.name, src.kind, pipeline.catalog_database_name(src)
-                     if src.kind != "documents" else "-",
-                     src.catalog_database_id or "-",
-                     f"{last.kind} {last.status}" if last else "-",
-                     pipeline.display_locator(src)))
+        rows.append(
+            (
+                src.name,
+                src.kind,
+                pipeline.catalog_database_name(src) if src.kind != "documents" else "-",
+                src.catalog_database_id or "-",
+                f"{last.kind} {last.status}" if last else "-",
+                pipeline.display_locator(src),
+            )
+        )
     if not rows:
         typer.echo("no sources (add one with `autoontology source add <path> --name <name>`)")
         return
@@ -343,8 +377,10 @@ def source_rm(
     name: str = typer.Argument(...),
     drop_db: bool = typer.Option(False, "--drop-db", help="Also drop autoontology_src_<name>."),
     force: bool = typer.Option(
-        False, "--force",
-        help="Remove locally even if the backend is down or graph teardown does not finish."),
+        False,
+        "--force",
+        help="Remove locally even if the backend is down or graph teardown does not finish.",
+    ),
 ) -> None:
     """Remove a source: its upstream connection (and ingested graph) and its run history.
 
@@ -359,8 +395,14 @@ def source_rm(
     if src is None:
         _fail(f"unknown source {name!r}")
     try:
-        remove_source(settings, store, src, drop_db=drop_db, force=force,
-                      notify=lambda message, warning: typer.echo(message, err=warning))
+        remove_source(
+            settings,
+            store,
+            src,
+            drop_db=drop_db,
+            force=force,
+            notify=lambda message, warning: typer.echo(message, err=warning),
+        )
     except RemoveError as exc:
         _fail(str(exc))
 
@@ -371,14 +413,15 @@ def _report_extract(store, name: str, result) -> bool:
 
     rows = extract_job.summary_rows(store, name)
     if rows:
-        typer.echo(_table(("DOCUMENT", "ENGINE", "PAGES", "CHUNKS", "EXTRACTED", "CONCEPTS"),
-                          rows))
+        typer.echo(_table(("DOCUMENT", "ENGINE", "PAGES", "CHUNKS", "EXTRACTED", "CONCEPTS"), rows))
     report = result.details.get("report", {})
     if report:
-        typer.echo(f"concepts {report.get('concepts', 0)}, relations {report.get('relations', 0)}"
-                   f", evidence {report.get('evidence', 0)} ({report.get('evidence_verified', 0)}"
-                   f" verified), chunks failed {report.get('chunks_failed', 0)}, pending "
-                   f"{report.get('chunks_pending', 0)}")
+        typer.echo(
+            f"concepts {report.get('concepts', 0)}, relations {report.get('relations', 0)}"
+            f", evidence {report.get('evidence', 0)} ({report.get('evidence_verified', 0)}"
+            f" verified), chunks failed {report.get('chunks_failed', 0)}, pending "
+            f"{report.get('chunks_pending', 0)}"
+        )
     report_path = result.export_dir / "report.md" if result.export_dir else None
     if result.status == "succeeded":
         typer.echo(f"extract {name} {result.run_id}: {result.status}")
@@ -390,16 +433,19 @@ def _report_extract(store, name: str, result) -> bool:
     steps = {s.name: s.detail for s in store.get_steps(result.run_id)}
     failed = steps.get("extract", {}).get("failed_chunks", [])
     unread = steps.get("read", {}).get("failed", [])
-    typer.echo(f"extract {name} {result.run_id}: partial ({len(failed)} chunk(s) failed, "
-               f"{len(unread)} document(s) failed to read)")
+    typer.echo(
+        f"extract {name} {result.run_id}: partial ({len(failed)} chunk(s) failed, "
+        f"{len(unread)} document(s) failed to read)"
+    )
     for item in failed[:10]:
         typer.echo(f"  failed: {item['document']} #{item['index']}: {item['error'][:160]}")
     for item in unread[:10]:
-        typer.echo(f"  unread: {shown_path(item['path'])} ({item['code']}): "
-                   f"{item['error'][:160]}")
+        typer.echo(f"  unread: {shown_path(item['path'])} ({item['code']}): {item['error'][:160]}")
     if steps.get("consolidate", {}).get("partial"):
-        typer.echo("  consolidation incomplete (embedding/merge judge failures; see "
-                   "jobs.log): the next run consolidates again")
+        typer.echo(
+            "  consolidation incomplete (embedding/merge judge failures; see "
+            "jobs.log): the next run consolidates again"
+        )
     if report_path:
         typer.echo(f"report: {report_path}")
     return False
@@ -448,8 +494,9 @@ def build(
     for src in documents:
         target, recursive = extract_job.documents_target(src)
         try:
-            result = extract_job.run_extract(src.name, target, settings=settings, store=store,
-                                             recursive=recursive, resume=resume)
+            result = extract_job.run_extract(
+                src.name, target, settings=settings, store=store, recursive=recursive, resume=resume
+            )
         except jobs.JobError as exc:
             hint = f" (log: {exc.log_path})" if exc.log_path else ""
             typer.echo(f"extract {src.name} failed: {exc}{hint}", err=True)
@@ -459,8 +506,11 @@ def build(
             _unexpected(f"extract {src.name}", exc, log_path)
         if not _report_extract(store, src.name, result):
             failed.append(src.name)
-    built = [s for s in (store.get_source(x.name) for x in store.list_sources())
-             if s is not None and s.kind in ("files", "database") and s.catalog_database_id]
+    built = [
+        s
+        for s in (store.get_source(x.name) for x in store.list_sources())
+        if s is not None and s.kind in ("files", "database") and s.catalog_database_id
+    ]
     if documents and not built:
         typer.echo("align: skipped (no built structured source to align to)")
     for doc in documents:
@@ -468,20 +518,26 @@ def build(
             continue
         for target_src in built:
             try:
-                result = align_job.run_align(doc.name, settings=settings, store=store,
-                                             structured_source=target_src.name, resume=resume)
+                result = align_job.run_align(
+                    doc.name,
+                    settings=settings,
+                    store=store,
+                    structured_source=target_src.name,
+                    resume=resume,
+                )
             except jobs.JobError as exc:
                 typer.echo(f"align {doc.name} -> {target_src.name} failed: {exc}", err=True)
                 failed.append(f"{doc.name}->{target_src.name}")
                 continue
             except Exception as exc:  # noqa: BLE001
                 _unexpected(f"align {doc.name}", exc, log_path)
-            typer.echo(f"align {doc.name} -> {target_src.name} {result.run_id}: "
-                       f"{result.status}")
+            typer.echo(f"align {doc.name} -> {target_src.name} {result.run_id}: {result.status}")
     elapsed = time.monotonic() - started
     if failed:
-        _fail(f"build finished with failures in {elapsed:.1f}s: {', '.join(failed)}\n"
-              f"log: {log_path}\nretry: uv run autoontology build --resume")
+        _fail(
+            f"build finished with failures in {elapsed:.1f}s: {', '.join(failed)}\n"
+            f"log: {log_path}\nretry: uv run autoontology build --resume"
+        )
     typer.echo(f"build: succeeded in {elapsed:.1f}s; next: uv run autoontology export")
 
 
@@ -504,20 +560,30 @@ def runs(
     for run in store.list_runs(source_id, limit=limit):
         all_steps = store.get_steps(run.id)
         steps = " ".join(
-            f"{s.name}={s.status}" + (f"({s.detail['seconds']}s)" if "seconds" in s.detail
-                                      else "")
-            for s in all_steps if not s.name.startswith(("chunk:", "concept:")))
+            f"{s.name}={s.status}" + (f"({s.detail['seconds']}s)" if "seconds" in s.detail else "")
+            for s in all_steps
+            if not s.name.startswith(("chunk:", "concept:"))
+        )
         for prefix, label in (("chunk:", "chunks"), ("concept:", "concepts")):
             by_status: dict[str, int] = {}
             for s in all_steps:
                 if s.name.startswith(prefix):
                     by_status[s.status] = by_status.get(s.status, 0) + 1
             if by_status:
-                steps += (f" {label}[" + " ".join(f"{k}={v}" for k, v in
-                                                  sorted(by_status.items())) + "]")
+                steps += (
+                    f" {label}[" + " ".join(f"{k}={v}" for k, v in sorted(by_status.items())) + "]"
+                )
         error = f" error={run.error[:80]}" if run.error else ""
-        rows.append((run.id, run.kind, names.get(run.source_id or "", "-"), run.status,
-                     (run.started_at or "-")[:19], steps + error))
+        rows.append(
+            (
+                run.id,
+                run.kind,
+                names.get(run.source_id or "", "-"),
+                run.status,
+                (run.started_at or "-")[:19],
+                steps + error,
+            )
+        )
     if not rows:
         typer.echo("no runs")
         return
@@ -526,8 +592,9 @@ def runs(
 
 @app.command()
 def export(
-    out: str = typer.Option(None, "--out", help="Output directory (default: "
-                            "exports/<name>/<run>/)."),
+    out: str = typer.Option(
+        None, "--out", help="Output directory (default: exports/<name>/<run>/)."
+    ),
 ) -> None:
     """Write the merged ontology of all sources: ontology.ttl, ontology.jsonld,
     graph.graphml, report.md."""
@@ -545,8 +612,13 @@ def export(
         _fail("nothing to export: no sources (see `autoontology source add`)")
     try:
         jobs.setup_job_logging(settings, console=True)
-        result = export_job.run_export(EXPORT_NAME, settings=settings, store=store,
-                                       sources=names, out=Path(out) if out else None)
+        result = export_job.run_export(
+            EXPORT_NAME,
+            settings=settings,
+            store=store,
+            sources=names,
+            out=Path(out) if out else None,
+        )
     except jobs.JobError as exc:
         hint = f"\nlog: {exc.log_path}" if exc.log_path else ""
         _fail(f"export failed: {exc}{hint}")
@@ -554,12 +626,35 @@ def export(
         _unexpected("export", exc, log_path)
     counts = result.details.get("collect", {}).get("counts", {})
     if counts:
-        typer.echo(_table(("CLASSES", "TERM", "DOCUMENT", "OBJECT PROPS", "DATA PROPS",
-                           "INDIVIDUALS", "DOCUMENTS", "MERGED"),
-                          [tuple(str(counts.get(k, 0)) for k in (
-                              "classes", "classes_structured", "classes_document",
-                              "object_properties", "datatype_properties", "individuals",
-                              "documents", "merged_concepts"))]))
+        typer.echo(
+            _table(
+                (
+                    "CLASSES",
+                    "TERM",
+                    "DOCUMENT",
+                    "OBJECT PROPS",
+                    "DATA PROPS",
+                    "INDIVIDUALS",
+                    "DOCUMENTS",
+                    "MERGED",
+                ),
+                [
+                    tuple(
+                        str(counts.get(k, 0))
+                        for k in (
+                            "classes",
+                            "classes_structured",
+                            "classes_document",
+                            "object_properties",
+                            "datatype_properties",
+                            "individuals",
+                            "documents",
+                            "merged_concepts",
+                        )
+                    )
+                ],
+            )
+        )
     for entry in result.details.get("report", {}).get("files", []):
         typer.echo(f"  {entry['name']}  {entry['bytes']} bytes")
     typer.echo(f"export {result.run_id}: {result.status} in {time.monotonic() - started:.1f}s")

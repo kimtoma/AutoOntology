@@ -16,8 +16,9 @@ def test_sends_user_header_and_parses():
     def handler(req: httpx.Request):
         seen.append(req)
         if req.url.path == "/api/datasources/dbs":
-            return httpx.Response(200, json={"data": [{"id": "d1", "name": "AutoOntology_Src_A"}],
-                                             "count": 1})
+            return httpx.Response(
+                200, json={"data": [{"id": "d1", "name": "AutoOntology_Src_A"}], "count": 1}
+            )
         if req.url.path == "/api/connections" and req.method == "POST":
             return httpx.Response(201, json={"data": json.loads(req.content)["connection"]})
         if req.url.path == "/api/connections":
@@ -34,8 +35,11 @@ def test_sends_user_header_and_parses():
     assert c.create_connection({"database": "x"}) == {"database": "x"}
     assert c.connection_exists("X") and not c.connection_exists("y")
     assert c.export_model(["d1"], "ossie", include_ontology=True) == b"zip-bytes"
-    assert json.loads(seen[-1].content) == {"databases": ["d1"], "format": "ossie",
-                                            "include_ontology": True}
+    assert json.loads(seen[-1].content) == {
+        "databases": ["d1"],
+        "format": "ossie",
+        "include_ontology": True,
+    }
     c.list_terms(query="고객", limit=None)
     assert seen[-1].url.params.get("query") == "고객" and "limit" not in seen[-1].url.params
     assert all(r.headers["x-auto-ontology-user-id"] == "autoontology" for r in seen)

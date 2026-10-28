@@ -50,11 +50,21 @@ _URL_PASSWORD_RE = re.compile(r"(://[^:/@\s]*:)[^@\s]+@")  # user may be empty
 #: word (POSTGRES_PASSWORD, PGPASSWORD, OPENAI_API_KEY, client_secret, ...), not token_count.
 _KV_SECRET_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY))"
-    r"([\"']?\s*[=:]\s*)(?:([\"'])(?!\*\*\*)[^\"'\n]*\3|(?!\*\*\*)[^\s,;&'\"}\]]+)")
+    r"([\"']?\s*[=:]\s*)(?:([\"'])(?!\*\*\*)[^\"'\n]*\3|(?!\*\*\*)[^\s,;&'\"}\]]+)"
+)
 _BEARER_RE = re.compile(r"(?i)\b(Bearer\s+)(?!\*\*\*)[^\s,;'\"]+")
 _BARE_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(nvapi-|sk-)[A-Za-z0-9_-]{6,}")
-_SECRET_KEYS = ("password", "passwd", "secret", "token", "api_key", "apikey", "credential",
-                "private_key", "authorization")
+_SECRET_KEYS = (
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "credential",
+    "private_key",
+    "authorization",
+)
 #: Seconds between SSE polls of the run log and step rows.
 SSE_POLL_S = 0.5
 #: How often the SSE stream checks that an unmanaged active run's owner is alive.
@@ -77,8 +87,10 @@ def mask(value: Any) -> Any:
         value = _BEARER_RE.sub(r"\1***", value)
         return _BARE_TOKEN_RE.sub(r"\1***", value)
     if isinstance(value, dict):
-        return {k: "***" if any(m in str(k).lower() for m in _SECRET_KEYS) else mask(v)
-                for k, v in value.items()}
+        return {
+            k: "***" if any(m in str(k).lower() for m in _SECRET_KEYS) else mask(v)
+            for k, v in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [mask(v) for v in value]
     return value
@@ -123,8 +135,12 @@ class ExportOptions(BaseModel):
     sources: list[str] | None = None
 
 
-OPTIONS: dict[str, type[BaseModel]] = {"build": BuildOptions, "extract": ExtractOptions,
-                                       "align": AlignOptions, "export": ExportOptions}
+OPTIONS: dict[str, type[BaseModel]] = {
+    "build": BuildOptions,
+    "extract": ExtractOptions,
+    "align": AlignOptions,
+    "export": ExportOptions,
+}
 
 
 class RunIn(BaseModel):
@@ -162,7 +178,7 @@ def host_name(header: str) -> str:
     header = header.strip().lower()
     if header.startswith("["):
         end = header.find("]")
-        return header[:end + 1] if end > 0 else header
+        return header[: end + 1] if end > 0 else header
     return header.rsplit(":", 1)[0] if ":" in header else header
 
 
@@ -219,14 +235,18 @@ class Api:
 
     # --- serialisation ---------------------------------------------------------------
 
-    def run_dict(self, run: Run, *, names: dict[str, str] | None = None,
-                 steps: bool = True) -> dict[str, Any]:
-        names = names if names is not None else {s.id: s.name
-                                                 for s in self.store.list_sources()}
+    def run_dict(
+        self, run: Run, *, names: dict[str, str] | None = None, steps: bool = True
+    ) -> dict[str, Any]:
+        names = names if names is not None else {s.id: s.name for s in self.store.list_sources()}
         out: dict[str, Any] = {
-            "id": run.id, "kind": run.kind, "source": names.get(run.source_id or ""),
-            "status": run.status, "started_at": run.started_at,
-            "finished_at": run.finished_at, "error": mask(run.error),
+            "id": run.id,
+            "kind": run.kind,
+            "source": names.get(run.source_id or ""),
+            "status": run.status,
+            "started_at": run.started_at,
+            "finished_at": run.finished_at,
+            "error": mask(run.error),
             "params": mask({k: v for k, v in run.params.items() if k != "pid"}),
             "managed": self.runs.is_managed(run.id),
         }
@@ -239,13 +259,21 @@ class Api:
         rows = self.store.get_steps(run.id)
         by_name = {s.name: s for s in rows}
         steps = []
-        for name in list(top) + [s.name for s in rows if s.name not in top
-                                 and not s.name.startswith(("chunk:", "concept:"))]:
+        for name in list(top) + [
+            s.name
+            for s in rows
+            if s.name not in top and not s.name.startswith(("chunk:", "concept:"))
+        ]:
             s = by_name.get(name)
-            steps.append({"name": name, "status": s.status if s else "pending",
-                          "started_at": s.started_at if s else None,
-                          "finished_at": s.finished_at if s else None,
-                          "detail": mask(_short_detail(s.detail)) if s else {}})
+            steps.append(
+                {
+                    "name": name,
+                    "status": s.status if s else "pending",
+                    "started_at": s.started_at if s else None,
+                    "finished_at": s.finished_at if s else None,
+                    "detail": mask(_short_detail(s.detail)) if s else {},
+                }
+            )
         progress: dict[str, dict[str, int]] = {}
         for s in rows:
             for prefix, label in (("chunk:", "chunks"), ("concept:", "concepts")):
@@ -261,15 +289,25 @@ class Api:
         last = self.store.latest_run(source.id)
         active = self.runs.active_source(source.name)
         out: dict[str, Any] = {
-            "name": source.name, "kind": source.kind,
+            "name": source.name,
+            "kind": source.kind,
             "locator": mask(pipeline.display_locator(source)),
-            "database": (pipeline.catalog_database_name(source)
-                         if source.kind in STRUCTURED_KINDS else None),
+            "database": (
+                pipeline.catalog_database_name(source) if source.kind in STRUCTURED_KINDS else None
+            ),
             "built": bool(source.catalog_database_id),
             "uploaded": self._is_upload(source),
             "created_at": source.created_at,
-            "last_run": ({"id": last.id, "kind": last.kind, "status": last.status,
-                          "finished_at": last.finished_at} if last else None),
+            "last_run": (
+                {
+                    "id": last.id,
+                    "kind": last.kind,
+                    "status": last.status,
+                    "finished_at": last.finished_at,
+                }
+                if last
+                else None
+            ),
             "active_run": ({"id": active.run_id, "kind": active.kind} if active else None),
         }
         if source.kind == "documents":
@@ -312,9 +350,12 @@ class Api:
                 model, _, _ = collect_model(name, self.store, client, structured, documents)
         except (BackendError, LookupError, httpx.HTTPError) as exc:
             if not documents:
-                raise ApiError(503, "backend_unavailable",
-                               f"structured graph unavailable: {mask(str(exc))}") from exc
-            warnings.append(f"could not load the structured sources (backend): {mask(str(exc))[:200]}")
+                raise ApiError(
+                    503, "backend_unavailable", f"structured graph unavailable: {mask(str(exc))}"
+                ) from exc
+            warnings.append(
+                f"could not load the structured sources (backend): {mask(str(exc))[:200]}"
+            )
             model = merged.build(name, documents=documents_inputs(self.store, documents))
             return model, warnings  # not cached: retry once the backend is back
         with self._graph_lock:
@@ -336,8 +377,11 @@ class Api:
         checks: dict[str, dict[str, str]] = {}
         try:
             code = httpx.get(f"{s.backend_url}/api/health/live", timeout=2.0).status_code
-            checks["backend"] = ({"status": "ok", "detail": s.backend_url} if code == 200 else
-                                 {"status": "error", "detail": f"HTTP {code}"})
+            checks["backend"] = (
+                {"status": "ok", "detail": s.backend_url}
+                if code == 200
+                else {"status": "error", "detail": f"HTTP {code}"}
+            )
         except httpx.HTTPError as exc:
             checks["backend"] = {"status": "error", "detail": type(exc).__name__}
         try:
@@ -345,28 +389,42 @@ class Api:
 
             with connect(s) as conn:
                 conn.execute("select 1")
-            checks["postgres"] = {"status": "ok",
-                                  "detail": f"{s.postgres_host}:{s.postgres_port}/"
-                                            f"{s.postgres_database}"}
+            checks["postgres"] = {
+                "status": "ok",
+                "detail": f"{s.postgres_host}:{s.postgres_port}/{s.postgres_database}",
+            }
         except Exception as exc:  # noqa: BLE001 - reported, not raised
-            checks["postgres"] = {"status": "error", "detail": type(exc).__name__,
-                                  "remedy": "start Postgres (e.g. `docker compose up -d`), "
-                                            "then `uv run autoontology setup`"}
+            checks["postgres"] = {
+                "status": "error",
+                "detail": type(exc).__name__,
+                "remedy": "start Postgres (e.g. `docker compose up -d`), "
+                "then `uv run autoontology setup`",
+            }
         if "ollama" in (s.chat_provider, s.embed_provider):
             from autoontology.engine.ollama import has_model, list_models
 
             try:
                 names = list_models(s.ollama_endpoint)
-                wanted = [*([s.ollama_chat_model] if s.chat_provider == "ollama" else []),
-                          *([s.ollama_embed_model] if s.embed_provider == "ollama" else [])]
+                wanted = [
+                    *([s.ollama_chat_model] if s.chat_provider == "ollama" else []),
+                    *([s.ollama_embed_model] if s.embed_provider == "ollama" else []),
+                ]
                 missing = [m for m in wanted if not has_model(names, m)]
-                checks["ollama"] = ({"status": "error",
-                                     "detail": f"missing models: {', '.join(missing)}",
-                                     "remedy": "uv run autoontology setup"} if missing else
-                                    {"status": "ok", "detail": ", ".join(wanted)})
+                checks["ollama"] = (
+                    {
+                        "status": "error",
+                        "detail": f"missing models: {', '.join(missing)}",
+                        "remedy": "uv run autoontology setup",
+                    }
+                    if missing
+                    else {"status": "ok", "detail": ", ".join(wanted)}
+                )
             except (httpx.HTTPError, ValueError) as exc:
-                checks["ollama"] = {"status": "error", "detail": type(exc).__name__,
-                                    "remedy": "start Ollama (`ollama serve`)"}
+                checks["ollama"] = {
+                    "status": "error",
+                    "detail": type(exc).__name__,
+                    "remedy": "start Ollama (`ollama serve`)",
+                }
         from autoontology.unstructured import kordoc
 
         try:
@@ -376,15 +434,20 @@ class Api:
             kordoc_ok = False
         overall = "error" if any(c["status"] == "error" for c in checks.values()) else "ok"
         result = {
-            "status": overall, "version": __version__,
-            "providers": {"chat_provider": s.chat_provider,
-                          "chat_model": s.effective_chat_model,
-                          "embed_provider": s.embed_provider,
-                          "embed_model": s.effective_embed_model,
-                          "openai_base_url": s.openai_base_url
-                          if "openai" in (s.chat_provider, s.embed_provider) else ""},
+            "status": overall,
+            "version": __version__,
+            "providers": {
+                "chat_provider": s.chat_provider,
+                "chat_model": s.effective_chat_model,
+                "embed_provider": s.embed_provider,
+                "embed_model": s.effective_embed_model,
+                "openai_base_url": s.openai_base_url
+                if "openai" in (s.chat_provider, s.embed_provider)
+                else "",
+            },
             "kordoc_available": kordoc_ok,
-            "service_url": s.service_url, "checks": checks,
+            "service_url": s.service_url,
+            "checks": checks,
             "doctor": "uv run autoontology doctor",
             "upload_max_mb": round(upload_limit_bytes() / (1024 * 1024), 1),
         }
@@ -428,8 +491,11 @@ def build_router(api: Api) -> APIRouter:
             except ValueError:
                 declared = 0
             if declared > limit + MULTIPART_OVERHEAD:  # refuse before reading the body
-                raise ApiError(413, "too_large", f"upload exceeds {limit // (1024 * 1024)} MB "
-                               "(AUTOONTOLOGY_UPLOAD_MAX_MB)")
+                raise ApiError(
+                    413,
+                    "too_large",
+                    f"upload exceeds {limit // (1024 * 1024)} MB (AUTOONTOLOGY_UPLOAD_MAX_MB)",
+                )
             form = await request.form()
             try:
                 return await _add_upload(api, form)
@@ -450,8 +516,14 @@ def build_router(api: Api) -> APIRouter:
             raise ApiError(409, "run_active", f"source {name!r} has an active run")
         messages: list[str] = []
         try:
-            remove_source(api.settings, api.store, source, drop_db=drop_db, force=force,
-                          notify=lambda m, _w: messages.append(mask(m)))
+            remove_source(
+                api.settings,
+                api.store,
+                source,
+                drop_db=drop_db,
+                force=force,
+                notify=lambda m, _w: messages.append(mask(m)),
+            )
         except RemoveError as exc:
             raise ApiError(409, "remove_failed", mask(str(exc))) from exc
         upload = api.uploads_dir / source.name
@@ -474,14 +546,16 @@ def build_router(api: Api) -> APIRouter:
         try:
             run_id = api.runs.start(req.kind, source.name, call)
         except RunStartError as exc:
-            code = {409: "run_active", 503: "backend_unavailable"}.get(exc.status,
-                                                                         "run_not_started")
+            code = {409: "run_active", 503: "backend_unavailable"}.get(
+                exc.status, "run_not_started"
+            )
             raise ApiError(exc.status, code, mask(str(exc))) from exc
         return {"run_id": run_id}
 
     @router.get("/runs")
-    def list_runs(source: str | None = None,
-                  limit: int = Query(30, ge=1, le=200)) -> dict[str, Any]:
+    def list_runs(
+        source: str | None = None, limit: int = Query(30, ge=1, le=200)
+    ) -> dict[str, Any]:
         source_id = api.source(source).id if source else None
         names = {s.id: s.name for s in api.store.list_sources()}
         runs = api.store.list_runs(source_id, limit=limit)
@@ -503,8 +577,11 @@ def build_router(api: Api) -> APIRouter:
     def cancel_run(run_id: str) -> dict[str, Any]:
         run = _run(run_id)
         if run.status not in ACTIVE_RUN_STATUSES or not api.runs.cancel(run_id):
-            raise ApiError(409, "not_cancellable",
-                           f"run {run_id} is not running in this service ({run.status})")
+            raise ApiError(
+                409,
+                "not_cancellable",
+                f"run {run_id} is not running in this service ({run.status})",
+            )
         return {"run_id": run_id, "cancel_requested": True}
 
     @router.get("/runs/{run_id}/events")
@@ -515,22 +592,31 @@ def build_router(api: Api) -> APIRouter:
     # concepts / relations -----------------------------------------------------------
 
     @router.get("/concepts")
-    def list_concepts(source: str | None = None, q: str = Query("", max_length=200),
-                      kind: str = Query("", max_length=40), page: int = Query(1, ge=1),
-                      size: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
+    def list_concepts(
+        source: str | None = None,
+        q: str = Query("", max_length=200),
+        kind: str = Query("", max_length=40),
+        page: int = Query(1, ge=1),
+        size: int = Query(50, ge=1, le=200),
+    ) -> dict[str, Any]:
         from autoontology.store.alignments import AlignmentStore
         from autoontology.store.documents import DocumentStore
 
         if source:
             sources = [api.source(source)]
             if sources[0].kind != "documents":
-                raise ApiError(400, "not_documents", f"source {source!r} is a "
-                               f"{sources[0].kind} source; concepts come from documents")
+                raise ApiError(
+                    400,
+                    "not_documents",
+                    f"source {source!r} is a "
+                    f"{sources[0].kind} source; concepts come from documents",
+                )
         else:
             sources = [s for s in api.store.list_sources() if s.kind == "documents"]
         names = {s.id: s.name for s in sources}
         rows, total = DocumentStore(api.store).search_concepts(
-            list(names), q=q, kind=kind, limit=size, offset=(page - 1) * size)
+            list(names), q=q, kind=kind, limit=size, offset=(page - 1) * size
+        )
         aligns = AlignmentStore(api.store)
         best: dict[str, Any] = {}
         for sid in names:
@@ -543,16 +629,36 @@ def build_router(api: Api) -> APIRouter:
         items = []
         for c in rows:
             a = best.get(c.id)
-            items.append({
-                "id": c.id, "name": c.name, "name_en": c.name_en, "kind": c.kind,
-                "source": names.get(c.source_id), "definition": c.definition[:300],
-                "synonyms": c.synonyms, "evidence_count": c.evidence_count,
-                "verified_count": c.verified_count,
-                "alignment": ({"relation": a.relation, "term": a.term_name,
-                               "accepted": a.accepted, "dry_run": a.dry_run} if a else None),
-            })
-        return {"items": items, "total": total, "page": page, "size": size,
-                "pages": max(1, -(-total // size))}
+            items.append(
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "name_en": c.name_en,
+                    "kind": c.kind,
+                    "source": names.get(c.source_id),
+                    "definition": c.definition[:300],
+                    "synonyms": c.synonyms,
+                    "evidence_count": c.evidence_count,
+                    "verified_count": c.verified_count,
+                    "alignment": (
+                        {
+                            "relation": a.relation,
+                            "term": a.term_name,
+                            "accepted": a.accepted,
+                            "dry_run": a.dry_run,
+                        }
+                        if a
+                        else None
+                    ),
+                }
+            )
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "size": size,
+            "pages": max(1, -(-total // size)),
+        }
 
     @router.get("/concepts/{concept_id}")
     def get_concept(concept_id: str) -> dict[str, Any]:
@@ -567,20 +673,47 @@ def build_router(api: Api) -> APIRouter:
         if c is None:
             raise ApiError(404, "unknown_concept", f"unknown concept {concept_id!r}")
         source = api.store.get_source_by_id(c.source_id)
-        evidence = [{"quote": e["quote"], "verified": bool(e["verified"]), "page": e["page"],
-                     "section": e["section_path"], "document": e["title"],
-                     "path": display_path(e["path"])} for e in docs.concept_evidence(c.id)]
-        alignments = [{"relation": a.relation, "term": a.term_name, "term_id": a.term_id,
-                       "structured_source": a.structured_source, "confidence": a.confidence,
-                       "similarity": a.similarity, "accepted": a.accepted,
-                       "dry_run": a.dry_run, "rationale": a.rationale}
-                      for a in AlignmentStore(api.store).for_concept(c.id)]
-        return {"id": c.id, "name": c.name, "name_en": c.name_en, "kind": c.kind,
-                "source": source.name if source else None, "definition": c.definition,
-                "synonyms": c.synonyms, "attributes": c.attributes,
-                "merged_from": c.merged_from, "evidence_count": c.evidence_count,
-                "verified_count": c.verified_count, "evidence": evidence,
-                "relations": docs.concept_relations(c.id), "alignments": alignments}
+        evidence = [
+            {
+                "quote": e["quote"],
+                "verified": bool(e["verified"]),
+                "page": e["page"],
+                "section": e["section_path"],
+                "document": e["title"],
+                "path": display_path(e["path"]),
+            }
+            for e in docs.concept_evidence(c.id)
+        ]
+        alignments = [
+            {
+                "relation": a.relation,
+                "term": a.term_name,
+                "term_id": a.term_id,
+                "structured_source": a.structured_source,
+                "confidence": a.confidence,
+                "similarity": a.similarity,
+                "accepted": a.accepted,
+                "dry_run": a.dry_run,
+                "rationale": a.rationale,
+            }
+            for a in AlignmentStore(api.store).for_concept(c.id)
+        ]
+        return {
+            "id": c.id,
+            "name": c.name,
+            "name_en": c.name_en,
+            "kind": c.kind,
+            "source": source.name if source else None,
+            "definition": c.definition,
+            "synonyms": c.synonyms,
+            "attributes": c.attributes,
+            "merged_from": c.merged_from,
+            "evidence_count": c.evidence_count,
+            "verified_count": c.verified_count,
+            "evidence": evidence,
+            "relations": docs.concept_relations(c.id),
+            "alignments": alignments,
+        }
 
     @router.get("/relations")
     def list_relations(source: str) -> dict[str, Any]:
@@ -593,8 +726,9 @@ def build_router(api: Api) -> APIRouter:
     # graph ------------------------------------------------------------------------------
 
     @router.get("/graph")
-    def graph(sources: str | None = None, layer: str = "all",
-              evidence: bool = False) -> dict[str, Any]:
+    def graph(
+        sources: str | None = None, layer: str = "all", evidence: bool = False
+    ) -> dict[str, Any]:
         from autoontology.web.graph import LAYERS, max_nodes_from_env, to_view
 
         if layer not in LAYERS:
@@ -602,25 +736,39 @@ def build_router(api: Api) -> APIRouter:
         if sources:
             names = list(dict.fromkeys(n.strip() for n in sources.split(",") if n.strip()))
         else:
-            names = [s.name for s in api.store.list_sources()
-                     if (s.kind in STRUCTURED_KINDS and s.catalog_database_id)
-                     or s.kind == "documents"]
+            names = [
+                s.name
+                for s in api.store.list_sources()
+                if (s.kind in STRUCTURED_KINDS and s.catalog_database_id) or s.kind == "documents"
+            ]
         if not names:
-            return {"nodes": [], "edges": [], "layer": layer, "warnings": [],
-                    "counts": {"nodes": 0, "edges": 0}, "structured_sources": [],
-                    "documents_sources": []}
+            return {
+                "nodes": [],
+                "edges": [],
+                "layer": layer,
+                "warnings": [],
+                "counts": {"nodes": 0, "edges": 0},
+                "structured_sources": [],
+                "documents_sources": [],
+            }
         model, warnings = api.graph_model(names)
         cap = max_nodes_from_env()
-        return {**to_view(model, layer, evidence=evidence, max_nodes=cap),
-                "max_nodes": cap, "warnings": warnings}
+        return {
+            **to_view(model, layer, evidence=evidence, max_nodes=cap),
+            "max_nodes": cap,
+            "warnings": warnings,
+        }
 
     # exports ----------------------------------------------------------------------------
 
     @router.get("/exports")
     def list_exports(source: str | None = None) -> dict[str, Any]:
         root = Path(api.settings.exports_dir)
-        folders = [root / _any_name(source)] if source else (
-            sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else [])
+        folders = (
+            [root / _any_name(source)]
+            if source
+            else (sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else [])
+        )
         out = []
         for folder in folders:
             if not folder.is_dir():
@@ -629,15 +777,26 @@ def build_router(api: Api) -> APIRouter:
                 if not (run_dir.is_dir() and RUN_ID_RE.fullmatch(run_dir.name)):
                     continue
                 run = api.store.get_run(run_dir.name)
-                files = sorted(({"name": f.name, "bytes": f.stat().st_size}
-                                for f in run_dir.iterdir()
-                                if f.is_file() and EXPORT_FILE_RE.fullmatch(f.name)),
-                               key=lambda f: f["name"])
-                out.append({"source": folder.name, "run_id": run_dir.name,
-                            "kind": run.kind if run else None,
-                            "status": run.status if run else None,
-                            "created_at": (run.finished_at or run.started_at) if run
-                            else _iso(run_dir.stat().st_mtime), "files": files})
+                files = sorted(
+                    (
+                        {"name": f.name, "bytes": f.stat().st_size}
+                        for f in run_dir.iterdir()
+                        if f.is_file() and EXPORT_FILE_RE.fullmatch(f.name)
+                    ),
+                    key=lambda f: f["name"],
+                )
+                out.append(
+                    {
+                        "source": folder.name,
+                        "run_id": run_dir.name,
+                        "kind": run.kind if run else None,
+                        "status": run.status if run else None,
+                        "created_at": (run.finished_at or run.started_at)
+                        if run
+                        else _iso(run_dir.stat().st_mtime),
+                        "files": files,
+                    }
+                )
         out.sort(key=lambda e: e["run_id"], reverse=True)
         return {"exports": out}
 
@@ -646,14 +805,16 @@ def build_router(api: Api) -> APIRouter:
         if not RUN_ID_RE.fullmatch(run_id) or not EXPORT_FILE_RE.fullmatch(file_name):
             raise ApiError(400, "invalid_path", "invalid export path")
         root = Path(api.settings.exports_dir).resolve()
-        for folder in (sorted(root.iterdir()) if root.is_dir() else []):
+        for folder in sorted(root.iterdir()) if root.is_dir() else []:
             candidate = (folder / run_id / file_name).resolve()
             if candidate.is_file() and candidate.is_relative_to(root):
                 if inline:
                     if candidate.stat().st_size > 5 * 1024 * 1024:
                         raise ApiError(413, "too_large", "file too large to preview")
-                    return Response(candidate.read_text(encoding="utf-8", errors="replace"),
-                                    media_type="text/plain; charset=utf-8")
+                    return Response(
+                        candidate.read_text(encoding="utf-8", errors="replace"),
+                        media_type="text/plain; charset=utf-8",
+                    )
                 return FileResponse(candidate, filename=file_name)
         raise ApiError(404, "unknown_export", f"no export file {run_id}/{file_name}")
 
@@ -668,8 +829,9 @@ def build_router(api: Api) -> APIRouter:
 
 def _validation_text(exc: Exception) -> str:
     if isinstance(exc, ValidationError):
-        return "; ".join(f"{'.'.join(str(p) for p in e['loc']) or 'body'}: {e['msg']}"
-                         for e in exc.errors())[:600]
+        return "; ".join(
+            f"{'.'.join(str(p) for p in e['loc']) or 'body'}: {e['msg']}" for e in exc.errors()
+        )[:600]
     return str(exc)[:600]
 
 
@@ -692,8 +854,9 @@ def _add_locator(api: Api, body: SourceIn) -> dict[str, Any]:
         else:
             if body.kind == "files" and not Path(body.locator).expanduser().is_absolute():
                 raise ApiError(400, "invalid_locator", "use an absolute path")
-            source = pipeline.add_source(api.store, body.locator, name=body.name,
-                                         kind=body.kind, recursive=body.recursive)
+            source = pipeline.add_source(
+                api.store, body.locator, name=body.name, kind=body.kind, recursive=body.recursive
+            )
     except (LoadError, ValueError) as exc:
         raise ApiError(400, "invalid_source", mask(str(exc))) from exc
     return api.source_dict(source)
@@ -714,7 +877,8 @@ async def _add_upload(api: Api, form: Any) -> dict[str, Any]:
     try:
         # the store lease also excludes CLI runs / removals of the same name
         token = await anyio.to_thread.run_sync(
-            lambda: api.store.acquire_leases([name], "upload", ttl=3600.0))
+            lambda: api.store.acquire_leases([name], "upload", ttl=3600.0)
+        )
     except SourceBusy as exc:
         api.runs.release(name)
         raise ApiError(409, "source_busy", str(exc)) from exc
@@ -744,8 +908,11 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
         if not FILE_NAME_RE.fullmatch(fname) or fname.startswith(".") or fname != fname.strip():
             raise ApiError(400, "invalid_file_name", f"invalid file name {f.filename!r}")
         if Path(fname).suffix.lower() not in allowed:
-            raise ApiError(400, "unsupported_file", f"unsupported file type {fname!r} "
-                           f"(supported: {', '.join(sorted(allowed))})")
+            raise ApiError(
+                400,
+                "unsupported_file",
+                f"unsupported file type {fname!r} (supported: {', '.join(sorted(allowed))})",
+            )
         if fname.casefold() in (n.casefold() for n in names):
             raise ApiError(400, "duplicate_file", f"duplicate file name {fname!r}")
         names.append(fname)
@@ -760,8 +927,12 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
                 while chunk := await f.read(1024 * 1024):
                     total += len(chunk)
                     if total > limit:
-                        raise ApiError(413, "too_large", f"upload exceeds "
-                                       f"{limit // (1024 * 1024)} MB (AUTOONTOLOGY_UPLOAD_MAX_MB)")
+                        raise ApiError(
+                            413,
+                            "too_large",
+                            f"upload exceeds "
+                            f"{limit // (1024 * 1024)} MB (AUTOONTOLOGY_UPLOAD_MAX_MB)",
+                        )
                     out.write(chunk)
 
         def register() -> Source:
@@ -789,32 +960,56 @@ def _job_call(api: Api, kind: str, source: Source, options: BaseModel):
     o = options
     if kind == "build":
         if source.kind not in STRUCTURED_KINDS:
-            raise ApiError(400, "wrong_source_kind",
-                           f"build needs a files/database source; {source.name!r} is "
-                           f"{source.kind}")
-        return lambda fn, store: fn(source.name, resume=o.resume, settings=settings,
-                                    store=store, skip_compile=o.skip_compile,
-                                    skip_export=o.skip_export)
+            raise ApiError(
+                400,
+                "wrong_source_kind",
+                f"build needs a files/database source; {source.name!r} is {source.kind}",
+            )
+        return lambda fn, store: fn(
+            source.name,
+            resume=o.resume,
+            settings=settings,
+            store=store,
+            skip_compile=o.skip_compile,
+            skip_export=o.skip_export,
+        )
     if kind == "extract":
         if source.kind != "documents":
-            raise ApiError(400, "wrong_source_kind",
-                           f"extract needs a documents source; {source.name!r} is "
-                           f"{source.kind}")
+            raise ApiError(
+                400,
+                "wrong_source_kind",
+                f"extract needs a documents source; {source.name!r} is {source.kind}",
+            )
         target, recursive = documents_target(source)
-        return lambda fn, store: fn(source.name, target, settings=settings, store=store,
-                                    recursive=recursive, resume=o.resume, workers=o.workers,
-                                    max_chunks=o.max_chunks)
+        return lambda fn, store: fn(
+            source.name,
+            target,
+            settings=settings,
+            store=store,
+            recursive=recursive,
+            resume=o.resume,
+            workers=o.workers,
+            max_chunks=o.max_chunks,
+        )
     if kind == "align":
         if source.kind != "documents":
-            raise ApiError(400, "wrong_source_kind",
-                           f"align needs a documents source; {source.name!r} is "
-                           f"{source.kind}")
+            raise ApiError(
+                400,
+                "wrong_source_kind",
+                f"align needs a documents source; {source.name!r} is {source.kind}",
+            )
         if o.structured_source:
             api.source(o.structured_source)
-        return lambda fn, store: fn(source.name, settings=settings, store=store,
-                                    structured_source=o.structured_source,
-                                    dry_run=o.dry_run, resume=o.resume, min_sim=o.threshold,
-                                    min_conf=o.min_conf)
+        return lambda fn, store: fn(
+            source.name,
+            settings=settings,
+            store=store,
+            structured_source=o.structured_source,
+            dry_run=o.dry_run,
+            resume=o.resume,
+            min_sim=o.threshold,
+            min_conf=o.min_conf,
+        )
     sources = None
     if o.sources:
         sources = [api.source(n).name for n in o.sources]
@@ -839,8 +1034,12 @@ async def _events(api: Api, run_id: str, request: Request):
     def snapshot() -> tuple[Run | None, dict[str, Any]]:
         nonlocal next_stale_check
         run = api.store.get_run(run_id)
-        if (run is not None and run.status in ACTIVE_RUN_STATUSES
-                and not api.runs.is_managed(run_id) and time.monotonic() >= next_stale_check):
+        if (
+            run is not None
+            and run.status in ACTIVE_RUN_STATUSES
+            and not api.runs.is_managed(run_id)
+            and time.monotonic() >= next_stale_check
+        ):
             # a run whose owner died never changes status by itself: reap it, so `end` comes
             next_stale_check = time.monotonic() + SSE_STALE_CHECK_S
             from autoontology.engine import jobs
@@ -878,8 +1077,7 @@ async def _events(api: Api, run_id: str, request: Request):
         return out
 
     def log_event(pos: int, raw: bytes) -> dict[str, str]:
-        return {"event": "log", "id": str(pos),
-                "data": mask(raw.decode("utf-8", errors="replace"))}
+        return {"event": "log", "id": str(pos), "data": mask(raw.decode("utf-8", errors="replace"))}
 
     while True:
         if await request.is_disconnected():
@@ -891,15 +1089,18 @@ async def _events(api: Api, run_id: str, request: Request):
         for step in state["steps"]:
             if last_steps.get(step["name"]) != step["status"]:
                 last_steps[step["name"]] = step["status"]
-                yield {"event": "step", "data": json.dumps(step, ensure_ascii=False,
-                                                           default=str)}
+                yield {"event": "step", "data": json.dumps(step, ensure_ascii=False, default=str)}
         if state["progress"] != last_progress:
             last_progress = state["progress"]
             yield {"event": "progress", "data": json.dumps(last_progress)}
         if run is not None and run.status != last_status:
             last_status = run.status
-            yield {"event": "status", "data": json.dumps(
-                {"status": run.status, "error": mask(run.error)}, ensure_ascii=False)}
+            yield {
+                "event": "status",
+                "data": json.dumps(
+                    {"status": run.status, "error": mask(run.error)}, ensure_ascii=False
+                ),
+            }
         if finished and not api.runs.is_managed(run_id):
             # the run thread may have written its last lines after the read above
             for pos, raw in read_lines(final=True):
@@ -932,18 +1133,26 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
         if guarded_path(request.url.path):
             host = host_name(request.headers.get("host") or "")
             if host not in LOCAL_HOSTS:
-                return JSONResponse({"error": "forbidden_host",
-                                     "detail": "the API answers on 127.0.0.1/localhost only"},
-                                    status_code=403)
+                return JSONResponse(
+                    {
+                        "error": "forbidden_host",
+                        "detail": "the API answers on 127.0.0.1/localhost only",
+                    },
+                    status_code=403,
+                )
             if request.method not in ("GET", "HEAD", "OPTIONS"):
                 origin = request.headers.get("origin")
                 site = request.headers.get("sec-fetch-site", "")
-                same = origin is None or urlsplit(origin).netloc.lower() == \
-                    (request.headers.get("host") or "").lower()
+                same = (
+                    origin is None
+                    or urlsplit(origin).netloc.lower()
+                    == (request.headers.get("host") or "").lower()
+                )
                 if not same or site == "cross-site":
-                    return JSONResponse({"error": "cross_origin",
-                                         "detail": "cross-origin requests are refused"},
-                                        status_code=403)
+                    return JSONResponse(
+                        {"error": "cross_origin", "detail": "cross-origin requests are refused"},
+                        status_code=403,
+                    )
         return await call_next(request)
 
     @app.exception_handler(ApiError)
@@ -953,21 +1162,23 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, exc: RequestValidationError) -> Response:
         if request.url.path.startswith(PREFIX):
-            detail = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}"
-                               for e in exc.errors())[:600]
-            return JSONResponse({"error": "invalid_request", "detail": detail},
-                                status_code=400)
+            detail = "; ".join(
+                f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()
+            )[:600]
+            return JSONResponse({"error": "invalid_request", "detail": detail}, status_code=400)
         return await request_validation_exception_handler(request, exc)
 
     @app.exception_handler(Exception)
     async def _unexpected(request: Request, exc: Exception) -> JSONResponse:
         import logging
 
-        logging.getLogger("autoontology.web").error("%s %s failed", request.method,
-                                                 request.url.path, exc_info=exc)
-        return JSONResponse({"error": "internal_error",
-                             "detail": f"{type(exc).__name__} (see service.log)"},
-                            status_code=500)
+        logging.getLogger("autoontology.web").error(
+            "%s %s failed", request.method, request.url.path, exc_info=exc
+        )
+        return JSONResponse(
+            {"error": "internal_error", "detail": f"{type(exc).__name__} (see service.log)"},
+            status_code=500,
+        )
 
     install_ui(app)
 
@@ -980,8 +1191,9 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
 
 #: The built UI (``ui/`` -> ``pnpm build``), committed so the service needs no Node.
 UI_DIST = Path(__file__).parent / "static" / "dist"
-UI_MISSING = ("the web UI is not built: run `uv run autoontology tools build-ui` "
-              "(needs Node.js and pnpm)")
+UI_MISSING = (
+    "the web UI is not built: run `uv run autoontology tools build-ui` (needs Node.js and pnpm)"
+)
 
 
 def install_ui(app: FastAPI, dist: Path | None = None) -> None:
@@ -995,8 +1207,9 @@ def install_ui(app: FastAPI, dist: Path | None = None) -> None:
         page = root / "index.html"
         if not page.is_file():
             return JSONResponse({"error": "ui_not_built", "detail": UI_MISSING}, status_code=503)
-        return FileResponse(page, media_type="text/html; charset=utf-8",
-                            headers={"Cache-Control": "no-cache"})
+        return FileResponse(
+            page, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"}
+        )
 
     @app.get("/ui", include_in_schema=False)
     def _ui_root() -> RedirectResponse:
@@ -1008,15 +1221,22 @@ def install_ui(app: FastAPI, dist: Path | None = None) -> None:
             try:
                 candidate = (root / path).resolve()
             except (ValueError, OSError):  # e.g. a NUL byte in the path
-                return JSONResponse({"error": "not_found", "detail": "invalid UI path"},
-                                    status_code=404)
+                return JSONResponse(
+                    {"error": "not_found", "detail": "invalid UI path"}, status_code=404
+                )
             if candidate.is_relative_to(root) and candidate.is_file():
                 immutable = candidate.parent == root / "assets"
-                return FileResponse(candidate, headers={
-                    "Cache-Control": "public, max-age=31536000, immutable" if immutable
-                    else "no-cache"})
+                return FileResponse(
+                    candidate,
+                    headers={
+                        "Cache-Control": "public, max-age=31536000, immutable"
+                        if immutable
+                        else "no-cache"
+                    },
+                )
             if path.startswith("assets/") or "." in path.rsplit("/", 1)[-1]:
                 # a missing file, not a client route: no HTML for a script/style URL
-                return JSONResponse({"error": "not_found", "detail": f"no UI file {path!r}"},
-                                    status_code=404)
+                return JSONResponse(
+                    {"error": "not_found", "detail": f"no UI file {path!r}"}, status_code=404
+                )
         return index()

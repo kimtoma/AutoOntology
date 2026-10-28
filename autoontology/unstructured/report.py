@@ -87,12 +87,11 @@ def summary_counts(data: ReportData) -> dict[str, Any]:
         "evidence_verified": data.evidence.get("verified", 0),
         "merges": int(stats.get("exact_merges", 0)) + int(stats.get("judge_merges", 0)),
         "paths": dict(Counter(c.extract_detail.get("path", "?") for c in extracted)),
-        "retried_chunks": sum(1 for c in data.chunks
-                              if c.extract_detail.get("upstream_retries")),
-        "over_timeout_chunks": sum(1 for c in data.chunks
-                                   if _over_timeout(c, data.llm_timeout_s)),
-        "max_chunk_seconds": max((float(c.extract_detail.get("seconds", 0.0))
-                                  for c in data.chunks), default=0.0),
+        "retried_chunks": sum(1 for c in data.chunks if c.extract_detail.get("upstream_retries")),
+        "over_timeout_chunks": sum(1 for c in data.chunks if _over_timeout(c, data.llm_timeout_s)),
+        "max_chunk_seconds": max(
+            (float(c.extract_detail.get("seconds", 0.0)) for c in data.chunks), default=0.0
+        ),
     }
 
 
@@ -110,73 +109,164 @@ def render(data: ReportData) -> str:
         "",
         "## Summary",
         "",
-        _table(["Item", "Value"], [
-            ["Documents", counts["documents"]],
-            ["Documents failed to read", counts["documents_failed"]],
-            ["Chunks (extracted / failed / pending)",
-             f"{counts['chunks']} ({counts['chunks_extracted']} / {counts['chunks_failed']} / "
-             f"{counts['chunks_pending']})"],
-            ["Concepts (without evidence)", f"{counts['concepts']} "
-                                      f"({counts['concepts_without_evidence']})"],
-            ["Relations", counts["relations"]],
-            ["Evidence (verified)", f"{counts['evidence']} ({counts['evidence_verified']}, "
-                             f"{_pct(counts['evidence_verified'], counts['evidence'])})"],
-            ["Merges (name/synonym match / LLM judgement)",
-             f"{counts['merges']} ({stats.get('exact_merges', 0)} / "
-             f"{stats.get('judge_merges', 0)}; {stats.get('judge_calls', 0)} judge calls)"],
-            ["Extraction paths", ", ".join(f"{k} {v}" for k, v in sorted(counts["paths"].items()))
-             or "-"],
-            ["Slowest chunk", f"{counts['max_chunk_seconds']:.1f}s"],
-            ["Chunks with upstream retries / chunks over LLM_INVOKE_TIMEOUT_S",
-             f"{counts['retried_chunks']} / {counts['over_timeout_chunks']}"],
-        ]),
+        _table(
+            ["Item", "Value"],
+            [
+                ["Documents", counts["documents"]],
+                ["Documents failed to read", counts["documents_failed"]],
+                [
+                    "Chunks (extracted / failed / pending)",
+                    f"{counts['chunks']} ({counts['chunks_extracted']} / {counts['chunks_failed']} / "
+                    f"{counts['chunks_pending']})",
+                ],
+                [
+                    "Concepts (without evidence)",
+                    f"{counts['concepts']} ({counts['concepts_without_evidence']})",
+                ],
+                ["Relations", counts["relations"]],
+                [
+                    "Evidence (verified)",
+                    f"{counts['evidence']} ({counts['evidence_verified']}, "
+                    f"{_pct(counts['evidence_verified'], counts['evidence'])})",
+                ],
+                [
+                    "Merges (name/synonym match / LLM judgement)",
+                    f"{counts['merges']} ({stats.get('exact_merges', 0)} / "
+                    f"{stats.get('judge_merges', 0)}; {stats.get('judge_calls', 0)} judge calls)",
+                ],
+                [
+                    "Extraction paths",
+                    ", ".join(f"{k} {v}" for k, v in sorted(counts["paths"].items())) or "-",
+                ],
+                ["Slowest chunk", f"{counts['max_chunk_seconds']:.1f}s"],
+                [
+                    "Chunks with upstream retries / chunks over LLM_INVOKE_TIMEOUT_S",
+                    f"{counts['retried_chunks']} / {counts['over_timeout_chunks']}",
+                ],
+            ],
+        ),
         "",
         "## Documents",
         "",
-        _table(["Document", "Engine", "Pages", "Chunks", "Concepts", "This run"], [
-            [display_path(d.path), d.engine, d.pages or "-", chunks_by_doc[d.id], by_doc[d.path],
-             actions.get(d.path, {}).get("action", "-")] for d in data.documents]),
+        _table(
+            ["Document", "Engine", "Pages", "Chunks", "Concepts", "This run"],
+            [
+                [
+                    display_path(d.path),
+                    d.engine,
+                    d.pages or "-",
+                    chunks_by_doc[d.id],
+                    by_doc[d.path],
+                    actions.get(d.path, {}).get("action", "-"),
+                ]
+                for d in data.documents
+            ],
+        ),
     ]
     failed_docs = data.read_detail.get("failed", [])
     if failed_docs:
-        out += ["", "### Read failures", "",
-                _table(["Document", "Code", "Error"],
-                       [[display_path(f["path"]), f.get("code", ""), f.get("error", "")] for f in failed_docs])]
+        out += [
+            "",
+            "### Read failures",
+            "",
+            _table(
+                ["Document", "Code", "Error"],
+                [
+                    [display_path(f["path"]), f.get("code", ""), f.get("error", "")]
+                    for f in failed_docs
+                ],
+            ),
+        ]
     duplicates = data.read_detail.get("duplicates", [])
     if duplicates:
-        out += ["", "### Duplicate documents (skipped, identical content)", "",
-                _table(["Document", "Same content as"],
-                       [[display_path(d["path"]), display_path(d["of"])] for d in duplicates])]
+        out += [
+            "",
+            "### Duplicate documents (skipped, identical content)",
+            "",
+            _table(
+                ["Document", "Same content as"],
+                [[display_path(d["path"]), display_path(d["of"])] for d in duplicates],
+            ),
+        ]
     pruned = data.read_detail.get("pruned", [])
     if pruned:
-        out += ["", "### Removed documents (no longer in the target path)", "",
-                "\n".join(f"- {display_path(p)}" for p in pruned)]
+        out += [
+            "",
+            "### Removed documents (no longer in the target path)",
+            "",
+            "\n".join(f"- {display_path(p)}" for p in pruned),
+        ]
     kinds = Counter(c.kind for c in data.concepts)
     preds = Counter(r.predicate for r in data.relations)
-    out += ["", "## Concept kinds", "", _table(["kind", "Count"], sorted(kinds.items())),
-            "", "## Relation kinds", "",
-            _table(["predicate", "Count"], sorted(preds.items())) if preds else "(none)"]
-    out += ["", f"## Top {TOP_CONCEPTS} concepts by evidence", "",
-            _table(["Concept", "English", "kind", "Evidence (verified)", "Documents", "Definition"], [
-                [c.name, c.name_en, c.kind, f"{c.evidence_count} ({c.verified_count})",
-                 len(data.concept_docs.get(c.name, ())), c.definition[:120]]
-                for c in data.concepts[:TOP_CONCEPTS]])]
+    out += [
+        "",
+        "## Concept kinds",
+        "",
+        _table(["kind", "Count"], sorted(kinds.items())),
+        "",
+        "## Relation kinds",
+        "",
+        _table(["predicate", "Count"], sorted(preds.items())) if preds else "(none)",
+    ]
+    out += [
+        "",
+        f"## Top {TOP_CONCEPTS} concepts by evidence",
+        "",
+        _table(
+            ["Concept", "English", "kind", "Evidence (verified)", "Documents", "Definition"],
+            [
+                [
+                    c.name,
+                    c.name_en,
+                    c.kind,
+                    f"{c.evidence_count} ({c.verified_count})",
+                    len(data.concept_docs.get(c.name, ())),
+                    c.definition[:120],
+                ]
+                for c in data.concepts[:TOP_CONCEPTS]
+            ],
+        ),
+    ]
     if data.relations:
         listed = sorted(data.relations, key=lambda r: (-r.evidence_count, r.subject))
-        out += ["", f"## Relations (by evidence, up to {MAX_RELATIONS_LISTED})", "",
-                _table(["Subject", "predicate", "Object", "Label", "Evidence"], [
+        out += [
+            "",
+            f"## Relations (by evidence, up to {MAX_RELATIONS_LISTED})",
+            "",
+            _table(
+                ["Subject", "predicate", "Object", "Label", "Evidence"],
+                [
                     [r.subject, r.predicate, r.object, r.label, r.evidence_count]
-                    for r in listed[:MAX_RELATIONS_LISTED]])]
+                    for r in listed[:MAX_RELATIONS_LISTED]
+                ],
+            ),
+        ]
     failed = [c for c in data.chunks if c.extraction is None and c.extract_detail.get("error")]
     if failed:
         paths = {d.id: display_path(d.path) for d in data.documents}
-        out += ["", "## Failed chunks", "",
-                _table(["Document", "Chunk", "Section", "Error"], [
-                    [paths.get(c.doc_id, c.doc_id), c.idx, c.section_path,
-                     str(c.extract_detail.get("error"))[:200]] for c in failed])]
+        out += [
+            "",
+            "## Failed chunks",
+            "",
+            _table(
+                ["Document", "Chunk", "Section", "Error"],
+                [
+                    [
+                        paths.get(c.doc_id, c.doc_id),
+                        c.idx,
+                        c.section_path,
+                        str(c.extract_detail.get("error"))[:200],
+                    ]
+                    for c in failed
+                ],
+            ),
+        ]
     if counts["chunks_pending"]:
-        out += ["", f"> {counts['chunks_pending']} pending chunks: not extracted yet because of the `--max-chunks` limit or "
-                "an interruption. Re-run the same command to continue extraction."]
+        out += [
+            "",
+            f"> {counts['chunks_pending']} pending chunks: not extracted yet because of the `--max-chunks` limit or "
+            "an interruption. Re-run the same command to continue extraction.",
+        ]
     return "\n".join(out) + "\n"
 
 

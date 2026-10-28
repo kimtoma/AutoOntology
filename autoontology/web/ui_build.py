@@ -29,23 +29,32 @@ def _node_version(node: str) -> tuple[int, ...]:
         return ()
 
 
-def build_ui(src: Path = UI_SRC, *, echo: Callable[[str], None] = print,
-             run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> Path:
+def build_ui(
+    src: Path = UI_SRC,
+    *,
+    echo: Callable[[str], None] = print,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> Path:
     """``pnpm install --frozen-lockfile && pnpm build`` in *src*; returns the dist dir."""
     if not (src / "package.json").is_file():
         raise BuildUiError(f"no UI sources at {src} (a source checkout is required)")
     node = shutil.which("node")
     if not node:
-        raise BuildUiError("Node.js not found on PATH: install Node "
-                           f"{MIN_NODE[0]}.{MIN_NODE[1]}+ (https://nodejs.org)")
+        raise BuildUiError(
+            "Node.js not found on PATH: install Node "
+            f"{MIN_NODE[0]}.{MIN_NODE[1]}+ (https://nodejs.org)"
+        )
     version = _node_version(node)
     if version and version < MIN_NODE:
-        raise BuildUiError(f"Node {'.'.join(map(str, version))} is too old: the UI build "
-                           f"needs {MIN_NODE[0]}.{MIN_NODE[1]}+")
+        raise BuildUiError(
+            f"Node {'.'.join(map(str, version))} is too old: the UI build "
+            f"needs {MIN_NODE[0]}.{MIN_NODE[1]}+"
+        )
     pnpm = shutil.which("pnpm")
     if not pnpm:
-        raise BuildUiError("pnpm not found on PATH: `corepack enable pnpm` or "
-                           "`npm install -g pnpm`")
+        raise BuildUiError(
+            "pnpm not found on PATH: `corepack enable pnpm` or `npm install -g pnpm`"
+        )
     for argv in ([pnpm, "install", "--frozen-lockfile"], [pnpm, "build"]):
         echo(f"$ {' '.join(['pnpm', *argv[1:]])}  (in {src})")
         result = run(argv, cwd=src, check=False)

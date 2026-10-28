@@ -59,20 +59,23 @@ class FakeJobs:
                 log.info("  doing %s with password=hunter2 at postgres://u:s3cret@h/db", name)
                 self.gate.wait(5)
                 return {"n": 1}
+
             return fn
 
-        return jobs._execute(ctx, steps, skip={}, already=set(),
-                             steps={n: step(n) for n in steps})
+        return jobs._execute(ctx, steps, skip={}, already=set(), steps={n: step(n) for n in steps})
 
     def build(self, name, **kw):
         self.calls.append(("build", name, kw))
-        return self._run("build", name, kw["store"], ["load", "register_connection", "ingest",
-                                                      "compile", "export"])
+        return self._run(
+            "build",
+            name,
+            kw["store"],
+            ["load", "register_connection", "ingest", "compile", "export"],
+        )
 
     def extract(self, name, target, **kw):
         self.calls.append(("extract", name, {"target": target, **kw}))
-        return self._run("extract", name, kw["store"], ["read", "extract", "consolidate",
-                                                        "report"])
+        return self._run("extract", name, kw["store"], ["read", "extract", "consolidate", "report"])
 
     def align(self, name, **kw):
         self.calls.append(("align", name, kw))
@@ -80,12 +83,17 @@ class FakeJobs:
 
     def export(self, name, **kw):
         self.calls.append(("export", name, kw))
-        return self._run("export", name, kw["store"], ["collect", "serialize", "upstream",
-                                                       "report"])
+        return self._run(
+            "export", name, kw["store"], ["collect", "serialize", "upstream", "report"]
+        )
 
     def table(self):
-        return {"build": self.build, "extract": self.extract, "align": self.align,
-                "export": self.export}
+        return {
+            "build": self.build,
+            "extract": self.extract,
+            "align": self.align,
+            "export": self.export,
+        }
 
 
 @pytest.fixture
@@ -115,12 +123,14 @@ def _docs_dir(root: Path) -> Path:
 def test_add_list_delete_documents_source_by_path(env, isolated_env):
     c, settings, _, _ = env
     d = _docs_dir(isolated_env)
-    resp = c.post(f"{API}/sources", json={"name": "hanbit-docs", "kind": "documents",
-                                           "locator": str(d)})
+    resp = c.post(
+        f"{API}/sources", json={"name": "hanbit-docs", "kind": "documents", "locator": str(d)}
+    )
     assert resp.status_code == 201, resp.text
     assert resp.json()["kind"] == "documents" and resp.json()["locator"] == str(d.resolve())
-    again = c.post(f"{API}/sources", json={"name": "hanbit-docs", "kind": "documents",
-                                            "locator": str(d)})
+    again = c.post(
+        f"{API}/sources", json={"name": "hanbit-docs", "kind": "documents", "locator": str(d)}
+    )
     assert again.status_code == 409 and again.json()["error"] == "source_exists"
     listed = c.get(f"{API}/sources").json()["sources"]
     assert [s["name"] for s in listed] == ["hanbit-docs"] and listed[0]["concepts"] == 0
@@ -132,18 +142,19 @@ def test_add_list_delete_documents_source_by_path(env, isolated_env):
 
 def test_source_validation_errors_are_structured(env, isolated_env):
     c, *_ = env
-    resp = c.post(f"{API}/sources", json={"name": "Bad Name", "kind": "files",
-                                           "locator": str(isolated_env)})
+    resp = c.post(
+        f"{API}/sources", json={"name": "Bad Name", "kind": "files", "locator": str(isolated_env)}
+    )
     assert resp.status_code == 400
-    assert resp.json()["error"] == "invalid_name" and "invalid source name" in \
-        resp.json()["detail"]
+    assert resp.json()["error"] == "invalid_name" and "invalid source name" in resp.json()["detail"]
     # structured names follow the T2 rule: no "-"
     resp = c.post(f"{API}/sources", json={"name": "a-b", "kind": "files", "locator": "/x"})
     assert resp.json()["error"] == "invalid_name"
     resp = c.post(f"{API}/sources", json={"name": "a", "kind": "nope", "locator": "/x"})
     assert resp.status_code == 400 and resp.json()["error"] == "invalid_request"
-    resp = c.post(f"{API}/sources", json={"name": "a", "kind": "documents",
-                                           "locator": "relative/dir"})
+    resp = c.post(
+        f"{API}/sources", json={"name": "a", "kind": "documents", "locator": "relative/dir"}
+    )
     assert resp.json()["error"] == "invalid_locator"
     assert c.get(f"{API}/sources/../etc").status_code in (404, 405)
     resp = c.get(f"{API}/concepts", params={"page": 0})
@@ -162,9 +173,14 @@ def test_database_url_password_never_returned(env):
 
 def test_upload_files_source_and_documents_source(env):
     c, settings, _, _ = env
-    resp = c.post(f"{API}/sources", data={"name": "shop", "kind": "files"},
-                  files=[("files", ("orders.csv", b"id,amount\n1,10\n", "text/csv")),
-                         ("files", ("customers.csv", b"id,name\n1,kim\n", "text/csv"))])
+    resp = c.post(
+        f"{API}/sources",
+        data={"name": "shop", "kind": "files"},
+        files=[
+            ("files", ("orders.csv", b"id,amount\n1,10\n", "text/csv")),
+            ("files", ("customers.csv", b"id,name\n1,kim\n", "text/csv")),
+        ],
+    )
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["kind"] == "files" and body["uploaded"] is True
@@ -172,8 +188,11 @@ def test_upload_files_source_and_documents_source(env):
     target = Path(settings.home) / "uploads" / "shop"
     assert sorted(p.name for p in target.iterdir()) == ["customers.csv", "orders.csv"]
 
-    resp = c.post(f"{API}/sources", data={"name": "rules-docs", "kind": "documents"},
-                  files=[("files", ("규정.md", "# 규정\n본문".encode(), "text/markdown"))])
+    resp = c.post(
+        f"{API}/sources",
+        data={"name": "rules-docs", "kind": "documents"},
+        files=[("files", ("규정.md", "# 규정\n본문".encode(), "text/markdown"))],
+    )
     assert resp.status_code == 201, resp.text
     assert (Path(settings.home) / "uploads" / "rules-docs" / "규정.md").is_file()
     # deleting an uploaded documents source removes its upload folder too
@@ -181,12 +200,16 @@ def test_upload_files_source_and_documents_source(env):
     assert not (Path(settings.home) / "uploads" / "rules-docs").exists()
 
 
-@pytest.mark.parametrize("filename", ["../evil.csv", "..\\evil.csv", ".hidden.csv",
-                                      "/abs/evil.csv"])
+@pytest.mark.parametrize(
+    "filename", ["../evil.csv", "..\\evil.csv", ".hidden.csv", "/abs/evil.csv"]
+)
 def test_upload_rejects_unsafe_file_names(env, filename):
     c, settings, _, _ = env
-    resp = c.post(f"{API}/sources", data={"name": "shop", "kind": "files"},
-                  files=[("files", (filename, b"id\n1\n", "text/csv"))])
+    resp = c.post(
+        f"{API}/sources",
+        data={"name": "shop", "kind": "files"},
+        files=[("files", (filename, b"id\n1\n", "text/csv"))],
+    )
     assert resp.status_code == 400 and resp.json()["error"] == "invalid_file_name"
     assert not (Path(settings.home) / "evil.csv").exists()
     assert not (Path(settings.home) / "uploads" / "shop").exists()
@@ -195,12 +218,18 @@ def test_upload_rejects_unsafe_file_names(env, filename):
 
 def test_upload_rejects_unsupported_type_and_size(env, monkeypatch):
     c, settings, _, _ = env
-    resp = c.post(f"{API}/sources", data={"name": "shop", "kind": "files"},
-                  files=[("files", ("x.exe", b"MZ", "application/octet-stream"))])
+    resp = c.post(
+        f"{API}/sources",
+        data={"name": "shop", "kind": "files"},
+        files=[("files", ("x.exe", b"MZ", "application/octet-stream"))],
+    )
     assert resp.status_code == 400 and resp.json()["error"] == "unsupported_file"
     monkeypatch.setenv("AUTOONTOLOGY_UPLOAD_MAX_MB", "0.000001")
-    resp = c.post(f"{API}/sources", data={"name": "shop", "kind": "files"},
-                  files=[("files", ("a.csv", b"id\n" + b"1\n" * 100, "text/csv"))])
+    resp = c.post(
+        f"{API}/sources",
+        data={"name": "shop", "kind": "files"},
+        files=[("files", ("a.csv", b"id\n" + b"1\n" * 100, "text/csv"))],
+    )
     assert resp.status_code == 413
     assert not (Path(settings.home) / "uploads" / "shop").exists()
 
@@ -212,16 +241,21 @@ def _files_source(c, isolated_env, name="shop"):
     d = isolated_env / "csv"
     d.mkdir(exist_ok=True)
     (d / "a.csv").write_text("x\n1\n")
-    assert c.post(f"{API}/sources", json={"name": name, "kind": "files",
-                                           "locator": str(d)}).status_code == 201
+    assert (
+        c.post(
+            f"{API}/sources", json={"name": name, "kind": "files", "locator": str(d)}
+        ).status_code
+        == 201
+    )
 
 
 def test_run_lifecycle_lock_and_sse(env, isolated_env):
     c, settings, fake, manager = env
     _files_source(c, isolated_env)
     fake.gate.clear()
-    resp = c.post(f"{API}/runs", json={"kind": "build", "source": "shop",
-                                        "options": {"skip_compile": True}})
+    resp = c.post(
+        f"{API}/runs", json={"kind": "build", "source": "shop", "options": {"skip_compile": True}}
+    )
     assert resp.status_code == 202, resp.text
     run_id = resp.json()["run_id"]
     assert fake.calls[0][2]["skip_compile"] is True and fake.calls[0][2]["resume"] is False
@@ -229,10 +263,14 @@ def test_run_lifecycle_lock_and_sse(env, isolated_env):
     assert busy.status_code == 409 and busy.json()["error"] == "run_active"
     state = c.get(f"{API}/runs/{run_id}").json()
     assert state["status"] == "running" and state["managed"] is True
-    assert [s["name"] for s in state["steps"]] == ["load", "register_connection", "ingest",
-                                                   "compile", "export"]
-    assert state["steps"][0]["status"] == "running" and state["steps"][1]["status"] == \
-        "pending"
+    assert [s["name"] for s in state["steps"]] == [
+        "load",
+        "register_connection",
+        "ingest",
+        "compile",
+        "export",
+    ]
+    assert state["steps"][0]["status"] == "running" and state["steps"][1]["status"] == "pending"
     fake.gate.set()
     manager.join(run_id, 5)
     state = c.get(f"{API}/runs/{run_id}").json()
@@ -242,8 +280,7 @@ def test_run_lifecycle_lock_and_sse(env, isolated_env):
     with c.stream("GET", f"{API}/runs/{run_id}/events") as resp:
         assert resp.status_code == 200
         text = "".join(resp.iter_text())
-    events = [line.split(": ", 1)[1] for line in text.splitlines()
-              if line.startswith("event: ")]
+    events = [line.split(": ", 1)[1] for line in text.splitlines() if line.startswith("event: ")]
     assert events[0] == "log" and events[-1] == "end"
     assert events.count("step") == 5 and "status" in events
     assert "[1/5] load" in text and "doing compile" in text
@@ -266,8 +303,9 @@ def test_run_precheck_failure_is_returned(env, isolated_env):
     assert resp.status_code == 400 and "has no concepts" in resp.json()["detail"]
     assert c.get(f"{API}/runs").json()["runs"] == []
     # the lock is released after a failed start
-    resp = c.post(f"{API}/runs", json={"kind": "extract", "source": "docs",
-                                        "options": {"workers": 1}})
+    resp = c.post(
+        f"{API}/runs", json={"kind": "extract", "source": "docs", "options": {"workers": 1}}
+    )
     assert resp.status_code == 202, resp.text
 
 
@@ -276,14 +314,14 @@ def test_run_kind_and_options_validated(env, isolated_env):
     _files_source(c, isolated_env)
     d = _docs_dir(isolated_env)
     c.post(f"{API}/sources", json={"name": "docs", "kind": "documents", "locator": str(d)})
-    cases = [({"kind": "extract", "source": "shop"}, "wrong_source_kind"),
-             ({"kind": "build", "source": "docs"}, "wrong_source_kind"),
-             ({"kind": "build", "source": "shop", "options": {"out": "/tmp"}},
-              "invalid_request"),
-             ({"kind": "drop", "source": "shop"}, "invalid_request"),
-             ({"kind": "export", "source": "shop", "options": {"sources": ["nope"]}},
-              "unknown_source"),
-             ({"kind": "build", "source": "missing"}, "unknown_source")]
+    cases = [
+        ({"kind": "extract", "source": "shop"}, "wrong_source_kind"),
+        ({"kind": "build", "source": "docs"}, "wrong_source_kind"),
+        ({"kind": "build", "source": "shop", "options": {"out": "/tmp"}}, "invalid_request"),
+        ({"kind": "drop", "source": "shop"}, "invalid_request"),
+        ({"kind": "export", "source": "shop", "options": {"sources": ["nope"]}}, "unknown_source"),
+        ({"kind": "build", "source": "missing"}, "unknown_source"),
+    ]
     for body, error in cases:
         resp = c.post(f"{API}/runs", json=body)
         assert resp.json().get("error") == error, (body, resp.text)
@@ -293,10 +331,13 @@ def test_run_kind_and_options_validated(env, isolated_env):
 def test_extract_uses_the_source_locator(env, isolated_env):
     c, _, fake, manager = env
     d = _docs_dir(isolated_env)
-    c.post(f"{API}/sources", json={"name": "docs", "kind": "documents", "locator": str(d),
-                                    "recursive": True})
-    run_id = c.post(f"{API}/runs", json={"kind": "extract", "source": "docs",
-                                          "options": {"max_chunks": 2}}).json()["run_id"]
+    c.post(
+        f"{API}/sources",
+        json={"name": "docs", "kind": "documents", "locator": str(d), "recursive": True},
+    )
+    run_id = c.post(
+        f"{API}/runs", json={"kind": "extract", "source": "docs", "options": {"max_chunks": 2}}
+    ).json()["run_id"]
     manager.join(run_id, 5)
     _, name, kw = fake.calls[0]
     assert name == "docs" and kw["target"] == d.resolve() and kw["recursive"] is True
@@ -328,41 +369,102 @@ def _seed_documents(settings, name="hanbit-docs"):
     store = _store(settings)
     src = store.add_source(name=name, kind="documents", locator=json.dumps({"path": "/x"}))
     docs = DocumentStore(store)
-    doc, _ = docs.replace_document(source_id=src.id, path="samples/계약관리규정.md",
-                                   title="계약관리규정", mime="text/markdown", engine="native",
-                                   sha256="ab" * 32, size=10, pages=None,
-                                   chunks=[_Chunk(0, "계약은 고객과 맺는 약정이다.")])
+    doc, _ = docs.replace_document(
+        source_id=src.id,
+        path="samples/계약관리규정.md",
+        title="계약관리규정",
+        mime="text/markdown",
+        engine="native",
+        sha256="ab" * 32,
+        size=10,
+        pages=None,
+        chunks=[_Chunk(0, "계약은 고객과 맺는 약정이다.")],
+    )
     chunk = docs.chunks_for_document(doc.id)[0].id
     ev = [EvidenceRecord(chunk, "계약은 고객과 맺는 약정", True)]
-    docs.replace_ontology(src.id, [
-        ConceptRecord("계약", "entity", "고객과 맺는 약정", "Contract", ["계약서"], [], [], ev),
-        ConceptRecord("계약금액", "metric", "계약의 총 금액 (100% 기준)", evidence=ev),
-        ConceptRecord("담당자", "entity", "업무 담당자", evidence=ev),
-        ConceptRecord("승인 기준", "rule", "3억 이상은 대표이사 승인"),
-    ], [RelationRecord("담당자", "owns", "계약", "담당자가 계약을 관리", ev)])
-    structured = store.add_source(name="hanbit", kind="files",
-                                  locator=json.dumps({"path": "/y"}),
-                                  pg_database="autoontology_src_hanbit")
+    docs.replace_ontology(
+        src.id,
+        [
+            ConceptRecord("계약", "entity", "고객과 맺는 약정", "Contract", ["계약서"], [], [], ev),
+            ConceptRecord("계약금액", "metric", "계약의 총 금액 (100% 기준)", evidence=ev),
+            ConceptRecord("담당자", "entity", "업무 담당자", evidence=ev),
+            ConceptRecord("승인 기준", "rule", "3억 이상은 대표이사 승인"),
+        ],
+        [RelationRecord("담당자", "owns", "계약", "담당자가 계약을 관리", ev)],
+    )
+    structured = store.add_source(
+        name="hanbit",
+        kind="files",
+        locator=json.dumps({"path": "/y"}),
+        pg_database="autoontology_src_hanbit",
+    )
     store.set_catalog_database_id(structured.id, "db1")
-    AlignmentStore(store).put(AlignmentRecord(
-        src.id, concept_id(src.id, "entity", "계약"), "계약", "same", "r", "hanbit", "t-c",
-        "Contracts", 0.8, 0.93, "같은 개념", accepted=True))
-    AlignmentStore(store).put(AlignmentRecord(
-        src.id, concept_id(src.id, "metric", "계약금액"), "계약금액", "related", "r", "hanbit",
-        "t-c", "Contracts", 0.7, 0.8, "속성"))
+    AlignmentStore(store).put(
+        AlignmentRecord(
+            src.id,
+            concept_id(src.id, "entity", "계약"),
+            "계약",
+            "same",
+            "r",
+            "hanbit",
+            "t-c",
+            "Contracts",
+            0.8,
+            0.93,
+            "같은 개념",
+            accepted=True,
+        )
+    )
+    AlignmentStore(store).put(
+        AlignmentRecord(
+            src.id,
+            concept_id(src.id, "metric", "계약금액"),
+            "계약금액",
+            "related",
+            "r",
+            "hanbit",
+            "t-c",
+            "Contracts",
+            0.7,
+            0.8,
+            "속성",
+        )
+    )
     return src
 
 
 def _snapshot():
-    contracts = TermInfo("t-c", "Contracts", "계약 정보", ["Contract"], attributes=[
-        {"id": "a1", "name": "계약금액", "datatype": "bigint", "column": "계약금액",
-         "schema": "public", "table": "contracts"}],
-        tables=[{"id": "tb-c", "name": "contracts", "schema": "public"}])
-    customers = TermInfo("t-k", "Customers", "고객", attributes=[],
-                         tables=[{"id": "tb-k", "name": "customers", "schema": "public"}])
-    return StructuredSnapshot("hanbit", "db1", "autoontology_src_hanbit", [contracts, customers],
-                              [SemanticFK("t-c", "t-k", "a3", "고객id",
-                                          "public.contracts.고객id")])
+    contracts = TermInfo(
+        "t-c",
+        "Contracts",
+        "계약 정보",
+        ["Contract"],
+        attributes=[
+            {
+                "id": "a1",
+                "name": "계약금액",
+                "datatype": "bigint",
+                "column": "계약금액",
+                "schema": "public",
+                "table": "contracts",
+            }
+        ],
+        tables=[{"id": "tb-c", "name": "contracts", "schema": "public"}],
+    )
+    customers = TermInfo(
+        "t-k",
+        "Customers",
+        "고객",
+        attributes=[],
+        tables=[{"id": "tb-k", "name": "customers", "schema": "public"}],
+    )
+    return StructuredSnapshot(
+        "hanbit",
+        "db1",
+        "autoontology_src_hanbit",
+        [contracts, customers],
+        [SemanticFK("t-c", "t-k", "a3", "고객id", "public.contracts.고객id")],
+    )
 
 
 def test_concept_search_and_detail(env):
@@ -372,8 +474,12 @@ def test_concept_search_and_detail(env):
     assert body["total"] == 4 and {i["source"] for i in body["items"]} == {"hanbit-docs"}
     by_syn = c.get(f"{API}/concepts", params={"q": "계약서"}).json()["items"]
     assert [i["name"] for i in by_syn] == ["계약"]
-    assert by_syn[0]["alignment"] == {"relation": "same", "term": "Contracts",
-                                      "accepted": True, "dry_run": False}
+    assert by_syn[0]["alignment"] == {
+        "relation": "same",
+        "term": "Contracts",
+        "accepted": True,
+        "dry_run": False,
+    }
     by_en = c.get(f"{API}/concepts", params={"q": "contract"}).json()["items"]
     assert [i["name"] for i in by_en] == ["계약"]
     # LIKE wildcards in the query are literal
@@ -387,10 +493,14 @@ def test_concept_search_and_detail(env):
     cid = by_syn[0]["id"]
     detail = c.get(f"{API}/concepts/{cid}").json()
     assert detail["synonyms"] == ["계약서"] and detail["name_en"] == "Contract"
-    assert detail["evidence"][0] == {"quote": "계약은 고객과 맺는 약정", "verified": True,
-                                     "page": 3, "section": "1장 > 계약",
-                                     "document": "계약관리규정",
-                                     "path": "samples/계약관리규정.md"}
+    assert detail["evidence"][0] == {
+        "quote": "계약은 고객과 맺는 약정",
+        "verified": True,
+        "page": 3,
+        "section": "1장 > 계약",
+        "document": "계약관리규정",
+        "path": "samples/계약관리규정.md",
+    }
     assert detail["alignments"][0]["term"] == "Contracts"
     assert detail["relations"][0]["predicate"] == "owns"
     assert c.get(f"{API}/concepts/{'0' * 32}").status_code == 404
@@ -422,26 +532,32 @@ def test_graph_endpoint_builds_from_the_merged_model(env, monkeypatch):
     assert {"semantic_fk", "aligned_same", "related", "document"} <= types
     assert {n["type"] for n in g["nodes"]} == {"class", "concept", "individual"}
     # same model the exporter builds -> same class count
-    model = export_job.collect_model("hanbit-docs", _store(settings), None,
-                                     [_store(settings).get_source("hanbit")],
-                                     [_store(settings).get_source("hanbit-docs")])[0]
+    model = export_job.collect_model(
+        "hanbit-docs",
+        _store(settings),
+        None,
+        [_store(settings).get_source("hanbit")],
+        [_store(settings).get_source("hanbit-docs")],
+    )[0]
     assert sum(n["type"] == "class" for n in g["nodes"]) == len(model.classes)
 
-    structured = c.get(f"{API}/graph", params={"sources": "hanbit,hanbit-docs",
-                                               "layer": "structured"}).json()
+    structured = c.get(
+        f"{API}/graph", params={"sources": "hanbit,hanbit-docs", "layer": "structured"}
+    ).json()
     assert {n["origin"] for n in structured["nodes"]} == {"structured"}
     assert {e["type"] for e in structured["edges"]} == {"semantic_fk"}
-    aligned = c.get(f"{API}/graph", params={"sources": "hanbit,hanbit-docs",
-                                            "layer": "aligned"}).json()
+    aligned = c.get(
+        f"{API}/graph", params={"sources": "hanbit,hanbit-docs", "layer": "aligned"}
+    ).json()
     assert {e["type"] for e in aligned["edges"]} == {"aligned_same", "related"}
     assert {n["id"] for n in aligned["nodes"]} >= {"term-t-c"}
-    docs_only = c.get(f"{API}/graph", params={"sources": "hanbit,hanbit-docs",
-                                              "layer": "documents"}).json()
+    docs_only = c.get(
+        f"{API}/graph", params={"sources": "hanbit,hanbit-docs", "layer": "documents"}
+    ).json()
     endpoints = {x for e in docs_only["edges"] for x in (e["source"], e["target"])}
     assert all(n["origin"] == "document" or n["id"] in endpoints for n in docs_only["nodes"])
     assert {e["layer"] for e in docs_only["edges"]} == {"documents"}
-    assert c.get(f"{API}/graph", params={"layer": "bogus"}).json()["error"] == \
-        "invalid_layer"
+    assert c.get(f"{API}/graph", params={"layer": "bogus"}).json()["error"] == "invalid_layer"
     assert c.get(f"{API}/graph", params={"sources": "nope"}).status_code == 404
 
 
@@ -475,11 +591,17 @@ def test_graph_cap_applies_before_the_evidence_layer():
 
     model = merged.MergedOntology(name="g", base="x")
     for i, local in enumerate(("a", "b", "c")):
-        model.documents[f"doc-{i}"] = merged.ODocument(f"doc-{i}", f"D{i}", "0" * 64,
-                                                       f"/secret/dir/d{i}.md", "docs")
+        model.documents[f"doc-{i}"] = merged.ODocument(
+            f"doc-{i}", f"D{i}", "0" * 64, f"/secret/dir/d{i}.md", "docs"
+        )
         model.evidence[f"ev-{i}"] = merged.OEvidence(f"ev-{i}", f"doc-{i}", "q", None, True)
-        model.classes[local] = merged.OClass(local=local, label=local.upper(), source="document",
-                                             documents_source="docs", derived_from=[f"ev-{i}"])
+        model.classes[local] = merged.OClass(
+            local=local,
+            label=local.upper(),
+            source="document",
+            documents_source="docs",
+            derived_from=[f"ev-{i}"],
+        )
     model.axioms.append(merged.OAxiom("a", "related", "b", "document"))  # c is the least connected
     view = to_view(model, evidence=True, max_nodes=2)
     assert view["truncated"] is True and view["counts"]["total_nodes"] == 3
@@ -499,9 +621,11 @@ def test_graph_alignment_subclass_relation_direction():
     model = merged.MergedOntology(name="g", base="x")
     model.classes["t"] = merged.OClass(local="t", label="T", source="structured")
     model.classes["c"] = merged.OClass(local="c", label="C", source="document")
-    model.axioms += [merged.OAxiom("t", "subclass_of", "c", "alignment"),
-                     merged.OAxiom("c", "subclass_of", "t", "alignment"),
-                     merged.OAxiom("c", "subclass_of", "t", "document")]
+    model.axioms += [
+        merged.OAxiom("t", "subclass_of", "c", "alignment"),
+        merged.OAxiom("c", "subclass_of", "t", "alignment"),
+        merged.OAxiom("c", "subclass_of", "t", "document"),
+    ]
     rels = [e.get("relation") for e in to_view(model)["edges"]]
     assert rels == ["narrower", "broader", None]
 
@@ -537,12 +661,15 @@ def test_exports_list_and_path_safe_download(env):
     resp = c.get(f"{API}/exports/20261027T145834Z-5ba517/ontology.ttl")
     assert resp.status_code == 200 and resp.text.startswith("@prefix")
     assert "attachment" in resp.headers["content-disposition"]
-    inline = c.get(f"{API}/exports/20261027T145834Z-5ba517/ontology.ttl",
-                   params={"inline": True})
+    inline = c.get(f"{API}/exports/20261027T145834Z-5ba517/ontology.ttl", params={"inline": True})
     assert inline.headers["content-type"].startswith("text/plain")
-    for bad in ["20261027T145834Z-5ba517/..%2Fsecret.txt", "..%2F..%2Fsecret.txt/x",
-                "20261027T145834Z-5ba517/.hidden", "20261027T145834Z-5ba517/%2Fetc%2Fpasswd",
-                "x/ontology.ttl"]:
+    for bad in [
+        "20261027T145834Z-5ba517/..%2Fsecret.txt",
+        "..%2F..%2Fsecret.txt/x",
+        "20261027T145834Z-5ba517/.hidden",
+        "20261027T145834Z-5ba517/%2Fetc%2Fpasswd",
+        "x/ontology.ttl",
+    ]:
         resp = c.get(f"{API}/exports/{bad}")
         assert resp.status_code in (400, 404), bad
         assert "top secret" not in resp.text
@@ -569,14 +696,19 @@ def test_status_reports_backend_postgres_ollama_kordoc_and_providers(env, monkey
     assert "docker compose up -d" in body["checks"]["postgres"]["remedy"]
     assert body["checks"]["ollama"]["status"] == "error"
     assert isinstance(body["kordoc_available"], bool)
-    assert body["providers"] == {"chat_provider": "ollama", "chat_model": "openai/qwen3:8b",
-                                 "embed_provider": "ollama", "embed_model": "bge-m3",
-                                 "openai_base_url": ""}
+    assert body["providers"] == {
+        "chat_provider": "ollama",
+        "chat_model": "openai/qwen3:8b",
+        "embed_provider": "ollama",
+        "embed_model": "bge-m3",
+        "openai_base_url": "",
+    }
     assert body["status"] == "error"
     assert body["upload_max_mb"] == web_api.upload_limit_bytes() / (1024 * 1024)
     # cached: a second call within STATUS_CACHE_S does not probe again
-    monkeypatch.setattr(web_api.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("not cached")))
+    monkeypatch.setattr(
+        web_api.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("not cached"))
+    )
     assert c.get(f"{API}/status").json() == body
     root = c.get("/", follow_redirects=False)
     assert root.status_code in (302, 307) and root.headers["location"] == "/ui/"
@@ -596,8 +728,9 @@ def test_status_never_shows_the_openai_key(isolated_env, monkeypatch):
     monkeypatch.setenv("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "m")
     import httpx
 
-    monkeypatch.setattr(web_api.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(
-        httpx.ConnectError("refused")))
+    monkeypatch.setattr(
+        web_api.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("refused"))
+    )
     from autoontology.engine import pg
 
     monkeypatch.setattr(pg, "connect", lambda *a, **k: (_ for _ in ()).throw(OSError("x")))
@@ -644,8 +777,13 @@ def test_ui_spa_fallback_and_redirects(tmp_path):
     c = TestClient(app)
     assert c.get("/ui", follow_redirects=False).headers["location"] == "/ui/"
     # client-side routes (also nested, with a query) get index.html
-    for path in ("/ui/", "/ui/sources", "/ui/settings", "/ui/runs?run=20261027T202922Z-34f08b",
-                 "/ui/concepts/deep/link"):
+    for path in (
+        "/ui/",
+        "/ui/sources",
+        "/ui/settings",
+        "/ui/runs?run=20261027T202922Z-34f08b",
+        "/ui/concepts/deep/link",
+    ):
         resp = c.get(path)
         assert resp.status_code == 200 and "<title>AutoOntology</title>" in resp.text, path
         assert resp.headers["content-type"].startswith("text/html")
@@ -685,8 +823,9 @@ def test_build_ui_reports_missing_tools(tmp_path, monkeypatch):
     monkeypatch.setattr(ui_build.shutil, "which", lambda name: None)
     with pytest.raises(ui_build.BuildUiError, match="Node.js not found"):
         ui_build.build_ui(src)
-    monkeypatch.setattr(ui_build.shutil, "which",
-                        lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(
+        ui_build.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None
+    )
     monkeypatch.setattr(ui_build, "_node_version", lambda node: (22, 1))
     with pytest.raises(ui_build.BuildUiError, match="pnpm not found"):
         ui_build.build_ui(src)
@@ -733,9 +872,12 @@ def test_foreign_host_and_cross_origin_writes_are_refused(env, isolated_env):
     body = {"name": "docs", "kind": "documents", "locator": str(d)}
     resp = c.post(f"{API}/sources", json=body, headers={"origin": "http://evil.example"})
     assert resp.status_code == 403 and resp.json()["error"] == "cross_origin"
-    resp = c.post(f"{API}/sources", data={"name": "x", "kind": "files"},
-                  files=[("files", ("a.csv", b"x\n1\n", "text/csv"))],
-                  headers={"sec-fetch-site": "cross-site"})
+    resp = c.post(
+        f"{API}/sources",
+        data={"name": "x", "kind": "files"},
+        files=[("files", ("a.csv", b"x\n1\n", "text/csv"))],
+        headers={"sec-fetch-site": "cross-site"},
+    )
     assert resp.status_code == 403
     resp = c.get(f"{API}/sources", headers={"host": "evil.example:7800"})
     assert resp.status_code == 403 and resp.json()["error"] == "forbidden_host"
@@ -749,30 +891,41 @@ def test_foreign_host_and_cross_origin_writes_are_refused(env, isolated_env):
 # --- review fixes ----------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text, secret", [
-    ('{"password": "hunter2"}', "hunter2"),
-    ("{'password': 'hunter2'}", "hunter2"),
-    ("POSTGRES_PASSWORD=pw123", "pw123"),
-    ("PGPASSWORD=hunter2 psql", "hunter2"),
-    ("OPENAI_API_KEY=sk-abc123def456", "sk-abc123def456"),
-    ("NVIDIA_API_KEY: nvapi-AbC_12-xyz789", "nvapi-AbC_12-xyz789"),
-    ("client_secret=s3cr3t&x=1", "s3cr3t"),
-    ("postgresql://:hunter2@h:5432/db", "hunter2"),
-    ("postgresql://scott:tiger@h/db", "tiger"),
-    ("Authorization: Bearer sk-live-0123456789", "sk-live-0123456789"),
-    ("headers={'Authorization': 'Bearer abcdef.ghijk'}", "abcdef.ghijk"),
-    ("calling with key sk-proj-Zz9_yy8-xx7 now", "sk-proj-Zz9_yy8-xx7"),
-    ("token=abc.def", "abc.def"),
-    ("password = 'pa ss'", "pa ss"),
-    ('{"db_password":"x y"}', "x y"),
-])
+@pytest.mark.parametrize(
+    "text, secret",
+    [
+        ('{"password": "hunter2"}', "hunter2"),
+        ("{'password': 'hunter2'}", "hunter2"),
+        ("POSTGRES_PASSWORD=pw123", "pw123"),
+        ("PGPASSWORD=hunter2 psql", "hunter2"),
+        ("OPENAI_API_KEY=sk-abc123def456", "sk-abc123def456"),
+        ("NVIDIA_API_KEY: nvapi-AbC_12-xyz789", "nvapi-AbC_12-xyz789"),
+        ("client_secret=s3cr3t&x=1", "s3cr3t"),
+        ("postgresql://:hunter2@h:5432/db", "hunter2"),
+        ("postgresql://scott:tiger@h/db", "tiger"),
+        ("Authorization: Bearer sk-live-0123456789", "sk-live-0123456789"),
+        ("headers={'Authorization': 'Bearer abcdef.ghijk'}", "abcdef.ghijk"),
+        ("calling with key sk-proj-Zz9_yy8-xx7 now", "sk-proj-Zz9_yy8-xx7"),
+        ("token=abc.def", "abc.def"),
+        ("password = 'pa ss'", "pa ss"),
+        ('{"db_password":"x y"}', "x y"),
+    ],
+)
 def test_mask_hides_secret_forms(text, secret):
     out = web_api.mask(text)
     assert secret not in out and "***" in out, out
 
 
-@pytest.mark.parametrize("text", ["token_count=3", "max_tokens: 1200", "1200 tokens: fine",
-                                  "risk-assessment task-runner", "secretary=kim"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "token_count=3",
+        "max_tokens: 1200",
+        "1200 tokens: fine",
+        "risk-assessment task-runner",
+        "secretary=kim",
+    ],
+)
 def test_mask_leaves_ordinary_text(text):
     assert web_api.mask(text) == text
 
@@ -784,8 +937,12 @@ def test_mask_dict_keys():
 
 def _finished_run(settings, name="shop"):
     store = _store(settings)
-    src = store.add_source(name=name, kind="files", locator=json.dumps({"path": "/x"}),
-                           pg_database=f"autoontology_src_{name}")
+    src = store.add_source(
+        name=name,
+        kind="files",
+        locator=json.dumps({"path": "/x"}),
+        pg_database=f"autoontology_src_{name}",
+    )
     run = store.create_run(kind="build", source_id=src.id)
     store.update_run(run.id, status="succeeded")
     path = Path(settings.logs_dir) / "runs" / f"{run.id}.log"
@@ -837,10 +994,8 @@ def test_sse_resumes_from_last_event_id(env):
     path.write_text("one\ntwo\nthree\n")
     with c.stream("GET", f"{API}/runs/{run_id}/events") as resp:
         events = [e for e in _sse("".join(resp.iter_text())) if e.get("event") == "log"]
-    assert [(e["data"], e["id"]) for e in events] == [("one", "4"), ("two", "8"),
-                                                      ("three", "14")]
-    with c.stream("GET", f"{API}/runs/{run_id}/events",
-                  headers={"Last-Event-ID": "4"}) as resp:
+    assert [(e["data"], e["id"]) for e in events] == [("one", "4"), ("two", "8"), ("three", "14")]
+    with c.stream("GET", f"{API}/runs/{run_id}/events", headers={"Last-Event-ID": "4"}) as resp:
         again = [e["data"] for e in _sse("".join(resp.iter_text())) if e.get("event") == "log"]
     assert again == ["two", "three"]
 
@@ -851,18 +1006,20 @@ def test_graph_view_dedupes_edge_ids_and_caps_nodes():
 
     model = merged.MergedOntology(name="g", base="x")
     for local, label in (("a", "A"), ("b", "B"), ("c", "C")):
-        model.classes[local] = merged.OClass(local=local, label=label, source="document",
-                                             documents_source="d")
-    model.axioms += [merged.OAxiom("a", "related", "b", "document"),
-                     merged.OAxiom("a", "related", "b", "document")]
+        model.classes[local] = merged.OClass(
+            local=local, label=label, source="document", documents_source="d"
+        )
+    model.axioms += [
+        merged.OAxiom("a", "related", "b", "document"),
+        merged.OAxiom("a", "related", "b", "document"),
+    ]
     view = to_view(model)
     ids = [e["id"] for e in view["edges"]]
     assert len(ids) == 2 and len(set(ids)) == 2 and view["truncated"] is False
     capped = to_view(model, max_nodes=2)
     assert capped["truncated"] is True and capped["counts"]["total_nodes"] == 3
     assert {n["id"] for n in capped["nodes"]} == {"a", "b"}  # the connected ones
-    assert all(e["source"] in {"a", "b"} and e["target"] in {"a", "b"}
-               for e in capped["edges"])
+    assert all(e["source"] in {"a", "b"} and e["target"] in {"a", "b"} for e in capped["edges"])
     assert to_view(model)["edges"][0]["id"] == ids[0]  # the model is not mutated
 
 
@@ -870,8 +1027,11 @@ def test_graph_cache_follows_runs_of_other_sources(env, monkeypatch):
     c, settings, _, _ = env
     _seed_documents(settings)
     calls = []
-    monkeypatch.setattr(export_job, "fetch_snapshot",
-                        lambda client, source: calls.append(source.name) or _snapshot())
+    monkeypatch.setattr(
+        export_job,
+        "fetch_snapshot",
+        lambda client, source: calls.append(source.name) or _snapshot(),
+    )
     c.get(f"{API}/graph", params={"sources": "hanbit"})
     c.get(f"{API}/graph", params={"sources": "hanbit"})
     assert calls == ["hanbit"]  # cached
@@ -891,11 +1051,15 @@ def test_graph_cache_invalidated_when_an_older_run_finishes_last(env, monkeypatc
     c, settings, _, _ = env
     _seed_documents(settings)
     calls = []
-    monkeypatch.setattr(export_job, "fetch_snapshot",
-                        lambda client, source: calls.append(source.name) or _snapshot())
+    monkeypatch.setattr(
+        export_job,
+        "fetch_snapshot",
+        lambda client, source: calls.append(source.name) or _snapshot(),
+    )
     store = _store(settings)
     docs = store.get_source("hanbit-docs") or store.add_source(
-        name="docs-a", kind="documents", locator="{}")
+        name="docs-a", kind="documents", locator="{}"
+    )
     run_a = store.create_run(kind="extract", source_id=docs.id)
     other = store.add_source(name="other-docs", kind="documents", locator="{}")
     run_b = store.create_run(kind="align", source_id=other.id)
@@ -920,23 +1084,38 @@ def test_upload_checks_content_length_and_holds_the_source(env, monkeypatch):
 
     monkeypatch.setattr(web_api, "_add_upload", spy)
     big = b"id\n" + b"1\n" * (1024 * 1024 + 10)
-    resp = c.post(f"{API}/sources", data={"name": "shop", "kind": "files"},
-                  files=[("files", ("a.csv", big, "text/csv"))])
+    resp = c.post(
+        f"{API}/sources",
+        data={"name": "shop", "kind": "files"},
+        files=[("files", ("a.csv", big, "text/csv"))],
+    )
     assert resp.status_code == 413 and read == []  # refused before the form was parsed
     manager.claim("shop", "upload")  # another upload of the same name in flight
-    resp = c.post(f"{API}/sources", data={"name": "shop", "kind": "files"},
-                  files=[("files", ("a.csv", b"id\n1\n", "text/csv"))])
+    resp = c.post(
+        f"{API}/sources",
+        data={"name": "shop", "kind": "files"},
+        files=[("files", ("a.csv", b"id\n1\n", "text/csv"))],
+    )
     assert resp.status_code == 409 and resp.json()["error"] == "source_busy"
     manager.release("shop")
-    resp = c.post(f"{API}/sources", data={"name": "shop", "kind": "files"},
-                  files=[("files", ("a.csv", b"id\n1\n", "text/csv"))])
+    resp = c.post(
+        f"{API}/sources",
+        data={"name": "shop", "kind": "files"},
+        files=[("files", ("a.csv", b"id\n1\n", "text/csv"))],
+    )
     assert resp.status_code == 201 and manager.active_source("shop") is None
 
 
-@pytest.mark.parametrize("header, host", [("[::1]", "[::1]"), ("[::1]:7800", "[::1]"),
-                                          ("localhost:7800", "localhost"),
-                                          ("127.0.0.1", "127.0.0.1"),
-                                          ("Evil.example:80", "evil.example")])
+@pytest.mark.parametrize(
+    "header, host",
+    [
+        ("[::1]", "[::1]"),
+        ("[::1]:7800", "[::1]"),
+        ("localhost:7800", "localhost"),
+        ("127.0.0.1", "127.0.0.1"),
+        ("Evil.example:80", "evil.example"),
+    ],
+)
 def test_host_name(header, host):
     assert web_api.host_name(header) == host
 
@@ -951,17 +1130,20 @@ def test_run_log_handler_claims_only_its_pool_threads():
     from autoontology.web.runs import _RunLogHandler
 
     seen = {}
-    t = threading.Thread(target=lambda: seen.update(prefix=pool_thread_prefix()),
-                         name="autoontology-run-7-extract")
+    t = threading.Thread(
+        target=lambda: seen.update(prefix=pool_thread_prefix()), name="autoontology-run-7-extract"
+    )
     t.start()
     t.join()
     assert seen["prefix"] == "autoontology-run-7-extract:extract"
     handler = _RunLogHandler("autoontology-run-7-extract")
     rec = logging.LogRecord("x", logging.INFO, __file__, 1, "m", None, None)
-    for name, owned in (("autoontology-run-7-extract", True),
-                        ("autoontology-run-7-extract:extract_0", True),
-                        ("autoontology-run-8-extract:extract_0", False),
-                        ("extract_0", False)):
+    for name, owned in (
+        ("autoontology-run-7-extract", True),
+        ("autoontology-run-7-extract:extract_0", True),
+        ("autoontology-run-8-extract:extract_0", False),
+        ("extract_0", False),
+    ):
         rec.threadName = name
         assert handler.owns(rec) is owned, name
 
@@ -969,8 +1151,9 @@ def test_run_log_handler_claims_only_its_pool_threads():
 def test_sse_ends_for_a_run_whose_owner_died(env):
     c, settings, _, _ = env
     store = Store.for_home(settings.home)
-    run = store.create_run(kind="ingest", source_id=None,
-                           params={"database": "nonexistent", "pid": 2**22 + 12345})
+    run = store.create_run(
+        kind="ingest", source_id=None, params={"database": "nonexistent", "pid": 2**22 + 12345}
+    )
     with c.stream("GET", f"{API}/runs/{run.id}/events") as resp:
         events = _sse("".join(resp.iter_text()))
     assert events[-1]["event"] == "end"

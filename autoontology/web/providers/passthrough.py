@@ -23,8 +23,9 @@ logger = logging.getLogger("autoontology.llm_proxy")
 
 
 def _passthrough(resp: httpx.Response, content: bytes) -> Response:
-    return Response(content=content, status_code=resp.status_code,
-                    media_type=resp.headers.get("content-type"))
+    return Response(
+        content=content, status_code=resp.status_code, media_type=resp.headers.get("content-type")
+    )
 
 
 class PassthroughProvider:
@@ -65,13 +66,25 @@ class PassthroughProvider:
     def upstream_error(self, url: str, exc: httpx.HTTPError) -> JSONResponse:
         """504 for timeouts, 502 for everything else (connection refused, broken stream)."""
         if isinstance(exc, httpx.TimeoutException):
-            return JSONResponse(status_code=504, content={"error": {
-                "message": f"{self.label} did not answer within {self.timeout_s():.0f}s at "
-                           f"{url} ({type(exc).__name__}); raise the timeout or check the model",
-                "type": "upstream_timeout"}})
-        return JSONResponse(status_code=502, content={"error": {
-            "message": f"{self.label} unreachable at {url}: {type(exc).__name__}",
-            "type": "upstream_unreachable"}})
+            return JSONResponse(
+                status_code=504,
+                content={
+                    "error": {
+                        "message": f"{self.label} did not answer within {self.timeout_s():.0f}s at "
+                        f"{url} ({type(exc).__name__}); raise the timeout or check the model",
+                        "type": "upstream_timeout",
+                    }
+                },
+            )
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "message": f"{self.label} unreachable at {url}: {type(exc).__name__}",
+                    "type": "upstream_unreachable",
+                }
+            },
+        )
 
     async def forward(self, body: dict[str, Any], request: Request | None) -> Response:
         """Relay *body* to ``<base>/chat/completions`` (streaming when asked)."""
@@ -81,7 +94,8 @@ class PassthroughProvider:
         try:
             upstream = await http.send(
                 http.build_request("POST", url, json=payload, headers=self.headers(request)),
-                stream=True)
+                stream=True,
+            )
         except httpx.HTTPError as exc:
             await http.aclose()
             return self.upstream_error(url, exc)
@@ -112,16 +126,27 @@ class PassthroughProvider:
             finally:
                 await close()
 
-        return StreamingResponse(relay(), status_code=upstream.status_code,
-                                 media_type=upstream.headers.get("content-type"))
+        return StreamingResponse(
+            relay(),
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type"),
+        )
 
     async def complete(self, request: ChatRequest) -> ChatResponse:
         """One non-streaming call (used by ``doctor``), through :meth:`forward`."""
-        body: dict[str, Any] = {"model": request.model, "messages": [
-            {"role": m.role, "content": m.content} for m in request.messages]}
+        body: dict[str, Any] = {
+            "model": request.model,
+            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+        }
         if request.mode in ("json_schema", "tool") and request.schema:
-            body["response_format"] = {"type": "json_schema", "json_schema": {
-                "name": request.schema_name, "schema": request.schema, "strict": True}}
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": request.schema_name,
+                    "schema": request.schema,
+                    "strict": True,
+                },
+            }
         if request.max_tokens:
             body["max_tokens"] = request.max_tokens
         start = time.monotonic()
@@ -131,15 +156,21 @@ class PassthroughProvider:
             err = data.get("error") or {}
             if not isinstance(err, dict):
                 err = {"message": err}
-            raise ProviderError(resp.status_code, str(err.get("type") or "provider_error"),
-                                str(err.get("message") or data)[:300])
+            raise ProviderError(
+                resp.status_code,
+                str(err.get("type") or "provider_error"),
+                str(err.get("message") or data)[:300],
+            )
         usage = data.get("usage") or {}
         return ChatResponse(
-            content=str(((data.get("choices") or [{}])[0].get("message") or {}).get("content")
-                        or ""),
-            model=request.model, prompt_tokens=int(usage.get("prompt_tokens") or 0),
+            content=str(
+                ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+            ),
+            model=request.model,
+            prompt_tokens=int(usage.get("prompt_tokens") or 0),
             completion_tokens=int(usage.get("completion_tokens") or 0),
-            duration_s=time.monotonic() - start)
+            duration_s=time.monotonic() - start,
+        )
 
     async def list_models_raw(self, request: Request | None = None) -> Response:
         url = f"{self.base}/models"

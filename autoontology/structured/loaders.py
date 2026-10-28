@@ -195,7 +195,8 @@ def discover_files(path: Path, *, recursive: bool = False) -> list[Path]:
         raise LoadError(f"no such file or directory: {path}")
     pattern = "**/*" if recursive else "*"
     return sorted(
-        p for p in path.glob(pattern)
+        p
+        for p in path.glob(pattern)
         if p.is_file() and p.suffix.lower() in SUPPORTED_SUFFIXES and not p.name.startswith(".")
     )
 
@@ -267,8 +268,7 @@ def typed_column(values: list[Any]) -> tuple[Any, str | None]:
             return text(), "HUGEINT"  # exact as digits, cast by DuckDB
         return text(), "VARCHAR"
     if kinds <= {int, float}:
-        return pd.array([None if v is None else float(v) for v in clean],
-                        dtype="Float64"), None
+        return pd.array([None if v is None else float(v) for v in clean], dtype="Float64"), None
     if kinds == {bytes}:
         return pd.Series(clean, dtype=object), "BLOB"
     if kinds <= {dt.datetime, pd.Timestamp}:
@@ -310,8 +310,9 @@ def typed_frame(columns: list[tuple[Any, list[Any]]]) -> tuple[Any, dict[str, st
     return pd.DataFrame(data), casts, labels
 
 
-def register_typed(duck: duckdb.DuckDBPyConnection, view: str, frame: Any,
-                   casts: dict[str, str]) -> str:
+def register_typed(
+    duck: duckdb.DuckDBPyConnection, view: str, frame: Any, casts: dict[str, str]
+) -> str:
     """Register *frame* and return a SELECT that applies the planned casts. The pandas
     scan samples every row (``pandas_analyze_sample``), so a BLOB or text column is never
     typed from a prefix either."""
@@ -319,8 +320,12 @@ def register_typed(duck: duckdb.DuckDBPyConnection, view: str, frame: Any,
     duck.register(view, frame)
     if not casts:
         return f"SELECT * FROM {view}"
-    exprs = [f"CAST({quote_ident(c)} AS {casts[c]}) AS {quote_ident(c)}" if c in casts
-             else quote_ident(c) for c in frame.columns]
+    exprs = [
+        f"CAST({quote_ident(c)} AS {casts[c]}) AS {quote_ident(c)}"
+        if c in casts
+        else quote_ident(c)
+        for c in frame.columns
+    ]
     return f"SELECT {', '.join(exprs)} FROM {view}"
 
 
@@ -337,8 +342,7 @@ def _relations_for_file(
     literal = _sql_str(str(path))
     if suffix in CSV_SUFFIXES:
         delim = ", delim='\\t'" if suffix == ".tsv" else ""
-        yield (path.stem, None,
-               f"SELECT * FROM read_csv_auto({literal}, header=true{delim})", None)
+        yield (path.stem, None, f"SELECT * FROM read_csv_auto({literal}, header=true{delim})", None)
     elif suffix in PARQUET_SUFFIXES:
         yield path.stem, None, f"SELECT * FROM read_parquet({literal})", None
     elif suffix in JSON_SUFFIXES:
@@ -355,22 +359,27 @@ def _relations_for_file(
                 continue
             view = f"xlsx_{len(duck.execute('SHOW TABLES').fetchall())}"
             typed, casts, labels = typed_frame(  # by position: labels may collide
-                [(frame.columns[i], list(frame.iloc[:, i])) for i in range(frame.shape[1])])
+                [(frame.columns[i], list(frame.iloc[:, i])) for i in range(frame.shape[1])]
+            )
             select_sql = register_typed(duck, view, typed, casts)
             base = path.stem if len(sheets) == 1 else f"{path.stem}_{sheet}"
             yield base, str(sheet), select_sql, labels
     elif suffix in SQLITE_SUFFIXES:
         with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
-            names = [r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
-            )]
+            names = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+            ]
             for table in names:
                 cur = conn.execute(f"SELECT * FROM {quote_ident(table)}")
                 cols = [d[0] for d in cur.description]
                 rows = cur.fetchall()
-                frame, casts, labels = typed_frame([(c, [r[i] for r in rows])
-                                                    for i, c in enumerate(cols)])
+                frame, casts, labels = typed_frame(
+                    [(c, [r[i] for r in rows]) for i, c in enumerate(cols)]
+                )
                 view = f"sqlite_{len(duck.execute('SHOW TABLES').fetchall())}"
                 yield table, table, register_typed(duck, view, frame, casts), labels
     else:  # pragma: no cover - discover_files filters
@@ -402,8 +411,9 @@ def read_tables(
             names = dedupe_identifiers(normalize_identifier(c) for c in originals)
             columns = []
             exprs = []
-            for internal, original, name, duck_type in zip(internals, originals, names,
-                                                           rel.types, strict=True):
+            for internal, original, name, duck_type in zip(
+                internals, originals, names, rel.types, strict=True
+            ):
                 pg_type = duckdb_to_pg_type(duck_type)
                 columns.append(ColumnPlan(name, original, str(duck_type), pg_type))
                 ref = quote_ident(internal)
@@ -411,13 +421,15 @@ def read_tables(
             if not columns:
                 warnings.append(f"{Path(path).name}: no columns, skipped")
                 continue
-            plans.append(TablePlan(
-                name=table,
-                source_file=str(path),
-                sheet=sheet,
-                select_sql=f"SELECT {', '.join(exprs)} FROM ({select_sql}) AS src",
-                columns=columns,
-            ))
+            plans.append(
+                TablePlan(
+                    name=table,
+                    source_file=str(path),
+                    sheet=sheet,
+                    select_sql=f"SELECT {', '.join(exprs)} FROM ({select_sql}) AS src",
+                    columns=columns,
+                )
+            )
     return plans
 
 
@@ -427,14 +439,22 @@ def read_tables(
 def table_manifest(plans: list[TablePlan]) -> dict[str, Any]:
     """What each planned table is built from and its column types (the schema contract the
     upstream catalog and semantic layer are compiled from)."""
-    return {p.name: {"source_file": p.source_file, "sheet": p.sheet,
-                     "columns": {c.name: c.pg_type for c in p.columns}} for p in plans}
+    return {
+        p.name: {
+            "source_file": p.source_file,
+            "sheet": p.sheet,
+            "columns": {c.name: c.pg_type for c in p.columns},
+        }
+        for p in plans
+    }
 
 
 #: ``format_type`` spellings of the types :func:`duckdb_to_pg_type` emits differently.
-_PG_TYPE_ALIASES = {"timestamp without time zone": "timestamp",
-                    "timestamp with time zone": "timestamptz",
-                    "time without time zone": "time"}
+_PG_TYPE_ALIASES = {
+    "timestamp without time zone": "timestamp",
+    "timestamp with time zone": "timestamptz",
+    "time without time zone": "time",
+}
 
 
 def existing_schema(conn: Any) -> dict[str, Any]:
@@ -445,7 +465,8 @@ def existing_schema(conn: Any) -> dict[str, Any]:
         "FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
         "JOIN pg_namespace n ON n.oid = c.relnamespace "
         "WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attnum > 0 "
-        "AND NOT a.attisdropped ORDER BY c.relname, a.attnum").fetchall()
+        "AND NOT a.attisdropped ORDER BY c.relname, a.attnum"
+    ).fetchall()
     out: dict[str, Any] = {}
     for table, column, pg_type in rows:
         entry = out.setdefault(table, {"source_file": None, "sheet": None, "columns": {}})
@@ -458,15 +479,21 @@ def diff_manifest(old: dict[str, Any], new: dict[str, Any]) -> dict[str, list[st
     return {
         "added": sorted(set(new) - set(old)),
         "removed": sorted(set(old) - set(new)),
-        "changed": sorted(t for t in set(old) & set(new)
-                          if dict(old[t].get("columns") or {})
-                          != dict(new[t].get("columns") or {})),
+        "changed": sorted(
+            t
+            for t in set(old) & set(new)
+            if dict(old[t].get("columns") or {}) != dict(new[t].get("columns") or {})
+        ),
     }
 
 
 def owned_tables(conn: Any) -> list[str]:
-    return [r[0] for r in conn.execute(
-        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")]
+    return [
+        r[0]
+        for r in conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+        )
+    ]
 
 
 def create_table_sql(plan: TablePlan) -> str:
@@ -504,14 +531,18 @@ def write_tables(
                         for row in batch:
                             copy.write_row(row)
                         rows += len(batch)
-        reports.append(TableReport(
-            name=plan.name,
-            source_file=plan.source_file,
-            sheet=plan.sheet,
-            rows=rows,
-            columns=[{"name": c.name, "original": c.original, "type": c.pg_type}
-                     for c in plan.columns],
-        ))
+        reports.append(
+            TableReport(
+                name=plan.name,
+                source_file=plan.source_file,
+                sheet=plan.sheet,
+                rows=rows,
+                columns=[
+                    {"name": c.name, "original": c.original, "type": c.pg_type}
+                    for c in plan.columns
+                ],
+            )
+        )
     return reports
 
 
@@ -544,8 +575,9 @@ def load_files_to_postgres(
         with pg.connect(settings, pg_database) as conn:
             old = previous if previous is not None else existing_schema(conn)
             report.schema_changes = diff_manifest(old, report.manifest)
-            if on_changes is not None and (report.schema_changes["removed"]
-                                           or report.schema_changes["changed"]):
+            if on_changes is not None and (
+                report.schema_changes["removed"] or report.schema_changes["changed"]
+            ):
                 on_changes(report.schema_changes)
             report.tables = write_tables(plans, duck, conn)
             obsolete = [t for t in owned_tables(conn) if t not in report.manifest]

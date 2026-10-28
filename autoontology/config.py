@@ -174,10 +174,22 @@ def resolve_selection(env_file: Path | None = None) -> tuple[dict[str, str], dic
     """(values, origin) of chat_provider/embed_provider. Precedence: shell env > ``.env`` >
     default (``ollama`` for both)."""
     layers: list[tuple[str, dict[str, str]]] = [
-        ("shell", {k: v.strip() for k, var in SELECTION_VARS.items()
-                   if (v := shell_value(var)) and v.strip()}),
-        (".env", {k: v.strip() for k, var in SELECTION_VARS.items()
-                  if (v := dotenv_layer(env_file).get(var)) and v.strip()}),
+        (
+            "shell",
+            {
+                k: v.strip()
+                for k, var in SELECTION_VARS.items()
+                if (v := shell_value(var)) and v.strip()
+            },
+        ),
+        (
+            ".env",
+            {
+                k: v.strip()
+                for k, var in SELECTION_VARS.items()
+                if (v := dotenv_layer(env_file).get(var)) and v.strip()
+            },
+        ),
     ]
     values: dict[str, str] = {}
     origin: dict[str, str] = {}
@@ -185,8 +197,10 @@ def resolve_selection(env_file: Path | None = None) -> tuple[dict[str, str], dic
         for name, layer in layers:
             if key in layer:
                 if layer[key] not in choices:
-                    raise ValueError(f"{SELECTION_VARS[key]} must be one of {choices}, got "
-                                     f"{layer[key]!r} (from {name})")
+                    raise ValueError(
+                        f"{SELECTION_VARS[key]} must be one of {choices}, got "
+                        f"{layer[key]!r} (from {name})"
+                    )
                 values[key], origin[key] = layer[key], name
                 break
         else:
@@ -298,8 +312,7 @@ class Settings:
             openai_api_key=env.get("AUTOONTOLOGY_OPENAI_API_KEY", "").strip(),
             openai_chat_model=env.get("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "").strip(),
             openai_embed_model=env.get("AUTOONTOLOGY_OPENAI_EMBED_MODEL", "").strip(),
-            openai_timeout_s=_float_env("AUTOONTOLOGY_OPENAI_TIMEOUT_S",
-                                        DEFAULT_OPENAI_TIMEOUT_S),
+            openai_timeout_s=_float_env("AUTOONTOLOGY_OPENAI_TIMEOUT_S", DEFAULT_OPENAI_TIMEOUT_S),
             llm_limits={k: env[k] for k in OLLAMA_LLM_LIMITS if env.get(k, "").strip()},
         )
 
@@ -435,8 +448,10 @@ def validate_model_profile(settings: Settings) -> list[str]:
         if not settings.openai_chat_model:
             problems.append("AUTOONTOLOGY_OPENAI_CHAT_MODEL is not set")
         elif not CHAT_MODEL_RE.fullmatch(settings.openai_chat_model):
-            problems.append(f"AUTOONTOLOGY_OPENAI_CHAT_MODEL {settings.openai_chat_model!r} "
-                            "is not a valid model name")
+            problems.append(
+                f"AUTOONTOLOGY_OPENAI_CHAT_MODEL {settings.openai_chat_model!r} "
+                "is not a valid model name"
+            )
     if settings.embed_provider == "openai" and not settings.openai_embed_model:
         problems.append("AUTOONTOLOGY_OPENAI_EMBED_MODEL is not set")
     return problems

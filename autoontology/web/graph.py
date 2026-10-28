@@ -41,14 +41,23 @@ def max_nodes_from_env() -> int:
     return value if value > 0 else MAX_NODES
 
 
-def _node(local: str, label: str, type_: str, source: str, kind: str, origin: str,
-          **extra: Any) -> dict[str, Any]:
-    return {"id": local, "label": label or local, "type": type_, "source": source,
-            "kind": kind, "origin": origin, **{k: v for k, v in extra.items() if v}}
+def _node(
+    local: str, label: str, type_: str, source: str, kind: str, origin: str, **extra: Any
+) -> dict[str, Any]:
+    return {
+        "id": local,
+        "label": label or local,
+        "type": type_,
+        "source": source,
+        "kind": kind,
+        "origin": origin,
+        **{k: v for k, v in extra.items() if v},
+    }
 
 
-def to_view(model: MergedOntology, layer: str = "all", *, evidence: bool = False,
-            max_nodes: int = MAX_NODES) -> dict[str, Any]:
+def to_view(
+    model: MergedOntology, layer: str = "all", *, evidence: bool = False, max_nodes: int = MAX_NODES
+) -> dict[str, Any]:
     if layer not in LAYERS:
         raise ValueError(f"layer must be one of {', '.join(LAYERS)}")
     nodes: dict[str, dict[str, Any]] = {}
@@ -58,27 +67,48 @@ def to_view(model: MergedOntology, layer: str = "all", *, evidence: bool = False
             attrs.setdefault(p.domain, []).append(p.label)
     for c in model.classes.values():
         nodes[c.local] = _node(
-            c.local, c.label, "class", c.structured_source or c.documents_source,
+            c.local,
+            c.label,
+            "class",
+            c.structured_source or c.documents_source,
             c.kind or ("term" if c.source == "structured" else ""),
             "structured" if c.source == "structured" else "document",
-            metric="Metric" in c.extra_types, synonyms=c.alt_labels[:12],
+            metric="Metric" in c.extra_types,
+            synonyms=c.alt_labels[:12],
             definition=(c.definitions[0] if c.definitions else c.comment)[:400],
-            tables=c.tables, attributes=sorted(attrs.get(c.local, []))[:30],
+            tables=c.tables,
+            attributes=sorted(attrs.get(c.local, []))[:30],
             enriched_by=c.documents_source if c.source == "structured" else "",
-            concept_ids=c.concept_ids, evidence_count=len(set(c.derived_from)))
+            concept_ids=c.concept_ids,
+            evidence_count=len(set(c.derived_from)),
+        )
     for i in model.individuals.values():
-        nodes[i.local] = _node(i.local, i.label, "individual", i.documents_source, i.kind,
-                               "document", individual_type=i.type,
-                               definition=i.comment[:400], synonyms=i.alt_labels[:12],
-                               concept_ids=[i.local.removeprefix("concept-")],
-                               evidence_count=len(set(i.derived_from)))
+        nodes[i.local] = _node(
+            i.local,
+            i.label,
+            "individual",
+            i.documents_source,
+            i.kind,
+            "document",
+            individual_type=i.type,
+            definition=i.comment[:400],
+            synonyms=i.alt_labels[:12],
+            concept_ids=[i.local.removeprefix("concept-")],
+            evidence_count=len(set(i.derived_from)),
+        )
     for m in model.merges:
         term = model.classes.get(m.term_local)
         nodes[m.concept_local] = _node(
-            m.concept_local, m.concept_name, "concept",
-            term.documents_source if term else "", m.concept_kind, "document",
-            folded_into=m.term_local, concept_ids=[m.concept_local.removeprefix("concept-")],
-            evidence_count=len(set(m.derived_from)))
+            m.concept_local,
+            m.concept_name,
+            "concept",
+            term.documents_source if term else "",
+            m.concept_kind,
+            "document",
+            folded_into=m.term_local,
+            concept_ids=[m.concept_local.removeprefix("concept-")],
+            evidence_count=len(set(m.derived_from)),
+        )
     grounds: dict[str, list[str]] = {}  # node -> evidence locals
     for c in model.classes.values():
         grounds[c.local] = c.derived_from
@@ -96,25 +126,50 @@ def to_view(model: MergedOntology, layer: str = "all", *, evidence: bool = False
         if source not in nodes or target not in nodes:
             continue
         layer_of = "structured" if p.source == "semantic_fk" else "documents"
-        edges.append({"id": p.local, "source": source, "target": target,
-                      "type": p.source, "label": p.predicate or p.label, "title": p.label,
-                      "layer": layer_of})
+        edges.append(
+            {
+                "id": p.local,
+                "source": source,
+                "target": target,
+                "type": p.source,
+                "label": p.predicate or p.label,
+                "title": p.label,
+                "layer": layer_of,
+            }
+        )
     for a in model.axioms:
-        edge = {"id": f"ax-{a.subject}-{a.kind}-{a.object}", "source": a.subject,
-                "target": a.object, "type": a.kind,
-                "label": "subClassOf" if a.kind == "subclass_of" else "related",
-                "layer": "aligned" if a.source == "alignment" else "documents",
-                "confidence": a.confidence}
+        edge = {
+            "id": f"ax-{a.subject}-{a.kind}-{a.object}",
+            "source": a.subject,
+            "target": a.object,
+            "type": a.kind,
+            "label": "subClassOf" if a.kind == "subclass_of" else "related",
+            "layer": "aligned" if a.source == "alignment" else "documents",
+            "confidence": a.confidence,
+        }
         if a.source == "alignment":  # narrower: Term ⊑ concept; broader: concept ⊑ Term
             subject = model.classes.get(a.subject)
-            edge["relation"] = ("related" if a.kind == "related" else "narrower"
-                                if subject is not None and subject.source == "structured"
-                                else "broader")
+            edge["relation"] = (
+                "related"
+                if a.kind == "related"
+                else "narrower"
+                if subject is not None and subject.source == "structured"
+                else "broader"
+            )
         edges.append(edge)
     for m in model.merges:
-        edges.append({"id": f"same-{m.concept_local}", "source": m.concept_local,
-                      "target": m.term_local, "type": "aligned_same", "label": "same",
-                      "layer": "aligned", "confidence": m.confidence, "relation": "same"})
+        edges.append(
+            {
+                "id": f"same-{m.concept_local}",
+                "source": m.concept_local,
+                "target": m.term_local,
+                "type": "aligned_same",
+                "label": "same",
+                "layer": "aligned",
+                "confidence": m.confidence,
+                "relation": "same",
+            }
+        )
 
     def node_layer(n: dict[str, Any]) -> str:
         if n["type"] == "concept":
@@ -153,14 +208,33 @@ def to_view(model: MergedOntology, layer: str = "all", *, evidence: bool = False
                     per_doc[row.document] = per_doc.get(row.document, 0) + 1
             for doc_local, count in per_doc.items():
                 docs_seen.setdefault(doc_local)
-                out_edges.append({"id": f"ev-{node_id}-{doc_local}", "source": node_id,
-                                  "target": doc_local, "type": "evidence", "label": "evidence",
-                                  "layer": "evidence", "count": count})
+                out_edges.append(
+                    {
+                        "id": f"ev-{node_id}-{doc_local}",
+                        "source": node_id,
+                        "target": doc_local,
+                        "type": "evidence",
+                        "label": "evidence",
+                        "layer": "evidence",
+                        "count": count,
+                    }
+                )
         for doc_local in docs_seen:
             d = model.documents[doc_local]
-            out_nodes.append({**_node(doc_local, d.title or d.path.rsplit("/", 1)[-1],
-                                      "document", d.source, "document", "document",
-                                      path=d.path.rsplit("/", 1)[-1]), "layer": "evidence"})
+            out_nodes.append(
+                {
+                    **_node(
+                        doc_local,
+                        d.title or d.path.rsplit("/", 1)[-1],
+                        "document",
+                        d.source,
+                        "document",
+                        "document",
+                        path=d.path.rsplit("/", 1)[-1],
+                    ),
+                    "layer": "evidence",
+                }
+            )
     seen: dict[str, int] = {}
     for e in out_edges:  # axioms can repeat (same subject/kind/object from two sources)
         n = seen.get(e["id"], 0)
@@ -168,11 +242,12 @@ def to_view(model: MergedOntology, layer: str = "all", *, evidence: bool = False
         if n:
             e["id"] = f"{e['id']}~{n}"
     return {
-        "name": model.name, "layer": layer,
+        "name": model.name,
+        "layer": layer,
         "structured_sources": model.structured_sources,
         "documents_sources": model.documents_sources,
-        "nodes": out_nodes, "edges": out_edges,
-        "counts": {"nodes": len(out_nodes), "edges": len(out_edges),
-                   "total_nodes": total_nodes},
+        "nodes": out_nodes,
+        "edges": out_edges,
+        "counts": {"nodes": len(out_nodes), "edges": len(out_edges), "total_nodes": total_nodes},
         "truncated": truncated,
     }

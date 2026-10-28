@@ -16,8 +16,9 @@ CANDS = {"t-contract": "Contracts", "t-customer": "Customers"}
 
 
 def _v(term_id="t-contract", relation="same", confidence=0.9, rationale="ok"):
-    return AlignmentVerdict(term_id=term_id, relation=relation, confidence=confidence,
-                            rationale=rationale)
+    return AlignmentVerdict(
+        term_id=term_id, relation=relation, confidence=confidence, rationale=rationale
+    )
 
 
 # --- judge post-validation ----------------------------------------------------------------
@@ -46,16 +47,17 @@ def test_texts_and_candidates():
     assert al.concept_text(c) == "계약 (Contract): 고객과 맺는 약정"
     t = al.TermInfo("t", "Contract", "계약 정보", ["계약서"], attributes=[{"name": "계약id"}])
     assert al.term_text(t) == "Contract: 계약 정보 | synonyms: 계약서 | columns: 계약id"
-    found = al.top_candidates([1.0, 0.0], {"a": [1.0, 0.0], "b": [0.0, 1.0], "c": [0.9, 0.1],
-                                           "d": None}, k=5, floor=0.55)
+    found = al.top_candidates(
+        [1.0, 0.0], {"a": [1.0, 0.0], "b": [0.0, 1.0], "c": [0.9, 0.1], "d": None}, k=5, floor=0.55
+    )
     assert [c.term_id for c in found] == ["a", "c"]
     assert al.top_candidates(None, {"a": [1.0]}) == []
 
 
 def test_merge_synonyms_is_case_insensitive_and_never_removes():
-    assert al.merge_synonyms(["Contract", "계약서"], ["contract", "계약", " 계약 ", "Contract",
-                                                    ""], "Contract") == [
-        "Contract", "계약서", "계약"]
+    assert al.merge_synonyms(
+        ["Contract", "계약서"], ["contract", "계약", " 계약 ", "Contract", ""], "Contract"
+    ) == ["Contract", "계약서", "계약"]
 
 
 # --- apply policy with a fake writer --------------------------------------------------------
@@ -71,8 +73,11 @@ class FakeWriter:
         term = self.terms[term_id]
         before = list(term.synonyms)
         term.synonyms = al.merge_synonyms(before, additions, term.name)
-        return {"synonyms": term.synonyms, "added": term.synonyms[len(before):],
-                "embeddings_refreshed": True}
+        return {
+            "synonyms": term.synonyms,
+            "added": term.synonyms[len(before) :],
+            "embeddings_refreshed": True,
+        }
 
     def patch_description(self, term_id, description):
         self.calls.append(("description", term_id, description))
@@ -85,13 +90,16 @@ class FakeWriter:
 
 
 def test_apply_policy_is_idempotent_and_respects_real_descriptions():
-    terms = {"t1": al.TermInfo("t1", "Contract", "계약 정보", ["Contract"]),
-             "t2": al.TermInfo("t2", "Invoices", "Business entity represented by table "
-                                                 "invoices")}
+    terms = {
+        "t1": al.TermInfo("t1", "Contract", "계약 정보", ["Contract"]),
+        "t2": al.TermInfo("t2", "Invoices", "Business entity represented by table invoices"),
+    }
     matches = {
         "t1": [al.SameMatch(1, "계약", ["계약서", "contract"], "고객과 맺는 약정", 0.9)],
-        "t2": [al.SameMatch(2, "청구서", [], "대금을 요구하는 문서", 0.8),
-               al.SameMatch(3, "청구", ["청구서"], "청구 행위", 0.75)],
+        "t2": [
+            al.SameMatch(2, "청구서", [], "대금을 요구하는 문서", 0.8),
+            al.SameMatch(3, "청구", ["청구서"], "청구 행위", 0.75),
+        ],
     }
     writer = FakeWriter(terms)
     patches = al.plan_patches(matches, terms)
@@ -108,8 +116,11 @@ def test_apply_policy_is_idempotent_and_respects_real_descriptions():
     again = al.plan_patches(matches, terms)
     assert not any(p.changed for p in again)
     for p in again:
-        assert al.apply_patch(p, writer) == {"term_id": p.term_id, "synonyms_added": [],
-                                             "description_set": False}
+        assert al.apply_patch(p, writer) == {
+            "term_id": p.term_id,
+            "synonyms_added": [],
+            "description_set": False,
+        }
     assert len(writer.calls) == 3
 
 
@@ -121,28 +132,59 @@ class FakeClient:
 
     def __init__(self):
         self.terms = {
-            "t-contract": {"id": "t-contract", "name": "Contract",
-                           "description": "계약 관련 정보", "synonyms": [],
-                           "tables": [{"id": "tb-c", "name": "contracts", "schema_id": "s1"}]},
-            "t-customer": {"id": "t-customer", "name": "Customer",
-                           "description": "Business entity represented by table customers",
-                           "synonyms": [],
-                           "tables": [{"id": "tb-k", "name": "customers", "schema_id": "s1"}]},
+            "t-contract": {
+                "id": "t-contract",
+                "name": "Contract",
+                "description": "계약 관련 정보",
+                "synonyms": [],
+                "tables": [{"id": "tb-c", "name": "contracts", "schema_id": "s1"}],
+            },
+            "t-customer": {
+                "id": "t-customer",
+                "name": "Customer",
+                "description": "Business entity represented by table customers",
+                "synonyms": [],
+                "tables": [{"id": "tb-k", "name": "customers", "schema_id": "s1"}],
+            },
         }
         self.attrs = {
-            "t-contract": [{"id": "a1", "name": "계약id", "source_column": "계약id",
-                            "datatype": "text", "primary_column": {
-                                "table_id": "tb-c", "table_name": "contracts",
-                                "schema_id": "s1", "column_name": "계약id"},
-                            "referenced_columns": []}],
-            "t-customer": [{"id": "a2", "name": "고객id", "source_column": "고객id",
-                            "datatype": "text", "primary_column": {
-                                "table_id": "tb-k", "table_name": "customers",
-                                "schema_id": "s1", "column_name": "고객id"},
-                            "referenced_columns": [{"table_id": "tb-c",
-                                                    "table_name": "contracts",
-                                                    "schema_id": "s1",
-                                                    "column_name": "고객id"}]}],
+            "t-contract": [
+                {
+                    "id": "a1",
+                    "name": "계약id",
+                    "source_column": "계약id",
+                    "datatype": "text",
+                    "primary_column": {
+                        "table_id": "tb-c",
+                        "table_name": "contracts",
+                        "schema_id": "s1",
+                        "column_name": "계약id",
+                    },
+                    "referenced_columns": [],
+                }
+            ],
+            "t-customer": [
+                {
+                    "id": "a2",
+                    "name": "고객id",
+                    "source_column": "고객id",
+                    "datatype": "text",
+                    "primary_column": {
+                        "table_id": "tb-k",
+                        "table_name": "customers",
+                        "schema_id": "s1",
+                        "column_name": "고객id",
+                    },
+                    "referenced_columns": [
+                        {
+                            "table_id": "tb-c",
+                            "table_name": "contracts",
+                            "schema_id": "s1",
+                            "column_name": "고객id",
+                        }
+                    ],
+                }
+            ],
         }
         self.patches = []
 
@@ -153,9 +195,16 @@ class FakeClient:
         return "db1"
 
     def semantic_graph(self, database_id=None):
-        return {"nodes": [{"id": k, "name": v["name"]} for k, v in self.terms.items()],
-                "links": [{"source": "t-customer", "target": "t-contract",
-                           "relationship_types": ["SEMANTIC_FK"]}]}
+        return {
+            "nodes": [{"id": k, "name": v["name"]} for k, v in self.terms.items()],
+            "links": [
+                {
+                    "source": "t-customer",
+                    "target": "t-contract",
+                    "relationship_types": ["SEMANTIC_FK"],
+                }
+            ],
+        }
 
     def schemas(self, database_id):
         return [{"id": "s1", "schema_name": "public"}]
@@ -190,8 +239,11 @@ class ClientWriter:
         before = list(term["synonyms"])
         term["synonyms"] = al.merge_synonyms(before, additions, term["name"])
         self.refreshes += 1
-        return {"synonyms": term["synonyms"], "added": term["synonyms"][len(before):],
-                "embeddings_refreshed": self.refresh_ok}
+        return {
+            "synonyms": term["synonyms"],
+            "added": term["synonyms"][len(before) :],
+            "embeddings_refreshed": self.refresh_ok,
+        }
 
     def patch_description(self, term_id, description):
         self.calls += 1
@@ -208,19 +260,28 @@ class ClientWriter:
         removed = [x for x in term["synonyms"] if al.norm_alias(x) in drop]
         term["synonyms"] = [x for x in term["synonyms"] if al.norm_alias(x) not in drop]
         self.refreshes += 1
-        return {"synonyms": term["synonyms"], "removed": removed,
-                "embeddings_refreshed": self.refresh_ok}
+        return {
+            "synonyms": term["synonyms"],
+            "removed": removed,
+            "embeddings_refreshed": self.refresh_ok,
+        }
 
 
-VECS = {"Contract": [1.0, 0.0, 0.0], "Customer": [0.0, 1.0, 0.0],
-        "계약": [0.95, 0.05, 0.0], "고객": [0.1, 0.9, 0.0], "계약금액": [0.7, 0.0, 0.7],
-        "날씨": [0.0, 0.0, 1.0]}
+VECS = {
+    "Contract": [1.0, 0.0, 0.0],
+    "Customer": [0.0, 1.0, 0.0],
+    "계약": [0.95, 0.05, 0.0],
+    "고객": [0.1, 0.9, 0.0],
+    "계약금액": [0.7, 0.0, 0.7],
+    "날씨": [0.0, 0.0, 1.0],
+}
 
 
 def fake_embed(calls):
     def embed(texts, input_type):
         calls.append((input_type, len(texts)))
         return [VECS[t.split(":")[0].split(" (")[0]] for t in texts]
+
     return embed
 
 
@@ -250,27 +311,49 @@ def env(isolated_env):
     store.set_catalog_database_id(structured.id, "db1")
     docs_src = store.add_source(name="hanbit-docs", kind="documents", locator="{}")
     docs = DocumentStore(store)
-    doc, _ = docs.replace_document(source_id=docs_src.id, path="/x/a.md", title="A",
-                                   mime="text/markdown", engine="native", sha256="s2",
-                                   size=1, pages=None, chunks=[C(0, "계약은 고객과 맺는다")])
+    doc, _ = docs.replace_document(
+        source_id=docs_src.id,
+        path="/x/a.md",
+        title="A",
+        mime="text/markdown",
+        engine="native",
+        sha256="s2",
+        size=1,
+        pages=None,
+        chunks=[C(0, "계약은 고객과 맺는다")],
+    )
     chunk = docs.chunks_for_document(doc.id)[0]
     ev = [EvidenceRecord(chunk.id, "계약은 고객과 맺는다", True)]
-    docs.replace_ontology(docs_src.id, [
-        ConceptRecord("계약", "entity", "고객과 맺는 약정", "Contract", ["계약서"], evidence=ev),
-        ConceptRecord("고객", "entity", "계약 상대방", "Customer", evidence=ev),
-        ConceptRecord("계약금액", "metric", "계약의 총 금액", evidence=ev),
-        ConceptRecord("날씨", "entity", "관계없는 것", evidence=ev),
-        ConceptRecord("승인", "process", "승인 절차", evidence=ev),
-    ], [])
+    docs.replace_ontology(
+        docs_src.id,
+        [
+            ConceptRecord(
+                "계약", "entity", "고객과 맺는 약정", "Contract", ["계약서"], evidence=ev
+            ),
+            ConceptRecord("고객", "entity", "계약 상대방", "Customer", evidence=ev),
+            ConceptRecord("계약금액", "metric", "계약의 총 금액", evidence=ev),
+            ConceptRecord("날씨", "entity", "관계없는 것", evidence=ev),
+            ConceptRecord("승인", "process", "승인 절차", evidence=ev),
+        ],
+        [],
+    )
     return settings, store
 
 
 def _align(settings, store, client, judge, embed_calls, writer=None, **kw):
-    backends = aj.AlignBackends(settings, judge_llm=judge, embedder=fake_embed(embed_calls),
-                                model="fake-embed")
-    return aj.run_align("hanbit-docs", settings=settings, store=store, client=client,
-                        backends=backends, writer=writer or ClientWriter(client),
-                        check_service=False, **kw)
+    backends = aj.AlignBackends(
+        settings, judge_llm=judge, embedder=fake_embed(embed_calls), model="fake-embed"
+    )
+    return aj.run_align(
+        "hanbit-docs",
+        settings=settings,
+        store=store,
+        client=client,
+        backends=backends,
+        writer=writer or ClientWriter(client),
+        check_service=False,
+        **kw,
+    )
 
 
 def test_run_align_end_to_end_idempotent(env):
@@ -362,19 +445,31 @@ def test_run_align_validation(env):
     settings, store = env
     client = FakeClient()
     with pytest.raises(JobError, match="documents source"):
-        aj.run_align("hanbit", settings=settings, store=store, client=client,
-                     check_service=False)
+        aj.run_align("hanbit", settings=settings, store=store, client=client, check_service=False)
     with pytest.raises(JobError, match="between 0 and 1"):
-        aj.run_align("hanbit-docs", settings=settings, store=store, client=client,
-                     check_service=False, min_sim=2.0)
+        aj.run_align(
+            "hanbit-docs",
+            settings=settings,
+            store=store,
+            client=client,
+            check_service=False,
+            min_sim=2.0,
+        )
     store.add_source(name="other", kind="files", locator="{}")
     store.set_catalog_database_id(store.get_source("other").id, "db2")
     with pytest.raises(JobError, match="--structured-source"):
-        aj.run_align("hanbit-docs", settings=settings, store=store, client=client,
-                     check_service=False)
+        aj.run_align(
+            "hanbit-docs", settings=settings, store=store, client=client, check_service=False
+        )
     with pytest.raises(JobError, match="is a documents source"):
-        aj.run_align("hanbit-docs", settings=settings, store=store, client=client,
-                     structured_source="hanbit-docs", check_service=False)
+        aj.run_align(
+            "hanbit-docs",
+            settings=settings,
+            store=store,
+            client=client,
+            structured_source="hanbit-docs",
+            check_service=False,
+        )
 
 
 def test_snapshot_derives_semantic_fks_from_referenced_columns():
@@ -386,19 +481,30 @@ def test_snapshot_derives_semantic_fks_from_referenced_columns():
     assert [t.name for t in snap.terms] == ["Contract", "Customer"]
     [fk] = snap.fks
     assert (fk.owner_term_id, fk.target_term_id, fk.column) == (
-        "t-contract", "t-customer", "public.contracts.고객id")
+        "t-contract",
+        "t-customer",
+        "public.contracts.고객id",
+    )
     assert snap.term_map()["t-customer"].attributes[0]["schema"] == "public"
 
 
 def test_attribute_and_column_concepts_are_never_same():
-    term = al.TermInfo("t-contract", "Contract", "계약", attributes=[
-        {"name": "계약금액", "source_column": "계약금액"}, {"name": "계약id"}])
+    term = al.TermInfo(
+        "t-contract",
+        "Contract",
+        "계약",
+        attributes=[{"name": "계약금액", "source_column": "계약금액"}, {"name": "계약id"}],
+    )
 
     def judge(concept, candidates):
         return _v("t-contract", "same", 0.95)
 
-    for name, kind in (("계약금액", "entity"), ("계약 ID", "entity"), ("계약상태", "attribute"),
-                       ("계약기간", "metric")):
+    for name, kind in (
+        ("계약금액", "entity"),
+        ("계약 ID", "entity"),
+        ("계약상태", "attribute"),
+        ("계약기간", "metric"),
+    ):
         v = al.judge_concept(judge, al.ConceptInfo("c", name, kind), [term])
         assert v.relation == "related" and v.notes, name
     v = al.judge_concept(judge, al.ConceptInfo("c", "계약", "entity"), [term])
@@ -464,8 +570,7 @@ def test_concurrent_synonym_edit_is_kept(env):
     writer.concurrent["t-contract"] = "약정"  # a person edits between plan and write
     result = _align(settings, store, client, FakeJudge(), [], writer=writer)
     assert client.terms["t-contract"]["synonyms"] == ["약정", "계약", "계약서"]
-    patch = next(p for p in result.details["apply"]["patches"]
-                 if p["term_name"] == "Contract")
+    patch = next(p for p in result.details["apply"]["patches"] if p["term_name"] == "Contract")
     assert patch["synonyms_added"] == ["계약", "계약서"]
 
 
@@ -509,13 +614,17 @@ def test_dry_run_after_a_real_run_keeps_committed_verdicts(env):
     client, judge = FakeClient(), FakeJudge()
     _align(settings, store, client, judge, [])
     src = store.get_source("hanbit-docs")
-    before = {a.concept_name: (a.accepted, a.relation, a.applied)
-              for a in AlignmentStore(store).list(src.id)}
+    before = {
+        a.concept_name: (a.accepted, a.relation, a.applied)
+        for a in AlignmentStore(store).list(src.id)
+    }
     assert before["계약"][0] and before["고객"][0]
     dry = _align(settings, store, client, judge, [], dry_run=True)
     assert dry.status == "succeeded"
-    after = {a.concept_name: (a.accepted, a.relation, a.applied)
-             for a in AlignmentStore(store).list(src.id)}
+    after = {
+        a.concept_name: (a.accepted, a.relation, a.applied)
+        for a in AlignmentStore(store).list(src.id)
+    }
     assert after == before  # committed verdicts untouched, `applied` kept
     previews = AlignmentStore(store).list(src.id, preview=True)
     assert previews and all(p.dry_run and not p.accepted for p in previews)
@@ -533,13 +642,22 @@ def test_dry_run_verdicts_never_reach_the_export(env):
     src = store.get_source("hanbit-docs")
     docs = DocumentStore(store)
     c = {x.name: x for x in docs.list_concepts(src.id)}
-    AlignmentStore(store).put(AlignmentRecord(
-        source_id=src.id, concept_id=c["날씨"].id, concept_name="날씨", relation="broader",
-        run_id="r", structured_source="hanbit", term_id="t-contract", term_name="Contract",
-        confidence=0.9, dry_run=True))
+    AlignmentStore(store).put(
+        AlignmentRecord(
+            source_id=src.id,
+            concept_id=c["날씨"].id,
+            concept_name="날씨",
+            relation="broader",
+            run_id="r",
+            structured_source="hanbit",
+            term_id="t-contract",
+            term_name="Contract",
+            confidence=0.9,
+            dry_run=True,
+        )
+    )
     snapshot = fetch_snapshot(FakeClient(), store.get_source("hanbit"))
-    model = merged.build("x", structured=[snapshot],
-                         documents=documents_inputs(store, [src]))
+    model = merged.build("x", structured=[snapshot], documents=documents_inputs(store, [src]))
     assert not [a for a in model.axioms if a.source == "alignment"]
     assert model.alignment_counts.get("broader", 0) == 0
 
@@ -597,11 +715,17 @@ def test_align_and_export_reread_sources_under_the_lease(env, monkeypatch):
         _align(settings, store, client, FakeJudge(), [])
     _replace_on_lease(store, "hanbit-docs", monkeypatch)
     with pytest.raises(JobError, match="removed or replaced"):
-        export_job.run_export("hanbit-docs", settings=settings, store=store,
-                              sources=["hanbit-docs", "hanbit"], client=client)
+        export_job.run_export(
+            "hanbit-docs",
+            settings=settings,
+            store=store,
+            sources=["hanbit-docs", "hanbit"],
+            client=client,
+        )
 
 
 # --- identity policy (review #4) ---------------------------------------------------------
+
 
 class ApproverJudge(FakeJudge):
     """The live failure: a 0.99 `same` for 승인권자 -> Contract."""
@@ -620,13 +744,25 @@ def approver_env(env):
     src = store.get_source("hanbit-docs")
     chunk = docs.chunks_for_document(docs.list_documents(src.id)[0].id)[0]
     ev = [EvidenceRecord(chunk.id, "계약은 고객과 맺는다", True)]
-    docs.replace_ontology(src.id, [
-        ConceptRecord("계약", "entity", "고객과 맺는 약정", "Contract", ["계약서"], evidence=ev),
-        ConceptRecord("고객", "entity", "계약 상대방", "Customer", evidence=ev),
-        ConceptRecord("계약금액", "metric", "계약의 총 금액", evidence=ev),
-        ConceptRecord("승인권자", "entity", "계약을 승인하는 사람", "Approver",
-                      ["승인자", "승인 담당자"], evidence=ev),
-    ], [])
+    docs.replace_ontology(
+        src.id,
+        [
+            ConceptRecord(
+                "계약", "entity", "고객과 맺는 약정", "Contract", ["계약서"], evidence=ev
+            ),
+            ConceptRecord("고객", "entity", "계약 상대방", "Customer", evidence=ev),
+            ConceptRecord("계약금액", "metric", "계약의 총 금액", evidence=ev),
+            ConceptRecord(
+                "승인권자",
+                "entity",
+                "계약을 승인하는 사람",
+                "Approver",
+                ["승인자", "승인 담당자"],
+                evidence=ev,
+            ),
+        ],
+        [],
+    )
     VECS["승인권자"] = [0.9, 0.1, 0.0]
     yield settings, store
     VECS.pop("승인권자", None)
@@ -636,9 +772,14 @@ def _concept(name, name_en="", synonyms=(), kind="entity"):
     return al.ConceptInfo(name, name, kind, "", name_en=name_en, synonyms=list(synonyms))
 
 
-CONTRACT = al.TermInfo("t-contract", "Contract", "계약", [], attributes=[
-    {"name": "계약금액", "source_column": "계약금액"}],
-    tables=[{"id": "tb", "name": "contracts"}])
+CONTRACT = al.TermInfo(
+    "t-contract",
+    "Contract",
+    "계약",
+    [],
+    attributes=[{"name": "계약금액", "source_column": "계약금액"}],
+    tables=[{"id": "tb", "name": "contracts"}],
+)
 
 
 def _guard(concept, term=CONTRACT, conf=0.99, min_conf=0.7, auto_added=()):
@@ -655,8 +796,9 @@ def test_identity_case1_approver_is_never_merged_into_contract(approver_env):
     assert proposal["policy"] == al.IDENTITY_POLICY_VERSION and proposal["confidence"] == 0.99
     # end to end: no identity merge, no synonym write for it
     result = _align(settings, store, client, judge, [])
-    rows = {a.concept_name: a for a in AlignmentStore(store).list(
-        store.get_source("hanbit-docs").id)}
+    rows = {
+        a.concept_name: a for a in AlignmentStore(store).list(store.get_source("hanbit-docs").id)
+    }
     assert rows["승인권자"].relation == "related" and not rows["승인권자"].accepted
     assert rows["승인권자"].proposal["term_id"] == "t-contract"
     assert rows["승인권자"].applied == {}
@@ -664,7 +806,9 @@ def test_identity_case1_approver_is_never_merged_into_contract(approver_env):
     assert result.details["judge"]["proposals"] == 1
     assert result.details["judge"]["identity_policy"] == al.IDENTITY_POLICY_VERSION
     report = (result.export_dir / "align-report.md").read_text(encoding="utf-8")
-    assert "same proposals needing review (1)" in report and "| 승인권자 | Contract | 0.99 |" in report
+    assert (
+        "same proposals needing review (1)" in report and "| 승인권자 | Contract | 0.99 |" in report
+    )
 
 
 def test_identity_case2_contract_with_a_trusted_alias_is_eligible():
@@ -706,8 +850,9 @@ def test_identity_case4_auto_added_alias_is_no_evidence(approver_env):
     client.terms["t-contract"]["synonyms"] = ["승인권자"]
     AlignmentStore(store).record_alias_additions("t-contract", ["승인권자"], run_id="old")
     _align(settings, store, client, ApproverJudge(), [])
-    rows = {a.concept_name: a for a in AlignmentStore(store).list(
-        store.get_source("hanbit-docs").id)}
+    rows = {
+        a.concept_name: a for a in AlignmentStore(store).list(store.get_source("hanbit-docs").id)
+    }
     assert rows["승인권자"].relation == "related" and not rows["승인권자"].accepted
     assert client.terms["t-contract"]["synonyms"] == ["승인권자", "계약", "계약서"]
     # apply records what it added: those aliases are never evidence either
@@ -721,8 +866,9 @@ def _bad_first_run(settings, store, client, monkeypatch):
     judge = ApproverJudge()
     first = _align(settings, store, client, judge, [])
     monkeypatch.undo()
-    rows = {a.concept_name: a for a in AlignmentStore(store).list(
-        store.get_source("hanbit-docs").id)}
+    rows = {
+        a.concept_name: a for a in AlignmentStore(store).list(store.get_source("hanbit-docs").id)
+    }
     assert rows["승인권자"].relation == "same" and rows["승인권자"].accepted
     assert "승인권자" in client.terms["t-contract"]["synonyms"]
     return first, judge
@@ -735,8 +881,9 @@ def test_identity_case5_cached_bad_same_is_recomputed(approver_env, monkeypatch)
     calls = judge.calls
     again = _align(settings, store, client, judge, [])
     assert judge.calls == calls  # cached verdicts: no LLM call
-    rows = {a.concept_name: a for a in AlignmentStore(store).list(
-        store.get_source("hanbit-docs").id)}
+    rows = {
+        a.concept_name: a for a in AlignmentStore(store).list(store.get_source("hanbit-docs").id)
+    }
     assert rows["승인권자"].relation == "related" and not rows["승인권자"].accepted
     assert rows["승인권자"].proposal["confidence"] == 0.99
     assert rows["계약"].relation == "same" and rows["계약"].accepted
@@ -752,21 +899,23 @@ def test_identity_case5_resumed_bad_same_is_recomputed(approver_env, monkeypatch
     run = store.get_run(first.run_id)
     params = {k: v for k, v in run.params.items() if k != "identity_policy"}
     with store._conn() as conn:  # a run judged before the policy existed
-        conn.execute("UPDATE runs SET params_json = ? WHERE id = ?",
-                     (__import__("json").dumps(params), run.id))
+        conn.execute(
+            "UPDATE runs SET params_json = ? WHERE id = ?",
+            (__import__("json").dumps(params), run.id),
+        )
     calls = judge.calls
     resumed = _align(settings, store, client, judge, [], resume=True)
     assert resumed.run_id == first.run_id and judge.calls == calls
     assert resumed.details["judge"]["resumed"] == 4
-    rows = {a.concept_name: a for a in AlignmentStore(store).list(
-        store.get_source("hanbit-docs").id)}
+    rows = {
+        a.concept_name: a for a in AlignmentStore(store).list(store.get_source("hanbit-docs").id)
+    }
     assert rows["승인권자"].relation == "related" and not rows["승인권자"].accepted
     assert rows["승인권자"].proposal["relation"] == "same"
     assert resumed.details["apply"]["accepted"] == 2  # 계약, 고객
 
 
-def test_identity_case6_rejected_alignment_no_longer_reaches_the_export(approver_env,
-                                                                         monkeypatch):
+def test_identity_case6_rejected_alignment_no_longer_reaches_the_export(approver_env, monkeypatch):
     settings, store = approver_env
     client = FakeClient()
     _bad_first_run(settings, store, client, monkeypatch)
@@ -774,8 +923,11 @@ def test_identity_case6_rejected_alignment_no_longer_reaches_the_export(approver
     model = _export_model(store)
     own = {c.label for c in model.classes.values() if c.source == "document"}
     assert "승인권자" in own  # kept as its own concept, not folded into Contract
-    folded = {a.concept_name for a in AlignmentStore(store).list(
-        store.get_source("hanbit-docs").id) if a.accepted and a.relation == "same"}
+    folded = {
+        a.concept_name
+        for a in AlignmentStore(store).list(store.get_source("hanbit-docs").id)
+        if a.accepted and a.relation == "same"
+    }
     assert folded == {"계약", "고객"}  # what export folds into Terms
     # the reviewed alias repair itself is tested in test_upstream_terms
     # (remove_term_synonyms: row lock, whole aliases, embeddings refreshed)
@@ -785,20 +937,32 @@ def test_identity_case6_rejected_alignment_no_longer_reaches_the_export(approver
 
 
 def test_stale_auto_aliases_plan():
-    term = al.TermInfo("t", "Contract", "", ["계약", "계약서", "승인권자", "승인자", "약정",
-                                             "수기 별칭", "남의 별칭"],
-                       tables=[{"name": "contracts"}])
-    prov = {"t": [{"alias": a, "source_id": "A", "concepts": ["승인권자"]}
-                  for a in ("계약", "계약서", "승인권자", "승인 자")]
-            + [{"alias": "수기 별칭", "source_id": None, "concepts": []},
-               {"alias": "남의 별칭", "source_id": "C", "concepts": ["x"]}]}
+    term = al.TermInfo(
+        "t",
+        "Contract",
+        "",
+        ["계약", "계약서", "승인권자", "승인자", "약정", "수기 별칭", "남의 별칭"],
+        tables=[{"name": "contracts"}],
+    )
+    prov = {
+        "t": [
+            {"alias": a, "source_id": "A", "concepts": ["승인권자"]}
+            for a in ("계약", "계약서", "승인권자", "승인 자")
+        ]
+        + [
+            {"alias": "수기 별칭", "source_id": None, "concepts": []},
+            {"alias": "남의 별칭", "source_id": "C", "concepts": ["x"]},
+        ]
+    }
     protected = {"t": {al.norm_alias(x) for x in ("계약", "계약서")}}
     stale, kept = al.stale_auto_aliases({"t": term}, prov, protected, "A")
     # only aliases recorded as added by source A and accounted for by no accepted alignment
     # of any source; 약정 (upstream's own) is never touched; whole normalized aliases
     assert [x.alias for x in stale] == ["승인권자", "승인자"]
     assert {(k["alias"], k["reason"]) for k in kept} == {
-        ("수기 별칭", "unknown provenance"), ("남의 별칭", "added by another documents source")}
+        ("수기 별칭", "unknown provenance"),
+        ("남의 별칭", "added by another documents source"),
+    }
     every = {"t": {al.norm_alias(x) for x in ("계약", "계약서", "승인권자", "승인자")}}
     assert al.stale_auto_aliases({"t": term}, prov, every, "A")[0] == []
 
@@ -806,9 +970,17 @@ def test_stale_auto_aliases_plan():
 def _second_docs_source(store, name, concepts):
     docs = DocumentStore(store)
     src = store.add_source(name=name, kind="documents", locator="{}")
-    doc, _ = docs.replace_document(source_id=src.id, path=f"/x/{name}.md", title=name,
-                                   mime="text/markdown", engine="native", sha256=name,
-                                   size=1, pages=None, chunks=[C(0, "약정")])
+    doc, _ = docs.replace_document(
+        source_id=src.id,
+        path=f"/x/{name}.md",
+        title=name,
+        mime="text/markdown",
+        engine="native",
+        sha256=name,
+        size=1,
+        pages=None,
+        chunks=[C(0, "약정")],
+    )
     chunk = docs.chunks_for_document(doc.id)[0]
     ev = [EvidenceRecord(chunk.id, "약정", True)]
     docs.replace_ontology(src.id, [ConceptRecord(*c, evidence=ev) for c in concepts], [])

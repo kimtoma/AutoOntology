@@ -60,27 +60,39 @@ def setup_database(settings: Settings) -> str:
     where = f"{settings.postgres_host}:{settings.postgres_port} as {settings.postgres_user}"
     try:
         with connect(settings, PG_MAINTENANCE_DB) as conn:
-            exists = conn.execute("select 1 from pg_database where datname = %s",
-                                  (db,)).fetchone() is not None
+            exists = (
+                conn.execute("select 1 from pg_database where datname = %s", (db,)).fetchone()
+                is not None
+            )
             if not exists:
                 conn.execute(sql.SQL("create database {}").format(sql.Identifier(db)))
     except psycopg.Error as exc:
-        raise SetupError(f"cannot prepare database {db} on {where}: "
-                         f"{type(exc).__name__}: {str(exc).strip()[:300]}") from exc
+        raise SetupError(
+            f"cannot prepare database {db} on {where}: "
+            f"{type(exc).__name__}: {str(exc).strip()[:300]}"
+        ) from exc
     created = "exists" if exists else "created"
     try:
         with connect(settings) as conn:
             conn.execute("set client_min_messages = warning")
             for ext in REQUIRED_EXTENSIONS:
-                conn.execute(sql.SQL("create extension if not exists {}").format(
-                    sql.Identifier(ext)))
+                conn.execute(
+                    sql.SQL("create extension if not exists {}").format(sql.Identifier(ext))
+                )
             rows = conn.execute(
                 "select extname, extversion from pg_extension where extname = any(%s) "
-                "order by extname", (list(REQUIRED_EXTENSIONS),)).fetchall()
+                "order by extname",
+                (list(REQUIRED_EXTENSIONS),),
+            ).fetchall()
     except psycopg.Error as exc:
-        hint = (" (the server needs pgvector, e.g. the pgvector/pgvector:pg17 image from "
-                "docker-compose.yml)" if "vector" in str(exc) else "")
-        raise SetupError(f"could not create extensions in {db}: {str(exc).strip()[:300]}"
-                         f"{hint}") from exc
+        hint = (
+            " (the server needs pgvector, e.g. the pgvector/pgvector:pg17 image from "
+            "docker-compose.yml)"
+            if "vector" in str(exc)
+            else ""
+        )
+        raise SetupError(
+            f"could not create extensions in {db}: {str(exc).strip()[:300]}{hint}"
+        ) from exc
     versions = ", ".join(f"{name} {version}" for name, version in rows)
     return f"database {db} ({created}) on {where}; extensions: {versions}"

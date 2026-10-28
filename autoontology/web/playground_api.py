@@ -104,8 +104,9 @@ def _api_error(exc: Exception) -> ApiError:
     return ApiError(status, code, mask(message))
 
 
-async def _guarded(stack: ExitStack, events: AsyncIterator[dict[str, Any]]
-                   ) -> AsyncIterator[dict[str, str]]:
+async def _guarded(
+    stack: ExitStack, events: AsyncIterator[dict[str, Any]]
+) -> AsyncIterator[dict[str, str]]:
     """Relay *events* as SSE, an exception as a final ``error`` event; release the slot."""
     try:
         async for ev in events:
@@ -127,9 +128,11 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         found = getattr(app.state, "playground", None)
         if found is None:
             found = Playground(
-                api.store, model_for=api.graph_model,
+                api.store,
+                model_for=api.graph_model,
                 llm_factory=lambda: llm_for(api.settings),
-                embedder_factory=EmbedderCache(lambda: api.settings, api.settings))
+                embedder_factory=EmbedderCache(lambda: api.settings, api.settings),
+            )
             app.state.playground = found
         return found
 
@@ -167,8 +170,11 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         if body.conversation_id:
             conv = pg().pg.get_conversation(body.conversation_id)
             if conv is None or conv["source_id"] != s.source.id:
-                raise ApiError(404, "unknown_conversation",
-                               f"no conversation {body.conversation_id!r} for {s.source.name!r}")
+                raise ApiError(
+                    404,
+                    "unknown_conversation",
+                    f"no conversation {body.conversation_id!r} for {s.source.name!r}",
+                )
         try:
             llm = pg().llm_factory()
         except LLMError as exc:
@@ -176,16 +182,21 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         stack = hold(s)
 
         async def events() -> AsyncIterator[dict[str, Any]]:
-            async for ev in pg().ask(s, body.question,
-                                     history=[t.model_dump() for t in body.history],
-                                     top_k=body.top_k, conversation_id=body.conversation_id,
-                                     llm=llm):
+            async for ev in pg().ask(
+                s,
+                body.question,
+                history=[t.model_dump() for t in body.history],
+                top_k=body.top_k,
+                conversation_id=body.conversation_id,
+                llm=llm,
+            ):
                 yield ev
 
         # the generator's finally never runs when the client leaves before the body starts:
         # the background task (after the response, whatever happened) releases the slot too
-        return EventSourceResponse(_guarded(stack, events()),
-                                   background=BackgroundTask(stack.close))
+        return EventSourceResponse(
+            _guarded(stack, events()), background=BackgroundTask(stack.close)
+        )
 
     @router.get("/conversations")
     def conversations(source: str) -> dict[str, Any]:
@@ -212,17 +223,21 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         target_db = None
         if body.source:
             s = scope(body.source)
-            target_db = next((x.catalog_database_id for x in s.structured
-                              if x.catalog_database_id), None)
+            target_db = next(
+                (x.catalog_database_id for x in s.structured if x.catalog_database_id), None
+            )
         payload: dict[str, Any] = {"question": body.question}
         if target_db:
             payload["target_db"] = target_db
-        http = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=UPSTREAM_READ_TIMEOUT_S),
-                                 transport=UPSTREAM_TRANSPORT)
+        http = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, read=UPSTREAM_READ_TIMEOUT_S), transport=UPSTREAM_TRANSPORT
+        )
         notices: list[str] = []
         url = f"{api.settings.backend_url}/api/chat/completions"
-        headers = {"x-auto-ontology-user-id": UPSTREAM_USER,
-                   "x-auto-ontology-source": "autoontology-playground"}
+        headers = {
+            "x-auto-ontology-user-id": UPSTREAM_USER,
+            "x-auto-ontology-source": "autoontology-playground",
+        }
 
         async def open_stream(with_conversation: bool) -> httpx.Response:
             data = dict(payload)
@@ -239,8 +254,10 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                 if STORAGE_MISSING in raw:
                     # upstream keeps conversations in the Next.js frontend's `frontend.*`
                     # schema, which AutoOntology does not run: ask statelessly instead
-                    notices.append("the upstream conversation store (frontend schema) is "
-                                   "missing: asking without the earlier turns")
+                    notices.append(
+                        "the upstream conversation store (frontend schema) is "
+                        "missing: asking without the earlier turns"
+                    )
                     resp = await open_stream(False)
             if resp.status_code >= 400:
                 raw = (await resp.aread()).decode("utf-8", "replace")
@@ -251,23 +268,35 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                 except (ValueError, AttributeError):
                     detail = raw
                 if resp.status_code == 409:
-                    raise ApiError(409, "sql_unavailable",
-                                   "cannot start the data query: the structured source has no "
-                                   "semantic layer (Terms) or a query of this conversation "
-                                   "is still running. "
-                                   f"(upstream: {mask(detail)[:300]})")
-                raise ApiError(502 if resp.status_code >= 500 else resp.status_code,
-                               "upstream_error", f"upstream {resp.status_code}: "
-                               f"{mask(detail)[:400]}")
+                    raise ApiError(
+                        409,
+                        "sql_unavailable",
+                        "cannot start the data query: the structured source has no "
+                        "semantic layer (Terms) or a query of this conversation "
+                        "is still running. "
+                        f"(upstream: {mask(detail)[:300]})",
+                    )
+                raise ApiError(
+                    502 if resp.status_code >= 500 else resp.status_code,
+                    "upstream_error",
+                    f"upstream {resp.status_code}: {mask(detail)[:400]}",
+                )
         except httpx.HTTPError as exc:
             await http.aclose()
-            raise ApiError(503, "backend_unavailable",
-                           f"upstream backend unreachable: {type(exc).__name__}") from exc
+            raise ApiError(
+                503, "backend_unavailable", f"upstream backend unreachable: {type(exc).__name__}"
+            ) from exc
 
         async def relay() -> AsyncIterator[dict[str, str]]:
             try:
-                yield _event("meta", {"target_db": target_db, "notices": notices,
-                                      "stateless": bool(notices) or not body.conversation_id})
+                yield _event(
+                    "meta",
+                    {
+                        "target_db": target_db,
+                        "notices": notices,
+                        "stateless": bool(notices) or not body.conversation_id,
+                    },
+                )
                 async for line in resp.aiter_lines():
                     if not line.startswith("data:"):
                         continue  # ": ping" keep-alives
@@ -279,15 +308,25 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                         ev = json.loads(raw)
                     except ValueError:
                         continue
-                    name = str(ev.get("type") or "message") if isinstance(ev, dict) else \
-                        "message"
+                    name = str(ev.get("type") or "message") if isinstance(ev, dict) else "message"
                     yield _event(name, ev)
-                yield _event("error", {"status": 502, "error": "stream_truncated",
-                                       "detail": "upstream stream ended without [DONE]"})
+                yield _event(
+                    "error",
+                    {
+                        "status": 502,
+                        "error": "stream_truncated",
+                        "detail": "upstream stream ended without [DONE]",
+                    },
+                )
             except httpx.HTTPError as exc:
-                yield _event("error", {"status": 502, "error": "upstream_error",
-                                       "detail": f"upstream stream broke: "
-                                       f"{type(exc).__name__}"})
+                yield _event(
+                    "error",
+                    {
+                        "status": 502,
+                        "error": "upstream_error",
+                        "detail": f"upstream stream broke: {type(exc).__name__}",
+                    },
+                )
             finally:
                 await cleanup()
 
@@ -309,13 +348,16 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         s = scope(body.source)
         found = latest_ttl(api.settings.exports_dir, s.source.name)
         if found is None:
-            raise ApiError(404, "no_export", f"source {s.source.name!r} has no exported "
-                           f"ontology.ttl; run `uv run autoontology export {s.source.name}` first")
+            raise ApiError(
+                404,
+                "no_export",
+                f"source {s.source.name!r} has no exported "
+                f"ontology.ttl; run `uv run autoontology export {s.source.name}` first",
+            )
         run_id, path = found
 
         def work() -> dict[str, Any]:
-            return {**sparql.run_file(run_id, path, body.query, limit=body.limit),
-                    "export": run_id}
+            return {**sparql.run_file(run_id, path, body.query, limit=body.limit), "export": run_id}
 
         try:
             return mask(await anyio.to_thread.run_sync(work))

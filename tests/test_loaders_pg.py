@@ -30,11 +30,19 @@ def test_load_and_replace(tmp_path, settings):
     by_name = {t.name: t for t in report.tables}
     assert by_name["계약_목록"].rows == 2
     with pg.connect(settings, DB) as conn:
-        rows = conn.execute('select "계약id", "금액", "시작일", "메모" from "계약_목록" order by 1').fetchall()
-        assert rows == [("K1", 100, dt.date(2024, 1, 1), "가"), ("K2", 200, dt.date(2024, 2, 1), None)]
-        types = dict(conn.execute(
-            "select column_name, data_type from information_schema.columns "
-            "where table_name = '계약_목록'").fetchall())
+        rows = conn.execute(
+            'select "계약id", "금액", "시작일", "메모" from "계약_목록" order by 1'
+        ).fetchall()
+        assert rows == [
+            ("K1", 100, dt.date(2024, 1, 1), "가"),
+            ("K2", 200, dt.date(2024, 2, 1), None),
+        ]
+        types = dict(
+            conn.execute(
+                "select column_name, data_type from information_schema.columns "
+                "where table_name = '계약_목록'"
+            ).fetchall()
+        )
         assert types == {"계약id": "text", "금액": "bigint", "시작일": "date", "메모": "text"}
         assert conn.execute('select tags from "e"').fetchone()[0] == ["a", "b"]
     # Replace: a second load with fewer rows replaces the table; e.jsonl is no longer an
@@ -45,8 +53,9 @@ def test_load_and_replace(tmp_path, settings):
 
     def on_changes(changes):
         with pg.connect(settings, DB) as conn:  # still the old schema at this point
-            cols = conn.execute("select count(*) from information_schema.columns "
-                                "where table_name='계약_목록'").fetchone()[0]
+            cols = conn.execute(
+                "select count(*) from information_schema.columns where table_name='계약_목록'"
+            ).fetchone()[0]
         seen.append((changes, cols))
 
     report = load_files_to_postgres([f], DB, settings, on_changes=on_changes)
@@ -55,9 +64,12 @@ def test_load_and_replace(tmp_path, settings):
     assert report.dropped_tables == ["e"]
     with pg.connect(settings, DB) as conn:
         assert conn.execute('select count(*) from "계약_목록"').fetchone()[0] == 1
-        assert conn.execute(
-            "select count(*) from information_schema.columns where table_name='계약_목록'"
-        ).fetchone()[0] == 2
+        assert (
+            conn.execute(
+                "select count(*) from information_schema.columns where table_name='계약_목록'"
+            ).fetchone()[0]
+            == 2
+        )
 
 
 def test_xlsx_and_sqlite_edge_values_reach_postgres_exactly(tmp_path, settings):
@@ -70,29 +82,54 @@ def test_xlsx_and_sqlite_edge_values_reach_postgres_exactly(tmp_path, settings):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(["id_text", "big", "valid_to", "valid_from"])
-    ws.append(["9007199254740993", 100000000000000000000, dt.datetime(9999, 12, 31),
-               dt.datetime(1600, 1, 1)])
+    ws.append(
+        [
+            "9007199254740993",
+            100000000000000000000,
+            dt.datetime(9999, 12, 31),
+            dt.datetime(1600, 1, 1),
+        ]
+    )
     ws.append([None, None, None, dt.datetime(2020, 5, 6)])
     wb.save(tmp_path / "edge.xlsx")
     with sqlite3.connect(tmp_path / "bin.sqlite") as conn:
         conn.execute("CREATE TABLE blobs (id INTEGER, payload BLOB)")
-        conn.executemany("INSERT INTO blobs VALUES (?, ?)",
-                         [(9007199254740993, b"\xff\x00"), (None, None), (2, b"abc")])
+        conn.executemany(
+            "INSERT INTO blobs VALUES (?, ?)",
+            [(9007199254740993, b"\xff\x00"), (None, None), (2, b"abc")],
+        )
     load_files_to_postgres(discover_files(tmp_path), DB, settings)
     with pg.connect(settings, DB) as conn:
-        rows = conn.execute('select id_text, big, valid_to, valid_from from "edge" '
-                            "order by valid_from").fetchall()
-        assert rows == [("9007199254740993", 100000000000000000000, dt.datetime(9999, 12, 31),
-                         dt.datetime(1600, 1, 1)),
-                        (None, None, None, dt.datetime(2020, 5, 6))]
+        rows = conn.execute(
+            'select id_text, big, valid_to, valid_from from "edge" order by valid_from'
+        ).fetchall()
+        assert rows == [
+            (
+                "9007199254740993",
+                100000000000000000000,
+                dt.datetime(9999, 12, 31),
+                dt.datetime(1600, 1, 1),
+            ),
+            (None, None, None, dt.datetime(2020, 5, 6)),
+        ]
         blobs = conn.execute('select id, payload from "blobs" order by id nulls last').fetchall()
         assert [(r[0], bytes(r[1]) if r[1] is not None else None) for r in blobs] == [
-            (2, b"abc"), (9007199254740993, b"\xff\x00"), (None, None)]
-        types = dict(conn.execute("select column_name, data_type from information_schema.columns "
-                                  "where table_name = 'edge'").fetchall())
-        assert types == {"id_text": "text", "big": "numeric",
-                         "valid_to": "timestamp without time zone",
-                         "valid_from": "timestamp without time zone"}
+            (2, b"abc"),
+            (9007199254740993, b"\xff\x00"),
+            (None, None),
+        ]
+        types = dict(
+            conn.execute(
+                "select column_name, data_type from information_schema.columns "
+                "where table_name = 'edge'"
+            ).fetchall()
+        )
+        assert types == {
+            "id_text": "text",
+            "big": "numeric",
+            "valid_to": "timestamp without time zone",
+            "valid_from": "timestamp without time zone",
+        }
 
 
 def test_late_oversized_integer_reaches_postgres_as_numeric(tmp_path, settings):
@@ -107,9 +144,13 @@ def test_late_oversized_integer_reaches_postgres_as_numeric(tmp_path, settings):
     wb.save(tmp_path / "late.xlsx")
     load_files_to_postgres(discover_files(tmp_path), DB, settings)
     with pg.connect(settings, DB) as conn:
-        kind = conn.execute("select data_type from information_schema.columns where "
-                            "table_name = 'late' and column_name = 'amount'").fetchone()[0]
+        kind = conn.execute(
+            "select data_type from information_schema.columns where "
+            "table_name = 'late' and column_name = 'amount'"
+        ).fetchone()[0]
         assert kind == "numeric"
-        assert conn.execute('select amount from "late" where id = 1999').fetchone()[0] == \
-            100000000000000000000
+        assert (
+            conn.execute('select amount from "late" where id = 1999').fetchone()[0]
+            == 100000000000000000000
+        )
         assert conn.execute('select count(*) from "late"').fetchone()[0] == 2001

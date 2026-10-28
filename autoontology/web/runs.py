@@ -57,8 +57,13 @@ class TrackingStore(Store):
     """A :class:`Store` that reports the run id the job creates or resumes, and raises
     :class:`RunCancelled` at the next top-level step once the run is cancelled."""
 
-    def __init__(self, path: Path, on_run: Callable[[str], None],
-                 cancelled: Callable[[], bool], top_steps: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        path: Path,
+        on_run: Callable[[str], None],
+        cancelled: Callable[[], bool],
+        top_steps: tuple[str, ...],
+    ) -> None:
         super().__init__(path)
         self._on_run = on_run
         self._cancelled = cancelled
@@ -93,8 +98,7 @@ class _RunLogHandler(logging.Handler):
     def __init__(self, thread_name: str) -> None:
         super().__init__(logging.INFO)
         self.thread_name = thread_name
-        self.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s",
-                                            "%H:%M:%S"))
+        self.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
         self._buffer: list[str] = []
         self._fh: Any = None
 
@@ -164,8 +168,12 @@ def default_jobs() -> dict[str, JobFn]:
     """The job entry points by run kind, looked up at call time (tests monkeypatch them)."""
     from autoontology.engine import align, export_job, extract, jobs
 
-    return {"build": jobs.run_build, "extract": extract.run_extract,
-            "align": align.run_align, "export": export_job.run_export}
+    return {
+        "build": jobs.run_build,
+        "extract": extract.run_extract,
+        "align": align.run_align,
+        "export": export_job.run_export,
+    }
 
 
 TOP_STEPS: dict[str, tuple[str, ...]] = {
@@ -177,8 +185,9 @@ TOP_STEPS: dict[str, tuple[str, ...]] = {
 
 
 class RunManager:
-    def __init__(self, settings: Settings,
-                 jobs: Callable[[], dict[str, JobFn]] = default_jobs) -> None:
+    def __init__(
+        self, settings: Settings, jobs: Callable[[], dict[str, JobFn]] = default_jobs
+    ) -> None:
         self.settings = settings
         self._jobs = jobs
         self._lock = threading.Lock()
@@ -204,19 +213,29 @@ class RunManager:
 
     # --- start / cancel ---------------------------------------------------------
 
-    def start(self, kind: str, source: str, call: Callable[[JobFn, Store], Any], *,
-              timeout: float = START_TIMEOUT_S) -> str:
+    def start(
+        self,
+        kind: str,
+        source: str,
+        call: Callable[[JobFn, Store], Any],
+        *,
+        timeout: float = START_TIMEOUT_S,
+    ) -> str:
         """Start *call(job_fn, store)* for *source* in a thread; return the run id."""
         if kind not in RUN_KINDS:
             raise RunStartError(f"unknown run kind {kind!r}")
         with self._lock:
             if source in self._by_source:
                 busy = self._by_source[source]
-                raise RunStartError(f"source {source!r} already has an active {busy.kind} run"
-                                    + (f" {busy.run_id}" if busy.run_id else ""), status=409)
+                raise RunStartError(
+                    f"source {source!r} already has an active {busy.kind} run"
+                    + (f" {busy.run_id}" if busy.run_id else ""),
+                    status=409,
+                )
             self._seq += 1
-            active = _Active(source=source, kind=kind,
-                             thread_name=f"autoontology-run-{self._seq}-{kind}")
+            active = _Active(
+                source=source, kind=kind, thread_name=f"autoontology-run-{self._seq}-{kind}"
+            )
             self._by_source[source] = active
         handler = _RunLogHandler(active.thread_name)
         logging.getLogger().addHandler(handler)
@@ -229,8 +248,12 @@ class RunManager:
                 self._threads[run_id] = threading.current_thread()
             active.started.set()
 
-        store = TrackingStore(Path(self.settings.home) / "autoontology.db", on_run,
-                              active.cancel.is_set, TOP_STEPS[kind])
+        store = TrackingStore(
+            Path(self.settings.home) / "autoontology.db",
+            on_run,
+            active.cancel.is_set,
+            TOP_STEPS[kind],
+        )
 
         def body() -> None:
             from autoontology.engine.jobs import JobError, setup_job_logging
@@ -238,14 +261,21 @@ class RunManager:
             setup_job_logging(self.settings)
             try:
                 result = call(self._jobs()[kind], store)
-                logger.info("%s run %s for %s: %s", kind, store.run_id, source,
-                            getattr(result, "status", "done"))
+                logger.info(
+                    "%s run %s for %s: %s",
+                    kind,
+                    store.run_id,
+                    source,
+                    getattr(result, "status", "done"),
+                )
             except RunCancelled as exc:
                 if store.run_id:
-                    store.update_run(store.run_id, status="cancelled",
-                                     error=f"cancelled before step {exc}")
-                logger.info("%s run %s for %s: cancelled before step %s", kind,
-                            store.run_id, source, exc)
+                    store.update_run(
+                        store.run_id, status="cancelled", error=f"cancelled before step {exc}"
+                    )
+                logger.info(
+                    "%s run %s for %s: cancelled before step %s", kind, store.run_id, source, exc
+                )
             except JobError as exc:
                 if store.run_id is None:  # failed its pre-checks: no run row
                     active.error = str(exc)
@@ -260,8 +290,14 @@ class RunManager:
                     active.error_status = 503 if isinstance(exc, BackendError) else 500
                 elif (run := store.get_run(store.run_id)) and run.status == "running":
                     store.update_run(store.run_id, status="failed", error=short_error(exc))
-                logger.error("%s run %s for %s failed: %s", kind, store.run_id, source,
-                             short_error(exc), exc_info=exc)
+                logger.error(
+                    "%s run %s for %s failed: %s",
+                    kind,
+                    store.run_id,
+                    source,
+                    short_error(exc),
+                    exc_info=exc,
+                )
             finally:
                 active.started.set()
                 logging.getLogger().removeHandler(handler)
@@ -274,11 +310,14 @@ class RunManager:
         thread = threading.Thread(target=body, name=active.thread_name, daemon=True)
         thread.start()
         if not active.started.wait(timeout):
-            raise RunStartError(f"{kind} run for {source!r} did not start within "
-                                f"{timeout:.0f}s", status=504)
+            raise RunStartError(
+                f"{kind} run for {source!r} did not start within {timeout:.0f}s", status=504
+            )
         if active.run_id is None:
-            raise RunStartError(active.error or f"{kind} run for {source!r} did not start",
-                                status=active.error_status)
+            raise RunStartError(
+                active.error or f"{kind} run for {source!r} did not start",
+                status=active.error_status,
+            )
         return active.run_id
 
     def claim(self, source: str, kind: str) -> None:

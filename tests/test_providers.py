@@ -18,17 +18,31 @@ from autoontology.web.providers.openai_compat import (
     to_sse,
 )
 
-SCHEMA = {"type": "object", "properties": {"answer": {"type": "string"}},
-          "required": ["answer"], "additionalProperties": False}
+SCHEMA = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}},
+    "required": ["answer"],
+    "additionalProperties": False,
+}
 FMT = {"type": "json_schema", "json_schema": {"name": "Ping", "schema": SCHEMA, "strict": True}}
 SECRET = "sk-test-secret-key-123456"
 
 
 def _answer(content: str = '{"answer": "pong"}') -> dict:
-    return {"id": "x", "object": "chat.completion", "created": 0, "model": "m",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": content},
-                         "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}}
+    return {
+        "id": "x",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "m",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+    }
 
 
 class Upstream:
@@ -53,8 +67,14 @@ def _client(upstream: Upstream) -> TestClient:
 
 
 def _chat(client, model, **extra):
-    body = {"model": model, "messages": [{"role": "system", "content": "Be terse."},
-                                         {"role": "user", "content": "say pong"}], **extra}
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Be terse."},
+            {"role": "user", "content": "say pong"},
+        ],
+        **extra,
+    }
     return client.post("/v1/chat/completions", json=body)
 
 
@@ -71,16 +91,35 @@ def openai_env(isolated_env, monkeypatch):
 
 
 def test_parse_request_modes_and_content_parts():
-    req = parse_request({"messages": [{"role": "user", "content": [
-        {"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}],
-        "response_format": FMT}, "m")
+    req = parse_request(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
+                }
+            ],
+            "response_format": FMT,
+        },
+        "m",
+    )
     assert (req.mode, req.schema, req.schema_name) == ("json_schema", SCHEMA, "Ping")
     assert req.transcript() == "a\nb"
-    tool = parse_request({"messages": [{"role": "user", "content": "x"}], "tools": [
-        {"type": "function", "function": {"name": "Ping", "parameters": SCHEMA}}]}, "m")
+    tool = parse_request(
+        {
+            "messages": [{"role": "user", "content": "x"}],
+            "tools": [{"type": "function", "function": {"name": "Ping", "parameters": SCHEMA}}],
+        },
+        "m",
+    )
     assert (tool.mode, tool.schema_name) == ("tool", "Ping")
-    obj = parse_request({"messages": [{"role": "user", "content": "x"}],
-                         "response_format": {"type": "json_object"}}, "m")
+    obj = parse_request(
+        {
+            "messages": [{"role": "user", "content": "x"}],
+            "response_format": {"type": "json_object"},
+        },
+        "m",
+    )
     assert obj.mode == "json_object"
     with pytest.raises(ProviderError) as exc:
         parse_request({"messages": []}, "m")
@@ -88,17 +127,30 @@ def test_parse_request_modes_and_content_parts():
 
 
 def test_transcript_labels_multi_turn_and_system_is_separate():
-    req = parse_request({"messages": [
-        {"role": "system", "content": "S1"}, {"role": "user", "content": "u1"},
-        {"role": "assistant", "content": "a1"}, {"role": "system", "content": "S2"},
-        {"role": "user", "content": "u2"}]}, "m")
+    req = parse_request(
+        {
+            "messages": [
+                {"role": "system", "content": "S1"},
+                {"role": "user", "content": "u1"},
+                {"role": "assistant", "content": "a1"},
+                {"role": "system", "content": "S2"},
+                {"role": "user", "content": "u2"},
+            ]
+        },
+        "m",
+    )
     assert req.system_text() == "S1\n\nS2"
     assert req.transcript() == "User:\nu1\n\nAssistant:\na1\n\nUser:\nu2"
 
 
 def test_to_openai_tool_calls_and_usage():
-    req = parse_request({"messages": [{"role": "user", "content": "x"}], "tools": [
-        {"type": "function", "function": {"name": "Ping", "parameters": SCHEMA}}]}, "m")
+    req = parse_request(
+        {
+            "messages": [{"role": "user", "content": "x"}],
+            "tools": [{"type": "function", "function": {"name": "Ping", "parameters": SCHEMA}}],
+        },
+        "m",
+    )
     out = to_openai(req, ChatResponse('{"answer":"pong"}', "m", 5, 2, 0.01), "openai/m")
     msg = out["choices"][0]["message"]
     assert out["choices"][0]["finish_reason"] == "tool_calls"
@@ -148,16 +200,18 @@ def test_ollama_unreachable_is_502(isolated_env):
 
 def test_ollama_streaming_is_relayed(isolated_env):
     sse = b'data: {"choices":[{"delta":{"content":"po"}}]}\n\ndata: [DONE]\n\n'
-    upstream = Upstream(lambda r: httpx.Response(
-        200, content=sse, headers={"content-type": "text/event-stream"}))
+    upstream = Upstream(
+        lambda r: httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
+    )
     res = _chat(_client(upstream), "openai/qwen3:8b", stream=True)
     assert res.status_code == 200 and res.content == sse
 
 
 def test_bad_json_body_is_400(isolated_env):
     client = _client(Upstream())
-    res = client.post("/v1/chat/completions", content=b"{nope",
-                      headers={"content-type": "application/json"})
+    res = client.post(
+        "/v1/chat/completions", content=b"{nope", headers={"content-type": "application/json"}
+    )
     assert res.status_code == 400 and res.json()["error"]["type"] == "invalid_request"
     assert client.post("/v1/chat/completions", json=[1]).status_code == 400
 
@@ -182,9 +236,11 @@ def test_openai_passthrough_strips_prefix_and_adds_bearer_key(openai_env):
 def test_openai_passthrough_replaces_the_callers_key(openai_env):
     upstream = Upstream()
     client = _client(upstream)
-    client.post("/v1/chat/completions", headers={"authorization": "Bearer from-upstream"},
-                json={"model": "openai/meta/llama-4-scout",
-                      "messages": [{"role": "user", "content": "x"}]})
+    client.post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer from-upstream"},
+        json={"model": "openai/meta/llama-4-scout", "messages": [{"role": "user", "content": "x"}]},
+    )
     assert upstream.requests[0].headers["authorization"] == f"Bearer {SECRET}"
 
 
@@ -199,8 +255,9 @@ def test_openai_errors_never_echo_the_key(openai_env):
 
 def test_openai_models_lists_the_configured_model(openai_env):
     res = _client(Upstream()).get("/v1/models")
-    assert res.json()["data"] == [{"id": "openai/meta/llama-4-scout", "object": "model",
-                                   "owned_by": "openai"}]
+    assert res.json()["data"] == [
+        {"id": "openai/meta/llama-4-scout", "object": "model", "owned_by": "openai"}
+    ]
 
 
 @contextlib.contextmanager
@@ -240,8 +297,13 @@ def test_langchain_chatopenai_structured_output_through_router(openai_env):
     upstream = Upstream()
     settings = Settings.from_env()
     with serve(web.create_app(settings, llm_transport=upstream.transport)) as base_url:
-        llm = ChatOpenAI(model=settings.upstream_chat_model, api_key="autoontology-router",
-                         base_url=f"{base_url}/v1", max_retries=0, timeout=30)
+        llm = ChatOpenAI(
+            model=settings.upstream_chat_model,
+            api_key="autoontology-router",
+            base_url=f"{base_url}/v1",
+            max_retries=0,
+            timeout=30,
+        )
         result = llm.with_structured_output(Ping, method="json_schema").invoke("pong?")
     assert result == Ping(answer="pong")
     assert upstream.bodies[0]["model"] == "meta/llama-4-scout"
@@ -256,14 +318,26 @@ def test_doctor_style_complete_through_the_provider(openai_env):
 
     upstream = Upstream()
     provider = OpenAIProvider(Settings.from_env(), upstream.transport)
-    resp = asyncio.run(provider.complete(ChatRequest(
-        model="openai/meta/llama-4-scout", messages=[ChatMessage("user", "x")], schema=SCHEMA,
-        schema_name="Ping", mode="json_schema", max_tokens=64)))
+    resp = asyncio.run(
+        provider.complete(
+            ChatRequest(
+                model="openai/meta/llama-4-scout",
+                messages=[ChatMessage("user", "x")],
+                schema=SCHEMA,
+                schema_name="Ping",
+                mode="json_schema",
+                max_tokens=64,
+            )
+        )
+    )
     assert resp.content == '{"answer": "pong"}' and resp.completion_tokens == 2
     assert upstream.bodies[0]["max_tokens"] == 64
-    failing = OpenAIProvider(Settings.from_env(), Upstream(
-        lambda r: httpx.Response(401, json={"error": {"message": "bad key",
-                                                       "type": "auth"}})).transport)
+    failing = OpenAIProvider(
+        Settings.from_env(),
+        Upstream(
+            lambda r: httpx.Response(401, json={"error": {"message": "bad key", "type": "auth"}})
+        ).transport,
+    )
     with pytest.raises(ProviderError) as err:
         asyncio.run(failing.complete(ChatRequest(model="m", messages=[ChatMessage("user", "x")])))
     assert err.value.status == 401 and err.value.type == "auth"
@@ -287,18 +361,23 @@ def no_fetch(monkeypatch):
     return seen
 
 
-@pytest.mark.parametrize("schema", [
-    {"$ref": "http://127.0.0.1:9/evil.json"},
-    {"$ref": "file:///etc/passwd"},
-    {"type": "object", "properties": {"a": {"items": {"$ref": "http://example.invalid/n"}}}},
-    {"properties": {"a": {"$ref": "sibling.json#/defs/a"}}},
-    {"type": "bogus"},
-    {"required": "answer"},
-    {"$ref": "#"},
-    {"$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"anyOf": [{"$ref": "#/$defs/a"}]}},
-     "$ref": "#/$defs/a"},
-], ids=["http", "file", "nested", "relative", "bogus-type", "bad-required", "self",
-        "defs-cycle"])
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"$ref": "http://127.0.0.1:9/evil.json"},
+        {"$ref": "file:///etc/passwd"},
+        {"type": "object", "properties": {"a": {"items": {"$ref": "http://example.invalid/n"}}}},
+        {"properties": {"a": {"$ref": "sibling.json#/defs/a"}}},
+        {"type": "bogus"},
+        {"required": "answer"},
+        {"$ref": "#"},
+        {
+            "$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"anyOf": [{"$ref": "#/$defs/a"}]}},
+            "$ref": "#/$defs/a",
+        },
+    ],
+    ids=["http", "file", "nested", "relative", "bogus-type", "bad-required", "self", "defs-cycle"],
+)
 def test_check_schema_refuses_unsafe_or_invalid_schemas(no_fetch, schema):
     from autoontology.web.providers.base import check_schema
 
@@ -314,8 +393,10 @@ def test_schema_size_and_depth_are_bounded():
     deep: dict = {"type": "string"}
     for _ in range(base.MAX_SCHEMA_DEPTH + 5):
         deep = {"type": "object", "properties": {"a": deep}}
-    big = {"type": "object", "properties": {
-        f"p{i}": {"type": "string", "description": "x" * 200} for i in range(1000)}}
+    big = {
+        "type": "object",
+        "properties": {f"p{i}": {"type": "string", "description": "x" * 200} for i in range(1000)},
+    }
     for schema in (deep, big):
         with pytest.raises(ProviderError):
             base.check_schema(schema)

@@ -47,8 +47,9 @@ class OllamaProvider(PassthroughProvider):
     label = "Ollama"
     forward_headers = ("authorization", "content-type")
 
-    def __init__(self, settings: Settings,
-                 transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None
+    ) -> None:
         super().__init__(f"{settings.ollama_root_url}/v1", transport)
         self.settings = settings
         self.no_think = settings.ollama_no_think
@@ -73,14 +74,26 @@ class OllamaProvider(PassthroughProvider):
         try:
             names = list_models(self.settings.ollama_endpoint)
         except (httpx.HTTPError, ValueError) as exc:
-            return ProviderStatus(self.name, False, False,
-                                  f"{self.settings.ollama_root_url}: {type(exc).__name__}",
-                                  "start Ollama (`ollama serve`)")
+            return ProviderStatus(
+                self.name,
+                False,
+                False,
+                f"{self.settings.ollama_root_url}: {type(exc).__name__}",
+                "start Ollama (`ollama serve`)",
+            )
         wanted = [self.settings.ollama_chat_model, self.settings.ollama_embed_model]
         missing = [m for m in wanted if not has_model(names, m)]
-        detail = (f"models missing: {', '.join(missing)}" if missing
-                  else f"{self.settings.ollama_root_url} has {', '.join(wanted)}")
+        detail = (
+            f"models missing: {', '.join(missing)}"
+            if missing
+            else f"{self.settings.ollama_root_url} has {', '.join(wanted)}"
+        )
         # "logged in" = no login needed; a missing model is reported in detail/remedy.
-        return ProviderStatus(self.name, True, True, detail,
-                              "uv run autoontology setup" if missing else "",
-                              sorted(names))
+        return ProviderStatus(
+            self.name,
+            True,
+            True,
+            detail,
+            "uv run autoontology setup" if missing else "",
+            sorted(names),
+        )

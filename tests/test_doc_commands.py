@@ -54,12 +54,19 @@ def option_names(command) -> set[str]:
 
 
 def test_invocation_parser():
-    text = ("```bash\nuv run autoontology build hanbit --resume   # comment\n"
-            "uv run autoontology up && uv run autoontology status\n```\n"
-            "text `uv run autoontology source rm x --drop-db` and `autoontology.config`, "
-            "`autoontology_src_<name>`, `pg_restore -d autoontology x.dump`, `autoontology doctor`.\n")
-    assert invocations(text) == ["build hanbit --resume", "up", "status",
-                                 "source rm x --drop-db", "doctor"]
+    text = (
+        "```bash\nuv run autoontology build hanbit --resume   # comment\n"
+        "uv run autoontology up && uv run autoontology status\n```\n"
+        "text `uv run autoontology source rm x --drop-db` and `autoontology.config`, "
+        "`autoontology_src_<name>`, `pg_restore -d autoontology x.dump`, `autoontology doctor`.\n"
+    )
+    assert invocations(text) == [
+        "build hanbit --resume",
+        "up",
+        "status",
+        "source rm x --drop-db",
+        "doctor",
+    ]
 
 
 def test_resolve_rejects_unknown():

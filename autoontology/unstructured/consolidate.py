@@ -144,19 +144,33 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
-def consolidate(extractions: Sequence[tuple[str, ValidatedExtraction]], *,
-                embedder: Embedder | None = None, judge: Judge | None = None,
-                threshold: float = DEFAULT_THRESHOLD,
-                max_judge: int = DEFAULT_MAX_JUDGE) -> ConsolidationResult:
+def consolidate(
+    extractions: Sequence[tuple[str, ValidatedExtraction]],
+    *,
+    embedder: Embedder | None = None,
+    judge: Judge | None = None,
+    threshold: float = DEFAULT_THRESHOLD,
+    max_judge: int = DEFAULT_MAX_JUDGE,
+) -> ConsolidationResult:
     stats = ConsolidationStats()
     cands: list[_Candidate] = []
     local: dict[tuple[str, str], int] = {}  # (chunk_id, name key) -> candidate index
     for chunk_id, ext in extractions:
         for c in ext.concepts:
             local[(chunk_id, name_key(c.name))] = len(cands)
-            cands.append(_Candidate(chunk_id, c.name, c.name_en, c.kind, c.definition,
-                                    list(c.synonyms), list(c.attributes), c.evidence,
-                                    c.evidence_verified))
+            cands.append(
+                _Candidate(
+                    chunk_id,
+                    c.name,
+                    c.name_en,
+                    c.kind,
+                    c.definition,
+                    list(c.synonyms),
+                    list(c.attributes),
+                    c.evidence,
+                    c.evidence_verified,
+                )
+            )
     stats.candidates = len(cands)
     uf = _UnionFind(len(cands))
     events: dict[int, list[dict[str, Any]]] = {}  # root -> merge chain (merged_from)
@@ -188,14 +202,28 @@ def consolidate(extractions: Sequence[tuple[str, ValidatedExtraction]], *,
             return
         other, cand = cands[j], cands[i]
         if not by_name and other.kind != cand.kind:
-            logger.debug("exact merge refused: %r (%s) / %r (%s) share %r but differ in "
-                         "kind", other.name, other.kind, cand.name, cand.kind, key)
+            logger.debug(
+                "exact merge refused: %r (%s) / %r (%s) share %r but differ in kind",
+                other.name,
+                other.kind,
+                cand.name,
+                cand.kind,
+                key,
+            )
             return
         same_name = name_key(other.name) == name_key(cand.name)
-        event = None if same_name else {"from": cand.name, "into": other.name,
-                                        "via": "synonym", "key": key}
-        logger.debug("exact merge %r + %r via %s %r", other.name, cand.name,
-                     "name" if by_name else "synonym", key)
+        event = (
+            None
+            if same_name
+            else {"from": cand.name, "into": other.name, "via": "synonym", "key": key}
+        )
+        logger.debug(
+            "exact merge %r + %r via %s %r",
+            other.name,
+            cand.name,
+            "name" if by_name else "synonym",
+            key,
+        )
         union(j, i, event)
         stats.exact_merges += 1
 
@@ -220,29 +248,39 @@ def consolidate(extractions: Sequence[tuple[str, ValidatedExtraction]], *,
         members = [c for j, c in enumerate(cands) if uf.find(j) == root]
         ov = overrides.get(root, {})
         name = ov.get("name") or _most_common([m.name for m in members])
-        return {"name": name, "kind": _most_common([m.kind for m in members]),
-                "definition": ov.get("definition") or _best_definition(members, name),
-                "synonyms": _dedupe([s for m in members for s in [m.name, *m.synonyms]]
-                                    + list(ov.get("synonyms", [])), {name.casefold()})}
+        return {
+            "name": name,
+            "kind": _most_common([m.kind for m in members]),
+            "definition": ov.get("definition") or _best_definition(members, name),
+            "synonyms": _dedupe(
+                [s for m in members for s in [m.name, *m.synonyms]] + list(ov.get("synonyms", [])),
+                {name.casefold()},
+            ),
+        }
 
     # 2. embedding similarity + LLM judge (always on the current, merged groups)
     roots = sorted({uf.find(i) for i in range(len(cands))})
     if embedder is not None and judge is not None and len(roots) > 1 and max_judge > 0:
         initial = {r: summary(r) for r in roots}
         try:
-            vectors = embedder([f"{initial[r]['name']}: {initial[r]['definition']}"
-                                for r in roots])
+            vectors = embedder([f"{initial[r]['name']}: {initial[r]['definition']}" for r in roots])
         except Exception as exc:  # noqa: BLE001 - exact merges still stand
             stats.embedding_error = f"{type(exc).__name__}: {str(exc)[:200]}"
-            logger.warning("consolidate: embedding failed (%s); semantic merge skipped",
-                           stats.embedding_error)
+            logger.warning(
+                "consolidate: embedding failed (%s); semantic merge skipped", stats.embedding_error
+            )
             vectors = []
         if vectors:
             stats.missing_vectors = sum(1 for v in vectors if not v) + max(
-                0, len(roots) - len(vectors))
+                0, len(roots) - len(vectors)
+            )
             if stats.missing_vectors:
-                logger.warning("consolidate: %d of %d group(s) got no embedding; their "
-                               "semantic merge was skipped", stats.missing_vectors, len(roots))
+                logger.warning(
+                    "consolidate: %d of %d group(s) got no embedding; their "
+                    "semantic merge was skipped",
+                    stats.missing_vectors,
+                    len(roots),
+                )
         pairs = []
         for a in range(len(vectors)):
             for b in range(a + 1, len(vectors)):
@@ -265,24 +303,32 @@ def consolidate(extractions: Sequence[tuple[str, ValidatedExtraction]], *,
                 decision = judge(sa, sb)
             except Exception as exc:  # noqa: BLE001 - fail closed: not the same
                 stats.judge_failures += 1
-                logger.warning("merge judge failed for %s / %s: %s", sa["name"], sb["name"],
-                               str(exc)[:160])
+                logger.warning(
+                    "merge judge failed for %s / %s: %s", sa["name"], sb["name"], str(exc)[:160]
+                )
                 continue
             if not decision.same:
                 continue
-            root = union(ra, rb, {"from": sb["name"], "into": sa["name"], "via": "judge",
-                                  "cosine": round(sim, 3)})
+            root = union(
+                ra,
+                rb,
+                {"from": sb["name"], "into": sa["name"], "via": "judge", "cosine": round(sim, 3)},
+            )
             stats.judge_merges += 1
             logger.info("merged %r + %r (cosine %.3f)", sa["name"], sb["name"], sim)
             allowed = {n.casefold(): n for x in (sa, sb) for n in [x["name"], *x["synonyms"]]}
             ov = overrides.setdefault(root, {})
             canonical = allowed.get(name_key(decision.canonical_name))
             ov["name"] = canonical or sa["name"]
-            ov["definition"] = (" ".join(decision.merged_definition.split())
-                                or sa["definition"])
-            ov["synonyms"] = [*ov.get("synonyms", []), *sa["synonyms"], *sb["synonyms"],
-                              sb["name"], sa["name"],
-                              *(" ".join(x.split()) for x in decision.merged_synonyms)]
+            ov["definition"] = " ".join(decision.merged_definition.split()) or sa["definition"]
+            ov["synonyms"] = [
+                *ov.get("synonyms", []),
+                *sa["synonyms"],
+                *sb["synonyms"],
+                sb["name"],
+                sa["name"],
+                *(" ".join(x.split()) for x in decision.merged_synonyms),
+            ]
 
     # 3. build the records (one per root; equal canonical names fold together)
     by_root: dict[int, list[int]] = {}
@@ -296,26 +342,34 @@ def consolidate(extractions: Sequence[tuple[str, ValidatedExtraction]], *,
         name = ov.get("name") or _most_common([m.name for m in members])
         key = name.casefold()
         surface = _dedupe([m.name for m in members], set())
-        evidence = _dedupe_evidence([EvidenceRecord(m.chunk_id, m.quote, m.verified)
-                                     for m in members])
+        evidence = _dedupe_evidence(
+            [EvidenceRecord(m.chunk_id, m.quote, m.verified) for m in members]
+        )
         synonyms = [*surface, *(s for m in members for s in m.synonyms), *ov.get("synonyms", [])]
         chain = events.get(root, [])
         if key in records:  # another group ended with the same canonical name
             rec = records[key]
             rec.synonyms = _dedupe([*rec.synonyms, *synonyms], {key})
-            rec.attributes = _dedupe([*rec.attributes, *(a for m in members
-                                                          for a in m.attributes)], set())
-            rec.merged_from = [*rec.merged_from, *chain,
-                               {"from": surface[0], "into": rec.name, "via": "name"}]
+            rec.attributes = _dedupe(
+                [*rec.attributes, *(a for m in members for a in m.attributes)], set()
+            )
+            rec.merged_from = [
+                *rec.merged_from,
+                *chain,
+                {"from": surface[0], "into": rec.name, "via": "name"},
+            ]
             rec.evidence = _dedupe_evidence([*rec.evidence, *evidence])
         else:
             records[key] = ConceptRecord(
-                name=name, kind=_most_common([m.kind for m in members]),
+                name=name,
+                kind=_most_common([m.kind for m in members]),
                 definition=ov.get("definition") or _best_definition(members, name),
                 name_en=_most_common([m.name_en for m in members]),
                 synonyms=_dedupe(synonyms, {key}),
                 attributes=_dedupe([a for m in members for a in m.attributes], set()),
-                merged_from=list(chain), evidence=evidence)
+                merged_from=list(chain),
+                evidence=evidence,
+            )
         root_name[root] = records[key].name
 
     # 4. relations
@@ -331,18 +385,20 @@ def consolidate(extractions: Sequence[tuple[str, ValidatedExtraction]], *,
             if subject == obj:
                 stats.self_relations_dropped += 1
                 continue
-            rel = rels.setdefault((subject, r.predicate, obj),
-                                  RelationRecord(subject, r.predicate, obj, r.label))
+            rel = rels.setdefault(
+                (subject, r.predicate, obj), RelationRecord(subject, r.predicate, obj, r.label)
+            )
             rel.label = rel.label or r.label
-            rel.evidence = _dedupe_evidence([*rel.evidence,
-                                             EvidenceRecord(chunk_id, r.evidence,
-                                                            r.evidence_verified)])
+            rel.evidence = _dedupe_evidence(
+                [*rel.evidence, EvidenceRecord(chunk_id, r.evidence, r.evidence_verified)]
+            )
     return ConsolidationResult(list(records.values()), list(rels.values()), stats)
 
 
 def _best_definition(members: Sequence[_Candidate], name: str) -> str:
-    ranked = sorted(members, key=lambda m: (m.name == name, m.verified, len(m.definition)),
-                    reverse=True)
+    ranked = sorted(
+        members, key=lambda m: (m.name == name, m.verified, len(m.definition)), reverse=True
+    )
     return ranked[0].definition if ranked else ""
 
 

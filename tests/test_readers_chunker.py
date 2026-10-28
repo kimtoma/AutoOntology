@@ -34,12 +34,17 @@ def test_markdown_heading_tree(tmp_path):
     doc = readers.read_document(path)
     assert doc.title == "계약관리규정" and doc.engine == "native" and doc.mime == "text/markdown"
     paths = [s.path for s in doc.sections]
-    assert paths == ["", "계약관리규정", "계약관리규정 > 제1장 총칙",
-                     "계약관리규정 > 제1장 총칙 > 제1조(목적)",
-                     "계약관리규정 > 제1장 총칙 > 제2조(정의)", "계약관리규정 > 제2장 승인"]
+    assert paths == [
+        "",
+        "계약관리규정",
+        "계약관리규정 > 제1장 총칙",
+        "계약관리규정 > 제1장 총칙 > 제1조(목적)",
+        "계약관리규정 > 제1장 총칙 > 제2조(정의)",
+        "계약관리규정 > 제2장 승인",
+    ]
     defs = doc.sections[4]
     assert defs.text.startswith("### 제2조(정의)") and "계약금액" in defs.text
-    assert MD[defs.char_start:].startswith("### 제2조(정의)")
+    assert MD[defs.char_start :].startswith("### 제2조(정의)")
     assert "| 1억 미만 | 팀장 |" in doc.sections[5].text
 
 
@@ -49,11 +54,14 @@ def test_txt_and_html(tmp_path):
     doc = readers.read_document(txt)
     assert [(s.path, s.text) for s in doc.sections] == [("", "첫 줄\n\n둘째 문단")]
     html = tmp_path / "b.html"
-    html.write_text("""<html><head><title>청구 안내</title><style>p{}</style></head><body>
+    html.write_text(
+        """<html><head><title>청구 안내</title><style>p{}</style></head><body>
       <nav><a>메뉴</a></nav><h1>청구</h1><p>청구서는 매월 <b>발행</b>한다.</p>
       <ul><li><p>연체 시 독촉</p></li></ul><script>alert(1)</script>
       <h2>수납</h2><table><tr><th>항목</th><th>기한</th></tr><tr><td>수납</td><td>30일</td>
-      </tr></table></body></html>""", encoding="utf-8")
+      </tr></table></body></html>""",
+        encoding="utf-8",
+    )
     doc = readers.read_document(html)
     assert doc.title == "청구 안내"
     assert [s.path for s in doc.sections] == ["청구", "청구 > 수납"]
@@ -71,7 +79,10 @@ def test_discover_documents(tmp_path):
     (tmp_path / "sub" / "d.pdf").write_bytes(b"x")
     assert [p.name for p in readers.discover_documents(tmp_path)] == ["a.md", "b.hwp"]
     assert [p.name for p in readers.discover_documents(tmp_path, recursive=True)] == [
-        "a.md", "b.hwp", "d.pdf"]
+        "a.md",
+        "b.hwp",
+        "d.pdf",
+    ]
     with pytest.raises(readers.ReadError, match="unsupported"):
         readers.discover_documents(tmp_path / "c.csv")
 
@@ -89,12 +100,15 @@ def test_kordoc_formats_need_the_engine(tmp_path, monkeypatch):
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_kordoc_chunks_become_sections(tmp_path, monkeypatch):
     cli = tmp_path / "cli.js"
-    cli.write_text("""console.log(JSON.stringify([
+    cli.write_text(
+        """console.log(JSON.stringify([
       {id:'c1', type:'heading', breadcrumb:[], text:'# 사업계획', page:1},
       {id:'c2', type:'text', breadcrumb:['사업계획'], text:'![image](i.jpg)', page:1},
       {id:'c3', type:'text', breadcrumb:['사업계획', ' 범위 '], text:'사업 범위는 다음과 같다. ![x](y.png)', page:2},
       {id:'c4', type:'table', breadcrumb:['사업계획'], text:'| 항목 | 값 |\\n| --- | --- |', page:3}]))
-    """, encoding="utf-8")
+    """,
+        encoding="utf-8",
+    )
     monkeypatch.setenv("KORDOC_CLI", str(cli))
     f = tmp_path / "plan.hwp"
     f.write_bytes(b"x")
@@ -112,9 +126,11 @@ def _doc(*sections):
 
 
 def test_chunker_packs_small_sections_under_common_path():
-    doc = _doc(Section("규정 > 제1조", None, "### 제1조\n목적을 정한다.", 0),
-               Section("규정 > 제2조", None, "정의를 둔다.", 20),
-               Section("규정 > 제3조", 4, "적용 범위.", 40))
+    doc = _doc(
+        Section("규정 > 제1조", None, "### 제1조\n목적을 정한다.", 0),
+        Section("규정 > 제2조", None, "정의를 둔다.", 20),
+        Section("규정 > 제3조", 4, "적용 범위.", 40),
+    )
     chunks = chunker.chunk(doc, max_tokens=200, pack_tokens=200)
     assert len(chunks) == 1
     [c] = chunks

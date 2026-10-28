@@ -48,8 +48,9 @@ _STRING_RE = re.compile(
 )
 _IRI_RE = re.compile(r"<[^<>\s]*>")
 _COMMENT_RE = re.compile(r"#[^\n]*")
-_KEYWORD_RE = re.compile(r"(?<![\w?$:])(" + "|".join(FORBIDDEN_KEYWORDS) + r")(?![\w:-])",
-                         re.IGNORECASE)
+_KEYWORD_RE = re.compile(
+    r"(?<![\w?$:])(" + "|".join(FORBIDDEN_KEYWORDS) + r")(?![\w:-])", re.IGNORECASE
+)
 
 
 class SparqlError(Exception):
@@ -61,17 +62,22 @@ class SparqlError(Exception):
 
 
 EXAMPLES: list[dict[str, str]] = [
-    {"id": "classes", "title": "Classes",
-     "description": "Every owl:Class and its origin (structured Term / document concept)",
-     "query": """SELECT ?class ?label ?source WHERE {
+    {
+        "id": "classes",
+        "title": "Classes",
+        "description": "Every owl:Class and its origin (structured Term / document concept)",
+        "query": """SELECT ?class ?label ?source WHERE {
   ?class a owl:Class ;
          rdfs:label ?label ;
          os:source ?source .
 }
-ORDER BY ?source ?label"""},
-    {"id": "term-synonyms", "title": "Synonyms per Term",
-     "description": "Structured Terms and their synonyms (including names aligned from documents)",
-     "query": """SELECT ?term ?label (GROUP_CONCAT(DISTINCT ?name; separator=", ") AS ?synonyms)
+ORDER BY ?source ?label""",
+    },
+    {
+        "id": "term-synonyms",
+        "title": "Synonyms per Term",
+        "description": "Structured Terms and their synonyms (including names aligned from documents)",
+        "query": """SELECT ?term ?label (GROUP_CONCAT(DISTINCT ?name; separator=", ") AS ?synonyms)
 WHERE {
   ?term a owl:Class ;
         os:source "structured" ;
@@ -80,10 +86,13 @@ WHERE {
   BIND(COALESCE(STR(?alt), "") AS ?name)
 }
 GROUP BY ?term ?label
-ORDER BY ?label"""},
-    {"id": "aligned-concepts", "title": "Aligned concepts",
-     "description": "Document concepts linked to a Term by alignment (narrower/related) and the confidence",
-     "query": """SELECT ?concept ?relation ?term ?confidence WHERE {
+ORDER BY ?label""",
+    },
+    {
+        "id": "aligned-concepts",
+        "title": "Aligned concepts",
+        "description": "Document concepts linked to a Term by alignment (narrower/related) and the confidence",
+        "query": """SELECT ?concept ?relation ?term ?confidence WHERE {
   ?st a rdf:Statement ;
       rdf:subject ?s ;
       rdf:predicate ?relation ;
@@ -95,10 +104,13 @@ ORDER BY ?label"""},
   BIND(IF(?ss = "structured", ?ol, ?sl) AS ?concept)
   BIND(IF(?ss = "structured", ?sl, ?ol) AS ?term)
 }
-ORDER BY DESC(?confidence)"""},
-    {"id": "relation-evidence", "title": "Relations and their evidence",
-     "description": "Relations extracted from documents with the quote, document and page",
-     "query": """SELECT ?relation ?label ?quote ?document ?page WHERE {
+ORDER BY DESC(?confidence)""",
+    },
+    {
+        "id": "relation-evidence",
+        "title": "Relations and their evidence",
+        "description": "Relations extracted from documents with the quote, document and page",
+        "query": """SELECT ?relation ?label ?quote ?document ?page WHERE {
   ?relation a owl:ObjectProperty ;
             os:source "document" ;
             rdfs:label ?label ;
@@ -108,38 +120,50 @@ ORDER BY DESC(?confidence)"""},
   ?doc dcterms:title ?document .
   OPTIONAL { ?ev os:page ?page }
 }
-ORDER BY ?label"""},
-    {"id": "business-rules", "title": "Business rules",
-     "description": "Business rule (os:BusinessRule) individuals and their description",
-     "query": """SELECT ?rule ?label ?comment WHERE {
+ORDER BY ?label""",
+    },
+    {
+        "id": "business-rules",
+        "title": "Business rules",
+        "description": "Business rule (os:BusinessRule) individuals and their description",
+        "query": """SELECT ?rule ?label ?comment WHERE {
   ?rule a os:BusinessRule ;
         rdfs:label ?label .
   OPTIONAL { ?rule rdfs:comment ?comment }
 }
-ORDER BY ?label"""},
-    {"id": "concepts-per-document", "title": "Concepts per document",
-     "description": "Classes and individuals linked by evidence (prov:wasDerivedFrom), per document",
-     "query": """SELECT ?document (COUNT(DISTINCT ?node) AS ?concepts) WHERE {
+ORDER BY ?label""",
+    },
+    {
+        "id": "concepts-per-document",
+        "title": "Concepts per document",
+        "description": "Classes and individuals linked by evidence (prov:wasDerivedFrom), per document",
+        "query": """SELECT ?document (COUNT(DISTINCT ?node) AS ?concepts) WHERE {
   ?node prov:wasDerivedFrom ?ev .
   { ?node a owl:Class } UNION { ?node a owl:NamedIndividual }
   ?ev dcterms:source ?doc .
   ?doc dcterms:title ?document .
 }
 GROUP BY ?document
-ORDER BY DESC(?concepts)"""},
-    {"id": "property-domain-range", "title": "Property domain/range",
-     "description": "Domain and range of object and datatype properties",
-     "query": """SELECT ?property ?kind ?label ?domain ?range WHERE {
+ORDER BY DESC(?concepts)""",
+    },
+    {
+        "id": "property-domain-range",
+        "title": "Property domain/range",
+        "description": "Domain and range of object and datatype properties",
+        "query": """SELECT ?property ?kind ?label ?domain ?range WHERE {
   ?property a ?kind ;
             rdfs:label ?label ;
             rdfs:domain ?domain ;
             rdfs:range ?range .
   VALUES ?kind { owl:ObjectProperty owl:DatatypeProperty }
 }
-ORDER BY ?kind ?label"""},
-    {"id": "unaligned-concepts", "title": "Unaligned concepts",
-     "description": "Document concept classes not linked to any structured Term",
-     "query": """SELECT ?concept ?label WHERE {
+ORDER BY ?kind ?label""",
+    },
+    {
+        "id": "unaligned-concepts",
+        "title": "Unaligned concepts",
+        "description": "Document concept classes not linked to any structured Term",
+        "query": """SELECT ?concept ?label WHERE {
   ?concept a owl:Class ;
            os:source "document" ;
            rdfs:label ?label .
@@ -148,7 +172,8 @@ ORDER BY ?kind ?label"""},
     ?term os:source "structured" .
   }
 }
-ORDER BY ?label"""},
+ORDER BY ?label""",
+    },
 ]
 
 
@@ -157,8 +182,15 @@ def latest_ttl(exports_dir: Path, source: str) -> tuple[str, Path] | None:
     folder = Path(exports_dir) / source
     if not folder.is_dir():
         return None
-    runs = sorted((p for p in folder.iterdir() if p.is_dir() and RUN_ID_RE.fullmatch(p.name)
-                   and (p / TTL_NAME).is_file()), key=lambda p: p.name, reverse=True)
+    runs = sorted(
+        (
+            p
+            for p in folder.iterdir()
+            if p.is_dir() and RUN_ID_RE.fullmatch(p.name) and (p / TTL_NAME).is_file()
+        ),
+        key=lambda p: p.name,
+        reverse=True,
+    )
     return (runs[0].name, runs[0] / TTL_NAME) if runs else None
 
 
@@ -188,26 +220,29 @@ def check_query(query: str, init_ns: dict[str, Any] | None = None) -> Any:
     """The prepared query (the graph's prefixes predeclared), or SparqlError(400) for a
     parse error or a forbidden keyword (SERVICE, FROM, LOAD)."""
     if len(query) > MAX_QUERY_CHARS:
-        raise SparqlError(400, "sparql_too_long", f"query longer than {MAX_QUERY_CHARS} "
-                          "characters")
+        raise SparqlError(400, "sparql_too_long", f"query longer than {MAX_QUERY_CHARS} characters")
     keyword = forbidden_keyword(query)
     if keyword:
-        raise SparqlError(400, "sparql_forbidden",
-                          f"{keyword} is not allowed: the console queries the exported "
-                          "ontology only (no federation, datasets or loading)")
+        raise SparqlError(
+            400,
+            "sparql_forbidden",
+            f"{keyword} is not allowed: the console queries the exported "
+            "ontology only (no federation, datasets or loading)",
+        )
     try:
         prepared = prepareQuery(query, initNs=init_ns or {})
     except Exception as exc:  # noqa: BLE001 - pyparsing/rdflib raise various types
-        raise SparqlError(400, "sparql_syntax", f"{type(exc).__name__}: {str(exc)[:400]}"
-                          ) from exc
+        raise SparqlError(400, "sparql_syntax", f"{type(exc).__name__}: {str(exc)[:400]}") from exc
     # defence in depth: the parsed algebra must not federate or name a dataset either
     for node in _walk(prepared.algebra):
         if getattr(node, "name", "") == "ServiceGraphPattern":
-            raise SparqlError(400, "sparql_forbidden", "SERVICE (federated query) is not "
-                              "allowed")
+            raise SparqlError(400, "sparql_forbidden", "SERVICE (federated query) is not allowed")
     if prepared.algebra.get("datasetClause"):
-        raise SparqlError(400, "sparql_forbidden", "FROM / FROM NAMED is not allowed: the "
-                          "console queries the exported ontology only")
+        raise SparqlError(
+            400,
+            "sparql_forbidden",
+            "FROM / FROM NAMED is not allowed: the console queries the exported ontology only",
+        )
     return prepared
 
 
@@ -230,26 +265,30 @@ class SparqlRunner:
         try:
             graph = load_graph(path)
         except Exception as exc:  # noqa: BLE001 - a broken export is the caller's 422
-            raise SparqlError(422, "sparql_bad_export",
-                              f"cannot parse {path.name}: {type(exc).__name__}") from exc
+            raise SparqlError(
+                422, "sparql_bad_export", f"cannot parse {path.name}: {type(exc).__name__}"
+            ) from exc
         with self._graphs_lock:
             self._graphs[run_id] = graph
             while len(self._graphs) > CACHE_SIZE:
                 self._graphs.popitem(last=False)
         return graph
 
-    def run_file(self, run_id: str, path: Path, query: str, *,
-                 limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
+    def run_file(
+        self, run_id: str, path: Path, query: str, *, limit: int = DEFAULT_LIMIT
+    ) -> dict[str, Any]:
         """*query* against the Turtle file *path* (parsed graph cached by *run_id*)."""
         if len(query) > MAX_QUERY_CHARS:
-            raise SparqlError(400, "sparql_too_long", f"query longer than {MAX_QUERY_CHARS} "
-                              "characters")
+            raise SparqlError(
+                400, "sparql_too_long", f"query longer than {MAX_QUERY_CHARS} characters"
+            )
         limit = max(1, min(int(limit), MAX_LIMIT))
         graph = self.graph(run_id, path)
         prepared = check_query(query, prefixes(graph))  # fast: refuse before any thread
         if not self._slots.acquire(blocking=False):
-            raise SparqlError(429, "sparql_busy", f"{MAX_CONCURRENT} queries are already "
-                              "running; retry shortly")
+            raise SparqlError(
+                429, "sparql_busy", f"{MAX_CONCURRENT} queries are already running; retry shortly"
+            )
         done = threading.Event()
         box: dict[str, Any] = {}
 
@@ -268,8 +307,9 @@ class SparqlRunner:
             self._slots.release()
             raise
         if not done.wait(self.timeout_s):
-            raise SparqlError(408, "sparql_timeout",
-                              f"query did not finish within {self.timeout_s:.0f}s")
+            raise SparqlError(
+                408, "sparql_timeout", f"query did not finish within {self.timeout_s:.0f}s"
+            )
         if "error" in box:
             raise box["error"]
         return {**box["result"], "triples": len(graph)}
@@ -295,8 +335,7 @@ def execute(graph: Graph, query: Any, limit: int) -> dict[str, Any]:
     except SparqlError:
         raise
     except Exception as exc:  # noqa: BLE001 - evaluation errors are the user's query
-        raise SparqlError(400, "sparql_error", f"{type(exc).__name__}: {str(exc)[:400]}"
-                          ) from exc
+        raise SparqlError(400, "sparql_error", f"{type(exc).__name__}: {str(exc)[:400]}") from exc
 
 
 def _context(graph: Graph, prepared: Any) -> Any:
@@ -307,10 +346,15 @@ def _context(graph: Graph, prepared: Any) -> Any:
     return ctx
 
 
-def _turtle_result(graph: Graph, kind: str, out: Graph, cap: int, over: bool
-                   ) -> dict[str, Any]:
-    return {"type": kind, "turtle": out.serialize(format="turtle"), "total": len(out),
-            "truncated": over, "columns": [], "rows": []}
+def _turtle_result(graph: Graph, kind: str, out: Graph, cap: int, over: bool) -> dict[str, Any]:
+    return {
+        "type": kind,
+        "turtle": out.serialize(format="turtle"),
+        "total": len(out),
+        "truncated": over,
+        "columns": [],
+        "rows": [],
+    }
 
 
 def _construct(graph: Graph, prepared: Any, limit: int) -> dict[str, Any]:
@@ -389,8 +433,14 @@ def short(graph: Graph, term: Any) -> Any:
 
 def _format(graph: Graph, result: Any, limit: int) -> dict[str, Any]:
     if result.type == "ASK":
-        return {"type": "ASK", "boolean": bool(result.askAnswer), "columns": ["result"],
-                "rows": [[bool(result.askAnswer)]], "total": 1, "truncated": False}
+        return {
+            "type": "ASK",
+            "boolean": bool(result.askAnswer),
+            "columns": ["result"],
+            "rows": [[bool(result.askAnswer)]],
+            "total": 1,
+            "truncated": False,
+        }
     columns = [str(v) for v in (result.vars or [])]
     rows: list[list[Any]] = []
     truncated = False
@@ -400,5 +450,10 @@ def _format(graph: Graph, result: Any, limit: int) -> dict[str, Any]:
             break
         rows.append([short(graph, row[i]) for i in range(len(columns))])
     # total = the rows returned; when truncated the real count is unknown (not computed)
-    return {"type": "SELECT", "columns": columns, "rows": rows, "total": len(rows),
-            "truncated": truncated}
+    return {
+        "type": "SELECT",
+        "columns": columns,
+        "rows": rows,
+        "total": len(rows),
+        "truncated": truncated,
+    }

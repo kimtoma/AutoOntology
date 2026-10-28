@@ -50,16 +50,21 @@ def database_id_for(client: BackendClient, source: Source) -> tuple[str, str]:
     name = pipeline.catalog_database_name(source)
     db_id = client.database_id_by_name(name) or source.catalog_database_id
     if not db_id:
-        raise LookupError(f"structured source {source.name!r} ({name}) is not in the upstream "
-                          f"catalog; run `uv run autoontology build {source.name}` first")
+        raise LookupError(
+            f"structured source {source.name!r} ({name}) is not in the upstream "
+            f"catalog; run `uv run autoontology build {source.name}` first"
+        )
     return db_id, name
 
 
 def _column(ref: dict[str, Any] | None, schemas: dict[str, str]) -> dict[str, Any]:
     ref = ref or {}
-    return {"table_id": ref.get("table_id"), "table": ref.get("table_name"),
-            "schema": schemas.get(str(ref.get("schema_id")), ""),
-            "column": ref.get("column_name")}
+    return {
+        "table_id": ref.get("table_id"),
+        "table": ref.get("table_name"),
+        "schema": schemas.get(str(ref.get("schema_id")), ""),
+        "column": ref.get("column_name"),
+    }
 
 
 def qualified(col: dict[str, Any]) -> str:
@@ -70,35 +75,55 @@ def fetch_snapshot(client: BackendClient, source: Source) -> StructuredSnapshot:
     db_id, db_name = database_id_for(client, source)
     graph = client.semantic_graph(db_id)
     schemas = {str(s.get("id")): str(s.get("schema_name") or "") for s in client.schemas(db_id)}
-    snapshot = StructuredSnapshot(source=source.name, database_id=db_id, database_name=db_name,
-                                  graph_links=len(graph.get("links") or []))
+    snapshot = StructuredSnapshot(
+        source=source.name,
+        database_id=db_id,
+        database_name=db_name,
+        graph_links=len(graph.get("links") or []),
+    )
     table_owner: dict[str, str] = {}
     for node in sorted(graph.get("nodes") or [], key=lambda n: str(n.get("name"))):
         detail = client.get_term(str(node["id"]))
         attrs = []
         for a in client.term_column_attributes(str(node["id"])):
             primary = _column(a.get("primary_column"), schemas)
-            attrs.append({
-                "id": a.get("id"), "name": a.get("name") or a.get("source_column") or "",
-                "description": a.get("description") or "",
-                "source_column": a.get("source_column") or "", "datatype": a.get("datatype"),
-                **{k: primary[k] for k in ("table_id", "table", "schema", "column")},
-                "referenced": [_column(r, schemas) for r in a.get("referenced_columns") or []],
-            })
-        tables = [{"id": t.get("id"), "name": t.get("name"),
-                   "schema": schemas.get(str(t.get("schema_id")), "")}
-                  for t in detail.get("tables") or []]
+            attrs.append(
+                {
+                    "id": a.get("id"),
+                    "name": a.get("name") or a.get("source_column") or "",
+                    "description": a.get("description") or "",
+                    "source_column": a.get("source_column") or "",
+                    "datatype": a.get("datatype"),
+                    **{k: primary[k] for k in ("table_id", "table", "schema", "column")},
+                    "referenced": [_column(r, schemas) for r in a.get("referenced_columns") or []],
+                }
+            )
+        tables = [
+            {
+                "id": t.get("id"),
+                "name": t.get("name"),
+                "schema": schemas.get(str(t.get("schema_id")), ""),
+            }
+            for t in detail.get("tables") or []
+        ]
         for t in tables:
             table_owner[str(t["id"])] = str(detail["id"])
-        snapshot.terms.append(TermInfo(
-            id=str(detail["id"]), name=detail.get("name") or "",
-            description=detail.get("description") or "",
-            synonyms=list(detail.get("synonyms") or []), attributes=attrs, tables=tables))
+        snapshot.terms.append(
+            TermInfo(
+                id=str(detail["id"]),
+                name=detail.get("name") or "",
+                description=detail.get("description") or "",
+                synonyms=list(detail.get("synonyms") or []),
+                attributes=attrs,
+                tables=tables,
+            )
+        )
     for term in snapshot.terms:
         for a in term.attributes:
             for ref in a["referenced"]:
                 owner = table_owner.get(str(ref.get("table_id")))
                 if owner and owner != term.id:
-                    snapshot.fks.append(SemanticFK(owner, term.id, str(a["id"]), a["name"],
-                                                   qualified(ref)))
+                    snapshot.fks.append(
+                        SemanticFK(owner, term.id, str(a["id"]), a["name"], qualified(ref))
+                    )
     return snapshot

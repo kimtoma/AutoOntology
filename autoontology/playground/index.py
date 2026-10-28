@@ -31,8 +31,16 @@ class Hit:
 
 
 class ElementIndex:
-    def __init__(self, elements: list[Element], vectors: list[list[float] | None],
-                 *, model: str, revision: int, reused: int = 0, embedded: int = 0) -> None:
+    def __init__(
+        self,
+        elements: list[Element],
+        vectors: list[list[float] | None],
+        *,
+        model: str,
+        revision: int,
+        reused: int = 0,
+        embedded: int = 0,
+    ) -> None:
         self.elements = elements
         self.by_id = {e.id: e for e in elements}
         self.model = model
@@ -61,8 +69,9 @@ class ElementIndex:
         order = np.argsort(-scores, kind="stable")[:top_k]
         return [Hit(self.elements[self._rows[i]], round(float(scores[i]), 4)) for i in order]
 
-    def retrieve(self, vector: list[float], top_k: int = DEFAULT_TOP_K,
-                 max_neighbours: int | None = None) -> list[Hit]:
+    def retrieve(
+        self, vector: list[float], top_k: int = DEFAULT_TOP_K, max_neighbours: int | None = None
+    ) -> list[Hit]:
         """Top-*top_k* by cosine, then the 1-hop neighbours of every retrieved class-like
         element (relations touching it and the nodes at their other ends), in rank order,
         at most *max_neighbours* (default *top_k*) of them."""
@@ -83,8 +92,15 @@ class ElementIndex:
         return hits + extra
 
 
-def build_index(store: PlaygroundStore, source_id: str, elements: list[Element], *,
-                revision: int, model: str, embed: Embedder) -> ElementIndex:
+def build_index(
+    store: PlaygroundStore,
+    source_id: str,
+    elements: list[Element],
+    *,
+    revision: int,
+    model: str,
+    embed: Embedder,
+) -> ElementIndex:
     """Refresh the stored index of *source_id* to *elements* and return it in memory.
 
     Vectors are reused for rows with the same element id, text sha and model; only the
@@ -100,16 +116,34 @@ def build_index(store: PlaygroundStore, source_id: str, elements: list[Element],
             vectors.append(None)
             todo.append(i)
     for start in range(0, len(todo), EMBED_BATCH):
-        batch = todo[start:start + EMBED_BATCH]
+        batch = todo[start : start + EMBED_BATCH]
         got = embed([elements[i].text for i in batch], "passage")
         if len(got) != len(batch):
             raise RuntimeError(f"embedder returned {len(got)} vectors for {len(batch)} texts")
         for i, v in zip(batch, got, strict=True):
             vectors[i] = list(v) if v else None
-    store.replace_index(source_id, [IndexRow(e.id, e.type, e.text_sha, v, model)
-                                    for e, v in zip(elements, vectors, strict=True)],
-                        revision=revision, model=model)
-    logger.info("playground index for %s: %d element(s), %d embedded, %d reused (rev %d)",
-                source_id, len(elements), len(todo), len(elements) - len(todo), revision)
-    return ElementIndex(elements, vectors, model=model, revision=revision,
-                        reused=len(elements) - len(todo), embedded=len(todo))
+    store.replace_index(
+        source_id,
+        [
+            IndexRow(e.id, e.type, e.text_sha, v, model)
+            for e, v in zip(elements, vectors, strict=True)
+        ],
+        revision=revision,
+        model=model,
+    )
+    logger.info(
+        "playground index for %s: %d element(s), %d embedded, %d reused (rev %d)",
+        source_id,
+        len(elements),
+        len(todo),
+        len(elements) - len(todo),
+        revision,
+    )
+    return ElementIndex(
+        elements,
+        vectors,
+        model=model,
+        revision=revision,
+        reused=len(elements) - len(todo),
+        embedded=len(todo),
+    )

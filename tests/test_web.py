@@ -19,8 +19,12 @@ def test_ingest_records_request_and_redacts(isolated_env, monkeypatch):
     seen = []
     monkeypatch.setattr(web, "enqueue_ingest", lambda conn, settings=None: seen.append(conn))
     c = client(isolated_env)
-    body = {"database": "autoontology_src_demo", "type": "postgres", "password": "hunter2",
-            "options": {"api_key": "k"}}
+    body = {
+        "database": "autoontology_src_demo",
+        "type": "postgres",
+        "password": "hunter2",
+        "options": {"api_key": "k"},
+    }
     resp = c.post("/ingest", json=body)
     assert resp.status_code == 202 and resp.json() == {"status": "accepted"}
     assert seen == [body]
@@ -66,13 +70,13 @@ def test_health_ok(isolated_env, monkeypatch):
     assert resp.status_code == 200 and resp.json()["status"] == "ok"
 
 
-
 def test_enqueue_ingest_runs_ingest_job_in_thread(isolated_env, monkeypatch):
     from autoontology.engine import jobs
 
     calls = []
-    monkeypatch.setattr(jobs, "run_ingest_job",
-                        lambda db, settings, store: calls.append((db, store.path.name)))
+    monkeypatch.setattr(
+        jobs, "run_ingest_job", lambda db, settings, store: calls.append((db, store.path.name))
+    )
     settings = Settings.from_env()
     assert web.enqueue_ingest({"type": "postgres"}, settings) is None
     thread = web.enqueue_ingest({"database": "autoontology_src_demo"}, settings)
@@ -94,7 +98,9 @@ def test_ingest_delete_shim(isolated_env, monkeypatch):
     seen = []
     monkeypatch.setattr(web, "enqueue_delete", lambda db, settings=None: seen.append(db))
     c = client(isolated_env)
-    assert c.post("/ingest/delete", params={"database_name": "autoontology_src_a"}).status_code == 202
+    assert (
+        c.post("/ingest/delete", params={"database_name": "autoontology_src_a"}).status_code == 202
+    )
     assert c.post("/ingest/delete", params={"database_name": "  "}).status_code == 422
     assert c.post("/ingest/delete").status_code == 422
     assert seen == ["autoontology_src_a"]
@@ -115,8 +121,11 @@ def test_shims_and_proxy_refuse_foreign_host_and_cross_origin(isolated_env, monk
     assert resp.status_code == 403
     resp = c.post("/ingest", json={"database": "x"}, headers={"origin": "http://evil.example"})
     assert resp.status_code == 403
-    resp = c.post("/v1/chat/completions", json={"model": "m", "messages": []},
-                  headers={"host": "evil.example"})
+    resp = c.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": []},
+        headers={"host": "evil.example"},
+    )
     assert resp.status_code == 403
     assert deleted == [] and ingested == []
     # upstream's own calls: Host 127.0.0.1:7800, no Origin

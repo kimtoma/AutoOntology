@@ -25,11 +25,13 @@ def make_pdf(src: Path, out: Path) -> None:
     from markdown_it import MarkdownIt
 
     html = MarkdownIt("commonmark").enable("table").render(src.read_text(encoding="utf-8"))
-    css = ("@font-face {font-family: kr; src: url(%s);} "
-           "* {font-family: kr; font-size: 10.5pt; line-height: 1.5;} "
-           "h1 {font-size: 18pt;} h2 {font-size: 14pt;} h3 {font-size: 12pt;} "
-           "table {border-collapse: collapse;} td, th {border: 1px solid #444; padding: 3px;}"
-           % FONT.name)
+    css = (
+        "@font-face {font-family: kr; src: url(%s);} "
+        "* {font-family: kr; font-size: 10.5pt; line-height: 1.5;} "
+        "h1 {font-size: 18pt;} h2 {font-size: 14pt;} h3 {font-size: 12pt;} "
+        "table {border-collapse: collapse;} td, th {border: 1px solid #444; padding: 3px;}"
+        % FONT.name
+    )
     story = pymupdf.Story(html=html, user_css=css, archive=pymupdf.Archive(str(FONT.parent)))
     writer = pymupdf.DocumentWriter(str(out))
     page = pymupdf.paper_rect("a4")

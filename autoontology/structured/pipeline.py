@@ -63,8 +63,10 @@ def parse_database_url(url: str) -> dict[str, Any]:
     if scheme in ("postgres", "postgresql", "mysql"):
         database = unquote(parts.path.lstrip("/"))
         if not (parts.hostname and user and database):
-            raise SourceError(f"{scheme} URL needs user, host and database: "
-                              f"{scheme}://user:password@host:port/database")
+            raise SourceError(
+                f"{scheme} URL needs user, host and database: "
+                f"{scheme}://user:password@host:port/database"
+            )
         conn: dict[str, Any] = {
             "type": "postgres" if scheme.startswith("postgres") else "mysql",
             "host": parts.hostname,
@@ -80,12 +82,21 @@ def parse_database_url(url: str) -> dict[str, Any]:
     if scheme == "snowflake":
         database = query.get("database", "")
         if not (parts.hostname and user and database and query.get("warehouse")):
-            raise SourceError("snowflake URL needs user, account, warehouse and database: "
-                              "snowflake://user:password@account?warehouse=W&database=D")
-        return {"type": "snowflake", "account": parts.hostname, "user": user,
-                "password": password, "warehouse": query["warehouse"], "database": database}
-    raise SourceError(f"unsupported database URL scheme {scheme!r} "
-                      f"(supported: {', '.join(sorted(_URL_SCHEMES))})")
+            raise SourceError(
+                "snowflake URL needs user, account, warehouse and database: "
+                "snowflake://user:password@account?warehouse=W&database=D"
+            )
+        return {
+            "type": "snowflake",
+            "account": parts.hostname,
+            "user": user,
+            "password": password,
+            "warehouse": query["warehouse"],
+            "database": database,
+        }
+    raise SourceError(
+        f"unsupported database URL scheme {scheme!r} (supported: {', '.join(sorted(_URL_SCHEMES))})"
+    )
 
 
 def redact_url(url: str) -> str:
@@ -166,8 +177,14 @@ def add_source(
     else:
         raise SourceError(f"unsupported kind {kind!r} (files | database)")
     for other in store.list_sources():
-        if other.kind in ("files", "database") and \
-                catalog_database_name(other).casefold() == db_name.casefold():
+        if (
+            other.kind in ("files", "database")
+            and catalog_database_name(other).casefold() == db_name.casefold()
+        ):
             raise SourceError(f"source {other.name!r} already uses database {db_name!r}")
-    return store.add_source(name=name, kind=kind, locator=locator,  # type: ignore[arg-type]
-                            pg_database=pg_database)
+    return store.add_source(
+        name=name,
+        kind=kind,
+        locator=locator,  # type: ignore[arg-type]
+        pg_database=pg_database,
+    )

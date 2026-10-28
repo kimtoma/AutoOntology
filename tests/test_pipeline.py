@@ -51,10 +51,20 @@ def test_database_source_and_redaction(store):
     src = pipeline.add_source(store, url, name="sales")
     assert src.kind == "database" and src.pg_database is None
     assert pipeline.catalog_database_name(src) == "sales"
-    assert pipeline.display_locator(src) == "postgresql://bob:***@db.example:6543/sales?schema=public,crm"
+    assert (
+        pipeline.display_locator(src)
+        == "postgresql://bob:***@db.example:6543/sales?schema=public,crm"
+    )
     conn = pipeline.connection_for(src, Settings(home=store.path.parent))
-    assert conn == {"type": "postgres", "host": "db.example", "user": "bob", "password": "s@cret",
-                    "database": "sales", "port": "6543", "schemas": ["public", "crm"]}
+    assert conn == {
+        "type": "postgres",
+        "host": "db.example",
+        "user": "bob",
+        "password": "s@cret",
+        "database": "sales",
+        "port": "6543",
+        "schemas": ["public", "crm"],
+    }
     with pytest.raises(SourceError, match="already uses database"):
         pipeline.add_source(store, "mysql://u:p@h/sales", name="sales2")
 
@@ -62,8 +72,14 @@ def test_database_source_and_redaction(store):
 def test_parse_urls():
     assert pipeline.parse_database_url("mysql://u:p@h/db")["type"] == "mysql"
     sf = pipeline.parse_database_url("snowflake://u:p@acct?warehouse=W&database=D")
-    assert sf == {"type": "snowflake", "account": "acct", "user": "u", "password": "p",
-                  "warehouse": "W", "database": "D"}
+    assert sf == {
+        "type": "snowflake",
+        "account": "acct",
+        "user": "u",
+        "password": "p",
+        "warehouse": "W",
+        "database": "D",
+    }
     with pytest.raises(SourceError):
         pipeline.parse_database_url("postgresql://h/db")
     with pytest.raises(SourceError, match="unsupported"):

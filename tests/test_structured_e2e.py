@@ -55,4 +55,5 @@ def test_hanbit_build_produces_ontology(ctx):
     assert (out / "summary.json").is_file()
     with zipfile.ZipFile(out / "ossie.zip") as zf:
         assert {"semantic_model.yaml", "ontology.yaml", "mapping.yaml"} <= {
-            n.rsplit("/", 1)[-1] for n in zf.namelist()}
+            n.rsplit("/", 1)[-1] for n in zf.namelist()
+        }

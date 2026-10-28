@@ -12,7 +12,7 @@ def test_format_checks_aligns_columns():
     lines = format_checks(checks).splitlines()
     assert lines[0].split() == ["CHECK", "STATUS", "DETAIL", "REMEDY"]
     status_col = lines[0].index("STATUS")
-    assert [line[status_col:status_col + 4] for line in lines[1:]] == ["OK  ", "WARN", "FAIL"]
+    assert [line[status_col : status_col + 4] for line in lines[1:]] == ["OK  ", "WARN", "FAIL"]
     assert lines[2].endswith("run `autoontology migrate`")
 
 
@@ -84,12 +84,20 @@ def test_openai_chat_check_calls_the_endpoint_directly(isolated_env, monkeypatch
 
     def handler(request):
         seen.append(request)
-        return httpx.Response(200, json={"choices": [{"message": {"content": '{"answer":"p"}'}}],
-                                         "usage": {"prompt_tokens": 1, "completion_tokens": 2}})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"answer":"p"}'}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 2},
+            },
+        )
 
     real = passthrough.PassthroughProvider.client
-    monkeypatch.setattr(passthrough.PassthroughProvider, "client", lambda self: (
-        setattr(self, "transport", httpx.MockTransport(handler)) or real(self)))
+    monkeypatch.setattr(
+        passthrough.PassthroughProvider,
+        "client",
+        lambda self: setattr(self, "transport", httpx.MockTransport(handler)) or real(self),
+    )
     check = doctor.check_openai_chat(Settings.from_env())
     assert check.status == "OK", check
     assert str(seen[0].url) == "https://llm.example.test/v1/chat/completions"
@@ -144,7 +152,8 @@ def test_postgres_errors_after_connect_become_fail_rows(isolated_env, monkeypatc
     monkeypatch.setattr(pg, "database_exists", refuse)
     checks = doctor.check_postgres(settings)
     assert [(c.name, c.status) for c in checks] == [
-        ("postgres", "OK"), ("database autoontology", "FAIL"),
+        ("postgres", "OK"),
+        ("database autoontology", "FAIL"),
     ]
     assert "OperationalError" in checks[1].detail
 
@@ -173,8 +182,9 @@ def test_ollama_check_wants_the_no_think_alias(isolated_env, monkeypatch):
     check = doctor.check_ollama(settings)
     assert check.status == "FAIL" and "openai/qwen3:8b" in check.detail
     assert check.remedy == "uv run autoontology setup"
-    monkeypatch.setattr(doctor.httpx, "get",
-                        lambda *a, **k: _Resp(["openai/qwen3:8b", "bge-m3:latest"]))
+    monkeypatch.setattr(
+        doctor.httpx, "get", lambda *a, **k: _Resp(["openai/qwen3:8b", "bge-m3:latest"])
+    )
     assert doctor.check_ollama(settings).status == "OK"
 
 
@@ -196,15 +206,24 @@ def test_vector_table_dimension_row(isolated_env, monkeypatch):
 
     settings = Settings.from_env()
     monkeypatch.setattr(jobs, "embedding_dimension", lambda s: 1024)
-    monkeypatch.setattr(jobs, "vector_table_state", lambda s: {
-        "data_objects_layer": ("halfvec(1024)", 10), "semantic_layer": None})
+    monkeypatch.setattr(
+        jobs,
+        "vector_table_state",
+        lambda s: {"data_objects_layer": ("halfvec(1024)", 10), "semantic_layer": None},
+    )
     check = doctor.check_vector_tables(settings)
     assert check.status == "OK" and "embedder 1024" in check.detail
-    monkeypatch.setattr(jobs, "vector_table_state", lambda s: {
-        "data_objects_layer": ("halfvec(2048)", 0), "semantic_layer": None})
+    monkeypatch.setattr(
+        jobs,
+        "vector_table_state",
+        lambda s: {"data_objects_layer": ("halfvec(2048)", 0), "semantic_layer": None},
+    )
     assert doctor.check_vector_tables(settings).status == "WARN"
-    monkeypatch.setattr(jobs, "vector_table_state", lambda s: {
-        "data_objects_layer": ("halfvec(2048)", 5), "semantic_layer": None})
+    monkeypatch.setattr(
+        jobs,
+        "vector_table_state",
+        lambda s: {"data_objects_layer": ("halfvec(2048)", 5), "semantic_layer": None},
+    )
     check = doctor.check_vector_tables(settings)
     assert check.status == "FAIL" and "2048" in check.detail and "1024" in check.detail
 
@@ -212,8 +231,11 @@ def test_vector_table_dimension_row(isolated_env, monkeypatch):
 def test_ollama_profile_runs_no_think_and_vector_rows(isolated_env, monkeypatch):
     _stub_infra(monkeypatch)
     monkeypatch.setattr(doctor, "check_ollama", lambda s: Check("ollama", "OK"))
-    monkeypatch.setattr(doctor, "check_openai_chat",
-                        lambda s: (_ for _ in ()).throw(AssertionError("wrong provider")))
+    monkeypatch.setattr(
+        doctor,
+        "check_openai_chat",
+        lambda s: (_ for _ in ()).throw(AssertionError("wrong provider")),
+    )
     monkeypatch.setattr(doctor, "check_ollama_chat", lambda s: Check("chat endpoint", "OK"))
     monkeypatch.setattr(doctor, "check_no_think", lambda s: Check("chat no-think", "OK"))
     monkeypatch.setattr(doctor, "check_embed", lambda s: Check("embedding endpoint", "OK"))
@@ -226,8 +248,13 @@ def test_ollama_profile_runs_no_think_and_vector_rows(isolated_env, monkeypatch)
     monkeypatch.setattr(doctor.httpx, "get", down)
     checks = doctor.run_checks(Settings.from_env())
     names = [c.name for c in checks]
-    assert names[-5:] == ["chat route", "chat endpoint", "chat no-think",
-                          "embedding endpoint", "vector tables"]
+    assert names[-5:] == [
+        "chat route",
+        "chat endpoint",
+        "chat no-think",
+        "embedding endpoint",
+        "vector tables",
+    ]
     route = next(c for c in checks if c.name == "chat route")
     assert route.status == "OK" and "http://127.0.0.1:7800/v1" in route.detail
     assert "service down" in route.detail
@@ -244,8 +271,14 @@ def test_ollama_chat_check_uses_proxy_payload_directly(isolated_env, monkeypatch
     def fake_post(url, json, **kw):
         seen["url"], seen["body"] = url, json
         content = seen.get("content", '{"answer": "pong"}')
-        return httpx.Response(200, request=httpx.Request("POST", url), json={
-            "choices": [{"message": {"content": content}}], "usage": {"completion_tokens": 6}})
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={
+                "choices": [{"message": {"content": content}}],
+                "usage": {"completion_tokens": 6},
+            },
+        )
 
     monkeypatch.setattr(ollama.httpx, "post", fake_post)
     check = doctor.check_ollama_chat(settings)

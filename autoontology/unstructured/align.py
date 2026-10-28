@@ -80,17 +80,25 @@ class TermInfo:
         return not description or description.startswith(FALLBACK_TERM_PREFIX)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "name": self.name, "description": self.description,
-                "synonyms": list(self.synonyms), "attributes": self.attributes,
-                "tables": self.tables}
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "synonyms": list(self.synonyms),
+            "attributes": self.attributes,
+            "tables": self.tables,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TermInfo:
-        return cls(id=data["id"], name=data.get("name") or "",
-                   description=data.get("description") or "",
-                   synonyms=list(data.get("synonyms") or []),
-                   attributes=list(data.get("attributes") or []),
-                   tables=list(data.get("tables") or []))
+        return cls(
+            id=data["id"],
+            name=data.get("name") or "",
+            description=data.get("description") or "",
+            synonyms=list(data.get("synonyms") or []),
+            attributes=list(data.get("attributes") or []),
+            tables=list(data.get("tables") or []),
+        )
 
 
 @dataclass
@@ -112,8 +120,7 @@ def concept_text(c: ConceptInfo) -> str:
 
 def term_text(t: TermInfo) -> str:
     columns = ", ".join(a.get("name") or "" for a in t.attributes if a.get("name"))
-    return (f"{t.name}: {t.description} | synonyms: {', '.join(t.synonyms)} "
-            f"| columns: {columns}")
+    return f"{t.name}: {t.description} | synonyms: {', '.join(t.synonyms)} | columns: {columns}"
 
 
 def text_sha256(text: str) -> str:
@@ -126,14 +133,19 @@ class Candidate:
     similarity: float
 
 
-def top_candidates(vector: Sequence[float] | None,
-                   term_vectors: dict[str, Sequence[float] | None], *,
-                   k: int = DEFAULT_TOP_K, floor: float = DEFAULT_MIN_SIM) -> list[Candidate]:
+def top_candidates(
+    vector: Sequence[float] | None,
+    term_vectors: dict[str, Sequence[float] | None],
+    *,
+    k: int = DEFAULT_TOP_K,
+    floor: float = DEFAULT_MIN_SIM,
+) -> list[Candidate]:
     """Top-*k* Terms by cosine with similarity >= *floor* (ties broken by term id)."""
     if not vector:
         return []
-    scored = [Candidate(tid, round(_cosine(vector, tv), 4))
-              for tid, tv in term_vectors.items() if tv]
+    scored = [
+        Candidate(tid, round(_cosine(vector, tv), 4)) for tid, tv in term_vectors.items() if tv
+    ]
     scored = [c for c in scored if c.similarity >= floor]
     scored.sort(key=lambda c: (-c.similarity, c.term_id))
     return scored[:k]
@@ -143,14 +155,25 @@ def top_candidates(vector: Sequence[float] | None,
 
 
 def concept_payload(c: ConceptInfo) -> dict[str, Any]:
-    return {"name": c.name, "name_en": c.name_en, "kind": c.kind, "definition": c.definition,
-            "synonyms": c.synonyms, "attributes": c.attributes, "evidence": c.evidence}
+    return {
+        "name": c.name,
+        "name_en": c.name_en,
+        "kind": c.kind,
+        "definition": c.definition,
+        "synonyms": c.synonyms,
+        "attributes": c.attributes,
+        "evidence": c.evidence,
+    }
 
 
 def candidate_payload(t: TermInfo) -> dict[str, Any]:
-    return {"id": t.id, "name": t.name, "description": t.description,
-            "synonyms": t.synonyms,
-            "columns": [a.get("name") for a in t.attributes if a.get("name")]}
+    return {
+        "id": t.id,
+        "name": t.name,
+        "description": t.description,
+        "synonyms": t.synonyms,
+        "columns": [a.get("name") for a in t.attributes if a.get("name")],
+    }
 
 
 def judge_key(concept: dict[str, Any], candidates: list[dict[str, Any]], model: str) -> str:
@@ -158,8 +181,16 @@ def judge_key(concept: dict[str, Any], candidates: list[dict[str, Any]], model: 
     model and prompt version = same verdict. Term synonyms and descriptions are left out on
     purpose: ``apply`` itself changes them, and a re-run must not re-judge because of that."""
     terms = [{k: c.get(k) for k in ("id", "name", "columns")} for c in candidates]
-    blob = json.dumps({"v": prompts.ALIGN_PROMPT_VERSION, "model": model, "concept": concept,
-                       "candidates": terms}, sort_keys=True, ensure_ascii=False)
+    blob = json.dumps(
+        {
+            "v": prompts.ALIGN_PROMPT_VERSION,
+            "model": model,
+            "concept": concept,
+            "candidates": terms,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -181,10 +212,12 @@ def make_alignment_judge(backend: LLMBackend, *, mode: str | None = None) -> Jud
             except Exception as exc:  # noqa: BLE001
                 if mode == "structured" or _is_connection_error(exc):
                     raise
-                logger.info("alignment judge structured output failed (%s); JSON mode",
-                            str(exc)[:160])
-        verdict, _ = invoke_json(backend, prompts.align_json_system_prompt(), human,
-                                 AlignmentVerdict)
+                logger.info(
+                    "alignment judge structured output failed (%s); JSON mode", str(exc)[:160]
+                )
+        verdict, _ = invoke_json(
+            backend, prompts.align_json_system_prompt(), human, AlignmentVerdict
+        )
         return verdict
 
     return judge
@@ -198,12 +231,20 @@ def allow_metric_same() -> bool:
     """``AUTOONTOLOGY_ALIGN_ALLOW_METRIC_SAME=1`` lets a metric concept be ``same`` as a Term
     (e.g. a KPI table); off by default."""
     return os.environ.get("AUTOONTOLOGY_ALIGN_ALLOW_METRIC_SAME", "").strip().lower() in (
-        "1", "true", "yes", "on")
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
-def apply_kind_guard(verdict: ValidatedVerdict, concept: ConceptInfo,
-                     term: TermInfo | None, *,
-                     metric_same: bool | None = None) -> ValidatedVerdict:
+def apply_kind_guard(
+    verdict: ValidatedVerdict,
+    concept: ConceptInfo,
+    term: TermInfo | None,
+    *,
+    metric_same: bool | None = None,
+) -> ValidatedVerdict:
     """A Term is a table-level entity: an ``attribute`` concept, a ``metric`` concept (unless
     *metric_same* / ``AUTOONTOLOGY_ALIGN_ALLOW_METRIC_SAME``), or a concept whose name is one
     of the Term's column attributes, is at most ``related`` to it, never ``same``
@@ -214,7 +255,8 @@ def apply_kind_guard(verdict: ValidatedVerdict, concept: ConceptInfo,
     metric_same = allow_metric_same() if metric_same is None else metric_same
     capped = {"attribute"} if metric_same else {"attribute", "metric"}
     columns = {_norm(a.get("name") or "") for a in term.attributes} | {
-        _norm(a.get("source_column") or "") for a in term.attributes}
+        _norm(a.get("source_column") or "") for a in term.attributes
+    }
     reason = ""
     if concept.kind in capped:
         reason = f"a {concept.kind} concept"
@@ -243,8 +285,7 @@ def norm_alias(text: str) -> str:
 
 
 def concept_aliases(concept: ConceptInfo) -> set[str]:
-    return {n for n in map(norm_alias, [concept.name, concept.name_en, *concept.synonyms])
-            if n}
+    return {n for n in map(norm_alias, [concept.name, concept.name_en, *concept.synonyms]) if n}
 
 
 def trusted_term_aliases(term: TermInfo, auto_added: Sequence[str] = ()) -> set[str]:
@@ -261,10 +302,14 @@ def identity_bar(min_conf: float) -> float:
     return max(min_conf, IDENTITY_MIN_CONF)
 
 
-def apply_identity_policy(verdict: ValidatedVerdict, concept: ConceptInfo,
-                          term: TermInfo | None, *, min_conf: float,
-                          auto_added: Sequence[str] = ()) -> tuple[ValidatedVerdict,
-                                                                   dict[str, Any]]:
+def apply_identity_policy(
+    verdict: ValidatedVerdict,
+    concept: ConceptInfo,
+    term: TermInfo | None,
+    *,
+    min_conf: float,
+    auto_added: Sequence[str] = (),
+) -> tuple[ValidatedVerdict, dict[str, Any]]:
     """``same`` (an identity merge: the concept's names become the Term's synonyms) needs
     confidence >= ``max(min_conf, 0.90)`` **and** a normalized full-alias match between the
     concept (name, English name, synonyms) and the Term's trusted aliases
@@ -278,28 +323,42 @@ def apply_identity_policy(verdict: ValidatedVerdict, concept: ConceptInfo,
     if verdict.confidence < bar:
         reason = f"confidence {verdict.confidence:.2f} < {bar:.2f}"
     elif not evidence:
-        reason = (f"no identity evidence: none of {concept.name!r}'s names equals a trusted "
-                  f"alias of {term.name!r}")
+        reason = (
+            f"no identity evidence: none of {concept.name!r}'s names equals a trusted "
+            f"alias of {term.name!r}"
+        )
     if not reason:
-        verdict.notes.append(f"identity evidence ({IDENTITY_POLICY_VERSION}): "
-                             + ", ".join(evidence))
+        verdict.notes.append(
+            f"identity evidence ({IDENTITY_POLICY_VERSION}): " + ", ".join(evidence)
+        )
         return verdict, {}
-    proposal = {"relation": "same", "term_id": verdict.term_id, "term_name": term.name,
-                "confidence": verdict.confidence, "policy": IDENTITY_POLICY_VERSION,
-                "reason": reason}
-    verdict.notes.append(f"same -> related ({IDENTITY_POLICY_VERSION}): {reason}; "
-                         "proposal kept for review")
+    proposal = {
+        "relation": "same",
+        "term_id": verdict.term_id,
+        "term_name": term.name,
+        "confidence": verdict.confidence,
+        "policy": IDENTITY_POLICY_VERSION,
+        "reason": reason,
+    }
+    verdict.notes.append(
+        f"same -> related ({IDENTITY_POLICY_VERSION}): {reason}; proposal kept for review"
+    )
     verdict.relation = "related"
     return verdict, proposal
 
 
-def guard_verdict(verdict: ValidatedVerdict, concept: ConceptInfo, term: TermInfo | None,
-                  *, min_conf: float, auto_added: Sequence[str] = (),
-                  metric_same: bool | None = None) -> tuple[ValidatedVerdict, dict[str, Any]]:
+def guard_verdict(
+    verdict: ValidatedVerdict,
+    concept: ConceptInfo,
+    term: TermInfo | None,
+    *,
+    min_conf: float,
+    auto_added: Sequence[str] = (),
+    metric_same: bool | None = None,
+) -> tuple[ValidatedVerdict, dict[str, Any]]:
     """Every acceptance rule in order: the kind/column guard, then the identity policy."""
     verdict = apply_kind_guard(verdict, concept, term, metric_same=metric_same)
-    return apply_identity_policy(verdict, concept, term, min_conf=min_conf,
-                                 auto_added=auto_added)
+    return apply_identity_policy(verdict, concept, term, min_conf=min_conf, auto_added=auto_added)
 
 
 @dataclass
@@ -315,14 +374,15 @@ class StaleAlias:
 def accepted_aliases(concept: ConceptInfo) -> set[str]:
     """What an accepted ``same`` concept put (or would put) on its Term: name, English name,
     synonyms, normalized."""
-    return {n for n in map(norm_alias, [concept.name, concept.name_en, *concept.synonyms])
-            if n}
+    return {n for n in map(norm_alias, [concept.name, concept.name_en, *concept.synonyms]) if n}
 
 
-def stale_auto_aliases(terms: dict[str, TermInfo],
-                       provenance: dict[str, Sequence[dict[str, Any]]],
-                       protected: dict[str, set[str]],
-                       source_id: str) -> tuple[list[StaleAlias], list[dict[str, Any]]]:
+def stale_auto_aliases(
+    terms: dict[str, TermInfo],
+    provenance: dict[str, Sequence[dict[str, Any]]],
+    protected: dict[str, set[str]],
+    source_id: str,
+) -> tuple[list[StaleAlias], list[dict[str, Any]]]:
     """Repair plan of documents source *source_id*: every synonym currently on a Term that
     the recorded provenance (*provenance*: term id -> [{alias, source_id, concepts}],
     ``term_alias_additions`` x ``runs``) says this source's alignment added, and that **no
@@ -348,28 +408,44 @@ def stale_auto_aliases(terms: dict[str, TermInfo],
                 continue
             sources = {r.get("source_id") for r in recs}
             if source_id in sources:
-                stale.append(StaleAlias(term_id, term.name, synonym, sorted(
-                    {c for r in recs for c in r.get("concepts") or []})))
+                stale.append(
+                    StaleAlias(
+                        term_id,
+                        term.name,
+                        synonym,
+                        sorted({c for r in recs for c in r.get("concepts") or []}),
+                    )
+                )
             else:
-                kept.append({"term_id": term_id, "term_name": term.name, "alias": synonym,
-                             "reason": "unknown provenance" if sources == {None}
-                             else "added by another documents source"})
+                kept.append(
+                    {
+                        "term_id": term_id,
+                        "term_name": term.name,
+                        "alias": synonym,
+                        "reason": "unknown provenance"
+                        if sources == {None}
+                        else "added by another documents source",
+                    }
+                )
     return stale, kept
 
 
-def judge_concept(judge: Judge, concept: ConceptInfo,
-                  candidates: list[TermInfo]) -> ValidatedVerdict:
+def judge_concept(
+    judge: Judge, concept: ConceptInfo, candidates: list[TermInfo]
+) -> ValidatedVerdict:
     raw = judge(concept_payload(concept), [candidate_payload(t) for t in candidates])
     verdict = validate_verdict(raw, {t.id: t.name for t in candidates})
-    return apply_kind_guard(verdict, concept,
-                            next((t for t in candidates if t.id == verdict.term_id), None))
+    return apply_kind_guard(
+        verdict, concept, next((t for t in candidates if t.id == verdict.term_id), None)
+    )
 
 
 # --- apply policy -----------------------------------------------------------------------
 
 
-def merge_synonyms(existing: Sequence[str], additions: Sequence[str],
-                   term_name: str = "") -> list[str]:
+def merge_synonyms(
+    existing: Sequence[str], additions: Sequence[str], term_name: str = ""
+) -> list[str]:
     """Existing synonyms in order, then new ones; case-insensitive dedupe, never removes
     an existing entry, never adds the Term's own name or blanks."""
     out = list(existing)
@@ -415,14 +491,20 @@ class TermPatch:
         return bool(self.synonyms_added) or self.description is not None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"term_id": self.term_id, "term_name": self.term_name,
-                "synonyms_added": self.synonyms_added, "synonyms_after": self.synonyms_after,
-                "description": self.description, "kept_definitions": self.kept_definitions,
-                "concepts": self.concepts}
+        return {
+            "term_id": self.term_id,
+            "term_name": self.term_name,
+            "synonyms_added": self.synonyms_added,
+            "synonyms_after": self.synonyms_after,
+            "description": self.description,
+            "kept_definitions": self.kept_definitions,
+            "concepts": self.concepts,
+        }
 
 
-def plan_patches(matches: dict[str, list[SameMatch]],
-                 terms: dict[str, TermInfo]) -> list[TermPatch]:
+def plan_patches(
+    matches: dict[str, list[SameMatch]], terms: dict[str, TermInfo]
+) -> list[TermPatch]:
     """One patch per Term with accepted ``same`` matches, from the Term's *current* state
     (so a re-run plans nothing for a Term that already has everything)."""
     patches = []
@@ -434,19 +516,22 @@ def plan_patches(matches: dict[str, list[SameMatch]],
         additions: list[str] = []
         for m in group:
             additions += [m.concept_name, *m.synonyms]
-        patch = TermPatch(term_id=term.id, term_name=term.name,
-                          synonyms_before=list(term.synonyms),
-                          synonyms_after=merge_synonyms(term.synonyms, additions, term.name),
-                          concepts=[m.concept_name for m in group],
-                          alignment_ids=[m.alignment_id for m in group
-                                         if m.alignment_id is not None])
+        patch = TermPatch(
+            term_id=term.id,
+            term_name=term.name,
+            synonyms_before=list(term.synonyms),
+            synonyms_after=merge_synonyms(term.synonyms, additions, term.name),
+            concepts=[m.concept_name for m in group],
+            alignment_ids=[m.alignment_id for m in group if m.alignment_id is not None],
+        )
         definitions = [m.definition.strip() for m in group if m.definition.strip()]
         if term.is_fallback:
             if definitions and definitions[0] != (term.description or "").strip():
                 patch.description = definitions[0]
         else:
-            patch.kept_definitions = [d for d in dict.fromkeys(definitions)
-                                      if d != term.description.strip()]
+            patch.kept_definitions = [
+                d for d in dict.fromkeys(definitions) if d != term.description.strip()
+            ]
         patches.append(patch)
     return patches
 
@@ -470,8 +555,11 @@ class TermWriter(Protocol):
 def apply_patch(patch: TermPatch, writer: TermWriter) -> dict[str, Any]:
     """Write one planned patch; unchanged Terms are not touched. The writer merges the
     additions into the Term's synonyms as they are at write time (not as planned)."""
-    result: dict[str, Any] = {"term_id": patch.term_id, "synonyms_added": [],
-                              "description_set": False}
+    result: dict[str, Any] = {
+        "term_id": patch.term_id,
+        "synonyms_added": [],
+        "description_set": False,
+    }
     if patch.synonyms_added:
         written = writer.add_synonyms(patch.term_id, patch.synonyms_added)
         result["synonyms_added"] = list(written.get("added", patch.synonyms_added))

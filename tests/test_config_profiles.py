@@ -17,9 +17,13 @@ def test_default_is_ollama_chat_and_embed(isolated_env):
     assert (s.chat_provider, s.embed_provider, s.model_profile) == ("ollama", "ollama", "ollama")
     assert s.selection_origin["chat_provider"] == "default"
     assert (s.port, s.backend_port) == (7800, 3101)
-    assert (s.postgres_host, s.postgres_port, s.postgres_user, s.postgres_password,
-            s.postgres_database) == ("localhost", 5432, "autoontology", "autoontology",
-                                     "autoontology")
+    assert (
+        s.postgres_host,
+        s.postgres_port,
+        s.postgres_user,
+        s.postgres_password,
+        s.postgres_database,
+    ) == ("localhost", 5432, "autoontology", "autoontology", "autoontology")
     assert s.ollama_endpoint == "http://localhost:11434/v1"
 
 
@@ -39,8 +43,11 @@ def test_ollama_expands_every_triplet(isolated_env, monkeypatch):
 
 def test_ollama_sets_llm_limits_only_when_unset(isolated_env, monkeypatch):
     env = expand_model_profile(Settings.from_env())
-    assert (env["LLM_INVOKE_TIMEOUT_S"], env["LLM_MAX_INFLIGHT"],
-            env["SEMANTIC_LLM_MAX_INFLIGHT"]) == ("180", "2", "1")
+    assert (
+        env["LLM_INVOKE_TIMEOUT_S"],
+        env["LLM_MAX_INFLIGHT"],
+        env["SEMANTIC_LLM_MAX_INFLIGHT"],
+    ) == ("180", "2", "1")
     monkeypatch.setenv("LLM_INVOKE_TIMEOUT_S", "600")
     env = expand_model_profile(Settings.from_env())
     assert "LLM_INVOKE_TIMEOUT_S" not in env  # the user's value stays in force
@@ -104,7 +111,8 @@ def test_openai_validation_names_missing_values(isolated_env, monkeypatch):
     assert any("AUTOONTOLOGY_OPENAI_API_KEY" in p for p in problems)
     assert any("AUTOONTOLOGY_OPENAI_CHAT_MODEL" in p for p in problems)
     assert validate_model_profile(Settings.from_env()) and not validate_model_profile(
-        Settings(home=isolated_env))
+        Settings(home=isolated_env)
+    )
 
 
 @pytest.mark.parametrize("value", ["claude", "codex", "nvidia", "custom"])

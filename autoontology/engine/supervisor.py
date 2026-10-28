@@ -122,8 +122,15 @@ def build_specs(settings: Settings) -> list[ProcessSpec]:
     backend = ProcessSpec(
         name="backend",
         argv=[
-            sys.executable, "-m", "uvicorn", backend_app, "--factory",
-            "--host", "127.0.0.1", "--port", str(settings.backend_port),
+            sys.executable,
+            "-m",
+            "uvicorn",
+            backend_app,
+            "--factory",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(settings.backend_port),
         ],
         cwd=VENDOR_DIR,
         port=settings.backend_port,
@@ -137,8 +144,14 @@ def build_specs(settings: Settings) -> list[ProcessSpec]:
     service = ProcessSpec(
         name="service",
         argv=[
-            sys.executable, "-m", "uvicorn", service_app,
-            "--host", "127.0.0.1", "--port", str(settings.port),
+            sys.executable,
+            "-m",
+            "uvicorn",
+            service_app,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(settings.port),
         ],
         cwd=REPO_ROOT,
         port=settings.port,
@@ -191,7 +204,9 @@ def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
 def listening_pids(port: int) -> list[int]:
     proc = subprocess.run(
         ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return sorted({int(x) for x in proc.stdout.split() if x.strip().isdigit()})
 
@@ -343,17 +358,20 @@ class Supervisor:
                     start_new_session=True,
                 )
         except OSError as exc:  # missing executable, unwritable log dir, ...
-            raise SupervisorError(f"{spec.name}: could not start: {type(exc).__name__}: "
-                                  f"{exc}") from exc
+            raise SupervisorError(
+                f"{spec.name}: could not start: {type(exc).__name__}: {exc}"
+            ) from exc
         # registered at once: whatever fails next, this instance knows and stops the child
         self._procs[proc.pid] = proc
         try:
             self.pid_file(spec).write_text(f"{proc.pid}\n")
         except OSError as exc:
             self._abort_spawn(spec, proc)
-            raise SupervisorError(f"{spec.name}: could not start: recording pid {proc.pid} "
-                                  f"failed ({type(exc).__name__}: {exc}); the child was "
-                                  "stopped") from exc
+            raise SupervisorError(
+                f"{spec.name}: could not start: recording pid {proc.pid} "
+                f"failed ({type(exc).__name__}: {exc}); the child was "
+                "stopped"
+            ) from exc
         return proc
 
     def _abort_spawn(self, spec: ProcessSpec, proc: subprocess.Popen) -> None:
@@ -455,11 +473,9 @@ class Supervisor:
                 if pid is None:
                     pid = self._spawn(spec).pid
                     started.append((spec, pid))
-                    self.echo(f"{spec.name}: started pid {pid} on port {spec.port}, "
-                              "waiting...")
+                    self.echo(f"{spec.name}: started pid {pid} on port {spec.port}, waiting...")
                 else:
-                    self.echo(f"{spec.name}: pid {pid} running but not healthy yet, "
-                              "waiting...")
+                    self.echo(f"{spec.name}: pid {pid} running but not healthy yet, waiting...")
                 self.wait_healthy(spec, pid)
             except Exception as exc:  # noqa: BLE001 - re-raised as SupervisorError below
                 # Roll back everything this call started (plus the unhealthy process).
@@ -468,15 +484,16 @@ class Supervisor:
                     targets.append((spec, pid))
                 stopped = self._stop_named(targets) if targets else []
                 kept = [
-                    f"{s.name} (pid {p})"
-                    for s in self.specs
-                    if (p := self.read_pid(s)) is not None
+                    f"{s.name} (pid {p})" for s in self.specs if (p := self.read_pid(s)) is not None
                 ]
                 note = "; ".join(stopped) or "nothing to stop"
                 if kept:
                     note += f"; left running (started before this call): {', '.join(kept)}"
-                message = str(exc) if isinstance(exc, SupervisorError) else (
-                    f"{spec.name}: could not start: {type(exc).__name__}: {exc}")
+                message = (
+                    str(exc)
+                    if isinstance(exc, SupervisorError)
+                    else (f"{spec.name}: could not start: {type(exc).__name__}: {exc}")
+                )
                 raise SupervisorError(f"{message}\nRolled back: {note}") from None
             self.echo(f"{spec.name}: healthy ({', '.join(spec.health_urls)})")
 
@@ -495,8 +512,13 @@ class Supervisor:
 def format_status(rows: Iterable[ProcessStatus]) -> str:
     header = ("NAME", "PID", "PORT", "HEALTHY", "LOG")
     data = [
-        (r.name, str(r.pid) if r.pid else "-", str(r.port), "yes" if r.healthy else "no",
-         str(r.log_path))
+        (
+            r.name,
+            str(r.pid) if r.pid else "-",
+            str(r.port),
+            "yes" if r.healthy else "no",
+            str(r.log_path),
+        )
         for r in rows
     ]
     widths = [max(len(row[i]) for row in [header, *data]) for i in range(len(header))]

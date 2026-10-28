@@ -32,11 +32,14 @@ def engine(monkeypatch):
     return engine
 
 
-@pytest.mark.parametrize("path, expected", [
-    (HWP, ["사업목적", "보안관리"]),
-    (SAMPLES / "계약관리규정.pdf", ["계약금액", "승인권자", "고객ID"]),
-    (SAMPLES / "청구수납규정.docx", ["청구서", "수납상태", "독촉장"]),
-])
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        (HWP, ["사업목적", "보안관리"]),
+        (SAMPLES / "계약관리규정.pdf", ["계약금액", "승인권자", "고객ID"]),
+        (SAMPLES / "청구수납규정.docx", ["청구서", "수납상태", "독촉장"]),
+    ],
+)
 def test_real_kordoc_reads_fixture(engine, path, expected):
     from autoontology.unstructured import chunker, kordoc, readers
 
@@ -66,8 +69,9 @@ def test_extract_hanbit_docs_against_ollama(monkeypatch):
     monkeypatch.delenv("KORDOC_CLI", raising=False)
     monkeypatch.chdir(REPO_ROOT)
     store = Store.for_home(settings.home)
-    res = extract_job.run_extract(SOURCE, Path("samples/unstructured"), settings=settings,
-                                  store=store)
+    res = extract_job.run_extract(
+        SOURCE, Path("samples/unstructured"), settings=settings, store=store
+    )
     assert res.status == "succeeded", res
     src = store.get_source(SOURCE)
     docs = DocumentStore(store)

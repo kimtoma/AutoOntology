@@ -57,8 +57,14 @@ def make_sup(tmp_path):
         kw.setdefault("ready_timeout", 3)
         kw.setdefault("stop_timeout", 3)
         kw.setdefault("poll_interval", 0.05)
-        sup = Supervisor(tmp_path / "run", tmp_path / "logs", specs,
-                         probe=probe or Probe(), echo=lambda m: messages.append(m), **kw)
+        sup = Supervisor(
+            tmp_path / "run",
+            tmp_path / "logs",
+            specs,
+            probe=probe or Probe(),
+            echo=lambda m: messages.append(m),
+            **kw,
+        )
         created.append(sup)
         return sup
 
@@ -209,8 +215,7 @@ def test_down_also_stops_grandchildren(make_sup):
 
 def test_partial_up_stops_what_it_started(make_sup):
     first, second = fake_spec("first"), fake_spec("second", urls=("http://x/second",))
-    sup = make_sup([first, second], probe=Probe(lambda url: "second" not in url),
-                   ready_timeout=0.5)
+    sup = make_sup([first, second], probe=Probe(lambda url: "second" not in url), ready_timeout=0.5)
     with pytest.raises(SupervisorError, match="Rolled back") as err:
         sup.up()
     assert "first: stopped" in str(err.value) and "second: stopped" in str(err.value)
@@ -234,7 +239,7 @@ def test_stop_escalates_when_a_grandchild_ignores_sigterm(make_sup):
     code = (
         "import subprocess, sys, time\n"
         "gc = 'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        "print(\"ready\", flush=True); time.sleep(60)'\n"
+        'print("ready", flush=True); time.sleep(60)\'\n'
         "p = subprocess.Popen([sys.executable, '-c', gc], stdout=subprocess.PIPE)\n"
         "p.stdout.readline()\n"
         "print(f'GC={p.pid}', flush=True)\n"
@@ -337,8 +342,9 @@ def test_child_env_marks_derived_keys_and_keeps_dotenv_selection_out(isolated_en
     from autoontology.config import load_env
 
     env_file = isolated_env / "sel.env"
-    env_file.write_text("AUTOONTOLOGY_CHAT_PROVIDER=openai\nAUTOONTOLOGY_OPENAI_CHAT_MODEL=m1\n"
-                        "OTHER=1\n")
+    env_file.write_text(
+        "AUTOONTOLOGY_CHAT_PROVIDER=openai\nAUTOONTOLOGY_OPENAI_CHAT_MODEL=m1\nOTHER=1\n"
+    )
     monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env_file))
     load_env()
     settings = S.from_env()

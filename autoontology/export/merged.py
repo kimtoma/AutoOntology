@@ -37,13 +37,30 @@ CLASS_KINDS = frozenset({"entity", "metric", "attribute"})
 INDIVIDUAL_TYPES = {"rule": "BusinessRule", "process": "Process"}
 #: catalog datatype -> XSD local name (anything else stays rdfs:Literal)
 XSD_TYPES = {
-    "text": "string", "varchar": "string", "character varying": "string", "char": "string",
-    "string": "string", "bigint": "integer", "integer": "integer", "int": "integer",
-    "smallint": "integer", "int64": "integer", "int32": "integer", "numeric": "decimal",
-    "decimal": "decimal", "double precision": "double", "real": "double", "float": "double",
-    "double": "double", "boolean": "boolean", "bool": "boolean", "date": "date",
-    "timestamp": "dateTime", "timestamp without time zone": "dateTime",
-    "timestamp with time zone": "dateTime", "timestamptz": "dateTime",
+    "text": "string",
+    "varchar": "string",
+    "character varying": "string",
+    "char": "string",
+    "string": "string",
+    "bigint": "integer",
+    "integer": "integer",
+    "int": "integer",
+    "smallint": "integer",
+    "int64": "integer",
+    "int32": "integer",
+    "numeric": "decimal",
+    "decimal": "decimal",
+    "double precision": "double",
+    "real": "double",
+    "float": "double",
+    "double": "double",
+    "boolean": "boolean",
+    "bool": "boolean",
+    "date": "date",
+    "timestamp": "dateTime",
+    "timestamp without time zone": "dateTime",
+    "timestamp with time zone": "dateTime",
+    "timestamptz": "dateTime",
 }
 LITERAL = "LITERAL"  # rdfs:Literal
 THING = "THING"  # owl:Thing
@@ -220,20 +237,22 @@ class MergedOntology:
             "classes_structured": sum(c.source == "structured" for c in self.classes.values()),
             "classes_document": sum(c.source == "document" for c in self.classes.values()),
             "metric_classes": sum("Metric" in c.extra_types for c in self.classes.values()),
-            "object_properties": sum(p.kind == "object" and p.source != "vocabulary"
-                                     for p in self.properties.values()),
+            "object_properties": sum(
+                p.kind == "object" and p.source != "vocabulary" for p in self.properties.values()
+            ),
             "datatype_properties": sum(p.kind == "datatype" for p in self.properties.values()),
-            "semantic_fk_properties": sum(p.source == "semantic_fk"
-                                          for p in self.properties.values()),
-            "relation_properties": sum(p.source == "document" and p.kind == "object"
-                                       for p in self.properties.values()),
+            "semantic_fk_properties": sum(
+                p.source == "semantic_fk" for p in self.properties.values()
+            ),
+            "relation_properties": sum(
+                p.source == "document" and p.kind == "object" for p in self.properties.values()
+            ),
             "column_properties": sum(p.source == "structured" for p in self.properties.values()),
-            "relation_datatype_properties": sum(p.source == "document" and p.kind == "datatype"
-                                                for p in self.properties.values()),
-            "predicate_properties": sum(p.source == "vocabulary"
-                                        for p in self.properties.values()),
-            "object_properties_total": sum(p.kind == "object"
-                                           for p in self.properties.values()),
+            "relation_datatype_properties": sum(
+                p.source == "document" and p.kind == "datatype" for p in self.properties.values()
+            ),
+            "predicate_properties": sum(p.source == "vocabulary" for p in self.properties.values()),
+            "object_properties_total": sum(p.kind == "object" for p in self.properties.values()),
             "individuals": len(self.individuals),
             "business_rules": sum(i.type == "BusinessRule" for i in self.individuals.values()),
             "processes": sum(i.type == "Process" for i in self.individuals.values()),
@@ -266,11 +285,17 @@ def _add_structured(model: MergedOntology, snap: StructuredSnapshot) -> dict[str
     for term in sorted(snap.terms, key=lambda t: (t.name, t.id)):
         local = f"term-{slug(term.id)}"
         term_class[term.id] = local
-        cls = OClass(local=local, label=term.name, source="structured",
-                     comment=term.description, term_id=term.id,
-                     structured_source=snap.source,
-                     tables=sorted(".".join(p for p in (t.get("schema"), t.get("name")) if p)
-                                   for t in term.tables))
+        cls = OClass(
+            local=local,
+            label=term.name,
+            source="structured",
+            comment=term.description,
+            term_id=term.id,
+            structured_source=snap.source,
+            tables=sorted(
+                ".".join(p for p in (t.get("schema"), t.get("name")) if p) for t in term.tables
+            ),
+        )
         _add_unique(cls.alt_labels, *term.synonyms)
         model.classes[local] = cls
         if term.is_fallback:
@@ -278,28 +303,44 @@ def _add_structured(model: MergedOntology, snap: StructuredSnapshot) -> dict[str
         for attr in sorted(term.attributes, key=lambda a: (a.get("name") or "", a["id"])):
             plocal = f"attr-{slug(attr['id'])}"
             model.properties[plocal] = OProperty(
-                local=plocal, kind="datatype", label=attr.get("name") or "", domain=local,
-                range=_xsd(attr.get("datatype")), source="structured",
-                source_column=qualified(attr), datatype=attr.get("datatype") or "",
-                comment=attr.get("description") or "", owner=snap.source)
+                local=plocal,
+                kind="datatype",
+                label=attr.get("name") or "",
+                domain=local,
+                range=_xsd(attr.get("datatype")),
+                source="structured",
+                source_column=qualified(attr),
+                datatype=attr.get("datatype") or "",
+                comment=attr.get("description") or "",
+                owner=snap.source,
+            )
     for n, fk in enumerate(sorted(snap.fks, key=lambda f: (f.attribute_id, f.column))):
         if fk.owner_term_id not in term_class or fk.target_term_id not in term_class:
             continue
         target = model.classes[term_class[fk.target_term_id]]
         plocal = f"fk-{slug(fk.attribute_id)}-{n}"
         model.properties[plocal] = OProperty(
-            local=plocal, kind="object", label=f"{fk.attribute_name} refers to {target.label}",
-            domain=term_class[fk.owner_term_id], range=target.local, source="semantic_fk",
-            source_column=fk.column, owner=snap.source)
+            local=plocal,
+            kind="object",
+            label=f"{fk.attribute_name} refers to {target.label}",
+            domain=term_class[fk.owner_term_id],
+            range=target.local,
+            source="semantic_fk",
+            source_column=fk.column,
+            owner=snap.source,
+        )
     return term_class
 
 
-def _add_documents(model: MergedOntology, docs: DocumentsInput,
-                   term_class: dict[str, str]) -> None:
+def _add_documents(model: MergedOntology, docs: DocumentsInput, term_class: dict[str, str]) -> None:
     for d in sorted(docs.documents, key=lambda d: d.path):
         model.documents[f"doc-{slug(d.id)}"] = ODocument(
-            local=f"doc-{slug(d.id)}", title=d.title, sha256=d.sha256, path=d.path,
-            source=docs.source)
+            local=f"doc-{slug(d.id)}",
+            title=d.title,
+            sha256=d.sha256,
+            path=d.path,
+            source=docs.source,
+        )
     concept_ev: dict[str, list[str]] = {}
     relation_ev: dict[str, list[str]] = {}
     for row in docs.evidence:
@@ -307,8 +348,13 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput,
         doc_local = f"doc-{slug(row['doc_id'])}"
         if doc_local not in model.documents:
             continue
-        model.evidence[local] = OEvidence(local=local, document=doc_local, quote=row["quote"],
-                                          page=row.get("page"), verified=bool(row["verified"]))
+        model.evidence[local] = OEvidence(
+            local=local,
+            document=doc_local,
+            quote=row["quote"],
+            page=row.get("page"),
+            verified=bool(row["verified"]),
+        )
         if row.get("concept_id"):
             concept_ev.setdefault(row["concept_id"], []).append(local)
         if row.get("relation_id"):
@@ -316,8 +362,9 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput,
     # committed verdicts only: a dry-run row (wherever it comes from) never folds, never
     # becomes an axiom and is not counted; it is only reported (dry_run_same)
     alignments = {a.concept_id: a for a in docs.alignments if not a.dry_run}
-    previews = {a.concept_id: a for a in [*docs.previews,
-                                           *(a for a in docs.alignments if a.dry_run)]}
+    previews = {
+        a.concept_id: a for a in [*docs.previews, *(a for a in docs.alignments if a.dry_run)]
+    }
     counts: dict[str, int] = {}
     node_of: dict[str, str] = {}  # concept name -> node local
     kind_of: dict[str, str] = {}
@@ -338,49 +385,79 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput,
             cls.derived_from += evidence
             cls.concept_ids.append(c.id)
             cls.documents_source = cls.documents_source or docs.source
-            model.merges.append(OMerge(f"concept-{slug(c.id)}", c.name, c.kind, term_local,
-                                       a.confidence, evidence))
+            model.merges.append(
+                OMerge(f"concept-{slug(c.id)}", c.name, c.kind, term_local, a.confidence, evidence)
+            )
             node_of[c.name] = term_local
             continue
         local = f"concept-{slug(c.id)}"
         node_of[c.name] = local
         if c.kind in CLASS_KINDS:
-            cls = OClass(local=local, label=c.name, source="document", kind=c.kind,
-                         derived_from=list(evidence), concept_ids=[c.id],
-                         documents_source=docs.source,
-                         extra_types=["Metric"] if c.kind == "metric" else [])
+            cls = OClass(
+                local=local,
+                label=c.name,
+                source="document",
+                kind=c.kind,
+                derived_from=list(evidence),
+                concept_ids=[c.id],
+                documents_source=docs.source,
+                extra_types=["Metric"] if c.kind == "metric" else [],
+            )
             _add_unique(cls.alt_labels, *c.synonyms, c.name_en)
             if c.definition:
                 cls.definitions.append(c.definition)
             model.classes[local] = cls
-            entry = {"name": c.name, "kind": c.kind, "source": docs.source,
-                     "relation": relation, "term": a.term_name if a else ""}
+            entry = {
+                "name": c.name,
+                "kind": c.kind,
+                "source": docs.source,
+                "relation": relation,
+                "term": a.term_name if a else "",
+            }
             preview = previews.get(c.id)
             if a and a.relation == "same":  # judged same but not folded: say why
                 if a.accepted and not term_local:
-                    model.source_missing.append({**entry, "confidence": a.confidence,
-                                                 "structured_source": a.structured_source})
+                    model.source_missing.append(
+                        {
+                            **entry,
+                            "confidence": a.confidence,
+                            "structured_source": a.structured_source,
+                        }
+                    )
                 else:
                     model.low_confidence.append({**entry, "confidence": a.confidence})
             elif preview is not None and preview.relation == "same":
-                model.dry_run_same.append({**entry, "term": preview.term_name,
-                                           "confidence": preview.confidence})
+                model.dry_run_same.append(
+                    {**entry, "term": preview.term_name, "confidence": preview.confidence}
+                )
             if term_local and a and a.relation in ("broader", "narrower", "related"):
                 # broader: concept ⊑ Term; narrower: Term ⊑ concept; related: concept ~ Term
-                subject, obj = ((term_local, local) if a.relation == "narrower"
-                                else (local, term_local))
-                model.axioms.append(OAxiom(
-                    subject=subject, kind="related" if a.relation == "related"
-                    else "subclass_of", object=obj, source="alignment",
-                    derived_from=list(evidence), confidence=a.confidence,
-                    rationale=a.rationale))
+                subject, obj = (
+                    (term_local, local) if a.relation == "narrower" else (local, term_local)
+                )
+                model.axioms.append(
+                    OAxiom(
+                        subject=subject,
+                        kind="related" if a.relation == "related" else "subclass_of",
+                        object=obj,
+                        source="alignment",
+                        derived_from=list(evidence),
+                        confidence=a.confidence,
+                        rationale=a.rationale,
+                    )
+                )
             else:
                 model.unaligned.append(entry)
         else:
             model.individuals[local] = OIndividual(
-                local=local, label=c.name, type=INDIVIDUAL_TYPES.get(c.kind, "Concept"),
-                kind=c.kind, comment=c.definition, derived_from=list(evidence),
-                documents_source=docs.source)
+                local=local,
+                label=c.name,
+                type=INDIVIDUAL_TYPES.get(c.kind, "Concept"),
+                kind=c.kind,
+                comment=c.definition,
+                derived_from=list(evidence),
+                documents_source=docs.source,
+            )
             _add_unique(model.individuals[local].alt_labels, *c.synonyms, c.name_en)
     # summed over every documents source of the export
     totals = {**model.alignment_counts}
@@ -396,50 +473,94 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput,
             model.collapsed_relations.append(f"{r.subject} {r.predicate} {r.object}")
             continue
         if r.predicate == "is_a" and s in model.classes and o in model.classes:
-            model.axioms.append(OAxiom(subject=s, kind="subclass_of", object=o,
-                                       source="document", derived_from=evidence))
+            model.axioms.append(
+                OAxiom(
+                    subject=s,
+                    kind="subclass_of",
+                    object=o,
+                    source="document",
+                    derived_from=evidence,
+                )
+            )
             continue
         local = f"rel-{slug(r.id)}"
-        label = r.label if r.label and r.label != r.predicate else \
-            f"{r.subject} {r.predicate} {r.object}"
+        label = (
+            r.label
+            if r.label and r.label != r.predicate
+            else f"{r.subject} {r.predicate} {r.object}"
+        )
         if r.predicate == "has_attribute" and kind_of.get(r.object) == "attribute":
             model.properties[local] = OProperty(
-                local=local, kind="datatype", label=label, domain=model.node_class(s),
-                range=LITERAL, source="document", predicate=r.predicate,
-                value_concept=o, derived_from=evidence, owner=docs.source,
-                subject_node=s, object_node=o)
+                local=local,
+                kind="datatype",
+                label=label,
+                domain=model.node_class(s),
+                range=LITERAL,
+                source="document",
+                predicate=r.predicate,
+                value_concept=o,
+                derived_from=evidence,
+                owner=docs.source,
+                subject_node=s,
+                object_node=o,
+            )
             continue
         model.properties[local] = OProperty(
-            local=local, kind="object", label=label, domain=model.node_class(s),
-            range=model.node_class(o), source="document", predicate=r.predicate,
-            sub_property_of=r.predicate, derived_from=evidence, owner=docs.source,
-            subject_node=s, object_node=o)
+            local=local,
+            kind="object",
+            label=label,
+            domain=model.node_class(s),
+            range=model.node_class(o),
+            source="document",
+            predicate=r.predicate,
+            sub_property_of=r.predicate,
+            derived_from=evidence,
+            owner=docs.source,
+            subject_node=s,
+            object_node=o,
+        )
         if r.predicate not in model.properties:
             model.properties[r.predicate] = OProperty(
-                local=r.predicate, kind="object", label=r.predicate.replace("_", " "),
-                domain=THING, range=THING, source="vocabulary", predicate=r.predicate)
+                local=r.predicate,
+                kind="object",
+                label=r.predicate.replace("_", " "),
+                domain=THING,
+                range=THING,
+                source="vocabulary",
+                predicate=r.predicate,
+            )
 
 
-def expected_class_count(structured: Sequence[StructuredSnapshot],
-                         documents: Sequence[DocumentsInput]) -> int:
+def expected_class_count(
+    structured: Sequence[StructuredSnapshot], documents: Sequence[DocumentsInput]
+) -> int:
     """owl:Class count the export must have, from the inputs alone (not the model): every
     Term, plus every entity/metric/attribute concept not folded into an exported Term by an
     accepted ``same``."""
     term_ids = {t.id for snap in structured for t in snap.terms}
     count = len(term_ids)
     for docs in documents:
-        folded = {a.concept_id for a in docs.alignments
-                  if a.accepted and not a.dry_run and a.relation == "same"
-                  and a.term_id in term_ids}
+        folded = {
+            a.concept_id
+            for a in docs.alignments
+            if a.accepted and not a.dry_run and a.relation == "same" and a.term_id in term_ids
+        }
         count += sum(c.kind in CLASS_KINDS and c.id not in folded for c in docs.concepts)
     return count
 
 
-def build(name: str, *, structured: Sequence[StructuredSnapshot] = (),
-          documents: Sequence[DocumentsInput] = ()) -> MergedOntology:
-    model = MergedOntology(name=name, base=BASE_IRI.format(name=slug(name)),
-                           structured_sources=[s.source for s in structured],
-                           documents_sources=[d.source for d in documents])
+def build(
+    name: str,
+    *,
+    structured: Sequence[StructuredSnapshot] = (),
+    documents: Sequence[DocumentsInput] = (),
+) -> MergedOntology:
+    model = MergedOntology(
+        name=name,
+        base=BASE_IRI.format(name=slug(name)),
+        structured_sources=[s.source for s in structured],
+        documents_sources=[d.source for d in documents],
+    )
     term_class: dict[str, str] = {}
     for snap in structured:
         term_class.update(_add_structured(model, snap))

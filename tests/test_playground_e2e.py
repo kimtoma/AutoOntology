@@ -30,16 +30,16 @@ def svc():
         httpx.get(f"{settings.service_url}/health/live", timeout=3).raise_for_status()
     except httpx.HTTPError:
         pytest.skip("service not running (uv run autoontology up)")
-    names = [s["name"] for s in httpx.get(f"{settings.service_url}/api/sources"
-                                          ).json()["sources"]]
+    names = [s["name"] for s in httpx.get(f"{settings.service_url}/api/sources").json()["sources"]]
     if DOCS not in names:
         pytest.skip(f"no {DOCS} source")
     yield base
     out = settings.exports_dir / "playground-e2e"
     out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    (out / f"{stamp}.json").write_text(json.dumps(RECORD, ensure_ascii=False, indent=2),
-                                       encoding="utf-8")
+    (out / f"{stamp}.json").write_text(
+        json.dumps(RECORD, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"\nrecorded: {out / f'{stamp}.json'}")
 
 
@@ -61,21 +61,31 @@ def test_chat_about_contracts_cites_elements(svc):
     assert "error" not in names, evs[-1]
     answer = "".join(d["text"] for n, d in evs if n == "delta")
     cites = dict(evs)["citations"]
-    RECORD["chat"] = {"question": "계약은 어떤 승인 절차를 거치나요?", "answer": answer,
-                      "citations": cites, "status": dict(evs)["status"],
-                      "retrieved": len(dict(evs)["retrieved"]["elements"]),
-                      "index": dict(evs)["retrieved"]["index"]}
+    RECORD["chat"] = {
+        "question": "계약은 어떤 승인 절차를 거치나요?",
+        "answer": answer,
+        "citations": cites,
+        "status": dict(evs)["status"],
+        "retrieved": len(dict(evs)["retrieved"]["elements"]),
+        "index": dict(evs)["retrieved"]["index"],
+    }
     assert answer.strip()
     assert len(cites["citations"]) >= 1, answer
 
 
 def test_nl_to_sql_question(svc):
-    evs = events(f"{svc}/sql", {"source": DOCS, "question": "고객 수는?",
-                                "conversation_id": str(uuid.uuid4())})
+    evs = events(
+        f"{svc}/sql",
+        {"source": DOCS, "question": "고객 수는?", "conversation_id": str(uuid.uuid4())},
+    )
     names = [n for n, _ in evs]
-    RECORD["sql"] = {"question": "고객 수는?", "events": names,
-                     "meta": dict(evs).get("meta"), "result": dict(evs).get("result"),
-                     "error": dict(evs).get("error")}
+    RECORD["sql"] = {
+        "question": "고객 수는?",
+        "events": names,
+        "meta": dict(evs).get("meta"),
+        "result": dict(evs).get("result"),
+        "error": dict(evs).get("error"),
+    }
     assert names[0] == "meta" and names[-1] in ("done", "error")
     assert "step" in names
     assert "result" in names or "error" in names
@@ -86,9 +96,14 @@ def test_sparql_examples_all_execute(svc):
     assert len(examples) == 8
     RECORD["sparql"] = {}
     for ex in examples:
-        r = httpx.post(f"{svc}/sparql", json={"source": DOCS, "query": ex["query"],
-                                              "limit": 3}, timeout=30)
+        r = httpx.post(
+            f"{svc}/sparql", json={"source": DOCS, "query": ex["query"], "limit": 3}, timeout=30
+        )
         assert r.status_code == 200, (ex["id"], r.text)
         body = r.json()
-        RECORD["sparql"][ex["id"]] = {"total": body["total"], "columns": body["columns"],
-                                      "rows": body["rows"], "export": body["export"]}
+        RECORD["sparql"][ex["id"]] = {
+            "total": body["total"],
+            "columns": body["columns"],
+            "rows": body["rows"],
+            "export": body["export"],
+        }

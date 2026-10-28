@@ -17,8 +17,15 @@ EXPORT_TIMEOUT_S = 300.0
 class BackendError(RuntimeError):
     """Non-2xx answer (``status`` set) or no answer at all (``status`` is None)."""
 
-    def __init__(self, message: str, *, status: int | None = None, body: str = "",
-                 method: str = "", url: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        body: str = "",
+        method: str = "",
+        url: str = "",
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.body = body
@@ -31,8 +38,12 @@ class BackendUnavailable(BackendError):
 
 
 class BackendClient:
-    def __init__(self, base_url: str, timeout: float = DEFAULT_TIMEOUT_S,
-                 transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = DEFAULT_TIMEOUT_S,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self._http = httpx.Client(
             base_url=self.base_url,
@@ -57,14 +68,18 @@ class BackendClient:
             raise BackendUnavailable(
                 f"upstream backend not reachable at {self.base_url} ({type(exc).__name__}); "
                 "start it with `uv run autoontology up`",
-                method=method, url=f"{self.base_url}{path}",
+                method=method,
+                url=f"{self.base_url}{path}",
             ) from exc
         if resp.is_success:
             return resp
         body = resp.text[:2000]
         raise BackendError(
             f"{method} {path} -> HTTP {resp.status_code}: {body[:300]}",
-            status=resp.status_code, body=body, method=method, url=str(resp.request.url),
+            status=resp.status_code,
+            body=body,
+            method=method,
+            url=str(resp.request.url),
         )
 
     def _json(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -87,8 +102,9 @@ class BackendClient:
 
     def connection_exists(self, database_name: str) -> bool:
         key = database_name.casefold()
-        return any(str(c.get("database_name", "")).casefold() == key
-                   for c in self.list_connections())
+        return any(
+            str(c.get("database_name", "")).casefold() == key for c in self.list_connections()
+        )
 
     def delete_connection(self, database_name: str) -> dict[str, Any]:
         path = f"/api/connections/{quote(database_name, safe='')}"
@@ -109,8 +125,9 @@ class BackendClient:
     def list_terms(self, **params: Any) -> dict[str, Any]:
         """``{"terms": [...], "total", "column_attribute_counts", "sql_attribute_counts",
         "related_counts"}``; params: query, skip, limit (no limit = every Term)."""
-        return self._json("GET", "/api/terms", params={k: v for k, v in params.items()
-                                                       if v is not None})
+        return self._json(
+            "GET", "/api/terms", params={k: v for k, v in params.items() if v is not None}
+        )
 
     def get_term(self, term_id: str) -> dict[str, Any]:
         """One Term with ``synonyms``, ``tables`` (REPRESENTS) and ``related_terms``."""
@@ -134,10 +151,12 @@ class BackendClient:
         params = {"database_id": database_id} if database_id else {}
         return self._json("GET", "/api/exploration/semantic-graph", params=params)["data"]
 
-    def export_model(self, database_ids: list[str], fmt: str = "auto_ontology",
-                     include_ontology: bool = False) -> bytes:
+    def export_model(
+        self, database_ids: list[str], fmt: str = "auto_ontology", include_ontology: bool = False
+    ) -> bytes:
         body: dict[str, Any] = {"databases": list(database_ids), "format": fmt}
         if include_ontology:
             body["include_ontology"] = True
-        return self._request("POST", "/api/model/export", json=body,
-                             timeout=EXPORT_TIMEOUT_S).content
+        return self._request(
+            "POST", "/api/model/export", json=body, timeout=EXPORT_TIMEOUT_S
+        ).content

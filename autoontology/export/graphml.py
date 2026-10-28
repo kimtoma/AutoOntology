@@ -23,8 +23,9 @@ from typing import Any
 from autoontology.export.merged import THING, MergedOntology
 
 GRAPHML_NS = "http://graphml.graphdrawing.org/xmlns"
-_SCHEMA_LOCATION = ("http://graphml.graphdrawing.org/xmlns "
-                    "http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd")
+_SCHEMA_LOCATION = (
+    "http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd"
+)
 
 
 class Graph:
@@ -49,38 +50,66 @@ class Graph:
     def __contains__(self, node: str) -> bool:
         return node in self.nodes
 
-VOCAB_NODES = {"BusinessRule": "os:BusinessRule", "Process": "os:Process",
-               "Concept": "skos:Concept", THING: "owl:Thing"}
+
+VOCAB_NODES = {
+    "BusinessRule": "os:BusinessRule",
+    "Process": "os:Process",
+    "Concept": "skos:Concept",
+    THING: "owl:Thing",
+}
 
 
 def to_graph(model: MergedOntology) -> Graph:
     g = Graph(name=model.name)
 
     def add(local: str, type_: str, label: str, source: str, **extra: str) -> None:
-        g.add_node(local, type=type_, label=label or local, source=source,
-                   **{k: v for k, v in extra.items() if v})
+        g.add_node(
+            local,
+            type=type_,
+            label=label or local,
+            source=source,
+            **{k: v for k, v in extra.items() if v},
+        )
 
     def ensure(local: str) -> None:
         if local not in g and local in VOCAB_NODES:
             add(local, "vocabulary", VOCAB_NODES[local], "vocabulary")
 
     for c in model.classes.values():
-        add(c.local, "class", c.label, c.source, kind=c.kind,
-            metric="true" if "Metric" in c.extra_types else "")
+        add(
+            c.local,
+            "class",
+            c.label,
+            c.source,
+            kind=c.kind,
+            metric="true" if "Metric" in c.extra_types else "",
+        )
     for i in model.individuals.values():
         add(i.local, "individual", i.label, "document", kind=i.kind, individual_type=i.type)
     for d in model.documents.values():
         add(d.local, "document", d.title, "document", path=d.path, sha256=d.sha256)
     for m in model.merges:
         add(m.concept_local, "concept", m.concept_name, "document", kind=m.concept_kind)
-        g.add_edge(m.concept_local, m.term_local, type="aligned_same", label="same",
-                   confidence=f"{m.confidence:.3f}" if m.confidence is not None else "")
+        g.add_edge(
+            m.concept_local,
+            m.term_local,
+            type="aligned_same",
+            label="same",
+            confidence=f"{m.confidence:.3f}" if m.confidence is not None else "",
+        )
     for p in model.properties.values():
         if p.source == "vocabulary":
             continue
         type_ = "object_property" if p.kind == "object" else "datatype_property"
-        add(p.local, type_, p.label, p.source, source_column=p.source_column,
-            predicate=p.predicate, datatype=p.datatype)
+        add(
+            p.local,
+            type_,
+            p.label,
+            p.source,
+            source_column=p.source_column,
+            predicate=p.predicate,
+            datatype=p.datatype,
+        )
         ensure(p.domain)
         g.add_edge(p.domain, p.local, type=type_, label="domain")
         if p.kind == "object":
@@ -89,14 +118,17 @@ def to_graph(model: MergedOntology) -> Graph:
         elif p.value_concept:
             g.add_edge(p.local, p.value_concept, type=type_, label="value concept")
     for a in model.axioms:
-        g.add_edge(a.subject, a.object, type=a.kind,
-                   label="subClassOf" if a.kind == "subclass_of" else "related",
-                   source=a.source)
+        g.add_edge(
+            a.subject,
+            a.object,
+            type=a.kind,
+            label="subClassOf" if a.kind == "subclass_of" else "related",
+            source=a.source,
+        )
     evidence_docs = {e.local: e.document for e in model.evidence.values()}
 
     def evidence_edges(local: str, refs: list[str]) -> None:
-        for doc, n in sorted(Counter(evidence_docs[r] for r in refs
-                                     if r in evidence_docs).items()):
+        for doc, n in sorted(Counter(evidence_docs[r] for r in refs if r in evidence_docs).items()):
             g.add_edge(local, doc, type="evidence", label="evidence", quotes=str(n))
 
     for c in model.classes.values():
@@ -114,8 +146,10 @@ def to_graph(model: MergedOntology) -> Graph:
 
 def to_xml(g: Graph) -> ET.ElementTree:
     ET.register_namespace("", GRAPHML_NS)
-    root = ET.Element(f"{{{GRAPHML_NS}}}graphml", {
-        "{http://www.w3.org/2001/XMLSchema-instance}schemaLocation": _SCHEMA_LOCATION})
+    root = ET.Element(
+        f"{{{GRAPHML_NS}}}graphml",
+        {"{http://www.w3.org/2001/XMLSchema-instance}schemaLocation": _SCHEMA_LOCATION},
+    )
     keys: dict[tuple[str, str], str] = {}
 
     def key_for(domain: str, name: str) -> str:
@@ -134,22 +168,30 @@ def to_xml(g: Graph) -> ET.ElementTree:
         for name in attrs:
             key_for("edge", name)
     for (domain, name), kid in keys.items():
-        ET.SubElement(root, f"{{{GRAPHML_NS}}}key", {"id": kid, "for": domain,
-                                                      "attr.name": name,
-                                                      "attr.type": "string"})
+        ET.SubElement(
+            root,
+            f"{{{GRAPHML_NS}}}key",
+            {"id": kid, "for": domain, "attr.name": name, "attr.type": "string"},
+        )
     graph = ET.SubElement(root, f"{{{GRAPHML_NS}}}graph", {"edgedefault": "directed"})
 
     def data(parent: ET.Element, domain: str, attrs: dict[str, str]) -> None:
         for name, value in attrs.items():
-            ET.SubElement(parent, f"{{{GRAPHML_NS}}}data",
-                          {"key": keys[(domain, name)]}).text = value
+            ET.SubElement(
+                parent, f"{{{GRAPHML_NS}}}data", {"key": keys[(domain, name)]}
+            ).text = value
 
     data(graph, "graph", graph_attrs)
     for node, attrs in g.nodes.items():
         data(ET.SubElement(graph, f"{{{GRAPHML_NS}}}node", {"id": node}), "node", attrs)
     for u, v, key, attrs in g.edges:
-        data(ET.SubElement(graph, f"{{{GRAPHML_NS}}}edge",
-                           {"source": u, "target": v, "id": str(key)}), "edge", attrs)
+        data(
+            ET.SubElement(
+                graph, f"{{{GRAPHML_NS}}}edge", {"source": u, "target": v, "id": str(key)}
+            ),
+            "edge",
+            attrs,
+        )
     tree = ET.ElementTree(root)
     ET.indent(tree)
     return tree
@@ -171,10 +213,14 @@ def read(path: Path) -> tuple[dict[str, dict[str, str]], list[tuple[str, str, di
         raise ValueError(f"{path}: no <graph> element")
 
     def attrs(el: ET.Element) -> dict[str, str]:
-        return {names.get(d.get("key"), d.get("key") or ""): d.text or ""
-                for d in el.findall("g:data", ns)}
+        return {
+            names.get(d.get("key"), d.get("key") or ""): d.text or ""
+            for d in el.findall("g:data", ns)
+        }
 
     nodes = {n.get("id") or "": attrs(n) for n in graph.findall("g:node", ns)}
-    edges = [(e.get("source") or "", e.get("target") or "", attrs(e))
-             for e in graph.findall("g:edge", ns)]
+    edges = [
+        (e.get("source") or "", e.get("target") or "", attrs(e))
+        for e in graph.findall("g:edge", ns)
+    ]
     return nodes, edges

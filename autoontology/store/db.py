@@ -284,8 +284,9 @@ class SourceBusy(RuntimeError):
     """Another operation holds the source's lease (an HTTP 409 for the API)."""
 
     def __init__(self, name: str, operation: str, pid: int) -> None:
-        super().__init__(f"source {name!r} already has an active {operation} (pid {pid}); "
-                         "wait for it to finish")
+        super().__init__(
+            f"source {name!r} already has an active {operation} (pid {pid}); wait for it to finish"
+        )
         self.name, self.operation, self.pid = name, operation, pid
 
 
@@ -306,16 +307,19 @@ class Lease:
         if self.lost.is_set():
             return False
         with self.store._conn() as conn:
-            n = conn.execute("SELECT count(*) FROM source_leases WHERE token = ?",
-                             (self.token,)).fetchone()[0]
+            n = conn.execute(
+                "SELECT count(*) FROM source_leases WHERE token = ?", (self.token,)
+            ).fetchone()[0]
         if n != len(self.names):
             self.lost.set()
         return not self.lost.is_set()
 
     def check(self) -> None:
         if not self.owned():
-            raise LeaseLost(f"lease lost: the {self.operation} reservation of "
-                            f"{', '.join(self.names)} was taken over; stopping")
+            raise LeaseLost(
+                f"lease lost: the {self.operation} reservation of "
+                f"{', '.join(self.names)} was taken over; stopping"
+            )
 
 
 def pid_alive(pid: int) -> bool:
@@ -433,17 +437,19 @@ def _retry_locked(fn: Any, conn: sqlite3.Connection, what: str) -> Any:
             if not _locked(exc):
                 raise
             last = exc
-        time.sleep(max(0.0, min(0.5, 0.005 * 2 ** attempt, deadline - time.monotonic())))
+        time.sleep(max(0.0, min(0.5, 0.005 * 2**attempt, deadline - time.monotonic())))
     raise StoreLocked(
         f"the AutoOntology store is locked ({what}) for more than {timeout:.0f}s: another "
         "process holds a write transaction on autoontology.db (see `autoontology status` / running "
-        "jobs); retry later or raise AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S") from last
+        "jobs); retry later or raise AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S"
+    ) from last
 
 
 def _ensure_wal(conn: sqlite3.Connection) -> None:
     """WAL mode, set once per database. Changing the journal mode needs an exclusive lock
     and fails with "database is locked" *without* waiting on the busy handler when another
     connection is opening the same fresh database, so it is retried."""
+
     def apply() -> None:
         if str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() != "wal":
             conn.execute("PRAGMA journal_mode=WAL")
@@ -482,8 +488,7 @@ class Store:
     def _immediate(self) -> Iterator[sqlite3.Connection]:
         """A connection inside ``BEGIN IMMEDIATE`` (write lock up front): check-then-write
         sequences in it are atomic across threads and processes."""
-        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000,
-                               isolation_level=None)
+        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
         conn.row_factory = sqlite3.Row
         try:
             conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
@@ -517,8 +522,7 @@ class Store:
         transactional) and the write lock taken by ``BEGIN IMMEDIATE`` serialises
         concurrent migrators, which re-read the version inside the transaction.
         """
-        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000,
-                               isolation_level=None)
+        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
         try:
             conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             _ensure_wal(conn)
@@ -530,8 +534,9 @@ class Store:
                         "CREATE TABLE IF NOT EXISTS schema_version "
                         "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
                     )
-                    current = conn.execute(
-                        "SELECT max(version) FROM schema_version").fetchone()[0] or 0
+                    current = (
+                        conn.execute("SELECT max(version) FROM schema_version").fetchone()[0] or 0
+                    )
                     pending = [(v, sql) for v, sql in MIGRATIONS if v > current]
                     if not pending:
                         conn.execute("COMMIT")
@@ -590,8 +595,10 @@ class Store:
 
     def set_locator(self, source_id: str, locator: str) -> None:
         with self._conn() as conn:
-            conn.execute("UPDATE sources SET locator = ?, updated_at = ? WHERE id = ?",
-                         (locator, now_iso(), source_id))
+            conn.execute(
+                "UPDATE sources SET locator = ?, updated_at = ? WHERE id = ?",
+                (locator, now_iso(), source_id),
+            )
 
     def set_catalog_database_id(self, source_id: str, catalog_database_id: str | None) -> None:
         with self._conn() as conn:
@@ -614,8 +621,9 @@ class Store:
 
     def get_file_manifest(self, source_id: str) -> dict[str, Any] | None:
         with self._conn() as conn:
-            row = conn.execute("SELECT manifest_json FROM file_manifests WHERE source_id = ?",
-                               (source_id,)).fetchone()
+            row = conn.execute(
+                "SELECT manifest_json FROM file_manifests WHERE source_id = ?", (source_id,)
+            ).fetchone()
         return json.loads(row[0]) if row else None
 
     def set_file_manifest(self, source_id: str, manifest: dict[str, Any]) -> None:
@@ -624,12 +632,14 @@ class Store:
                 "INSERT INTO file_manifests (source_id, manifest_json, updated_at) "
                 "VALUES (?, ?, ?) ON CONFLICT (source_id) DO UPDATE SET "
                 "manifest_json = excluded.manifest_json, updated_at = excluded.updated_at",
-                (source_id, json.dumps(manifest, ensure_ascii=False), now_iso()))
+                (source_id, json.dumps(manifest, ensure_ascii=False), now_iso()),
+            )
 
     def _semantic_row(self, source_id: str) -> sqlite3.Row | None:
         with self._conn() as conn:
-            return conn.execute("SELECT * FROM semantic_baselines WHERE source_id = ?",
-                                (source_id,)).fetchone()
+            return conn.execute(
+                "SELECT * FROM semantic_baselines WHERE source_id = ?", (source_id,)
+            ).fetchone()
 
     def get_semantic_baseline(self, source_id: str) -> dict[str, Any] | None:
         row = self._semantic_row(source_id)
@@ -646,7 +656,8 @@ class Store:
                 f"INSERT INTO semantic_baselines (source_id, {column}, updated_at) "
                 f"VALUES (?, ?, ?) ON CONFLICT (source_id) DO UPDATE SET "
                 f"{column} = excluded.{column}, updated_at = excluded.updated_at",
-                (source_id, payload, now_iso()))
+                (source_id, payload, now_iso()),
+            )
 
     def set_semantic_baseline(self, source_id: str, baseline: dict[str, Any]) -> None:
         self._set_semantic(source_id, "baseline_json", baseline)
@@ -669,8 +680,14 @@ class Store:
             conn.execute(
                 "INSERT INTO runs (id, kind, source_id, status, started_at, params_json) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (run_id, kind, source_id, status, now_iso(),
-                 json.dumps(params or {}, ensure_ascii=False, default=str)),
+                (
+                    run_id,
+                    kind,
+                    source_id,
+                    status,
+                    now_iso(),
+                    json.dumps(params or {}, ensure_ascii=False, default=str),
+                ),
             )
         return self.get_run(run_id)  # type: ignore[return-value]
 
@@ -781,7 +798,9 @@ class Store:
         with self._conn() as conn:
             conn.executemany(
                 "UPDATE steps SET status = 'pending', started_at = NULL, finished_at = NULL "
-                "WHERE run_id = ? AND name = ?", [(run_id, n) for n in names])
+                "WHERE run_id = ? AND name = ?",
+                [(run_id, n) for n in names],
+            )
 
     def get_steps(self, run_id: str) -> list[Step]:
         with self._conn() as conn:
@@ -795,8 +814,7 @@ class Store:
 
     # --- source leases --------------------------------------------------------
 
-    def acquire_leases(self, names: list[str], operation: str, *,
-                       ttl: float = LEASE_TTL_S) -> str:
+    def acquire_leases(self, names: list[str], operation: str, *, ttl: float = LEASE_TTL_S) -> str:
         """Reserve every source in *names* for *operation*, all or nothing; return the
         lease token. Raises :class:`SourceBusy` while a lease's holder pid is alive (also
         past its expiry: a suspended or slow holder keeps exclusivity). Only a lease whose
@@ -806,8 +824,9 @@ class Store:
         wanted = sorted(set(names))
         with self._immediate() as conn:
             for name in wanted:
-                row = conn.execute("SELECT * FROM source_leases WHERE source_name = ?",
-                                   (name,)).fetchone()
+                row = conn.execute(
+                    "SELECT * FROM source_leases WHERE source_name = ?", (name,)
+                ).fetchone()
                 if row is not None and pid_alive(row["pid"]):
                     raise SourceBusy(name, row["operation"], row["pid"])
             for name in wanted:
@@ -817,14 +836,17 @@ class Store:
                     "ON CONFLICT (source_name) DO UPDATE SET token = excluded.token, "
                     "operation = excluded.operation, pid = excluded.pid, "
                     "acquired_at = excluded.acquired_at, expires_at = excluded.expires_at",
-                    (name, token, operation, os.getpid(), now_iso(), now + ttl))
+                    (name, token, operation, os.getpid(), now_iso(), now + ttl),
+                )
         return token
 
     def heartbeat_lease(self, token: str, *, ttl: float = LEASE_TTL_S) -> bool:
         """Extend the lease; False when it was lost (reclaimed by someone else)."""
         with self._conn() as conn:
-            cur = conn.execute("UPDATE source_leases SET expires_at = ? WHERE token = ?",
-                               (time.time() + ttl, token))
+            cur = conn.execute(
+                "UPDATE source_leases SET expires_at = ? WHERE token = ?",
+                (time.time() + ttl, token),
+            )
         return cur.rowcount > 0
 
     def release_lease(self, token: str) -> None:
@@ -834,15 +856,17 @@ class Store:
     def lease_holder(self, name: str) -> dict[str, Any] | None:
         """The live lease on *name* (``operation``, ``pid``, ...), if any."""
         with self._conn() as conn:
-            row = conn.execute("SELECT * FROM source_leases WHERE source_name = ?",
-                               (name,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM source_leases WHERE source_name = ?", (name,)
+            ).fetchone()
         if row is None or not pid_alive(row["pid"]):
             return None
         return dict(row)
 
     @contextmanager
-    def lease(self, names: list[str], operation: str, *,
-              ttl: float = LEASE_TTL_S) -> Iterator[Lease]:
+    def lease(
+        self, names: list[str], operation: str, *, ttl: float = LEASE_TTL_S
+    ) -> Iterator[Lease]:
         """Hold the sources' lease for the ``with`` body, refreshed by a heartbeat thread.
         A failed heartbeat (the row is no longer ours) marks the :class:`Lease` lost; the
         holder checks it (:meth:`Lease.check`) before each step and stops."""
@@ -858,8 +882,7 @@ class Store:
                 except sqlite3.Error:  # busy store: the next beat retries
                     pass
 
-        thread = threading.Thread(target=beat, name=f"autoontology-lease-{operation}",
-                                  daemon=True)
+        thread = threading.Thread(target=beat, name=f"autoontology-lease-{operation}", daemon=True)
         thread.start()
         try:
             yield held

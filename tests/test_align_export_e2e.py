@@ -50,8 +50,7 @@ def test_align_hanbit_docs_applies_same_alignments(live):
     from autoontology.store.documents import DocumentStore
 
     settings, store, client = live
-    res = align_job.run_align(DOCS, settings=settings, store=store,
-                              structured_source=STRUCTURED)
+    res = align_job.run_align(DOCS, settings=settings, store=store, structured_source=STRUCTURED)
     assert res.status == "succeeded", res
     src = store.get_source(DOCS)
     rows = AlignmentStore(store).list(src.id)
@@ -65,9 +64,11 @@ def test_align_hanbit_docs_applies_same_alignments(live):
         assert a.concept_name.casefold() in synonyms, (a.concept_name, a.term_name, synonyms)
     names = {a.concept_name: a.term_name for a in accepted}
     # upstream names Terms singular or plural depending on the compile (claude: singular)
-    assert names.get("계약") in ("Contract", "Contracts") or \
-        names.get("고객") in ("Customer", "Customers") or \
-        names.get("청구서") in ("Invoice", "Invoices"), names
+    assert (
+        names.get("계약") in ("Contract", "Contracts")
+        or names.get("고객") in ("Customer", "Customers")
+        or names.get("청구서") in ("Invoice", "Invoices")
+    ), names
     # identity policy (review #4): the role concept 승인권자 is never merged into a Term
     assert "승인권자" not in names, names
     # no attribute concept was applied as a Term synonym
@@ -76,8 +77,7 @@ def test_align_hanbit_docs_applies_same_alignments(live):
 
     # idempotent: a re-run judges nothing new and patches nothing
     before = {a.term_id: client.get_term(a.term_id)["synonyms"] for a in accepted}
-    again = align_job.run_align(DOCS, settings=settings, store=store,
-                                structured_source=STRUCTURED)
+    again = align_job.run_align(DOCS, settings=settings, store=store, structured_source=STRUCTURED)
     assert again.status == "succeeded", again
     run_id = again.run_id
     steps = {s.name: s.detail for s in store.get_steps(run_id)}
@@ -95,25 +95,34 @@ def test_export_hanbit_docs_roundtrip(live):
     res = CliRunner().invoke(app, ["export", DOCS])
     assert res.exit_code == 0, res.output
     out = Path(re.search(r"^dir: (.+)$", res.output, re.M).group(1).strip())
-    assert {p.name for p in out.iterdir()} >= {"ontology.ttl", "ontology.jsonld",
-                                                "graph.graphml", "report.md", "model.yaml",
-                                                "ossie.zip"}
+    assert {p.name for p in out.iterdir()} >= {
+        "ontology.ttl",
+        "ontology.jsonld",
+        "graph.graphml",
+        "report.md",
+        "model.yaml",
+        "ossie.zip",
+    }
     # independent expectations: upstream Terms of hanbit + unaligned class-kind concepts
     db_id, _ = database_id_for(client, store.get_source(STRUCTURED))
     terms = client.semantic_graph(db_id)["nodes"]
     src = store.get_source(DOCS)
     concepts = DocumentStore(store).list_concepts(src.id)
-    folded = {a.concept_id for a in AlignmentStore(store).list(src.id)
-              if a.accepted and a.relation == "same"}
-    unaligned = [c for c in concepts if c.kind in ("entity", "metric", "attribute")
-                 and c.id not in folded]
+    folded = {
+        a.concept_id
+        for a in AlignmentStore(store).list(src.id)
+        if a.accepted and a.relation == "same"
+    }
+    unaligned = [
+        c for c in concepts if c.kind in ("entity", "metric", "attribute") and c.id not in folded
+    ]
     g = Graph().parse(str(out / "ontology.ttl"), format="turtle")
     classes = set(g.subjects(RDF.type, OWL.Class))
     assert len(classes) == len(terms) + len(unaligned)
     props = set(g.subjects(RDF.type, OWL.ObjectProperty)) | set(
-        g.subjects(RDF.type, OWL.DatatypeProperty))
-    assert props and all((p, RDFS.domain, None) in g and (p, RDFS.range, None) in g
-                         for p in props)
+        g.subjects(RDF.type, OWL.DatatypeProperty)
+    )
+    assert props and all((p, RDFS.domain, None) in g and (p, RDFS.range, None) in g for p in props)
     base = f"https://autoontology.local/ontology/{DOCS}#"
     by_label: dict[str, set] = {}
     for s, _, o in g.triples((None, RDFS.label, None)):
@@ -121,7 +130,10 @@ def test_export_hanbit_docs_roundtrip(live):
     for c in concepts:  # every document concept has provenance (own node or its Term)
         nodes = [s for s in by_label.get(c.name, set()) if str(s).startswith(base)]
         if c.id in folded:
-            nodes = [n for n in g.subjects(RDF.type, OWL.Class)
-                     if any(str(o) == c.name for o in g.objects(n, None))]
+            nodes = [
+                n
+                for n in g.subjects(RDF.type, OWL.Class)
+                if any(str(o) == c.name for o in g.objects(n, None))
+            ]
         assert nodes and any((n, PROV.wasDerivedFrom, None) in g for n in nodes), c.name
     assert "Merged ontology report" in (out / "report.md").read_text(encoding="utf-8")

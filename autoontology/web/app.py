@@ -45,8 +45,9 @@ def _run_ingest(database: str, settings: Settings) -> None:
     from autoontology.store.db import Store
 
     try:
-        result = jobs.run_ingest_job(database, settings=settings,
-                                     store=Store.for_home(settings.home))
+        result = jobs.run_ingest_job(
+            database, settings=settings, store=Store.for_home(settings.home)
+        )
         if result is not None:
             logger.info("ingest run %s for %r: %s", result.run_id, database, result.status)
     except Exception:  # noqa: BLE001 - background thread: the run row holds the error
@@ -64,8 +65,12 @@ def enqueue_ingest(connection: dict, settings: Settings | None = None) -> thread
         logger.warning("ingest request without a database name ignored")
         return None
     settings = settings or Settings.from_env()
-    thread = threading.Thread(target=_run_ingest, args=(database, settings), daemon=True,
-                              name=f"autoontology-ingest-{database}")
+    thread = threading.Thread(
+        target=_run_ingest,
+        args=(database, settings),
+        daemon=True,
+        name=f"autoontology-ingest-{database}",
+    )
     thread.start()
     return thread
 
@@ -89,8 +94,12 @@ def _run_delete(database: str, settings: Settings) -> None:
 def enqueue_delete(database: str, settings: Settings | None = None) -> threading.Thread:
     """Tear down a database's ingested graph and embeddings (``trigger_reset`` target)."""
     settings = settings or Settings.from_env()
-    thread = threading.Thread(target=_run_delete, args=(database, settings), daemon=True,
-                              name=f"autoontology-delete-{database}")
+    thread = threading.Thread(
+        target=_run_delete,
+        args=(database, settings),
+        daemon=True,
+        name=f"autoontology-delete-{database}",
+    )
     thread.start()
     return thread
 
@@ -111,9 +120,13 @@ def _sweep_stale_runs(store: Any) -> None:
         logger.info("startup sweep: reaped %d stale run(s): %s", len(reaped), ", ".join(reaped))
 
 
-def create_app(settings: Settings | None = None, *,
-               llm_transport: httpx.AsyncBaseTransport | None = None,
-               runs: RunManager | None = None, providers: Any = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    llm_transport: httpx.AsyncBaseTransport | None = None,
+    runs: RunManager | None = None,
+    providers: Any = None,
+) -> FastAPI:
     from autoontology.web import api
     from autoontology.web.providers.router import Registry, build_router
 
@@ -191,8 +204,7 @@ def _provider_logging() -> None:
     plog = logging.getLogger("autoontology.providers")
     if not plog.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: "
-                                               "%(message)s"))
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         plog.addHandler(handler)
         plog.setLevel(logging.INFO)
         plog.propagate = False

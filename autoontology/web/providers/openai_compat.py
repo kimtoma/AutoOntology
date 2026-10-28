@@ -69,13 +69,18 @@ class ChatRequest:
         if len(turns) == 1 and turns[0].role == "user":
             return turns[0].content
         labels = {"user": "User", "assistant": "Assistant", "tool": "Tool result"}
-        return "\n\n".join(f"{labels.get(m.role, m.role.title())}:\n{m.content}"
-                           for m in turns)
+        return "\n\n".join(f"{labels.get(m.role, m.role.title())}:\n{m.content}" for m in turns)
 
     def with_extra_user(self, text: str) -> ChatRequest:
-        return ChatRequest(model=self.model, messages=[*self.messages, ChatMessage("user", text)],
-                           schema=self.schema, schema_name=self.schema_name, mode=self.mode,
-                           stream=self.stream, max_tokens=self.max_tokens)
+        return ChatRequest(
+            model=self.model,
+            messages=[*self.messages, ChatMessage("user", text)],
+            schema=self.schema,
+            schema_name=self.schema_name,
+            mode=self.mode,
+            stream=self.stream,
+            max_tokens=self.max_tokens,
+        )
 
 
 @dataclass
@@ -106,8 +111,11 @@ def _text(content: Any) -> str:
             elif isinstance(part, dict) and part.get("type") in ("text", "input_text"):
                 parts.append(str(part.get("text", "")))
             elif isinstance(part, dict):
-                raise ProviderError(400, "invalid_request",
-                                    f"unsupported content part {part.get('type')!r} (text only)")
+                raise ProviderError(
+                    400,
+                    "invalid_request",
+                    f"unsupported content part {part.get('type')!r} (text only)",
+                )
         return "\n".join(parts)
     raise ProviderError(400, "invalid_request", "message content must be a string or parts")
 
@@ -121,9 +129,12 @@ def _message(raw: Any) -> ChatMessage:
     text = _text(raw.get("content"))
     calls = raw.get("tool_calls") or []
     if role == "assistant" and calls:
-        rendered = [f"{(c.get('function') or {}).get('name', 'tool')}("
-                    f"{(c.get('function') or {}).get('arguments', '')})"
-                    for c in calls if isinstance(c, dict)]
+        rendered = [
+            f"{(c.get('function') or {}).get('name', 'tool')}("
+            f"{(c.get('function') or {}).get('arguments', '')})"
+            for c in calls
+            if isinstance(c, dict)
+        ]
         text = "\n".join(filter(None, [text, *rendered]))
     if role not in ("system", "user", "assistant", "tool"):
         raise ProviderError(400, "invalid_request", f"unsupported message role {role!r}")
@@ -138,14 +149,21 @@ def parse_request(body: Any, model: str) -> ChatRequest:
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages:
         raise ProviderError(400, "invalid_request", "messages must be a non-empty list")
-    req = ChatRequest(model=model, messages=[_message(m) for m in messages],
-                      stream=bool(body.get("stream")), max_tokens=_max_tokens(body))
+    req = ChatRequest(
+        model=model,
+        messages=[_message(m) for m in messages],
+        stream=bool(body.get("stream")),
+        max_tokens=_max_tokens(body),
+    )
     tools = [t for t in body.get("tools") or [] if isinstance(t, dict)]
     fmt = body.get("response_format") or {}
     if tools:
         if len(tools) != 1:
-            raise ProviderError(400, "unsupported", "only one tool is accepted "
-                                "(structured output); got " + str(len(tools)))
+            raise ProviderError(
+                400,
+                "unsupported",
+                "only one tool is accepted (structured output); got " + str(len(tools)),
+            )
         fn = tools[0].get("function") or {}
         if not isinstance(fn.get("name"), str):
             raise ProviderError(400, "invalid_request", "tool function needs a name")
@@ -182,24 +200,34 @@ def _max_tokens(body: dict[str, Any]) -> int | None:
 
 def _message_out(req: ChatRequest, resp: ChatResponse) -> tuple[dict[str, Any], str]:
     if req.mode == "tool":
-        call = {"id": f"call_{uuid.uuid4().hex[:24]}", "type": "function",
-                "function": {"name": req.schema_name, "arguments": resp.content}}
-        return ({"role": "assistant", "content": None, "tool_calls": [call]},
-                resp.finish_reason or "tool_calls")
+        call = {
+            "id": f"call_{uuid.uuid4().hex[:24]}",
+            "type": "function",
+            "function": {"name": req.schema_name, "arguments": resp.content},
+        }
+        return (
+            {"role": "assistant", "content": None, "tool_calls": [call]},
+            resp.finish_reason or "tool_calls",
+        )
     return {"role": "assistant", "content": resp.content}, resp.finish_reason or "stop"
 
 
 def _usage(resp: ChatResponse) -> dict[str, Any]:
-    return {"prompt_tokens": resp.prompt_tokens, "completion_tokens": resp.completion_tokens,
-            "total_tokens": resp.prompt_tokens + resp.completion_tokens}
+    return {
+        "prompt_tokens": resp.prompt_tokens,
+        "completion_tokens": resp.completion_tokens,
+        "total_tokens": resp.prompt_tokens + resp.completion_tokens,
+    }
 
 
 def to_openai(req: ChatRequest, resp: ChatResponse, model_name: str) -> dict[str, Any]:
     """Non-streaming ``chat.completion`` body. *model_name* = what the caller asked for."""
     message, finish = _message_out(req, resp)
     out: dict[str, Any] = {
-        "id": f"chatcmpl-{uuid.uuid4().hex}", "object": "chat.completion",
-        "created": int(time.time()), "model": model_name,
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_name,
         "choices": [{"index": 0, "message": message, "finish_reason": finish}],
         "usage": _usage(resp),
     }
@@ -211,14 +239,20 @@ def to_openai(req: ChatRequest, resp: ChatResponse, model_name: str) -> dict[str
 def to_sse(req: ChatRequest, resp: ChatResponse, model_name: str) -> bytes:
     """``stream: true`` shim: the whole answer in one chunk, then ``[DONE]``."""
     message, finish = _message_out(req, resp)
-    base = {"id": f"chatcmpl-{uuid.uuid4().hex}", "object": "chat.completion.chunk",
-            "created": int(time.time()), "model": model_name}
+    base = {
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model_name,
+    }
     delta: dict[str, Any] = {"role": "assistant"}
     if message.get("tool_calls"):
         delta["tool_calls"] = [{"index": 0, **c} for c in message["tool_calls"]]
     else:
         delta["content"] = message["content"]
-    first = {**base, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
-             "usage": _usage(resp)}
-    return (f"data: {json.dumps(first, ensure_ascii=False)}\n\n"
-            "data: [DONE]\n\n").encode("utf-8")
+    first = {
+        **base,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+        "usage": _usage(resp),
+    }
+    return (f"data: {json.dumps(first, ensure_ascii=False)}\n\ndata: [DONE]\n\n").encode("utf-8")

@@ -15,8 +15,17 @@ logger = logging.getLogger("autoontology.extract")
 
 ConceptKind = Literal["entity", "metric", "rule", "process", "attribute", "other"]
 RelationKind = Literal[
-    "is_a", "part_of", "has_attribute", "measured_by", "governed_by",
-    "produces", "consumes", "owns", "belongs_to", "depends_on", "related_to",
+    "is_a",
+    "part_of",
+    "has_attribute",
+    "measured_by",
+    "governed_by",
+    "produces",
+    "consumes",
+    "owns",
+    "belongs_to",
+    "depends_on",
+    "related_to",
 ]
 
 MAX_CONCEPTS_PER_CHUNK = 25
@@ -26,29 +35,37 @@ MAX_EVIDENCE_CHARS = 200
 
 class ExtractedConcept(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str = Field(description="Canonical business name in the source language, 1-6 words, "
-                                  "no trailing punctuation")
-    name_en: str = Field(default="", description="English rendering of name; empty if the "
-                                                 "source is already English")
+    name: str = Field(
+        description="Canonical business name in the source language, 1-6 words, "
+        "no trailing punctuation"
+    )
+    name_en: str = Field(
+        default="", description="English rendering of name; empty if the source is already English"
+    )
     kind: ConceptKind
-    definition: str = Field(description="One or two sentences, grounded ONLY in the provided "
-                                        "text")
-    synonyms: list[str] = Field(default_factory=list, description="Aliases, abbreviations, "
-                                                                  "code names used in the text")
-    attributes: list[str] = Field(default_factory=list, description="Properties/fields "
-                                  "explicitly mentioned (e.g. 계약번호, 만료일)")
-    evidence: str = Field(description="Verbatim quote (<= 200 chars) from the chunk that "
-                                      "supports the definition")
+    definition: str = Field(description="One or two sentences, grounded ONLY in the provided text")
+    synonyms: list[str] = Field(
+        default_factory=list, description="Aliases, abbreviations, code names used in the text"
+    )
+    attributes: list[str] = Field(
+        default_factory=list,
+        description="Properties/fields explicitly mentioned (e.g. 계약번호, 만료일)",
+    )
+    evidence: str = Field(
+        description="Verbatim quote (<= 200 chars) from the chunk that supports the definition"
+    )
 
 
 class ExtractedRelation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     subject: str = Field(description="Must equal the `name` of a concept in this output")
     predicate: RelationKind
-    object: str = Field(description="Must equal the `name` of a concept in this output; must "
-                                    "differ from subject")
-    label: str = Field(default="", description="Free-text relation phrase as written in the "
-                                               "text, e.g. '승인한다'")
+    object: str = Field(
+        description="Must equal the `name` of a concept in this output; must differ from subject"
+    )
+    label: str = Field(
+        default="", description="Free-text relation phrase as written in the text, e.g. '승인한다'"
+    )
     evidence: str = Field(description="Verbatim quote (<= 200 chars)")
 
 
@@ -108,15 +125,19 @@ class ValidatedExtraction:
     stats: ValidationStats = field(default_factory=ValidationStats)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"concepts": [asdict(c) for c in self.concepts],
-                "relations": [asdict(r) for r in self.relations],
-                "stats": asdict(self.stats)}
+        return {
+            "concepts": [asdict(c) for c in self.concepts],
+            "relations": [asdict(r) for r in self.relations],
+            "stats": asdict(self.stats),
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ValidatedExtraction:
-        return cls([ValidatedConcept(**c) for c in data.get("concepts", [])],
-                   [ValidatedRelation(**r) for r in data.get("relations", [])],
-                   ValidationStats(**data.get("stats", {})))
+        return cls(
+            [ValidatedConcept(**c) for c in data.get("concepts", [])],
+            [ValidatedRelation(**r) for r in data.get("relations", [])],
+            ValidationStats(**data.get("stats", {})),
+        )
 
 
 def collapse_ws(text: str) -> str:
@@ -190,15 +211,24 @@ def post_validate(raw: ChunkExtraction, chunk_text: str, *, label: str = "") -> 
                 first.evidence, first.evidence_verified = quote[:MAX_EVIDENCE_CHARS], True
             continue
         concepts[key] = ValidatedConcept(
-            name=name, name_en=collapse_ws(item.name_en), kind=item.kind, definition=definition,
-            synonyms=_clean_list(item.synonyms, {key}), attributes=_clean_list(item.attributes,
-                                                                                set()),
-            evidence=quote[:MAX_EVIDENCE_CHARS], evidence_verified=verified)
+            name=name,
+            name_en=collapse_ws(item.name_en),
+            kind=item.kind,
+            definition=definition,
+            synonyms=_clean_list(item.synonyms, {key}),
+            attributes=_clean_list(item.attributes, set()),
+            evidence=quote[:MAX_EVIDENCE_CHARS],
+            evidence_verified=verified,
+        )
     kept = list(concepts.values())
     if len(kept) > MAX_CONCEPTS_PER_CHUNK:
         stats.truncated_concepts = len(kept) - MAX_CONCEPTS_PER_CHUNK
-        logger.warning("%s: %d concepts, keeping the first %d", label or "chunk", len(kept),
-                       MAX_CONCEPTS_PER_CHUNK)
+        logger.warning(
+            "%s: %d concepts, keeping the first %d",
+            label or "chunk",
+            len(kept),
+            MAX_CONCEPTS_PER_CHUNK,
+        )
         kept = kept[:MAX_CONCEPTS_PER_CHUNK]
     names = {c.name.casefold(): c.name for c in kept}
     relations: list[ValidatedRelation] = []
@@ -214,30 +244,50 @@ def post_validate(raw: ChunkExtraction, chunk_text: str, *, label: str = "") -> 
             continue
         seen.add(key3)
         quote = collapse_ws(item.evidence)
-        relations.append(ValidatedRelation(
-            subject=subject, predicate=item.predicate, object=obj,
-            label=collapse_ws(item.label), evidence=quote[:MAX_EVIDENCE_CHARS],
-            evidence_verified=evidence_verified(quote, chunk_text)))
+        relations.append(
+            ValidatedRelation(
+                subject=subject,
+                predicate=item.predicate,
+                object=obj,
+                label=collapse_ws(item.label),
+                evidence=quote[:MAX_EVIDENCE_CHARS],
+                evidence_verified=evidence_verified(quote, chunk_text),
+            )
+        )
     if len(relations) > MAX_RELATIONS_PER_CHUNK:
         stats.truncated_relations = len(relations) - MAX_RELATIONS_PER_CHUNK
-        logger.warning("%s: %d relations, keeping the first %d", label or "chunk",
-                       len(relations), MAX_RELATIONS_PER_CHUNK)
+        logger.warning(
+            "%s: %d relations, keeping the first %d",
+            label or "chunk",
+            len(relations),
+            MAX_RELATIONS_PER_CHUNK,
+        )
         relations = relations[:MAX_RELATIONS_PER_CHUNK]
-    stats.unverified_evidence = (sum(not c.evidence_verified for c in kept)
-                                 + sum(not r.evidence_verified for r in relations))
+    stats.unverified_evidence = sum(not c.evidence_verified for c in kept) + sum(
+        not r.evidence_verified for r in relations
+    )
     return ValidatedExtraction(kept, relations, stats)
 
 
 def reverify(ext: ValidatedExtraction, chunk_text: str) -> ValidatedExtraction:
     """Recompute the evidence flags of a stored extraction with the current rules (no LLM),
     so a rule change applies to chunks extracted earlier."""
-    concepts = [ValidatedConcept(**{**asdict(c), "evidence_verified": evidence_verified(
-        c.evidence, chunk_text, c.name)}) for c in ext.concepts]
-    relations = [ValidatedRelation(**{**asdict(r), "evidence_verified": evidence_verified(
-        r.evidence, chunk_text)}) for r in ext.relations]
+    concepts = [
+        ValidatedConcept(
+            **{**asdict(c), "evidence_verified": evidence_verified(c.evidence, chunk_text, c.name)}
+        )
+        for c in ext.concepts
+    ]
+    relations = [
+        ValidatedRelation(
+            **{**asdict(r), "evidence_verified": evidence_verified(r.evidence, chunk_text)}
+        )
+        for r in ext.relations
+    ]
     stats = ValidationStats(**asdict(ext.stats))
-    stats.unverified_evidence = (sum(not c.evidence_verified for c in concepts)
-                                 + sum(not r.evidence_verified for r in relations))
+    stats.unverified_evidence = sum(not c.evidence_verified for c in concepts) + sum(
+        not r.evidence_verified for r in relations
+    )
     return ValidatedExtraction(concepts, relations, stats)
 
 
@@ -255,7 +305,7 @@ def parse_json_object(text: str) -> Any:
         start, end = body.find("{"), body.rfind("}")
         if start == -1 or end <= start:
             raise
-        return json.loads(body[start:end + 1])
+        return json.loads(body[start : end + 1])
 
 
 # --- alignment (``autoontology align``) --------------------------------------------------
@@ -270,14 +320,18 @@ class AlignmentVerdict(BaseModel):
     the opposite (Term ⊑ concept)."""
 
     model_config = ConfigDict(extra="forbid")
-    term_id: str = Field(description="The `id` of the chosen candidate Term exactly as given; "
-                                     "empty string when relation is none")
-    relation: AlignRelation = Field(description="same = the concept and the Term denote the "
-                                                "same business thing; broader = the Term is "
-                                                "broader than the concept; narrower = the "
-                                                "Term is narrower than the concept; related = "
-                                                "associated but neither; none = no candidate "
-                                                "fits")
+    term_id: str = Field(
+        description="The `id` of the chosen candidate Term exactly as given; "
+        "empty string when relation is none"
+    )
+    relation: AlignRelation = Field(
+        description="same = the concept and the Term denote the "
+        "same business thing; broader = the Term is "
+        "broader than the concept; narrower = the "
+        "Term is narrower than the concept; related = "
+        "associated but neither; none = no candidate "
+        "fits"
+    )
     confidence: float = Field(description="Confidence in this verdict, 0 to 1")
     rationale: str = Field(description="One short sentence explaining the verdict")
 
@@ -291,8 +345,7 @@ class ValidatedVerdict:
     notes: list[str] = field(default_factory=list)
 
 
-def validate_verdict(verdict: AlignmentVerdict,
-                     candidates: dict[str, str]) -> ValidatedVerdict:
+def validate_verdict(verdict: AlignmentVerdict, candidates: dict[str, str]) -> ValidatedVerdict:
     """Fail-closed post-validation. *candidates* maps candidate Term id -> name.
 
     The term id must be one of the candidates (an exact Term name is accepted as its id);
@@ -317,5 +370,6 @@ def validate_verdict(verdict: AlignmentVerdict,
     clamped = min(1.0, max(0.0, float(confidence)))
     if clamped != confidence:
         notes.append(f"confidence {confidence} clamped to {clamped}")
-    return ValidatedVerdict(term_id, relation, clamped,
-                            collapse_ws(verdict.rationale or "")[:500], notes)
+    return ValidatedVerdict(
+        term_id, relation, clamped, collapse_ws(verdict.rationale or "")[:500], notes
+    )

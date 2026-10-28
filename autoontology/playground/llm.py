@@ -37,8 +37,9 @@ class PlaygroundLLM(Protocol):
 
     def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]: ...
 
-    async def structured(self, messages: list[dict[str, str]], schema: dict[str, Any],
-                         name: str) -> Any: ...
+    async def structured(
+        self, messages: list[dict[str, str]], schema: dict[str, Any], name: str
+    ) -> Any: ...
 
 
 def _error_message(raw: bytes) -> str:
@@ -54,9 +55,16 @@ def _error_message(raw: bytes) -> str:
 
 
 class RouterLLM:
-    def __init__(self, base_url: str, model_name: str, *, provider: str, model: str,
-                 timeout: float | None = None,
-                 transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        model_name: str,
+        *,
+        provider: str,
+        model: str,
+        timeout: float | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
         self.provider = provider
@@ -66,19 +74,21 @@ class RouterLLM:
         self.transport = transport
 
     def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, connect=5.0),
-                                 transport=self.transport)
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(self.timeout, connect=5.0), transport=self.transport
+        )
 
     async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
-        body = {"model": self.model_name, "messages": messages, "stream": True,
-                "temperature": 0}
+        body = {"model": self.model_name, "messages": messages, "stream": True, "temperature": 0}
         async with self._client() as http:
             try:
-                async with http.stream("POST", f"{self.base_url}/v1/chat/completions",
-                                       json=body) as resp:
+                async with http.stream(
+                    "POST", f"{self.base_url}/v1/chat/completions", json=body
+                ) as resp:
                     if resp.status_code >= 400:
-                        raise LLMError(resp.status_code, "provider_error",
-                                       _error_message(await resp.aread()))
+                        raise LLMError(
+                            resp.status_code, "provider_error", _error_message(await resp.aread())
+                        )
                     if "text/event-stream" not in resp.headers.get("content-type", ""):
                         data = json.loads(await resp.aread())
                         yield data["choices"][0]["message"].get("content") or ""
@@ -94,40 +104,56 @@ class RouterLLM:
                         except ValueError:
                             continue
                         if chunk.get("error"):
-                            raise LLMError(502, "provider_error",
-                                           _error_message(payload.encode()))
+                            raise LLMError(502, "provider_error", _error_message(payload.encode()))
                         for choice in chunk.get("choices") or []:
-                            text = (choice.get("delta") or {}).get("content") or \
-                                (choice.get("message") or {}).get("content")
+                            text = (choice.get("delta") or {}).get("content") or (
+                                choice.get("message") or {}
+                            ).get("content")
                             if text:
                                 yield text
                     # EOF without [DONE]: a cut connection or proxy, never a full answer
-                    raise LLMError(502, "stream_truncated",
-                                   f"the {self.provider} answer stream ended without [DONE] "
-                                   "(the partial answer is stored as incomplete)")
+                    raise LLMError(
+                        502,
+                        "stream_truncated",
+                        f"the {self.provider} answer stream ended without [DONE] "
+                        "(the partial answer is stored as incomplete)",
+                    )
             except httpx.TimeoutException as exc:
-                raise LLMError(504, "provider_timeout",
-                               f"{self.provider} did not answer within {self.timeout:.0f}s"
-                               ) from exc
+                raise LLMError(
+                    504,
+                    "provider_timeout",
+                    f"{self.provider} did not answer within {self.timeout:.0f}s",
+                ) from exc
             except httpx.HTTPError as exc:
-                raise LLMError(502, "provider_unreachable",
-                               f"chat router unreachable: {type(exc).__name__}") from exc
+                raise LLMError(
+                    502, "provider_unreachable", f"chat router unreachable: {type(exc).__name__}"
+                ) from exc
 
-    async def structured(self, messages: list[dict[str, str]], schema: dict[str, Any],
-                         name: str) -> Any:
-        body = {"model": self.model_name, "messages": messages, "temperature": 0,
-                "response_format": {"type": "json_schema", "json_schema": {
-                    "name": name, "schema": schema, "strict": True}}}
+    async def structured(
+        self, messages: list[dict[str, str]], schema: dict[str, Any], name: str
+    ) -> Any:
+        body = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": 0,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": name, "schema": schema, "strict": True},
+            },
+        }
         async with self._client() as http:
             try:
                 resp = await http.post(f"{self.base_url}/v1/chat/completions", json=body)
             except httpx.TimeoutException as exc:
-                raise LLMError(504, "provider_timeout",
-                               f"{self.provider} did not answer within {self.timeout:.0f}s"
-                               ) from exc
+                raise LLMError(
+                    504,
+                    "provider_timeout",
+                    f"{self.provider} did not answer within {self.timeout:.0f}s",
+                ) from exc
             except httpx.HTTPError as exc:
-                raise LLMError(502, "provider_unreachable",
-                               f"chat router unreachable: {type(exc).__name__}") from exc
+                raise LLMError(
+                    502, "provider_unreachable", f"chat router unreachable: {type(exc).__name__}"
+                ) from exc
         if resp.status_code >= 400:
             raise LLMError(resp.status_code, "provider_error", _error_message(resp.content))
         content = resp.json()["choices"][0]["message"].get("content") or ""
@@ -144,13 +170,19 @@ class RouterLLM:
         return value
 
 
-def llm_for(settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None
-            ) -> RouterLLM:
+def llm_for(settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None) -> RouterLLM:
     """The selected chat provider through the service's router."""
     if settings.chat_provider not in ROUTED:
-        raise LLMError(400, "provider_unsupported",
-                       f"the playground uses the service's chat router (ollama, openai);"
-                       f" chat provider {settings.chat_provider!r} is not routed there")
-    return RouterLLM(settings.service_url, settings.upstream_chat_model,
-                     provider=settings.chat_provider, model=settings.effective_chat_model,
-                     transport=transport)
+        raise LLMError(
+            400,
+            "provider_unsupported",
+            f"the playground uses the service's chat router (ollama, openai);"
+            f" chat provider {settings.chat_provider!r} is not routed there",
+        )
+    return RouterLLM(
+        settings.service_url,
+        settings.upstream_chat_model,
+        provider=settings.chat_provider,
+        model=settings.effective_chat_model,
+        transport=transport,
+    )

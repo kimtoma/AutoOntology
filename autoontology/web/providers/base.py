@@ -26,9 +26,15 @@ class ProviderStatus:
         return self.available and self.logged_in
 
     def as_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "ok": self.ok, "available": self.available,
-                "logged_in": self.logged_in, "detail": self.detail, "remedy": self.remedy,
-                "models": list(self.models)}
+        return {
+            "name": self.name,
+            "ok": self.ok,
+            "available": self.available,
+            "logged_in": self.logged_in,
+            "detail": self.detail,
+            "remedy": self.remedy,
+            "models": list(self.models),
+        }
 
 
 @runtime_checkable
@@ -65,18 +71,25 @@ def _walk_schema(schema: Any) -> None:
         node, depth = stack.pop()
         nodes += 1
         if depth > MAX_SCHEMA_DEPTH:
-            raise ProviderError(400, "invalid_schema",
-                                f"the JSON schema nests deeper than {MAX_SCHEMA_DEPTH} levels")
+            raise ProviderError(
+                400,
+                "invalid_schema",
+                f"the JSON schema nests deeper than {MAX_SCHEMA_DEPTH} levels",
+            )
         if nodes > MAX_SCHEMA_NODES:
-            raise ProviderError(400, "invalid_schema",
-                                f"the JSON schema has more than {MAX_SCHEMA_NODES} nodes")
+            raise ProviderError(
+                400, "invalid_schema", f"the JSON schema has more than {MAX_SCHEMA_NODES} nodes"
+            )
         if isinstance(node, dict):
             for key in _REF_KEYS:
                 ref = node.get(key)
                 if ref is not None and not (isinstance(ref, str) and ref.startswith("#")):
-                    raise ProviderError(400, "invalid_schema",
-                                        f"{key} {str(ref)[:120]!r} is not allowed: only local "
-                                        "references into the schema itself ('#...')")
+                    raise ProviderError(
+                        400,
+                        "invalid_schema",
+                        f"{key} {str(ref)[:120]!r} is not allowed: only local "
+                        "references into the schema itself ('#...')",
+                    )
             stack.extend((v, depth + 1) for v in node.values())
         elif isinstance(node, list):
             stack.extend((v, depth + 1) for v in node)
@@ -92,16 +105,18 @@ def check_schema(schema: Any) -> None:
         raise ProviderError(400, "invalid_schema", "the JSON schema must be an object")
     size = len(json.dumps(schema, ensure_ascii=False).encode("utf-8"))
     if size > MAX_SCHEMA_BYTES:
-        raise ProviderError(400, "invalid_schema",
-                            f"the JSON schema is {size} bytes (max {MAX_SCHEMA_BYTES})")
+        raise ProviderError(
+            400, "invalid_schema", f"the JSON schema is {size} bytes (max {MAX_SCHEMA_BYTES})"
+        )
     _walk_schema(schema)
     _refuse_cycles(schema)
     cls = jsonschema.validators.validator_for(schema, default=jsonschema.Draft202012Validator)
     try:
         cls.check_schema(schema)
     except jsonschema.SchemaError as exc:
-        raise ProviderError(400, "invalid_schema",
-                            f"not a valid JSON schema: {exc.message[:300]}") from None
+        raise ProviderError(
+            400, "invalid_schema", f"not a valid JSON schema: {exc.message[:300]}"
+        ) from None
 
 
 def schema_problem(value: Any, schema: dict[str, Any]) -> str | None:
@@ -117,8 +132,9 @@ def schema_problem(value: Any, schema: dict[str, Any]) -> str | None:
     try:
         error = jsonschema.exceptions.best_match(cls(schema).iter_errors(value))
     except RecursionError:
-        raise ProviderError(400, "schema_too_complex",
-                            "the JSON schema recurses too deeply for this answer") from None
+        raise ProviderError(
+            400, "schema_too_complex", "the JSON schema recurses too deeply for this answer"
+        ) from None
     if error is None:
         return None
     where = "/".join(str(p) for p in error.absolute_path)
@@ -205,9 +221,12 @@ def _refuse_cycles(schema: dict[str, Any]) -> None:
                 state[path] = 2
                 work.pop()
             elif state.get(nxt) == 1:
-                raise ProviderError(400, "invalid_schema",
-                                    "the JSON schema has a cyclic reference that consumes no "
-                                    f"part of the answer (at #/{'/'.join(map(str, nxt))})")
+                raise ProviderError(
+                    400,
+                    "invalid_schema",
+                    "the JSON schema has a cyclic reference that consumes no "
+                    f"part of the answer (at #/{'/'.join(map(str, nxt))})",
+                )
             elif not state.get(nxt):
                 state[nxt] = 1
                 work.append((nxt, iter(edges(nxt))))

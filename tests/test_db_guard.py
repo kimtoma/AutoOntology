@@ -6,8 +6,17 @@ from autoontology.engine import pg
 
 GOOD = ["autoontology", "autoontology_src_crm", "autoontology_src_a1_b2"]
 BAD = [
-    "", "postgres", "moneybook", "autoontology2", "autoontology_src_", "autoontology_src_CRM",
-    "autoontology_x", "AutoOntology", "autoontology_src_a-b", "autoontology; drop", " autoontology",
+    "",
+    "postgres",
+    "moneybook",
+    "autoontology2",
+    "autoontology_src_",
+    "autoontology_src_CRM",
+    "autoontology_x",
+    "AutoOntology",
+    "autoontology_src_a-b",
+    "autoontology; drop",
+    " autoontology",
 ]
 
 
@@ -94,8 +103,7 @@ class _FakeServer:
 
 
 @pytest.mark.parametrize("exists", [False, True])
-def test_setup_database_creates_db_and_extensions_idempotently(isolated_env, monkeypatch,
-                                                                exists):
+def test_setup_database_creates_db_and_extensions_idempotently(isolated_env, monkeypatch, exists):
     server = _FakeServer(exists)
     monkeypatch.setattr(pg.psycopg, "connect", server.connect)
     line = pg.setup_database(Settings.from_env())
@@ -106,8 +114,10 @@ def test_setup_database_creates_db_and_extensions_idempotently(isolated_env, mon
     # create database runs on the maintenance DB, extensions in the catalog DB
     assert all(db == "postgres" for db, t in server.log if "database" in t)
     exts = [t for db, t in server.log if db == "autoontology" and t.startswith("create extension")]
-    assert exts == ['create extension if not exists "vector"',
-                    'create extension if not exists "pg_trgm"']
+    assert exts == [
+        'create extension if not exists "vector"',
+        'create extension if not exists "pg_trgm"',
+    ]
 
 
 def test_setup_database_refuses_foreign_names_before_connecting(isolated_env, monkeypatch):
@@ -135,10 +145,19 @@ def test_settings_read_postgres_values_like_python_dotenv(isolated_env, monkeypa
     monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env_file))
     want = dotenv_values(env_file)
     s = Settings.from_env()
-    assert (s.postgres_host, str(s.postgres_port), s.postgres_user, s.postgres_password,
-            s.postgres_database) == (want["POSTGRES_HOST"], want["POSTGRES_PORT"],
-                                     want["POSTGRES_USER"], want["POSTGRES_PASSWORD"],
-                                     want["POSTGRES_DATABASE"])
+    assert (
+        s.postgres_host,
+        str(s.postgres_port),
+        s.postgres_user,
+        s.postgres_password,
+        s.postgres_database,
+    ) == (
+        want["POSTGRES_HOST"],
+        want["POSTGRES_PORT"],
+        want["POSTGRES_USER"],
+        want["POSTGRES_PASSWORD"],
+        want["POSTGRES_DATABASE"],
+    )
 
 
 DOTENV_CASES = """\
@@ -186,8 +205,9 @@ def test_remove_revalidates_before_drop(isolated_env, monkeypatch):
 
     settings = Settings.from_env()
     store = Store.for_home(settings.home)
-    src = store.add_source(name="x", kind="files", locator="{}",
-                           pg_database="autoontology_src_" + "a" * 50)
+    src = store.add_source(
+        name="x", kind="files", locator="{}", pg_database="autoontology_src_" + "a" * 50
+    )
     executed = []
 
     class _Conn:

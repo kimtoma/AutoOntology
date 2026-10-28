@@ -21,8 +21,9 @@ def test_schema_created_versioned_and_wal(store, tmp_path):
 
 
 def test_source_crud(store):
-    src = store.add_source(name="hanbit", kind="files", locator="{}",
-                           pg_database="autoontology_src_hanbit")
+    src = store.add_source(
+        name="hanbit", kind="files", locator="{}", pg_database="autoontology_src_hanbit"
+    )
     assert store.get_source("hanbit") == src
     assert store.get_source_by_id(src.id) == src
     with pytest.raises(ValueError, match="already exists"):
@@ -135,11 +136,30 @@ def test_schema_v1_has_every_table_and_no_playground_tests(store):
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         cols = {r[1] for r in conn.execute("PRAGMA table_info(alignments)")}
         msg_cols = {r[1] for r in conn.execute("PRAGMA table_info(playground_messages)")}
-    assert {"sources", "runs", "steps", "source_leases", "file_manifests", "semantic_baselines",
-            "ontology_revision", "documents", "chunks", "concepts", "relations", "evidence",
-            "term_embeddings", "alignments", "alignment_previews", "term_alias_additions",
-            "term_refresh_pending", "playground_index", "playground_index_meta",
-            "playground_conversations", "playground_messages", "schema_version"} <= tables
+    assert {
+        "sources",
+        "runs",
+        "steps",
+        "source_leases",
+        "file_manifests",
+        "semantic_baselines",
+        "ontology_revision",
+        "documents",
+        "chunks",
+        "concepts",
+        "relations",
+        "evidence",
+        "term_embeddings",
+        "alignments",
+        "alignment_previews",
+        "term_alias_additions",
+        "term_refresh_pending",
+        "playground_index",
+        "playground_index_meta",
+        "playground_conversations",
+        "playground_messages",
+        "schema_version",
+    } <= tables
     assert not {"playground_tests", "playground_test_runs"} & tables
     assert {"dry_run", "proposal_json"} <= cols and "incomplete" in msg_cols
     assert store.schema_version() == 1

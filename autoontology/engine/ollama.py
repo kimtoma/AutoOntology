@@ -104,13 +104,22 @@ def list_models(endpoint: str, client: httpx.Client | None = None) -> set[str]:
     return {m.get("name", "") for m in resp.json().get("models", [])}
 
 
-def chat_probe(endpoint: str, model: str, *, client: httpx.Client | None = None,
-               timeout: float = PROBE_TIMEOUT_S) -> tuple[str, int]:
+def chat_probe(
+    endpoint: str,
+    model: str,
+    *,
+    client: httpx.Client | None = None,
+    timeout: float = PROBE_TIMEOUT_S,
+) -> tuple[str, int]:
     """One OpenAI-compatible chat call; returns (answer, usage.completion_tokens)."""
     resp = (client or httpx).post(
         f"{root_url(endpoint)}/v1/chat/completions",
-        json={"model": model, "messages": [{"role": "user", "content": PROBE_PROMPT}],
-              "max_tokens": 256, "temperature": 0},
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": PROBE_PROMPT}],
+            "max_tokens": 256,
+            "temperature": 0,
+        },
         headers={"Authorization": "Bearer ollama"},
         timeout=timeout,
     )
@@ -129,9 +138,14 @@ STRUCTURED_PROBE_SCHEMA = {
 }
 
 
-def structured_probe(endpoint: str, model: str, *, no_think: bool,
-                     client: httpx.Client | None = None,
-                     timeout: float = PROBE_TIMEOUT_S) -> tuple[dict | None, str, int]:
+def structured_probe(
+    endpoint: str,
+    model: str,
+    *,
+    no_think: bool,
+    client: httpx.Client | None = None,
+    timeout: float = PROBE_TIMEOUT_S,
+) -> tuple[dict | None, str, int]:
     """A json_schema chat call shaped like upstream's ChatOpenAI structured output, with
     the body the service's /v1 passthrough would forward (``prepare_chat_payload``).
 
@@ -142,16 +156,25 @@ def structured_probe(endpoint: str, model: str, *, no_think: bool,
 
     from autoontology.web.providers.ollama import prepare_chat_payload
 
-    body = prepare_chat_payload({
-        "model": model,
-        "messages": [{"role": "user", "content": STRUCTURED_PROBE_PROMPT}],
-        "max_tokens": 256,
-        "temperature": 0,
-        "response_format": {"type": "json_schema", "json_schema": {
-            "name": "Ping", "schema": STRUCTURED_PROBE_SCHEMA, "strict": True}},
-    }, no_think=no_think)
-    resp = (client or httpx).post(f"{root_url(endpoint)}/v1/chat/completions", json=body,
-                                  headers={"Authorization": "Bearer ollama"}, timeout=timeout)
+    body = prepare_chat_payload(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": STRUCTURED_PROBE_PROMPT}],
+            "max_tokens": 256,
+            "temperature": 0,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "Ping", "schema": STRUCTURED_PROBE_SCHEMA, "strict": True},
+            },
+        },
+        no_think=no_think,
+    )
+    resp = (client or httpx).post(
+        f"{root_url(endpoint)}/v1/chat/completions",
+        json=body,
+        headers={"Authorization": "Bearer ollama"},
+        timeout=timeout,
+    )
     resp.raise_for_status()
     data = resp.json()
     content = (data["choices"][0]["message"].get("content") or "").strip()
@@ -176,7 +199,9 @@ def _run(run: Runner, argv: list[str], **kw) -> subprocess.CompletedProcess:
     try:
         proc = run(argv, text=True, capture_output=True, **kw)
     except FileNotFoundError as exc:
-        raise OllamaSetupError("`ollama` not found on PATH (install it from https://ollama.com)") from exc
+        raise OllamaSetupError(
+            "`ollama` not found on PATH (install it from https://ollama.com)"
+        ) from exc
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip().splitlines()[-1:] or [""]
         raise OllamaSetupError(f"`{' '.join(argv)}` failed: {detail[0]}")
@@ -189,12 +214,19 @@ def _reachable_models(endpoint: str, client: httpx.Client | None) -> set[str]:
     except httpx.HTTPError as exc:
         raise OllamaSetupError(
             f"Ollama not reachable at {root_url(endpoint)} ({type(exc).__name__}); "
-            "start it with `ollama serve`") from exc
+            "start it with `ollama serve`"
+        ) from exc
 
 
-def pull_models(endpoint: str, models: Iterable[str], *, run: Runner = subprocess.run,
-                client: httpx.Client | None = None, echo: Callable[[str], None] = print,
-                names: set[str] | None = None) -> list[str]:
+def pull_models(
+    endpoint: str,
+    models: Iterable[str],
+    *,
+    run: Runner = subprocess.run,
+    client: httpx.Client | None = None,
+    echo: Callable[[str], None] = print,
+    names: set[str] | None = None,
+) -> list[str]:
     """``ollama pull`` each of *models* that Ollama does not have yet; returns those pulled."""
     if names is None:
         names = _reachable_models(endpoint, client)
@@ -207,15 +239,21 @@ def pull_models(endpoint: str, models: Iterable[str], *, run: Runner = subproces
     return pulled
 
 
-def setup_ollama(*, endpoint: str, base: str = DEFAULT_BASE_MODEL,
-                 alias: str = DEFAULT_ALIAS, embed: str = "bge-m3",
-                 num_ctx: int = DEFAULT_NUM_CTX, force: bool = False,
-                 run: Runner = subprocess.run, client: httpx.Client | None = None,
-                 echo: Callable[[str], None] = print) -> SetupResult:
+def setup_ollama(
+    *,
+    endpoint: str,
+    base: str = DEFAULT_BASE_MODEL,
+    alias: str = DEFAULT_ALIAS,
+    embed: str = "bge-m3",
+    num_ctx: int = DEFAULT_NUM_CTX,
+    force: bool = False,
+    run: Runner = subprocess.run,
+    client: httpx.Client | None = None,
+    echo: Callable[[str], None] = print,
+) -> SetupResult:
     """Pull *base*/*embed* if missing, (re)build *alias*, then verify thinking is off."""
     names = _reachable_models(endpoint, client)
-    pulled = pull_models(endpoint, [base, embed], run=run, client=client, echo=echo,
-                         names=names)
+    pulled = pull_models(endpoint, [base, embed], run=run, client=client, echo=echo, names=names)
     created = False
     if has_model(names, alias) and not force:
         echo(f"{alias} exists (use --force to rebuild); verifying")
@@ -236,5 +274,6 @@ def setup_ollama(*, endpoint: str, base: str = DEFAULT_BASE_MODEL,
         raise OllamaSetupError(
             f"{alias} still thinks: completion_tokens {tokens} for {PROBE_PROMPT!r} "
             f"(max {MAX_PROBE_COMPLETION_TOKENS}); answer {answer[:60]!r}. "
-            "Rebuild with --force.")
+            "Rebuild with --force."
+        )
     return SetupResult(alias, created, tuple(pulled), answer, tokens)

@@ -37,8 +37,9 @@ _CITE_ONE = re.compile(r"E(\d+)")
 
 def _escape_block(text: str) -> str:
     """Context text cannot close or open the delimiting tags."""
-    return re.sub(r"</?\s*(ontology_context|judge_input|ontology_summary)", "‹tag›", text,
-                  flags=re.I)
+    return re.sub(
+        r"</?\s*(ontology_context|judge_input|ontology_summary)", "‹tag›", text, flags=re.I
+    )
 
 
 def context_tokens(hits: Sequence[Hit]) -> dict[str, Element]:
@@ -49,30 +50,39 @@ def context_tokens(hits: Sequence[Hit]) -> dict[str, Element]:
 def build_context(hits: Sequence[Hit]) -> str:
     lines = []
     for token, element in context_tokens(hits).items():
-        lines.append(f"[{token}] ({element.type}) {_escape_block(element.label)} | "
-                     f"{_escape_block(element.text)}")
+        lines.append(
+            f"[{token}] ({element.type}) {_escape_block(element.label)} | "
+            f"{_escape_block(element.text)}"
+        )
     return "<ontology_context>\n" + "\n".join(lines) + "\n</ontology_context>"
 
 
-def chat_messages(question: str, hits: Sequence[Hit],
-                  history: Sequence[dict[str, str]] = ()) -> list[dict[str, str]]:
+def chat_messages(
+    question: str, hits: Sequence[Hit], history: Sequence[dict[str, str]] = ()
+) -> list[dict[str, str]]:
     msgs = [{"role": "system", "content": CHAT_SYSTEM}]
     turns = [t for t in history if t.get("role") in ("user", "assistant") and t.get("content")]
     for turn in turns[-HISTORY_TURNS:]:
         # earlier answers quote ontology text: escaped like the context block
-        msgs.append({"role": turn["role"],
-                     "content": _escape_block(str(turn["content"])[:HISTORY_CHARS])})
-    body = (f"{build_context(hits)}\n\n질문: {question}\n\n"
-            "위 컨텍스트만 근거로 답하고, 근거 토큰([E1] 형식)을 붙이세요.")
+        msgs.append(
+            {"role": turn["role"], "content": _escape_block(str(turn["content"])[:HISTORY_CHARS])}
+        )
+    body = (
+        f"{build_context(hits)}\n\n질문: {question}\n\n"
+        "위 컨텍스트만 근거로 답하고, 근거 토큰([E1] 형식)을 붙이세요."
+    )
     if not hits:
-        body = (f"<ontology_context>\n(관련 요소 없음)\n</ontology_context>\n\n질문: {question}"
-                f"\n\n컨텍스트가 비어 있으면 \"{NO_BASIS}\"라고 답하세요.")
+        body = (
+            f"<ontology_context>\n(관련 요소 없음)\n</ontology_context>\n\n질문: {question}"
+            f'\n\n컨텍스트가 비어 있으면 "{NO_BASIS}"라고 답하세요.'
+        )
     msgs.append({"role": "user", "content": body})
     return msgs
 
 
-def parse_citations(answer: str, tokens: dict[str, Element]
-                    ) -> tuple[dict[str, dict[str, str]], list[str]]:
+def parse_citations(
+    answer: str, tokens: dict[str, Element]
+) -> tuple[dict[str, dict[str, str]], list[str]]:
     """(cited token -> chip, unknown tokens) in order of first appearance."""
     cited: dict[str, dict[str, str]] = {}
     unknown: list[str] = []

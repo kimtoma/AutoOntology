@@ -36,16 +36,19 @@ def test_source_add_documents_kind(isolated_env):
     docs = Path(isolated_env) / "docs"
     docs.mkdir()
     (docs / "a.md").write_text("# A\n\ntext\n")
-    res = runner.invoke(app, ["source", "add", str(docs), "--name", "demo-docs",
-                              "--kind", "documents"])
+    res = runner.invoke(
+        app, ["source", "add", str(docs), "--name", "demo-docs", "--kind", "documents"]
+    )
     assert res.exit_code == 0, res.output
     assert "demo-docs (documents)" in res.output
     assert "documents" in runner.invoke(app, ["source", "list"]).output
-    again = runner.invoke(app, ["source", "add", str(docs), "--name", "demo-docs",
-                                "--kind", "documents"])
+    again = runner.invoke(
+        app, ["source", "add", str(docs), "--name", "demo-docs", "--kind", "documents"]
+    )
     assert again.exit_code == 1 and "already exists" in again.output
-    missing = runner.invoke(app, ["source", "add", str(docs / "nope"), "--name", "x",
-                                  "--kind", "documents"])
+    missing = runner.invoke(
+        app, ["source", "add", str(docs / "nope"), "--name", "x", "--kind", "documents"]
+    )
     assert missing.exit_code == 1 and "no such file" in missing.output
     bad = runner.invoke(app, ["source", "add", str(docs), "--name", "x", "--kind", "files"])
     assert bad.exit_code == 2 and "structured | documents" in bad.output
@@ -63,8 +66,9 @@ def test_build_failure_exits_1_with_log_path(isolated_env, monkeypatch):
     _demo_source(isolated_env)
 
     def fail(*a, **k):
-        raise jobs.JobError("step compile failed: boom", run_id="r1", step="compile",
-                            log_path=Path("/x/jobs.log"))
+        raise jobs.JobError(
+            "step compile failed: boom", run_id="r1", step="compile", log_path=Path("/x/jobs.log")
+        )
 
     monkeypatch.setattr(jobs, "run_build", fail)
     res = runner.invoke(app, ["build"])
@@ -81,14 +85,12 @@ def test_build_runs_every_kind_in_order(isolated_env, monkeypatch):
     docs = Path(isolated_env) / "docs"
     docs.mkdir()
     (docs / "a.md").write_text("# A\n")
-    runner.invoke(app, ["source", "add", str(docs), "--name", "demo-docs", "--kind",
-                        "documents"])
+    runner.invoke(app, ["source", "add", str(docs), "--name", "demo-docs", "--kind", "documents"])
     calls = []
 
     class _R:
         def __init__(self, run_id):
-            self.run_id, self.status, self.export_dir, self.details = run_id, "succeeded", \
-                None, {}
+            self.run_id, self.status, self.export_dir, self.details = run_id, "succeeded", None, {}
 
     def build(name, **kw):
         calls.append(("build", name, kw["resume"]))
@@ -109,8 +111,11 @@ def test_build_runs_every_kind_in_order(isolated_env, monkeypatch):
     monkeypatch.setattr(align_job, "run_align", align)
     res = runner.invoke(app, ["build", "--resume"])
     assert res.exit_code == 0, res.output
-    assert calls == [("build", "demo", True), ("extract", "demo-docs", "docs", True),
-                     ("align", "demo-docs", "demo", True)]
+    assert calls == [
+        ("build", "demo", True),
+        ("extract", "demo-docs", "docs", True),
+        ("align", "demo-docs", "demo", True),
+    ]
     assert "build: succeeded" in res.output
 
 
@@ -166,8 +171,11 @@ def test_setup_with_openai_provider_skips_ollama(isolated_env, monkeypatch):
     monkeypatch.setattr(migrate, "run_migrations", lambda s: None)
     monkeypatch.setattr(migrate, "current_revision", lambda s: "abc")
     monkeypatch.setattr(migrate, "head_revision", lambda: "abc")
-    monkeypatch.setattr(ollama, "setup_ollama", lambda **kw: (_ for _ in ()).throw(
-        AssertionError("ollama must not be touched")))
+    monkeypatch.setattr(
+        ollama,
+        "setup_ollama",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("ollama must not be touched")),
+    )
     res = runner.invoke(app, ["setup"])
     assert res.exit_code == 0, res.output
     assert "models: skipped (chat and embeddings use the openai provider" in res.output

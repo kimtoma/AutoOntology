@@ -82,12 +82,15 @@ def test_shell_sources_and_settings(base_url, browser, name):
     page.wait_for_url("**/ui/sources")  # / -> /ui/ (server) -> /ui/sources (client)
     rows = page.locator("#sources-table tbody tr[data-source]")
     rows.first.wait_for()
-    assert sorted(rows.evaluate_all("rs => rs.map(r => r.dataset.source)")) == \
-        sorted(s["name"] for s in sources)
+    assert sorted(rows.evaluate_all("rs => rs.map(r => r.dataset.source)")) == sorted(
+        s["name"] for s in sources
+    )
     if any(s["name"] == "hanbit" for s in sources):
         assert page.locator("#sources-table").get_by_text("hanbit", exact=True).is_visible()
-    page.locator("#status-badge[data-status=ok], #status-badge[data-status=warn], "
-                 "#status-badge[data-status=error]").wait_for()
+    page.locator(
+        "#status-badge[data-status=ok], #status-badge[data-status=warn], "
+        "#status-badge[data-status=error]"
+    ).wait_for()
     assert page.evaluate(NO_HSCROLL), "horizontal scroll on 소스"
     assert page.evaluate(OVERFLOWING) == [], f"overflowing elements on 소스 at {name}"
 
@@ -102,8 +105,12 @@ def test_shell_sources_and_settings(base_url, browser, name):
         page.locator("a[data-nav=settings]").click()
     cards = page.locator("#provider-cards [data-provider]")
     cards.first.wait_for()
-    assert sorted(cards.evaluate_all("cs => cs.map(c => c.dataset.provider)")) == \
-        ["claude", "codex", "nvidia", "ollama"]
+    assert sorted(cards.evaluate_all("cs => cs.map(c => c.dataset.provider)")) == [
+        "claude",
+        "codex",
+        "nvidia",
+        "ollama",
+    ]
     assert page.locator("#precedence-note").is_visible()
     assert page.evaluate(NO_HSCROLL), "horizontal scroll on 설정"
     assert page.evaluate(OVERFLOWING) == [], f"overflowing elements on 설정 at {name}"
@@ -203,12 +210,16 @@ def test_graph_mobile_sheets(base_url, browser):
 @pytest.mark.parametrize("name", ["desktop", "mobile"])
 def test_playground_sparql_example_shows_rows(base_url, browser, name):
     url, sources = base_url
+
     def exported(source):
         found = httpx.get(f"{url}/api/exports", params={"source": source}).json()
         return any(f["name"] == "ontology.ttl" for e in found["exports"] for f in e["files"])
 
-    docs = [s["name"] for s in sorted(sources, key=lambda s: -(s.get("concepts") or 0))
-            if s["kind"] == "documents" and s.get("concepts") and exported(s["name"])]
+    docs = [
+        s["name"]
+        for s in sorted(sources, key=lambda s: -(s.get("concepts") or 0))
+        if s["kind"] == "documents" and s.get("concepts") and exported(s["name"])
+    ]
     if not docs:
         pytest.skip("no documents source with concepts and an exported ontology.ttl")
     page = new_page(browser, VIEWPORTS[name])

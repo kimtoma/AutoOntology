@@ -37,10 +37,23 @@ DEFAULT_TIMEOUT_S = 300.0
 INSTALL_COMMAND = "uv run autoontology tools install-kordoc"
 VERSION_FILE = "kordoc.version"
 #: File types kordoc parses (``kordoc --help``; HWPML is ``.hml``).
-EXTENSIONS: frozenset[str] = frozenset({
-    ".hwp", ".hwpx", ".hml", ".hwpml", ".pdf", ".docx", ".pptx", ".xls", ".xlsx",
-    ".png", ".jpg", ".jpeg", ".webp",
-})
+EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".hwp",
+        ".hwpx",
+        ".hml",
+        ".hwpml",
+        ".pdf",
+        ".docx",
+        ".pptx",
+        ".xls",
+        ".xlsx",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+    }
+)
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$")
 
 
@@ -90,8 +103,10 @@ def _cli_behind_shim(shim: str) -> Path | None:
     if real.suffix == ".js" and real.is_file():
         return real
     # npm global layout: <prefix>/bin/kordoc -> <prefix>/lib/node_modules/kordoc/dist/cli.js
-    for candidate in (real.parent.parent / "lib" / "node_modules" / "kordoc" / "dist" / "cli.js",
-                      real.parent / "node_modules" / "kordoc" / "dist" / "cli.js"):
+    for candidate in (
+        real.parent.parent / "lib" / "node_modules" / "kordoc" / "dist" / "cli.js",
+        real.parent / "node_modules" / "kordoc" / "dist" / "cli.js",
+    ):
         if candidate.is_file():
             return candidate
     return None
@@ -125,8 +140,9 @@ def resolve_node(env: Mapping[str, str] | None = None) -> str | None:
 
 def node_version(node: str) -> tuple[int, ...] | None:
     try:
-        out = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=15,
-                             check=False).stdout.strip()
+        out = subprocess.run(
+            [node, "--version"], capture_output=True, text=True, timeout=15, check=False
+        ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
     match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", out)
@@ -136,13 +152,17 @@ def node_version(node: str) -> tuple[int, ...] | None:
 def require_node(env: Mapping[str, str] | None = None) -> tuple[str, tuple[int, ...]]:
     node = resolve_node(env)
     if not node:
-        raise KordocUnavailable("NODE_MISSING", f"Node.js >= {MIN_NODE_MAJOR} not found "
-                                "(install Node.js 20+, or set KORDOC_NODE)")
+        raise KordocUnavailable(
+            "NODE_MISSING",
+            f"Node.js >= {MIN_NODE_MAJOR} not found (install Node.js 20+, or set KORDOC_NODE)",
+        )
     version = node_version(node)
     if version is None or version[0] < MIN_NODE_MAJOR:
         shown = ".".join(map(str, version)) if version else "unknown"
-        raise KordocUnavailable("NODE_TOO_OLD", f"{node} is Node {shown}; kordoc needs "
-                                f">= {MIN_NODE_MAJOR} (install Node.js 20+)")
+        raise KordocUnavailable(
+            "NODE_TOO_OLD",
+            f"{node} is Node {shown}; kordoc needs >= {MIN_NODE_MAJOR} (install Node.js 20+)",
+        )
     return node, version
 
 
@@ -151,8 +171,10 @@ def resolve_engine(home: Path, env: Mapping[str, str] | None = None) -> KordocEn
     found = resolve_cli(home, env)
     if found is None:
         raise KordocUnavailable(
-            "ENGINE_MISSING", "the kordoc document engine is not installed (needed for "
-            f"HWP/HWPX/PDF/DOCX/PPTX/XLSX/images); run `{INSTALL_COMMAND}`")
+            "ENGINE_MISSING",
+            "the kordoc document engine is not installed (needed for "
+            f"HWP/HWPX/PDF/DOCX/PPTX/XLSX/images); run `{INSTALL_COMMAND}`",
+        )
     node, _ = require_node(env)
     return KordocEngine(node=node, cli=found[0], origin=found[1])
 
@@ -173,16 +195,26 @@ def _child_env() -> dict[str, str]:
     return {**os.environ, "KORDOC_OFFLINE": "1"}
 
 
-def run_cli(engine: KordocEngine, args: list[str], *, timeout: float | None = None,
-            label: str = "") -> subprocess.CompletedProcess[str]:
+def run_cli(
+    engine: KordocEngine, args: list[str], *, timeout: float | None = None, label: str = ""
+) -> subprocess.CompletedProcess[str]:
     cmd = [engine.node, str(engine.cli), *args]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False,
-                              timeout=timeout or timeout_s(), env=_child_env(),
-                              stdin=subprocess.DEVNULL)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout or timeout_s(),
+            env=_child_env(),
+            stdin=subprocess.DEVNULL,
+        )
     except subprocess.TimeoutExpired as exc:
-        raise KordocError("TIMEOUT", f"{label or args[:1]} took longer than "
-                          f"{exc.timeout:.0f}s (AUTOONTOLOGY_KORDOC_TIMEOUT)") from exc
+        raise KordocError(
+            "TIMEOUT",
+            f"{label or args[:1]} took longer than "
+            f"{exc.timeout:.0f}s (AUTOONTOLOGY_KORDOC_TIMEOUT)",
+        ) from exc
     except OSError as exc:
         raise KordocUnavailable("ENGINE_MISSING", f"cannot run {engine.node}: {exc}") from exc
     for line in (proc.stderr or "").splitlines():
@@ -198,13 +230,17 @@ def _decode(proc: subprocess.CompletedProcess[str], label: str) -> Any:
     except json.JSONDecodeError:
         data = None
     if isinstance(data, dict) and data.get("success") is False:
-        raise KordocError(str(data.get("code") or "FAILED"),
-                          f"{label}: {str(data.get('error') or 'parse failed')[:300]}",
-                          stderr=stderr_tail)
+        raise KordocError(
+            str(data.get("code") or "FAILED"),
+            f"{label}: {str(data.get('error') or 'parse failed')[:300]}",
+            stderr=stderr_tail,
+        )
     if proc.returncode != 0 or data is None:
-        raise KordocError(f"EXIT_{proc.returncode}",
-                          f"{label}: no JSON on stdout ({stderr_tail or 'no stderr'})",
-                          stderr=stderr_tail)
+        raise KordocError(
+            f"EXIT_{proc.returncode}",
+            f"{label}: no JSON on stdout ({stderr_tail or 'no stderr'})",
+            stderr=stderr_tail,
+        )
     return data
 
 
@@ -218,13 +254,29 @@ def _path_args(path: Path) -> list[str]:
     return ["--", str(Path(path).resolve())]
 
 
-def parse_chunks(engine: KordocEngine, path: Path, *, timeout: float | None = None,
-                 extra_args: list[str] | None = None) -> list[KordocChunk]:
+def parse_chunks(
+    engine: KordocEngine,
+    path: Path,
+    *,
+    timeout: float | None = None,
+    extra_args: list[str] | None = None,
+) -> list[KordocChunk]:
     """``--format chunks`` (the extractor's input). Malformed entries are skipped."""
     path = Path(path)
-    proc = run_cli(engine, ["--format", "chunks", "--table-format", "gfm", "--silent",
-                            *(extra_args or []), *_path_args(path)], timeout=timeout,
-                   label=path.name)
+    proc = run_cli(
+        engine,
+        [
+            "--format",
+            "chunks",
+            "--table-format",
+            "gfm",
+            "--silent",
+            *(extra_args or []),
+            *_path_args(path),
+        ],
+        timeout=timeout,
+        label=path.name,
+    )
     data = _decode(proc, path.name)
     if not isinstance(data, list):
         raise KordocError("BAD_OUTPUT", f"{path.name}: expected a JSON list of chunks")
@@ -235,17 +287,27 @@ def parse_chunks(engine: KordocEngine, path: Path, *, timeout: float | None = No
             continue
         crumbs = item.get("breadcrumb")
         crumbs = tuple(str(c) for c in crumbs) if isinstance(crumbs, list) else ()
-        chunks.append(KordocChunk(id=str(item.get("id") or f"c{i + 1:04d}"),
-                                  type=str(item.get("type") or "text"), breadcrumb=crumbs,
-                                  text=item["text"], page=_page(item.get("page"))))
+        chunks.append(
+            KordocChunk(
+                id=str(item.get("id") or f"c{i + 1:04d}"),
+                type=str(item.get("type") or "text"),
+                breadcrumb=crumbs,
+                text=item["text"],
+                page=_page(item.get("page")),
+            )
+        )
     return chunks
 
 
 def parse_json(engine: KordocEngine, path: Path, *, timeout: float | None = None) -> dict:
     """``--format json --no-images``: markdown, blocks, metadata, pageCount."""
     path = Path(path)
-    proc = run_cli(engine, ["--format", "json", "--no-images", "--table-format", "gfm",
-                            "--silent", *_path_args(path)], timeout=timeout, label=path.name)
+    proc = run_cli(
+        engine,
+        ["--format", "json", "--no-images", "--table-format", "gfm", "--silent", *_path_args(path)],
+        timeout=timeout,
+        label=path.name,
+    )
     data = _decode(proc, path.name)
     if not isinstance(data, dict):
         raise KordocError("BAD_OUTPUT", f"{path.name}: expected a JSON object")
@@ -256,8 +318,9 @@ def engine_version(engine: KordocEngine) -> str:
     proc = run_cli(engine, ["--version"], timeout=30, label="--version")
     version = proc.stdout.strip().splitlines()[0] if proc.stdout.strip() else ""
     if proc.returncode != 0 or not version:
-        raise KordocError(f"EXIT_{proc.returncode}", "`--version` failed",
-                          stderr=(proc.stderr or "")[-300:])
+        raise KordocError(
+            f"EXIT_{proc.returncode}", "`--version` failed", stderr=(proc.stderr or "")[-300:]
+        )
     return version
 
 
@@ -277,37 +340,49 @@ def read_version_file(home: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
-    return {"version": lines[0] if lines else "",
-            "omit_optional": "omit=optional" in lines[1:]}
+    return {"version": lines[0] if lines else "", "omit_optional": "omit=optional" in lines[1:]}
 
 
-def install_kordoc(home: Path, *, version: str = DEFAULT_VERSION, omit_optional: bool = False,
-                   force: bool = False, npm: str | None = None,
-                   runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
-                   echo: Callable[[str], None] = print) -> InstallResult:
+def install_kordoc(
+    home: Path,
+    *,
+    version: str = DEFAULT_VERSION,
+    omit_optional: bool = False,
+    force: bool = False,
+    npm: str | None = None,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    echo: Callable[[str], None] = print,
+) -> InstallResult:
     """``npm install --prefix <home>/kordoc --no-audit --no-fund kordoc@<version>``."""
     if not _VERSION_RE.fullmatch(version):
         raise KordocError("BAD_VERSION", f"not a kordoc version: {version!r}")
     target = install_dir(home)
     recorded = read_version_file(home)
-    if (not force and recorded and recorded["version"] == version
-            and recorded["omit_optional"] == omit_optional and home_cli(home).is_file()):
+    if (
+        not force
+        and recorded
+        and recorded["version"] == version
+        and recorded["omit_optional"] == omit_optional
+        and home_cli(home).is_file()
+    ):
         return InstallResult("already installed", version, home_cli(home), omit_optional)
     require_node()
     npm = npm or shutil.which("npm")
     if not npm:
-        raise KordocUnavailable("NPM_MISSING", "npm not found (it ships with Node.js: "
-                                "install Node.js 20+)")
+        raise KordocUnavailable(
+            "NPM_MISSING", "npm not found (it ships with Node.js: install Node.js 20+)"
+        )
     target.mkdir(parents=True, exist_ok=True)
-    argv = [npm, "install", "--prefix", str(target), "--no-audit", "--no-fund",
-            f"kordoc@{version}"]
+    argv = [npm, "install", "--prefix", str(target), "--no-audit", "--no-fund", f"kordoc@{version}"]
     if omit_optional:
         argv.append("--omit=optional")
     echo("running: " + " ".join(argv))
     proc = runner(argv, check=False)
     if proc.returncode != 0:
-        raise KordocError(f"EXIT_{proc.returncode}", "npm install failed (see the output "
-                          "above; npm needs network access for this one step)")
+        raise KordocError(
+            f"EXIT_{proc.returncode}",
+            "npm install failed (see the output above; npm needs network access for this one step)",
+        )
     cli = home_cli(home)
     if not cli.is_file():
         raise KordocError("ENGINE_MISSING", f"npm finished but {cli} does not exist")

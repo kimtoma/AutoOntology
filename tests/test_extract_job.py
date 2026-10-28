@@ -20,10 +20,21 @@ class FakeLLM:
             return MergeDecision(same=False)
         text = human.split("\n\n", 1)[1]
         found = [w for w in VOCAB if w in text]
-        concepts = [{"name": w, "kind": "entity", "definition": f"{w}의 정의",
-                     "evidence": w} for w in found]
-        relations = ([{"subject": found[0], "predicate": "related_to", "object": found[1],
-                       "evidence": found[0]}] if len(found) > 1 else [])
+        concepts = [
+            {"name": w, "kind": "entity", "definition": f"{w}의 정의", "evidence": w} for w in found
+        ]
+        relations = (
+            [
+                {
+                    "subject": found[0],
+                    "predicate": "related_to",
+                    "object": found[1],
+                    "evidence": found[0],
+                }
+            ]
+            if len(found) > 1
+            else []
+        )
         return ChunkExtraction.model_validate({"concepts": concepts, "relations": relations})
 
     def text(self, prompt):
@@ -43,23 +54,38 @@ def env(isolated_env, tmp_path):
     store = Store.for_home(settings.home)
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir()
-    (docs_dir / "계약.md").write_text("# 계약규정\n\n## 제1조\n계약은 고객과 맺는다.\n\n"
-                                     "## 제2조\n" + "계약 조건은 서면으로 정한다. " * 80,
-                                     encoding="utf-8")
-    (docs_dir / "청구.md").write_text("# 청구규정\n\n청구서를 발행하고 수납을 확인한다.",
-                                     encoding="utf-8")
+    (docs_dir / "계약.md").write_text(
+        "# 계약규정\n\n## 제1조\n계약은 고객과 맺는다.\n\n"
+        "## 제2조\n" + "계약 조건은 서면으로 정한다. " * 80,
+        encoding="utf-8",
+    )
+    (docs_dir / "청구.md").write_text(
+        "# 청구규정\n\n청구서를 발행하고 수납을 확인한다.", encoding="utf-8"
+    )
     return settings, store, docs_dir
 
 
 def _backends(settings, llm=None, embed=None):
     llm = llm or FakeLLM()
-    return ex.Backends(settings, llm=llm, judge_llm=llm,
-                       embedder=embed or (lambda texts: [[1.0, 0.0]] * len(texts)))
+    return ex.Backends(
+        settings,
+        llm=llm,
+        judge_llm=llm,
+        embedder=embed or (lambda texts: [[1.0, 0.0]] * len(texts)),
+    )
 
 
 def _run(settings, store, target, backends, **kw):
-    return ex.run_extract("hanbit_docs", target, settings=settings, store=store,
-                          backends=backends, check_service=False, workers=2, **kw)
+    return ex.run_extract(
+        "hanbit_docs",
+        target,
+        settings=settings,
+        store=store,
+        backends=backends,
+        check_service=False,
+        workers=2,
+        **kw,
+    )
 
 
 def test_extract_end_to_end_and_noop_rerun(env, monkeypatch):
@@ -81,16 +107,25 @@ def test_extract_end_to_end_and_noop_rerun(env, monkeypatch):
     assert set(concepts) == set(VOCAB)
     assert all(c.evidence_count >= 1 for c in concepts.values())
     assert {(r.subject, r.object) for r in docs.list_relations(src.id)} == {
-        ("계약", "고객"), ("청구서", "수납")}
+        ("계약", "고객"),
+        ("청구서", "수납"),
+    }
     judge_calls = llm.calls - len(chunks)
     assert judge_calls == 6  # 4 concepts, every pair at cosine 1.0, judge says "not same"
     report = (result.export_dir / "report.md").read_text(encoding="utf-8")
-    assert "# Document extraction report — hanbit_docs" in report and "| Concepts (without evidence) | 4 (0) |" in report
+    assert (
+        "# Document extraction report — hanbit_docs" in report
+        and "| Concepts (without evidence) | 4 (0) |" in report
+    )
     assert result.details["report"]["concepts"] == 4
 
     # unchanged files: no LLM, no new chunks, consolidation kept
-    again = _run(settings, store, docs_dir, ex.Backends(settings, llm=Boom(), judge_llm=Boom(),
-                                                         embedder=Boom().structured))
+    again = _run(
+        settings,
+        store,
+        docs_dir,
+        ex.Backends(settings, llm=Boom(), judge_llm=Boom(), embedder=Boom().structured),
+    )
     assert again.run_id != result.run_id
     assert again.details["read"]["new_or_changed"] == 0
     assert again.details["extract"]["attempted"] == 0
@@ -101,8 +136,7 @@ def test_extract_end_to_end_and_noop_rerun(env, monkeypatch):
     (docs_dir / "청구.md").write_text("# 청구규정\n\n청구서는 매월 발행한다.", encoding="utf-8")
     llm2 = FakeLLM()
     third = _run(settings, store, docs_dir, _backends(settings, llm2))
-    assert [d["action"] for d in third.details["read"]["documents"]] == ["unchanged",
-                                                                          "replaced"]
+    assert [d["action"] for d in third.details["read"]["documents"]] == ["unchanged", "replaced"]
     assert third.details["extract"]["attempted"] == 1
     assert third.details["consolidate"]["action"] == "consolidated"
     assert "수납" not in {c.name for c in docs.list_concepts(src.id)}
@@ -142,8 +176,11 @@ def test_failed_chunks_and_missing_engine(env, monkeypatch):
     assert [f["code"] for f in read["failed"]] == ["ENGINE_MISSING"]
     assert "install-kordoc" in read["failed"][0]["error"]
     assert result.details["extract"]["failed"] == 1
-    failed = [s for s in store.get_steps(result.run_id)
-              if s.name.startswith("chunk:") and s.status == "failed"]
+    failed = [
+        s
+        for s in store.get_steps(result.run_id)
+        if s.name.startswith("chunk:") and s.status == "failed"
+    ]
     assert len(failed) == 1 and "model said no" in failed[0].detail["structured_error"]
     report = (result.export_dir / "report.md").read_text(encoding="utf-8")
     assert "## Failed chunks" in report and "ENGINE_MISSING" in report
@@ -183,8 +220,12 @@ def test_all_chunks_failing_fails_the_run(env):
         text = structured
 
     with pytest.raises(jobs.JobError, match="extract failed") as err:
-        _run(settings, store, docs_dir, ex.Backends(settings, llm=Down(), judge_llm=Down(),
-                                                     embedder=lambda t: []))
+        _run(
+            settings,
+            store,
+            docs_dir,
+            ex.Backends(settings, llm=Down(), judge_llm=Down(), embedder=lambda t: []),
+        )
     run = store.get_run(err.value.run_id)
     assert run.status == "failed" and "all" in run.error
 
@@ -214,8 +255,9 @@ def test_cli_extract_runs_listing_and_rm(env, monkeypatch):
 
     monkeypatch.setattr(ex, "run_extract", fake)
     runner = CliRunner()
-    res = runner.invoke(app, ["source", "add", str(docs_dir), "--name", "hanbit_docs",
-                              "--kind", "documents"])
+    res = runner.invoke(
+        app, ["source", "add", str(docs_dir), "--name", "hanbit_docs", "--kind", "documents"]
+    )
     assert res.exit_code == 0, res.output
     res = runner.invoke(app, ["build"])
     assert res.exit_code == 0, res.output
@@ -227,8 +269,9 @@ def test_cli_extract_runs_listing_and_rm(env, monkeypatch):
     res = runner.invoke(app, ["source", "rm", "hanbit_docs"])
     assert res.exit_code == 0 and "removed documents source" in res.output
     assert store.get_source("hanbit_docs") is None
-    res = runner.invoke(app, ["source", "add", str(docs_dir / "missing"), "--name", "x",
-                              "--kind", "documents"])
+    res = runner.invoke(
+        app, ["source", "add", str(docs_dir / "missing"), "--name", "x", "--kind", "documents"]
+    )
     assert res.exit_code == 1 and "no such file" in res.output
 
 
@@ -241,11 +284,13 @@ def test_documents_source_names():
 
 def test_removed_documents_are_pruned_and_duplicates_kept_stable(env):
     settings, store, docs_dir = env
-    (docs_dir / "사본.md").write_text((docs_dir / "청구.md").read_text(encoding="utf-8"),
-                                    encoding="utf-8")
+    (docs_dir / "사본.md").write_text(
+        (docs_dir / "청구.md").read_text(encoding="utf-8"), encoding="utf-8"
+    )
     first = _run(settings, store, docs_dir, _backends(settings))
     assert [d["path"].rsplit("/", 1)[-1] for d in first.details["read"]["duplicates"]] == [
-        "청구.md"]  # 사본.md sorts first and owns the content
+        "청구.md"
+    ]  # 사본.md sorts first and owns the content
     src = store.get_source("hanbit_docs")
     docs = DocumentStore(store)
     paths = sorted(d.path.rsplit("/", 1)[-1] for d in docs.list_documents(src.id))
@@ -283,12 +328,20 @@ def test_cli_partial_exits_1(env, monkeypatch):
             return super().structured(system, human, schema)
 
     real = ex.run_extract
-    monkeypatch.setattr(ex, "run_extract", lambda name, target, **kw: real(
-        name, target, **{**kw, "backends": _backends(settings, Flaky()),
-                         "check_service": False}))
+    monkeypatch.setattr(
+        ex,
+        "run_extract",
+        lambda name, target, **kw: real(
+            name, target, **{**kw, "backends": _backends(settings, Flaky()), "check_service": False}
+        ),
+    )
     runner = CliRunner()
-    assert runner.invoke(app, ["source", "add", str(docs_dir), "--name", "hanbit_docs",
-                               "--kind", "documents"]).exit_code == 0
+    assert (
+        runner.invoke(
+            app, ["source", "add", str(docs_dir), "--name", "hanbit_docs", "--kind", "documents"]
+        ).exit_code
+        == 0
+    )
     res = runner.invoke(app, ["build"])
     assert res.exit_code == 1
     assert "partial (1 chunk(s) failed" in res.output and "--resume" in res.output
@@ -302,12 +355,31 @@ def test_report_flags_chunks_over_the_llm_timeout(monkeypatch):
     monkeypatch.setenv("LLM_INVOKE_TIMEOUT_S", "180")
 
     def chunk(seconds, **detail):
-        return ChunkRow("c", "d", 0, "", None, "text", "t", 1, {"concepts": []},
-                        {"seconds": seconds, **detail}, "x")
+        return ChunkRow(
+            "c",
+            "d",
+            0,
+            "",
+            None,
+            "text",
+            "t",
+            1,
+            {"concepts": []},
+            {"seconds": seconds, **detail},
+            "x",
+        )
 
-    data = report.ReportData("s", "r", "now", [], [chunk(327.3), chunk(90.0),
-                                                   chunk(10.0, upstream_retries=1)],
-                             [], [], {}, {})
+    data = report.ReportData(
+        "s",
+        "r",
+        "now",
+        [],
+        [chunk(327.3), chunk(90.0), chunk(10.0, upstream_retries=1)],
+        [],
+        [],
+        {},
+        {},
+    )
     counts = report.summary_counts(data)
     assert counts["over_timeout_chunks"] == 1 and counts["retried_chunks"] == 1
     assert counts["max_chunk_seconds"] == 327.3
@@ -323,16 +395,20 @@ def test_moving_to_another_dir_with_the_old_copy_still_present(env, tmp_path):
     src = store.get_source("hanbit_docs")
     docs = DocumentStore(store)
     concepts = {c.name for c in docs.list_concepts(src.id)}
-    moved = _run(settings, store, dir_b, ex.Backends(settings, llm=Boom(), judge_llm=Boom(),
-                                                      embedder=Boom().structured))
+    moved = _run(
+        settings,
+        store,
+        dir_b,
+        ex.Backends(settings, llm=Boom(), judge_llm=Boom(), embedder=Boom().structured),
+    )
     read = moved.details["read"]
     assert read["duplicates"] == [] and read["pruned"] == []
     assert [d["action"] for d in read["documents"]] == ["unchanged", "unchanged"]
     assert moved.details["extract"]["attempted"] == 0
     assert {d.path for d in docs.list_documents(src.id)} == {
-        str((dir_b / n).resolve()) for n in ("계약.md", "청구.md")}
+        str((dir_b / n).resolve()) for n in ("계약.md", "청구.md")
+    }
     assert {c.name for c in docs.list_concepts(src.id)} == concepts
-
 
 
 def test_read_failures_fail_the_run_and_resume_retries_them(env, monkeypatch):
@@ -382,11 +458,20 @@ def test_cli_extract_lists_read_failures(env, monkeypatch):
 
     monkeypatch.setattr(readers, "read_document", flaky)
     real_run = ex.run_extract
-    monkeypatch.setattr(ex, "run_extract", lambda name, target, **kw: real_run(
-        name, target, **{**kw, "backends": _backends(settings), "check_service": False}))
+    monkeypatch.setattr(
+        ex,
+        "run_extract",
+        lambda name, target, **kw: real_run(
+            name, target, **{**kw, "backends": _backends(settings), "check_service": False}
+        ),
+    )
     runner = CliRunner()
-    assert runner.invoke(app, ["source", "add", str(docs_dir), "--name", "hanbit_docs",
-                               "--kind", "documents"]).exit_code == 0
+    assert (
+        runner.invoke(
+            app, ["source", "add", str(docs_dir), "--name", "hanbit_docs", "--kind", "documents"]
+        ).exit_code
+        == 0
+    )
     res = runner.invoke(app, ["build"])
     assert res.exit_code == 1
     assert "1 document(s) failed to read" in res.output and "청구.md" in res.output
@@ -444,7 +529,9 @@ def test_consolidation_identity_includes_threshold(env, monkeypatch):
 
 def _paths_by_content(store, docs_dir):
     src = store.get_source("hanbit_docs")
-    return {d.path.rsplit("/", 1)[-1]: d.sha256 for d in DocumentStore(store).list_documents(src.id)}
+    return {
+        d.path.rsplit("/", 1)[-1]: d.sha256 for d in DocumentStore(store).list_documents(src.id)
+    }
 
 
 def _sha(text):
@@ -456,7 +543,11 @@ def _sha(text):
 def test_replace_chain_keeps_every_current_content(env):
     """Fix wave 2 #4: A=X, B=Y -> A=Y, B=Z must keep Y (now under A) and add Z."""
     settings, store, docs_dir = env
-    x, y, z = ("# X\n\n계약은 고객과 맺는다.", "# Y\n\n청구서를 발행한다.", "# Z\n\n수납을 확인한다.")
+    x, y, z = (
+        "# X\n\n계약은 고객과 맺는다.",
+        "# Y\n\n청구서를 발행한다.",
+        "# Z\n\n수납을 확인한다.",
+    )
     for f in docs_dir.iterdir():
         f.unlink()
     a, b = docs_dir / "a.md", docs_dir / "b.md"
@@ -472,8 +563,7 @@ def test_replace_chain_keeps_every_current_content(env):
     assert [d["path"].rsplit("/", 1)[-1] for d in read["superseded"]] == ["a.md"]
     actions = {d["path"].rsplit("/", 1)[-1]: d["action"] for d in read["documents"]}
     assert actions == {"a.md": "unchanged", "b.md": "new"}  # Y moved to a.md
-    names = {c.name for c in DocumentStore(store).list_concepts(store.get_source(
-        "hanbit_docs").id)}
+    names = {c.name for c in DocumentStore(store).list_concepts(store.get_source("hanbit_docs").id)}
     assert {"청구서", "수납"} <= names and "계약" not in names
 
 
@@ -488,15 +578,21 @@ def test_swapped_and_moved_contents_are_kept_without_rereading(env):
     _run(settings, store, docs_dir, _backends(settings))
     a.write_text(y, encoding="utf-8")  # swap
     b.write_text(x, encoding="utf-8")
-    swapped = _run(settings, store, docs_dir, ex.Backends(settings, llm=Boom(),
-                                                          judge_llm=Boom(),
-                                                          embedder=Boom().structured))
+    swapped = _run(
+        settings,
+        store,
+        docs_dir,
+        ex.Backends(settings, llm=Boom(), judge_llm=Boom(), embedder=Boom().structured),
+    )
     assert swapped.status == "succeeded" and swapped.details["read"]["superseded"] == []
     assert _paths_by_content(store, docs_dir) == {"a.md": _sha(y), "b.md": _sha(x)}
     b.rename(docs_dir / "c.md")  # move
-    moved = _run(settings, store, docs_dir, ex.Backends(settings, llm=Boom(),
-                                                        judge_llm=Boom(),
-                                                        embedder=Boom().structured))
+    moved = _run(
+        settings,
+        store,
+        docs_dir,
+        ex.Backends(settings, llm=Boom(), judge_llm=Boom(), embedder=Boom().structured),
+    )
     assert moved.details["read"]["pruned"] == []
     assert _paths_by_content(store, docs_dir) == {"a.md": _sha(y), "c.md": _sha(x)}
 
@@ -514,8 +610,12 @@ def test_resume_reconsolidates_a_legacy_incomplete_consolidation(env):
     partial/config fields must not be reused by --resume."""
     settings, store, docs_dir = env
     first = _run(settings, store, docs_dir, _backends(settings))
-    _poison_consolidate(store, first.run_id, drop=("partial", "config"),
-                        set={"stats": {"embedding_error": "ConnectionError: down"}})
+    _poison_consolidate(
+        store,
+        first.run_id,
+        drop=("partial", "config"),
+        set={"stats": {"embedding_error": "ConnectionError: down"}},
+    )
     resumed = _run(settings, store, docs_dir, _backends(settings), resume=True)
     assert resumed.run_id == first.run_id
     assert resumed.details["consolidate"]["action"] == "consolidated"
@@ -553,8 +653,7 @@ def test_threshold_cycle_never_reports_an_unmaterialised_result(env, monkeypatch
                 return MergeDecision(same=True)
             return super().structured(system, human, schema)
 
-    vectors = {"계약": [1.0, 0.0], "고객": [0.9, 0.4359], "청구서": [0.0, 1.0],
-               "수납": [-1.0, 0.0]}
+    vectors = {"계약": [1.0, 0.0], "고객": [0.9, 0.4359], "청구서": [0.0, 1.0], "수납": [-1.0, 0.0]}
 
     def embed(texts):
         return [vectors.get(t.split(":")[0], [0.0, -1.0]) for t in texts]
@@ -592,8 +691,10 @@ def test_record_without_identity_is_never_reused_even_with_equal_counts(env):
     docs = DocumentStore(store)
     before = len(docs.list_concepts(src.id))
     with store._conn() as conn:  # same counts, different membership
-        conn.execute("UPDATE concepts SET name = name || '-other' WHERE source_id = ? AND "
-                     "name = '계약'", (src.id,))
+        conn.execute(
+            "UPDATE concepts SET name = name || '-other' WHERE source_id = ? AND name = '계약'",
+            (src.id,),
+        )
     assert len(docs.list_concepts(src.id)) == before
     again = _run(settings, store, docs_dir, _backends(settings))
     assert again.details["consolidate"]["action"] == "consolidated"
@@ -612,8 +713,10 @@ def test_same_settings_resume_checks_the_ontology_identity(env, identity):
         _poison_consolidate(store, first.run_id, drop=("ontology_sha",))
     elif identity == "mismatch":
         with store._conn() as conn:  # someone else's membership, same counts
-            conn.execute("UPDATE concepts SET name = name || '-other' WHERE source_id = ? "
-                         "AND name = '계약'", (src.id,))
+            conn.execute(
+                "UPDATE concepts SET name = name || '-other' WHERE source_id = ? AND name = '계약'",
+                (src.id,),
+            )
     resumed = _run(settings, store, docs_dir, _backends(settings), resume=True)
     assert resumed.run_id == first.run_id and resumed.status == "succeeded"
     if identity == "match":

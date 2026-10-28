@@ -16,14 +16,32 @@ from urllib.parse import quote
 
 from autoontology.export.merged import LITERAL, THING, MergedOntology
 
-ELEMENT_TYPES: tuple[str, ...] = ("term", "concept", "rule", "process", "individual",
-                                  "relation", "evidence")
+ELEMENT_TYPES: tuple[str, ...] = (
+    "term",
+    "concept",
+    "rule",
+    "process",
+    "individual",
+    "relation",
+    "evidence",
+)
 TEXT_LIMIT = 1500
 INDIVIDUAL_TYPES = {"BusinessRule": "rule", "Process": "process"}
-KIND_KO = {"entity": "엔터티", "metric": "지표", "attribute": "속성", "rule": "규칙",
-           "process": "절차"}
-PREDICATE_KO = {"is_a": "의 하위 개념", "has_attribute": "속성 보유", "part_of": "의 일부",
-                "governed_by": "규칙 적용", "owns": "소유/관리", "related_to": "관련"}
+KIND_KO = {
+    "entity": "엔터티",
+    "metric": "지표",
+    "attribute": "속성",
+    "rule": "규칙",
+    "process": "절차",
+}
+PREDICATE_KO = {
+    "is_a": "의 하위 개념",
+    "has_attribute": "속성 보유",
+    "part_of": "의 일부",
+    "governed_by": "규칙 적용",
+    "owns": "소유/관리",
+    "related_to": "관련",
+}
 
 
 @dataclass
@@ -45,8 +63,13 @@ class Element:
         return hashlib.sha256(self.text.encode("utf-8")).hexdigest()
 
     def chip(self) -> dict[str, str]:
-        return {"type": self.type, "id": self.id, "label": self.label, "link": self.link,
-                "graph_link": self.graph_link}
+        return {
+            "type": self.type,
+            "id": self.id,
+            "label": self.label,
+            "link": self.link,
+            "graph_link": self.graph_link,
+        }
 
 
 def _clip(text: str, limit: int = TEXT_LIMIT) -> str:
@@ -96,8 +119,10 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
     for p in model.properties.values():
         if p.source == "structured":
             columns.setdefault(p.domain, []).append(
-                _join([p.label, f"({p.source_column}{', ' + p.datatype if p.datatype else ''})"],
-                      " "))
+                _join(
+                    [p.label, f"({p.source_column}{', ' + p.datatype if p.datatype else ''})"], " "
+                )
+            )
         elif p.source == "document" and p.kind == "datatype" and p.subject_node:
             attributes.setdefault(p.subject_node, []).append(label_of(p.value_concept))
     owner_of_evidence: dict[str, str] = {}
@@ -111,26 +136,57 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
     out: list[Element] = []
     for c in sorted(model.classes.values(), key=lambda c: (c.source, c.label, c.local)):
         if c.source == "structured":
-            text = (f"Term(정형 데이터 개념) {c.label}. 설명: {c.comment}. "
-                    f"문서 정의: {_join(c.definitions, ' / ')}. 동의어: {_join(c.alt_labels)}. "
-                    f"테이블: {_join(c.tables)}. 컬럼: {_join(columns.get(c.local, []))}")
+            text = (
+                f"Term(정형 데이터 개념) {c.label}. 설명: {c.comment}. "
+                f"문서 정의: {_join(c.definitions, ' / ')}. 동의어: {_join(c.alt_labels)}. "
+                f"테이블: {_join(c.tables)}. 컬럼: {_join(columns.get(c.local, []))}"
+            )
             first = c.concept_ids[0] if c.concept_ids else ""
-            out.append(Element(c.local, "term", c.label, _clip(text),
-                               _concept_link(first, c.local), _graph(c.local), nodes=[c.local]))
+            out.append(
+                Element(
+                    c.local,
+                    "term",
+                    c.label,
+                    _clip(text),
+                    _concept_link(first, c.local),
+                    _graph(c.local),
+                    nodes=[c.local],
+                )
+            )
         else:
-            text = (f"문서 개념({KIND_KO.get(c.kind, c.kind)}) {c.label}. "
-                    f"정의: {_join(c.definitions, ' / ')}. 동의어: {_join(c.alt_labels)}. "
-                    f"속성: {_join(attributes.get(c.local, []))}")
-            out.append(Element(c.local, "concept", c.label, _clip(text),
-                               _concept_link(concept_id_of(c.local), c.local), _graph(c.local),
-                               nodes=[c.local]))
+            text = (
+                f"문서 개념({KIND_KO.get(c.kind, c.kind)}) {c.label}. "
+                f"정의: {_join(c.definitions, ' / ')}. 동의어: {_join(c.alt_labels)}. "
+                f"속성: {_join(attributes.get(c.local, []))}"
+            )
+            out.append(
+                Element(
+                    c.local,
+                    "concept",
+                    c.label,
+                    _clip(text),
+                    _concept_link(concept_id_of(c.local), c.local),
+                    _graph(c.local),
+                    nodes=[c.local],
+                )
+            )
     for i in sorted(model.individuals.values(), key=lambda i: (i.label, i.local)):
         kind = INDIVIDUAL_TYPES.get(i.type, "individual")
-        text = (f"{'업무 규칙' if kind == 'rule' else '업무 절차' if kind == 'process' else '개체'}"
-                f" {i.label}: {i.comment}. 동의어: {_join(i.alt_labels)}")
-        out.append(Element(i.local, kind, i.label, _clip(text),
-                           _concept_link(concept_id_of(i.local), i.local), _graph(i.local),
-                           nodes=[i.local]))
+        text = (
+            f"{'업무 규칙' if kind == 'rule' else '업무 절차' if kind == 'process' else '개체'}"
+            f" {i.label}: {i.comment}. 동의어: {_join(i.alt_labels)}"
+        )
+        out.append(
+            Element(
+                i.local,
+                kind,
+                i.label,
+                _clip(text),
+                _concept_link(concept_id_of(i.local), i.local),
+                _graph(i.local),
+                nodes=[i.local],
+            )
+        )
     for p in sorted(model.properties.values(), key=lambda p: p.local):
         if p.source == "semantic_fk":
             s, o = p.domain, p.range
@@ -141,49 +197,82 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
             text = f"관계 {label_of(s)} {p.predicate}({verb}) {label_of(o)}: {p.label}"
         else:
             continue
-        out.append(Element(p.local, "relation", p.label or f"{label_of(s)} → {label_of(o)}",
-                           _clip(text), _graph(s) or _graph(o) or "/graph", _graph(s) or _graph(o),
-                           nodes=[s, o]))
+        out.append(
+            Element(
+                p.local,
+                "relation",
+                p.label or f"{label_of(s)} → {label_of(o)}",
+                _clip(text),
+                _graph(s) or _graph(o) or "/graph",
+                _graph(s) or _graph(o),
+                nodes=[s, o],
+            )
+        )
     axioms: dict[str, Element] = {}
     for a in model.axioms:
         aid = f"ax-{a.subject}-{a.kind}-{a.object}"
         how = "의 하위 개념" if a.kind == "subclass_of" else "와 관련"
         origin = "정렬 판정" if a.source == "alignment" else "문서"
         conf = f", 신뢰도 {a.confidence:.2f}" if a.confidence is not None else ""
-        text = (f"관계 {label_of(a.subject)}{how} {label_of(a.object)} "
-                f"({origin}{conf}). {a.rationale}")
+        text = (
+            f"관계 {label_of(a.subject)}{how} {label_of(a.object)} ({origin}{conf}). {a.rationale}"
+        )
         if aid in axioms:  # the same axiom from an alignment and from a document
             axioms[aid].text = _clip(f"{axioms[aid].text} / {origin}{conf}. {a.rationale}")
             continue
-        axioms[aid] = Element(aid, "relation", f"{label_of(a.subject)} {how} "
-                              f"{label_of(a.object)}", _clip(text),
-                              _graph(a.subject) or "/graph", _graph(a.subject),
-                              nodes=[a.subject, a.object])
+        axioms[aid] = Element(
+            aid,
+            "relation",
+            f"{label_of(a.subject)} {how} {label_of(a.object)}",
+            _clip(text),
+            _graph(a.subject) or "/graph",
+            _graph(a.subject),
+            nodes=[a.subject, a.object],
+        )
         out.append(axioms[aid])
     for m in model.merges:
         mid = f"same-{m.concept_local}"
-        text = (f"관계 문서 개념 {m.concept_name}은(는) Term {label_of(m.term_local)}와 같은 개념"
-                f"(정렬 판정{f', 신뢰도 {m.confidence:.2f}' if m.confidence is not None else ''})")
-        out.append(Element(mid, "relation", f"{m.concept_name} = {label_of(m.term_local)}",
-                           _clip(text), _concept_link(concept_id_of(m.concept_local),
-                                                      m.term_local),
-                           _graph(m.term_local), nodes=[m.term_local]))
+        text = (
+            f"관계 문서 개념 {m.concept_name}은(는) Term {label_of(m.term_local)}와 같은 개념"
+            f"(정렬 판정{f', 신뢰도 {m.confidence:.2f}' if m.confidence is not None else ''})"
+        )
+        out.append(
+            Element(
+                mid,
+                "relation",
+                f"{m.concept_name} = {label_of(m.term_local)}",
+                _clip(text),
+                _concept_link(concept_id_of(m.concept_local), m.term_local),
+                _graph(m.term_local),
+                nodes=[m.term_local],
+            )
+        )
     for ev in sorted(model.evidence.values(), key=lambda e: e.local):
         doc = model.documents.get(ev.document)
         owner = owner_of_evidence.get(ev.local, "")
         page = f", {ev.page}쪽" if ev.page is not None else ""
-        text = (f"근거 \"{ev.quote}\" (문서 {doc.title if doc else ev.document}{page}"
-                f"{', 검증됨' if ev.verified else ''}) — {label_of(owner) if owner else ''}")
+        text = (
+            f'근거 "{ev.quote}" (문서 {doc.title if doc else ev.document}{page}'
+            f"{', 검증됨' if ev.verified else ''}) — {label_of(owner) if owner else ''}"
+        )
         title = doc.title if doc else ev.document
-        out.append(Element(ev.local, "evidence", f"{title}{page}", _clip(text),
-                           _concept_link(concept_id_of(owner), owner) if owner
-                           else "/concepts", _graph(owner) if owner else "",
-                           nodes=[owner] if owner else []))
+        out.append(
+            Element(
+                ev.local,
+                "evidence",
+                f"{title}{page}",
+                _clip(text),
+                _concept_link(concept_id_of(owner), owner) if owner else "/concepts",
+                _graph(owner) if owner else "",
+                nodes=[owner] if owner else [],
+            )
+        )
 
     # 1-hop neighbours: a relation connects its endpoints; an endpoint sees the relation
     # and the node at its other end
-    by_node: dict[str, Element] = {e.id: e for e in out if e.type != "relation"
-                                   and e.type != "evidence"}
+    by_node: dict[str, Element] = {
+        e.id: e for e in out if e.type != "relation" and e.type != "evidence"
+    }
     for e in out:
         if e.type != "relation":
             continue

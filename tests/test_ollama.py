@@ -7,13 +7,7 @@ import pytest
 from autoontology.engine import ollama
 from autoontology.engine.ollama import NEW1, NEW2, OLD1, OLD2, TemplatePatchError
 
-BASE_TEMPLATE = (
-    "{{- range $i, $_ := .Messages }}\n"
-    + OLD1
-    + "\nmiddle\n"
-    + OLD2
-    + "{{ end }}\n"
-)
+BASE_TEMPLATE = "{{- range $i, $_ := .Messages }}\n" + OLD1 + "\nmiddle\n" + OLD2 + "{{ end }}\n"
 
 
 def test_patch_replaces_both_think_switches():
@@ -80,9 +74,13 @@ def _transport(names, completion_tokens=2):
         assert request.url.path == "/v1/chat/completions"
         body = json.loads(request.content)
         assert body["model"] == "openai/qwen3:8b"
-        return httpx.Response(200, json={
-            "choices": [{"message": {"content": "pong"}}],
-            "usage": {"completion_tokens": completion_tokens}})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "pong"}}],
+                "usage": {"completion_tokens": completion_tokens},
+            },
+        )
 
     return httpx.MockTransport(handler)
 
@@ -90,9 +88,16 @@ def _transport(names, completion_tokens=2):
 def _setup(names, runner, *, force=False, tokens=2):
     client = httpx.Client(transport=_transport(names, tokens))
     return ollama.setup_ollama(
-        endpoint="http://localhost:11434/v1", base="qwen3:8b", alias="openai/qwen3:8b",
-        embed="bge-m3", num_ctx=16384, force=force, run=runner, client=client,
-        echo=lambda _m: None)
+        endpoint="http://localhost:11434/v1",
+        base="qwen3:8b",
+        alias="openai/qwen3:8b",
+        embed="bge-m3",
+        num_ctx=16384,
+        force=force,
+        run=runner,
+        client=client,
+        echo=lambda _m: None,
+    )
 
 
 def test_setup_pulls_missing_models_and_creates_alias():

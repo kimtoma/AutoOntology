@@ -41,13 +41,20 @@ def require_internals() -> dict[str, Any]:
     except ImportError as exc:  # pragma: no cover - guarded by the pin test
         raise UpstreamInternalsChanged(
             f"upstream moved the Term DAL/service ({exc}); update "
-            "autoontology/engine/upstream_terms.py") from exc
+            "autoontology/engine/upstream_terms.py"
+        ) from exc
     missing = [c for c in ("synonyms", "name", "modified", "modified_by") if c not in s.term.c]
     if missing:
-        raise UpstreamInternalsChanged(f"upstream table `term` has no {missing} column(s); "
-                                       "update autoontology/engine/upstream_terms.py")
-    return {"s": s, "store": store, "write_transaction": write_transaction,
-            "refresh_term_embeddings": refresh_term_embeddings}
+        raise UpstreamInternalsChanged(
+            f"upstream table `term` has no {missing} column(s); "
+            "update autoontology/engine/upstream_terms.py"
+        )
+    return {
+        "s": s,
+        "store": store,
+        "write_transaction": write_transaction,
+        "refresh_term_embeddings": refresh_term_embeddings,
+    }
 
 
 def refresh_term(settings: Settings, term_id: str) -> bool:
@@ -65,8 +72,7 @@ def refresh_term(settings: Settings, term_id: str) -> bool:
     return True
 
 
-def add_term_synonyms(settings: Settings, term_id: str,
-                      additions: Sequence[str]) -> dict[str, Any]:
+def add_term_synonyms(settings: Settings, term_id: str, additions: Sequence[str]) -> dict[str, Any]:
     """Merge *additions* into ``term.synonyms`` and refresh the Term's embeddings.
 
     The merge happens inside one upstream write transaction: the current array is re-read
@@ -89,25 +95,29 @@ def add_term_synonyms(settings: Settings, term_id: str,
     s = up["s"]
     with up["write_transaction"]():
         rows = up["store"]().query_write(
-            select(s.term.c.name, s.term.c.synonyms).where(s.term.c.id == term_id)
-            .with_for_update())
+            select(s.term.c.name, s.term.c.synonyms).where(s.term.c.id == term_id).with_for_update()
+        )
         if not rows:
             raise LookupError(f"upstream Term {term_id} not found")
         current = list(rows[0]["synonyms"] or [])
         merged = merge_synonyms(current, additions, rows[0]["name"] or "")
-        added = merged[len(current):]
+        added = merged[len(current) :]
         if added:
             up["store"]().query_write(
-                update(s.term).where(s.term.c.id == term_id)
-                .values(synonyms=merged, modified=func.now(), modified_by=USER_ID))
+                update(s.term)
+                .where(s.term.c.id == term_id)
+                .values(synonyms=merged, modified=func.now(), modified_by=USER_ID)
+            )
     if not added:
         return {"synonyms": current, "added": [], "embeddings_refreshed": None}
-    return {"synonyms": merged, "added": added,
-            "embeddings_refreshed": refresh_term(settings, term_id)}
+    return {
+        "synonyms": merged,
+        "added": added,
+        "embeddings_refreshed": refresh_term(settings, term_id),
+    }
 
 
-def set_term_synonyms(settings: Settings, term_id: str,
-                      synonyms: Sequence[str]) -> dict[str, Any]:
+def set_term_synonyms(settings: Settings, term_id: str, synonyms: Sequence[str]) -> dict[str, Any]:
     """Replace ``term.synonyms`` outright (manual corrections only; ``align`` never
     removes synonyms and uses :func:`add_term_synonyms`)."""
     from autoontology.engine.client import USER_ID
@@ -120,17 +130,22 @@ def set_term_synonyms(settings: Settings, term_id: str,
     s = up["s"]
     with up["write_transaction"]():
         rows = up["store"]().query_write(
-            update(s.term).where(s.term.c.id == term_id)
+            update(s.term)
+            .where(s.term.c.id == term_id)
             .values(synonyms=list(synonyms), modified=func.now(), modified_by=USER_ID)
-            .returning(s.term.c.id, s.term.c.synonyms))
+            .returning(s.term.c.id, s.term.c.synonyms)
+        )
     if not rows:
         raise LookupError(f"upstream Term {term_id} not found")
-    return {"synonyms": list(rows[0]["synonyms"] or []),
-            "embeddings_refreshed": refresh_term(settings, term_id)}
+    return {
+        "synonyms": list(rows[0]["synonyms"] or []),
+        "embeddings_refreshed": refresh_term(settings, term_id),
+    }
 
 
-def remove_term_synonyms(settings: Settings, term_id: str,
-                         removals: Sequence[str]) -> dict[str, Any]:
+def remove_term_synonyms(
+    settings: Settings, term_id: str, removals: Sequence[str]
+) -> dict[str, Any]:
     """Reviewed repair of a wrong alignment: take *removals* (compared NFKC/case/space
     normalized, whole aliases only) off ``term.synonyms`` inside one write transaction
     (``SELECT ... FOR UPDATE``, so a concurrent edit is kept), then refresh the Term's
@@ -150,8 +165,8 @@ def remove_term_synonyms(settings: Settings, term_id: str,
     s = up["s"]
     with up["write_transaction"]():
         rows = up["store"]().query_write(
-            select(s.term.c.name, s.term.c.synonyms).where(s.term.c.id == term_id)
-            .with_for_update())
+            select(s.term.c.name, s.term.c.synonyms).where(s.term.c.id == term_id).with_for_update()
+        )
         if not rows:
             raise LookupError(f"upstream Term {term_id} not found")
         current = list(rows[0]["synonyms"] or [])
@@ -159,9 +174,14 @@ def remove_term_synonyms(settings: Settings, term_id: str,
         removed = [x for x in current if norm_alias(x) in drop]
         if removed:
             up["store"]().query_write(
-                update(s.term).where(s.term.c.id == term_id)
-                .values(synonyms=kept, modified=func.now(), modified_by=USER_ID))
+                update(s.term)
+                .where(s.term.c.id == term_id)
+                .values(synonyms=kept, modified=func.now(), modified_by=USER_ID)
+            )
     if not removed:
         return {"synonyms": current, "removed": [], "embeddings_refreshed": None}
-    return {"synonyms": kept, "removed": removed,
-            "embeddings_refreshed": refresh_term(settings, term_id)}
+    return {
+        "synonyms": kept,
+        "removed": removed,
+        "embeddings_refreshed": refresh_term(settings, term_id),
+    }
