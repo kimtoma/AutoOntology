@@ -255,11 +255,11 @@ def test_elements_cover_the_merged_model(model):
     term = els["term-t-c"]
     # Term text: synonyms (folded concept 계약 too), tables, columns
     assert "계약서" in term.text and "public.contracts" in term.text and "고객id" in term.text
-    assert term.link == f"/concepts?concept={CID['계약']}"  # folded concept detail
+    assert term.link == "/ontology?concept=term-t-c"  # the Term's own concept sheet
     assert term.graph_link == "/graph?focus=term-t-c"
     rule = els[f"concept-{CID['승인 기준']}"]
     assert rule.type == "rule" and "3억" in rule.text
-    assert rule.link == f"/concepts?concept={CID['승인 기준']}"
+    assert rule.link == f"/ontology?concept=concept-{CID['승인 기준']}"
     owns = next(e for e in els.values() if e.type == "relation" and "owns" in e.text)
     assert "담당자" in owns.text and "Contracts" in owns.text
     # 1-hop neighbours: the concept sees the relation and the Term at its other end
@@ -270,6 +270,9 @@ def test_elements_cover_the_merged_model(model):
     )
     ev = next(e for e in els.values() if e.type == "evidence")
     assert ev.label.startswith("계약관리규정") and "근거" in ev.text
+    assert "쪽" not in ev.label  # chip labels are English (the retrieval text stays Korean)
+    axiom = next(e for e in els.values() if e.id.startswith("ax-"))
+    assert " is a subclass of " in axiom.label or " is related to " in axiom.label
 
 
 # --- index + retrieval --------------------------------------------------------------------
@@ -1031,6 +1034,12 @@ def test_graph_links_are_encoded_and_only_for_graph_nodes():
     assert els["term-a b"].graph_link == "/graph?focus=term-a%20b"
     assert els["rel-1"].graph_link == "/graph?focus=term-a%20b"  # the endpoint that is a node
     assert els["rel-2"].graph_link == "" and els["rel-2"].link == "/graph"
+    # chips link the Ontology page (not the removed /concepts route) and label the
+    # owl:Thing / rdfs:Literal endpoints in English
+    assert els["term-a b"].link == "/ontology?concept=term-a%20b"
+    assert "Literal" in els["rel-2"].text and "Thing" in els["rel-1"].text
+    assert not any("모든 것" in e.text or "값" in e.text for e in els.values())
+    assert not any("/concepts" in e.link for e in els.values())
 
 
 def test_embedder_follows_the_selection(isolated_env, monkeypatch):

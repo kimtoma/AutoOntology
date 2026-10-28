@@ -50,7 +50,7 @@ class Element:
     type: str
     label: str
     text: str
-    #: client route of the UI (relative to /ui), e.g. /concepts?concept=<id>
+    #: client route of the UI (relative to /ui), e.g. /ontology?concept=<term-/concept-id>
     link: str
     #: the Graph page focused on the node standing for this element
     graph_link: str
@@ -81,9 +81,12 @@ def _join(values: list[str], sep: str = ", ") -> str:
     return sep.join(v for v in values if v)
 
 
-def concept_id_of(local: str) -> str:
-    """The store concept id behind a ``concept-<id>`` local ("" for anything else)."""
-    return local.removeprefix("concept-") if local.startswith("concept-") else ""
+def concept_link(local: str) -> str:
+    """The Ontology page with the concept sheet of *local* open ("" unless *local* is a
+    ``term-``/``concept-`` id, the ids ``/api/ontology/concepts/{id}`` serves)."""
+    if local.startswith(("term-", "concept-")):
+        return f"/ontology?concept={quote(local, safe='')}"
+    return ""
 
 
 def graph_link(local: str, nodes: set[str] | frozenset[str]) -> str:
@@ -100,10 +103,8 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
     def _graph(local: str) -> str:
         return graph_link(local, graph_nodes)
 
-    def _concept_link(concept_id: str, local: str) -> str:
-        if concept_id:
-            return f"/concepts?concept={quote(concept_id, safe='')}"
-        return _graph(local) or "/graph"
+    def _concept_link(local: str) -> str:
+        return concept_link(local) or _graph(local) or "/graph"
 
     def label_of(local: str) -> str:
         if local in model.classes:
@@ -111,7 +112,7 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
         if local in model.individuals:
             return model.individuals[local].label
         if local in (THING, LITERAL):
-            return {"THING": "모든 것", "LITERAL": "값"}[local]
+            return {THING: "Thing", LITERAL: "Literal"}[local]
         return local.removeprefix("xsd:")
 
     columns: dict[str, list[str]] = {}
@@ -141,14 +142,13 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
                 f"문서 정의: {_join(c.definitions, ' / ')}. 동의어: {_join(c.alt_labels)}. "
                 f"테이블: {_join(c.tables)}. 컬럼: {_join(columns.get(c.local, []))}"
             )
-            first = c.concept_ids[0] if c.concept_ids else ""
             out.append(
                 Element(
                     c.local,
                     "term",
                     c.label,
                     _clip(text),
-                    _concept_link(first, c.local),
+                    _concept_link(c.local),
                     _graph(c.local),
                     nodes=[c.local],
                 )
@@ -165,7 +165,7 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
                     "concept",
                     c.label,
                     _clip(text),
-                    _concept_link(concept_id_of(c.local), c.local),
+                    _concept_link(c.local),
                     _graph(c.local),
                     nodes=[c.local],
                 )
@@ -182,7 +182,7 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
                 kind,
                 i.label,
                 _clip(text),
-                _concept_link(concept_id_of(i.local), i.local),
+                _concept_link(i.local),
                 _graph(i.local),
                 nodes=[i.local],
             )
@@ -212,6 +212,7 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
     for a in model.axioms:
         aid = f"ax-{a.subject}-{a.kind}-{a.object}"
         how = "의 하위 개념" if a.kind == "subclass_of" else "와 관련"
+        how_en = "is a subclass of" if a.kind == "subclass_of" else "is related to"
         origin = "정렬 판정" if a.source == "alignment" else "문서"
         conf = f", 신뢰도 {a.confidence:.2f}" if a.confidence is not None else ""
         text = (
@@ -223,7 +224,7 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
         axioms[aid] = Element(
             aid,
             "relation",
-            f"{label_of(a.subject)} {how} {label_of(a.object)}",
+            f"{label_of(a.subject)} {how_en} {label_of(a.object)}",
             _clip(text),
             _graph(a.subject) or "/graph",
             _graph(a.subject),
@@ -242,7 +243,7 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
                 "relation",
                 f"{m.concept_name} = {label_of(m.term_local)}",
                 _clip(text),
-                _concept_link(concept_id_of(m.concept_local), m.term_local),
+                _concept_link(m.term_local),
                 _graph(m.term_local),
                 nodes=[m.term_local],
             )
@@ -260,9 +261,9 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
             Element(
                 ev.local,
                 "evidence",
-                f"{title}{page}",
+                f"{title}, p. {ev.page}" if ev.page is not None else title,
                 _clip(text),
-                _concept_link(concept_id_of(owner), owner) if owner else "/concepts",
+                _concept_link(owner) if owner else "/ontology",
                 _graph(owner) if owner else "",
                 nodes=[owner] if owner else [],
             )
