@@ -244,6 +244,14 @@ def test_vendored_schemas_match_the_licence_folder():
     assert "89e2e17f8249e68f30df7b29ac8852fa9dd24501" in readme and "unmodified" in readme
 
 
+def test_directly_imported_schema_packages_are_declared():
+    import tomllib
+
+    deps = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text("utf-8"))["project"]
+    names = {d.split(">")[0].split("[")[0].strip() for d in deps["dependencies"]}
+    assert {"jsonschema", "referencing"} <= names  # export.ossie imports both
+
+
 def test_schema_errors_name_the_json_pointer():
     errors = ossie.schema_errors(
         "ontology",
