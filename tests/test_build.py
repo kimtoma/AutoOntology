@@ -381,7 +381,10 @@ def test_export_reads_the_snapshot_and_overwrites_its_folder(env):
     assert (folder / "upstream/hanbit.ossie.zip").read_bytes() == b"ossie:db1:True"
     ttl = (folder / "ontology.ttl").read_text(encoding="utf-8")
     assert "@prefix ao: <http://example.com/autoontology#>" in ttl
-    assert "Revision: 1" in (folder / "report.md").read_text(encoding="utf-8")
+    report = (folder / "report.md").read_text(encoding="utf-8")
+    assert "Revision: 1" in report
+    assert "upstream/ files reflect the backend state at export time, not at build time" in report
+    assert marker["upstream_fetched_at"] and marker["upstream_fetched_at"] in report
     (folder / "stale.txt").write_text("old")
     again = export_job.run_export(store, settings, revision=1, client=env["client"])
     assert again.export_dir == folder and not (folder / "stale.txt").exists()

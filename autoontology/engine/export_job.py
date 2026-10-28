@@ -7,7 +7,7 @@ rebuilds the model -- and every format writer serialises that same object; ``ser
 re-parses the Turtle file and fails the run if the export invariants do not hold. The
 files go to ``exports/r<revision:04d>/`` (``--out DIR`` writes ``DIR/r<revision:04d>/``):
 ``ontology.ttl``, ``ontology.jsonld``, ``ontology.graphml``, ``report.md``, the
-``export.json`` marker (workspace, revision, snapshot run and time) and, per structured
+``export.json`` marker (workspace, revision, snapshot run and time, upstream fetch time) and, per structured
 source, ``upstream/<source>.model.yaml`` and ``upstream/<source>.ossie.zip`` fetched from
 the backend. Exporting a revision again replaces its folder -- but only a folder that holds
 nothing except what this exporter writes (:data:`EXPORT_ENTRIES`): a directory with any
@@ -40,7 +40,7 @@ from autoontology.export import graphml, rdf
 from autoontology.export import report as export_report
 from autoontology.ontology import model as merged
 from autoontology.store.alignments import AlignmentStore
-from autoontology.store.db import Run, Snapshot, Source, Store
+from autoontology.store.db import Run, Snapshot, Source, Store, now_iso
 from autoontology.store.documents import DocumentStore
 from autoontology.structured.semantic import database_id_for
 from autoontology.unstructured.report import display_path
@@ -147,6 +147,8 @@ class _ExportCtx:
     model: merged.MergedOntology | None = None
     files: list[Path] = field(default_factory=list)
     upstream: list[dict[str, Any]] = field(default_factory=list)
+    #: when the upstream files were fetched (None: no structured source)
+    upstream_fetched_at: str | None = None
 
 
 def _file_entry(path: Path, root: Path) -> dict[str, Any]:
@@ -232,7 +234,11 @@ def _step_serialize(ctx: _ExportCtx) -> dict[str, Any]:
 
 
 def _step_upstream(ctx: _ExportCtx) -> dict[str, Any]:
+    """The structured sources' upstream exports, fetched *now*: they reflect the backend
+    at export time, not at the time the snapshot was built (said in ``report.md``)."""
     folder = ctx.out_dir / UPSTREAM_DIR
+    if ctx.structured:
+        ctx.upstream_fetched_at = now_iso()
     for source in ctx.structured:
         db_id, _ = database_id_for(ctx.client, source)
         for suffix, fmt in UPSTREAM_FILES:
@@ -253,7 +259,7 @@ def _step_upstream(ctx: _ExportCtx) -> dict[str, Any]:
                 }
             )
             logger.info("  %s: %d bytes", target.relative_to(ctx.out_dir).as_posix(), len(data))
-    return {"upstream": ctx.upstream}
+    return {"upstream": ctx.upstream, "upstream_fetched_at": ctx.upstream_fetched_at}
 
 
 def export_metadata(ctx: _ExportCtx) -> dict[str, Any]:
@@ -264,6 +270,7 @@ def export_metadata(ctx: _ExportCtx) -> dict[str, Any]:
         "snapshot_run": ctx.snapshot.run_id,
         "snapshot_created_at": ctx.snapshot.created_at,
         "export_run": ctx.run.id,
+        "upstream_fetched_at": ctx.upstream_fetched_at,
     }
 
 
@@ -286,6 +293,7 @@ def _step_report(ctx: _ExportCtx) -> dict[str, Any]:
         files=entries,
         upstream=ctx.upstream,
         revision=ctx.snapshot.revision,
+        upstream_fetched_at=ctx.upstream_fetched_at,
     )
     marker = ctx.out_dir / EXPORT_MARKER
     marker.write_text(json.dumps(export_metadata(ctx), indent=2) + "\n", encoding="utf-8")

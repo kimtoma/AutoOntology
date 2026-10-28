@@ -44,6 +44,7 @@ def render(
     files: list[dict[str, Any]],
     upstream: list[dict[str, Any]],
     revision: int | None = None,
+    upstream_fetched_at: str | None = None,
 ) -> str:
     counts = model.counts()
     lines = [
@@ -134,6 +135,12 @@ def render(
         lines.append(f"| {f['name']} | {f['bytes']} | `{f['sha256'][:16]}…` |")
     for u in upstream:
         lines.append(f"- {u['name']}: {u['origin']}")
+    if upstream:
+        lines += [
+            "",
+            "upstream/ files reflect the backend state at export time, not at build time"
+            + (f" (fetched at {upstream_fetched_at})." if upstream_fetched_at else "."),
+        ]
     return "\n".join(lines) + "\n"
 
 
