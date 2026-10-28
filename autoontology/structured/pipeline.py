@@ -109,7 +109,8 @@ SCHEMA_CONNECT_TIMEOUT_S = 5
 _PG_USER_SCHEMAS = "NOT IN ('pg_catalog', 'information_schema')"
 #: What upstream's Postgres connector ingests and the semantic step consumes
 #: (``connectors/postgres.py`` ``get_columns`` / ``get_pks`` / ``get_fks``), one row kind
-#: each, so a column, primary-key or foreign-key change all change the fingerprint.
+#: each, so a column, primary-key or foreign-key change all change the fingerprint (the
+#: foreign keys: :data:`_PG_FK_SQL`).
 _PG_SCHEMA_QUERIES: dict[str, tuple[str, str]] = {
     "column": (
         "SELECT table_schema, table_name, column_name, data_type "
@@ -124,24 +125,84 @@ _PG_SCHEMA_QUERIES: dict[str, tuple[str, str]] = {
         "WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema " + _PG_USER_SCHEMAS,
         "tc.table_schema",
     ),
-    "fk": (
-        "SELECT tc.constraint_schema, tc.constraint_name, kcu.table_schema, kcu.table_name, "
-        "kcu.column_name, ccu.table_schema, ccu.table_name, ccu.column_name "
-        "FROM information_schema.table_constraints tc "
-        "JOIN information_schema.key_column_usage kcu "
-        "ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema "
-        "JOIN information_schema.constraint_column_usage ccu "
-        "ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema "
-        "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema " + _PG_USER_SCHEMAS,
-        "tc.table_schema",
-    ),
 }
+
+
+#: Foreign keys from ``pg_constraint`` (``information_schema.constraint_column_usage``
+#: cannot pair columns and joins the referenced table on the referencing schema): both
+#: ends resolved by ``conrelid``/``confrelid`` to schema-qualified names, and the
+#: ``conkey``/``confkey`` arrays, paired position by position (:data:`_PG_FK_ATTR_SQL`).
+_PG_FK_SQL = (
+    "SELECT con.conrelid::bigint, con.confrelid::bigint, ns.nspname, con.conname, "
+    "cn.nspname, cl.relname, fn.nspname, fcl.relname, con.conkey, con.confkey "
+    "FROM pg_constraint con "
+    "JOIN pg_namespace ns ON ns.oid = con.connamespace "
+    "JOIN pg_class cl ON cl.oid = con.conrelid "
+    "JOIN pg_namespace cn ON cn.oid = cl.relnamespace "
+    "JOIN pg_class fcl ON fcl.oid = con.confrelid "
+    "JOIN pg_namespace fn ON fn.oid = fcl.relnamespace "
+    "WHERE con.contype = 'f' AND cn.nspname " + _PG_USER_SCHEMAS
+)
+#: Column names of every relation on either end of a foreign key, by attribute number.
+_PG_FK_ATTR_SQL = (
+    "SELECT a.attrelid::bigint, a.attnum::int, a.attname FROM pg_attribute a "
+    "WHERE a.attnum > 0 AND a.attrelid IN (SELECT conrelid FROM pg_constraint WHERE "
+    "contype = 'f' UNION SELECT confrelid FROM pg_constraint WHERE contype = 'f')"
+)
+
+
+def _pg_foreign_keys(pg_conn: Any, schemas: list[str] | None) -> list[tuple[str, ...]]:
+    """``fk`` rows (constraint schema/name, schema, table, column, referenced
+    schema/table/column, position): one per column pair, ``conkey[i]`` with ``confkey[i]``."""
+    sql, args = _PG_FK_SQL, []
+    if schemas:
+        sql += " AND cn.nspname = ANY(%s)"
+        args.append(schemas)
+    constraints = pg_conn.execute(sql, args).fetchall()
+    if not constraints:
+        return []
+    names = {
+        (int(rel), int(num)): str(name)
+        for rel, num, name in pg_conn.execute(_PG_FK_ATTR_SQL, []).fetchall()
+    }
+    rows: list[tuple[str, ...]] = []
+    for (
+        rel,
+        ref,
+        con_schema,
+        con_name,
+        schema,
+        table,
+        ref_schema,
+        ref_table,
+        keys,
+        refs,
+    ) in constraints:
+        for position, (key, ref_key) in enumerate(
+            zip(keys or [], refs or [], strict=True), start=1
+        ):
+            rows.append(
+                (
+                    "fk",
+                    str(con_schema),
+                    str(con_name),
+                    str(schema),
+                    str(table),
+                    names.get((int(rel), int(key)), f"#{key}"),
+                    str(ref_schema),
+                    str(ref_table),
+                    names.get((int(ref), int(ref_key)), f"#{ref_key}"),
+                    str(position),
+                )
+            )
+    return rows
 
 
 def _postgres_schema(conn: dict[str, Any]) -> list[tuple[str, ...]]:
     """Rows ``(kind, ...)`` of a Postgres database's user schema: ``column`` (schema,
     table, column, type), ``pk`` (schema, table, column, position) and ``fk`` (constraint
-    schema/name, schema, table, column, referenced schema/table/column)."""
+    schema/name, schema, table, column, referenced schema/table/column, position:
+    :func:`_pg_foreign_keys`), every query under ``statement_timeout``."""
     import psycopg
 
     timeout_ms = int(SCHEMA_CONNECT_TIMEOUT_S * 1000)
@@ -163,6 +224,7 @@ def _postgres_schema(conn: dict[str, Any]) -> list[tuple[str, ...]]:
             rows += [
                 (kind, *(str(v) for v in row)) for row in pg_conn.execute(sql, args).fetchall()
             ]
+        rows += _pg_foreign_keys(pg_conn, list(conn["schemas"]) if conn.get("schemas") else None)
     return rows
 
 

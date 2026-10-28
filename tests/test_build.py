@@ -753,19 +753,13 @@ def test_postgres_introspector_reads_keys_under_a_statement_timeout(monkeypatch)
 
         def execute(self, sql, args=()):
             seen["sql"].append(sql)
-            if "FOREIGN KEY" in sql:
+            if "pg_attribute" in sql:
+                return Result([(10, 2, "customer_id"), (20, 1, "id")])
+            if "pg_constraint" in sql:
                 return Result(
                     [
-                        (
-                            "public",
-                            "fk_orders_customer",
-                            "public",
-                            "orders",
-                            "customer_id",
-                            "public",
-                            "customers",
-                            "id",
-                        )
+                        (10, 20, "public", "fk_orders_customer", "public", "orders")
+                        + ("public", "customers", [2], [1])
                     ]
                 )
             if "PRIMARY KEY" in sql:
@@ -783,7 +777,81 @@ def test_postgres_introspector_reads_keys_under_a_statement_timeout(monkeypatch)
     kinds = {r[0] for r in rows}
     assert kinds == {"column", "pk", "fk"}
     fk = next(r for r in rows if r[0] == "fk")
-    assert "fk_orders_customer" in fk and "customers" in fk and "id" in fk
+    assert fk == (
+        "fk",
+        "public",
+        "fk_orders_customer",
+        "public",
+        "orders",
+        "customer_id",
+        "public",
+        "customers",
+        "id",
+        "1",
+    )
+
+
+def test_postgres_fk_fingerprint_follows_cross_schema_and_composite_pairs(env, monkeypatch):
+    """Round 3 #3: the FK rows come from ``pg_constraint`` (referenced table resolved by
+    ``confrelid``, so ``sales.orders -> crm.customers`` is seen) and ``conkey``/``confkey``
+    are paired position by position through ``pg_attribute``, so pointing the FK at
+    another schema or swapping which column references which changes the fingerprint."""
+    import sys
+    import types
+
+    rels = {10: ("sales", "orders"), 20: ("crm", "customers"), 30: ("sales", "customers")}
+    attrs = {
+        10: {1: "id", 2: "customer_id", 3: "region"},
+        20: {1: "id", 2: "region"},
+        30: {1: "id", 2: "region"},
+    }
+    fk = {"confrelid": 30, "conkey": [2, 3], "confkey": [1, 2]}
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, args=()):
+            if "pg_attribute" in sql:
+                return Result(
+                    [(rel, n, name) for rel, cols in attrs.items() for n, name in cols.items()]
+                )
+            if "pg_constraint" in sql:
+                assert "contype = 'f'" in sql
+                ref = rels[fk["confrelid"]]
+                return Result(
+                    [
+                        (10, fk["confrelid"], "sales", "fk_orders_customer", "sales", "orders")
+                        + ref
+                        + (list(fk["conkey"]), list(fk["confkey"]))
+                    ]
+                )
+            if "PRIMARY KEY" in sql:
+                return Result([])
+            return Result([("sales", "orders", "id", "integer")])
+
+    monkeypatch.setitem(sys.modules, "psycopg", types.SimpleNamespace(connect=lambda **kw: Conn()))
+    src = pipeline.add_source(env["store"], "postgres://u:p@db.example/crm", name="crm")
+    rows = pipeline.SCHEMA_INTROSPECTORS["postgres"]({"host": "db", "user": "u", "database": "crm"})
+    fks = sorted(r for r in rows if r[0] == "fk")
+    assert [(r[5], r[8]) for r in fks] == [("customer_id", "id"), ("region", "region")]
+    first = bj.input_fingerprint(src)
+    assert first
+    fk["confrelid"] = 20  # sales.orders -> crm.customers: another schema, same names
+    cross = bj.input_fingerprint(src)
+    assert cross not in ("", first)
+    fk["confkey"] = [2, 1]  # customer_id -> region, region -> id: the pairing changed
+    assert bj.input_fingerprint(src) not in ("", first, cross)
 
 
 # --- export from a snapshot ---------------------------------------------------------------
