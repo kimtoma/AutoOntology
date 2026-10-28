@@ -276,6 +276,20 @@ describe("Exports page", () => {
     await user.click(within(root).getByRole("button", { name: "Preview okf/concepts/계약상태.md" }))
     expect(await screen.findByText(/type: Business Concept/)).toBeInTheDocument()
   })
+
+  it("shows 20 export folders, then more on request", async () => {
+    const user = userEvent.setup()
+    const entry = (n: number) => ({ revision: n, dir: `r${String(n).padStart(4, "0")}`,
+                                    created_at: "2026-10-28T12:06:24+00:00", files: [], dirs: [] })
+    mockFetch({ "GET /exports": { exports: Array.from({ length: 23 }, (_, i) => entry(23 - i)) } })
+    renderPage(<ExportsPage />)
+    await screen.findByText("exports/r0023/")
+    expect(document.querySelectorAll("[data-export]")).toHaveLength(20)
+    await user.click(screen.getByRole("button", { name: "Show more (3 older)" }))
+    expect(document.querySelectorAll("[data-export]")).toHaveLength(23)
+    expect(screen.getByText("exports/r0001/")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull()
+  })
 })
 
 describe("Status page", () => {

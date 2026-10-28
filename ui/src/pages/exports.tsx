@@ -28,6 +28,9 @@ const DIR_INFO: Record<string, string> = {
   upstream: "The upstream backend's own per-source model and Ossie zip",
 }
 
+/** export folders shown at first; "Show more" adds this many at a time */
+const PAGE = 20
+
 type Preview = { dir: string; file: string; text: string }
 type Open = (dir: string, file: string) => void
 
@@ -165,6 +168,7 @@ export default function ExportsPage() {
   const list = useQuery({ queryKey: keys.exports, queryFn: api.exports })
   const [preview, setPreview] = useState<Preview | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
+  const [shown, setShown] = useState(PAGE)
 
   const open: Open = async (dir, file) => {
     setLoading(`${dir}/${file}`)
@@ -190,9 +194,15 @@ export default function ExportsPage() {
                       action={<Button asChild><Link to="/build"><Hammer aria-hidden /> Go to Build</Link></Button>} />
         ) : (
           <div id="exports-list" className="grid gap-4">
-            {list.data.slice(0, 20).map((e, i) => (
+            {list.data.slice(0, shown).map((e, i) => (
               <ExportCard key={e.dir} entry={e} latest={i === 0} onPreview={open} loading={loading} />
             ))}
+            {list.data.length > shown && (
+              <Button variant="outline" className="justify-self-center" id="exports-more"
+                      onClick={() => setShown((n) => n + PAGE)}>
+                Show more ({list.data.length - shown} older)
+              </Button>
+            )}
           </div>
         )}
       <Dialog open={!!preview} onOpenChange={(o) => { if (!o) setPreview(null) }}>
