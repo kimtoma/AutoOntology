@@ -80,13 +80,41 @@ AutoOntology는 여기에 문서 개념 추출을 더하고, 문서 개념을 �
 ```
 git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git
 cd AutoOntology
-cp .env.example .env
 docker compose up -d            # or point POSTGRES_* in .env at your own Postgres
 uv sync
-uv run autoontology setup       # add --docs for HWP/PDF/DOCX via kordoc
+uv run autoontology init        # checks what is installed, writes .env, runs setup
+uv run autoontology demo        # builds the quickstart sample set and opens the web UI
+```
+
+실행하면 이렇게 됩니다:
+
+- `init`은 번호가 붙은 일곱 단계를 차례로 진행하고 단계마다 상태를 한 줄씩 출력합니다:
+  Postgres, 채팅 제공자, 임베딩, 문서, `.env`, `setup`, 요약. 쓸 수 있는 채팅 제공자(로그인된
+  `claude`·`codex` CLI, 실행 중인 Ollama)를 감지해 claude, codex, ollama 순서로 준비된 첫
+  번째를 제안합니다. `.env`에는 필요한 키만 씁니다(직접 쓴 줄과 주석은 그대로 두고, 기존 파일은
+  먼저 `.env.bak-<시각>`으로 복사합니다). API 키는 절대 묻지 않습니다. `openai` 제공자를 쓰려면
+  `AUTOONTOLOGY_OPENAI_API_KEY=…`를 `.env`에 직접 입력하세요. `--yes`는 아무것도 묻지 않고
+  감지한 기본값으로 진행합니다. `--provider`, `--chat-model`, `--docs/--no-docs`,
+  `--vision-model`로 답을 미리 정할 수 있습니다. 여러 번 실행해도 안전합니다.
+- `demo`는 서비스를 시작하고, 샘플 세트를 등록하고(`quick`, `quick-docs`; `--set hanbit`이면
+  회사 전체 데이터인 `hanbit`, `hanbit-docs`, `hanbit-images`), 채팅 제공자별 첫 빌드 예상
+  시간을 보여 준 뒤 빌드(단계별 소요 시간 포함)·내보내기를 하고 웹 UI를 엽니다. 그다음
+  **Ontology → Graph → Playground** 순서로 살펴보세요. `demo --resume`은 중단된 빌드를 이어
+  가고, `--no-open`은 브라우저를 열지 않습니다.
+- `uv run autoontology provider status`는 모든 채팅 제공자(사용 가능 여부, 로그인, 모델, 마지막
+  테스트, 해결 방법)를 보여 주고, `provider test`는 테스트 호출을 한 번 하며,
+  `provider use claude`는 `.env`의 제공자를 바꿉니다(이후
+  `uv run autoontology down && uv run autoontology up`으로 재시작).
+
+<details>
+<summary>수동 단계 (init/demo가 하는 일)</summary>
+
+```
+cp .env.example .env            # then edit the provider settings
+uv run autoontology setup       # add --docs for HWP/PDF/DOCX/PPTX/XLSX and image OCR via kordoc
 uv run autoontology up
-uv run autoontology source add samples/structured --name hanbit
-uv run autoontology source add samples/unstructured --name hanbit-docs --kind documents
+uv run autoontology source add samples/quickstart/structured --name quick
+uv run autoontology source add samples/quickstart/documents --name quick-docs --kind documents
 uv run autoontology build
 uv run autoontology export
 uv run autoontology ui
@@ -111,6 +139,8 @@ uv run autoontology ui
   포함되므로 문서를 다시 읽습니다.
 - `export`는 자신이 쓴 폴더를 출력합니다(예: `exports/r0001/`).
 - `ui`는 http://127.0.0.1:7800/ui/ 를 엽니다.
+
+</details>
 
 샘플 데이터는 가상의 한국 무역회사("한빛상사")입니다. 서로 연결된 CSV 파일 세 개(고객, 계약,
 청구)와, 계약·청구 규정 문서로 이루어져 있습니다. [samples/README.md](samples/README.md)를
@@ -142,6 +172,9 @@ AUTOONTOLOGY_EMBED_PROVIDER=ollama
 
 | 명령 | 하는 일 |
 |---|---|
+| `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | 단계별 설정: Postgres 확인(`docker compose up -d` 후 재시도), 채팅 제공자·임베딩·문서 감지와 선택, `.env` 작성(다른 줄은 유지, 기존 파일은 백업), `setup` 실행. `--yes`는 아무것도 묻지 않으며, Postgres가 꺼져 있거나 고른 CLI가 로그인되지 않았으면 해결 방법과 함께 종료 코드 2로 끝납니다. |
+| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume]` | 서비스 시작, 샘플 세트 소스 등록(이미 등록된 것은 유지, 경로가 다른 소스는 교체), 제공자별 예상 빌드 시간 출력, 단계별 시간과 함께 빌드, 내보내기, 웹 UI 열기. |
+| `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M]` | 모든 채팅 제공자 표시(사용 가능, 로그인, 모델, 마지막 테스트, 해결 방법), 테스트 호출 한 번, 또는 `.env`의 제공자 전환(셸 변수가 파일보다 우선하면 경고). |
 | `autoontology setup [--docs] [--skip-models] [--force-alias]` | 멱등 준비 작업: 카탈로그 데이터베이스와 `vector`, `pg_trgm` 확장을 만들고, 마이그레이션을 실행하고, Ollama 모델을 받아 `openai/qwen3:8b` 별칭을 만들며, `--docs`를 주면 kordoc을 설치합니다. |
 | `autoontology doctor [--skip-models]` | Postgres, pgvector, 마이그레이션, 모델 엔드포인트, 벡터 테이블, 포트를 점검합니다. |
 | `autoontology up` / `down` / `status` | 엔진 백엔드와 서비스를 시작, 중지하거나 상태를 보여 줍니다. |
@@ -182,6 +215,8 @@ kordoc이 설치되지 않아 건너뛴 문서는 실패가 아니라 경고입�
 | 메서드와 경로 | 용도 |
 |---|---|
 | `GET /api/status` | 버전, 백엔드와 Postgres 상태, Ollama 모델, `kordoc_available`, 제공자 요약(키는 절대 포함하지 않음). |
+| `GET /api/samples` | `samples/`의 샘플 세트(`quickstart`, `hanbit`): `[{set, path, sources: [{name, kind, path, files, bytes}], registered}]`. |
+| `POST /api/samples/load` | `{"set": "quickstart"}`: 그 세트의 소스를 `autoontology demo`와 똑같이 등록합니다(`action`: `created`, `kept`, `replaced`와 함께 반환). 모르는 세트는 400, run이 진행 중이면 409. |
 | `GET /api/sources` | 소스 목록. |
 | `POST /api/sources` | 소스 추가: JSON `{name, kind: files\|database\|documents, locator, recursive?}` 또는 multipart 업로드. |
 | `DELETE /api/sources/{name}` | 소스 제거(`?drop_db=true`는 데이터베이스도 삭제, `&force=true`는 `source rm --force`처럼 엔진의 그래프 삭제나 별칭 정리가 실패하거나 끝나지 않아도 로컬에서 제거). 문서 소스는 `source rm`과 마찬가지로 먼저 업스트림 Term에서 그 소스가 추가한 별칭을 지웁니다. |

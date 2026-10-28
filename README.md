@@ -88,13 +88,42 @@ Prerequisites:
 ```
 git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git
 cd AutoOntology
-cp .env.example .env
 docker compose up -d            # or point POSTGRES_* in .env at your own Postgres
 uv sync
-uv run autoontology setup       # add --docs for HWP/PDF/DOCX via kordoc
+uv run autoontology init        # checks what is installed, writes .env, runs setup
+uv run autoontology demo        # builds the quickstart sample set and opens the web UI
+```
+
+What happens:
+
+- `init` goes through seven numbered steps and prints one status line for each: Postgres,
+  chat provider, embeddings, documents, `.env`, `setup`, summary. It detects which chat
+  providers you can use (a logged-in `claude` or `codex` CLI, a running Ollama) and
+  suggests the first ready one, in the order claude, codex, ollama. It writes only the keys
+  it needs into `.env` (lines and comments you wrote stay as they are; an existing file is
+  first copied to `.env.bak-<timestamp>`). It never asks for an API key: for the `openai`
+  provider, type `AUTOONTOLOGY_OPENAI_API_KEY=…` into `.env` yourself. `--yes` takes the
+  detected defaults without asking anything; `--provider`, `--chat-model`,
+  `--docs/--no-docs` and `--vision-model` preset the answers. Running it again is safe.
+- `demo` starts the services, registers the sample set (`quick` and `quick-docs`; with
+  `--set hanbit` the full company: `hanbit`, `hanbit-docs`, `hanbit-images`), prints how
+  long the first build should take with each chat provider, builds (with the time of every
+  step), exports and opens the web UI. Then look at **Ontology → Graph → Playground**.
+  `demo --resume` continues an interrupted build; `--no-open` does not open the browser.
+- `uv run autoontology provider status` shows every chat provider (available, logged in,
+  model, last test, what to do), `provider test` makes one test call, and
+  `provider use claude` switches the provider in `.env` (then restart with
+  `uv run autoontology down && uv run autoontology up`).
+
+<details>
+<summary>Manual steps (what init/demo do)</summary>
+
+```
+cp .env.example .env            # then edit the provider settings
+uv run autoontology setup       # add --docs for HWP/PDF/DOCX/PPTX/XLSX and image OCR via kordoc
 uv run autoontology up
-uv run autoontology source add samples/structured --name hanbit
-uv run autoontology source add samples/unstructured --name hanbit-docs --kind documents
+uv run autoontology source add samples/quickstart/structured --name quick
+uv run autoontology source add samples/quickstart/documents --name quick-docs --kind documents
 uv run autoontology build
 uv run autoontology export
 uv run autoontology ui
@@ -119,6 +148,8 @@ What to expect:
   so the documents are read again.
 - `export` prints the folder it wrote, for example `exports/r0001/`.
 - `ui` opens http://127.0.0.1:7800/ui/.
+
+</details>
 
 The sample data is a fictitious Korean trading company ("한빛상사"): three related CSV files
 (customers, contracts, invoices) and its contract and billing rules as documents. See
@@ -198,6 +229,9 @@ What to know:
 
 | Command | What it does |
 |---|---|
+| `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | Step-by-step setup: checks Postgres (retry after `docker compose up -d`), detects and picks the chat provider, embeddings and documents, writes `.env` (other lines kept, previous file backed up) and runs `setup`. `--yes` asks nothing; exits 2 with the fix when Postgres is down or the chosen CLI is not logged in. |
+| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume]` | Starts the services, registers the sample set's sources (already registered ones are kept, a source with another path is replaced), prints the expected build time per provider, builds with per-step times, exports and opens the web UI. |
+| `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M]` | Shows every chat provider (available, logged in, model, last test, remedy), runs one test call, or switches the provider in `.env` (warns when a shell variable overrides the file). |
 | `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | Idempotent preparation: creates the catalog database and the `vector` and `pg_trgm` extensions, runs the migrations, pulls the Ollama models (and `AUTOONTOLOGY_VISION_MODEL` when set) and builds the `openai/qwen3:8b` alias, and with `--docs` installs kordoc and its OCR models (`--skip-ocr-models` leaves the models out). |
 | `autoontology doctor [--skip-models]` | Checks Postgres, pgvector, migrations, model endpoints, the vector tables and the ports. |
 | `autoontology up` / `down` / `status` | Starts, stops or shows the engine backend and the service. |
@@ -264,6 +298,8 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 |---|---|
 | `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, `ocr_ready`, `vision_model`, `formats` (every supported extension by source kind, with its engine) and a provider summary (never the key): `providers.chat` (`name`, `model`, `available`, `logged_in`, `detail`, `remedy`, `last_test`) and `providers.embed`. |
 | `POST /api/providers/test` | One test call (`{"answer": "pong"}`) through the active chat provider; 409 while another test runs. The result is kept as `last_test`. |
+| `GET /api/samples` | The sample sets in `samples/` (`quickstart`, `hanbit`): `[{set, path, sources: [{name, kind, path, files, bytes}], registered}]`. |
+| `POST /api/samples/load` | `{"set": "quickstart"}` registers that set's sources like `autoontology demo` (returns them with `action`: `created`, `kept` or `replaced`); 400 for an unknown set, 409 while a run is active. |
 | `GET /api/sources` | Lists the sources. |
 | `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
 | `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion or the alias cleanup fails or does not finish, like `source rm --force`). A documents source's alias additions are removed from the upstream Terms first, as with `source rm`. |
@@ -430,6 +466,7 @@ then `.env`, then the built-in default.
 | `AUTOONTOLOGY_KORDOC_TIMEOUT` | `300` | Seconds per document (kordoc always runs offline). |
 | `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS` | `200` | Rows a CSV/TSV document keeps. |
 | `AUTOONTOLOGY_DOC_MAX_BYTES` | `52428800` (50 MB) | Largest CSV/TSV, text, Markdown, HTML or `.doc` document the native readers accept; larger files fail with `FILE_TOO_LARGE`. |
+| `AUTOONTOLOGY_SAMPLES_DIR` | `<repo>/samples` | Folder holding the sample sets that `demo` and `/api/samples` use. |
 | `AUTOONTOLOGY_VISION_MODEL` | unset | Ollama vision model (for example `gemma4:e4b`) that describes image documents before their OCR text; `setup` pulls it. Unset: OCR text only. |
 | `AUTOONTOLOGY_CHUNK_TOKENS` / `_CHUNK_OVERLAP_TOKENS` / `_CHUNK_PACK_TOKENS` | `1200` / `100` / `400` | Chunk size, overlap when a section is split, and how far small neighbouring sections are packed together (tiktoken `cl100k_base` tokens). |
 | `AUTOONTOLOGY_LLM_WORKERS` | `1` with ollama, else `3` | Parallel chunk extraction calls. |
