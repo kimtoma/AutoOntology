@@ -130,7 +130,7 @@ def concept_items(model: MergedOntology) -> list[dict[str, Any]]:
                 "name": m.concept_name,
                 "kind": m.concept_kind,
                 "origin": "document",
-                "source": term.documents_source if term else "",
+                "source": m.documents_source or (term.documents_source if term else ""),
                 "definition": "",
                 "synonyms": [],
                 "merged_concepts": [],

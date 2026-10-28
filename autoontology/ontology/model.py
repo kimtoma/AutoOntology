@@ -179,6 +179,8 @@ class OMerge:
     term_local: str
     confidence: float | None
     derived_from: list[str] = field(default_factory=list)
+    #: the documents source the concept came from (several may fold into one Term)
+    documents_source: str = ""
 
 
 @dataclass
@@ -455,7 +457,15 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput, term_class: dict
             cls.concept_ids.append(c.id)
             cls.documents_source = cls.documents_source or docs.source
             model.merges.append(
-                OMerge(f"concept-{slug(c.id)}", c.name, c.kind, term_local, a.confidence, evidence)
+                OMerge(
+                    f"concept-{slug(c.id)}",
+                    c.name,
+                    c.kind,
+                    term_local,
+                    a.confidence,
+                    evidence,
+                    documents_source=docs.source,
+                )
             )
             node_of[c.name] = term_local
             continue

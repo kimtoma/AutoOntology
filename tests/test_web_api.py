@@ -531,6 +531,24 @@ def test_ontology_concepts_search_and_detail(env):
         assert c.get(f"{API}{gone}").status_code == 404
 
 
+def test_folded_concepts_keep_their_own_documents_source():
+    from autoontology.ontology import model as merged
+    from autoontology.web.concepts import concept_items
+
+    model = merged.MergedOntology(name="w", base="http://x/#")
+    model.classes["term-t"] = merged.OClass(
+        "term-t", "Contracts", "structured", structured_source="db", documents_source="docs-a"
+    )
+    model.merges = [
+        merged.OMerge("concept-a", "계약", "entity", "term-t", 0.95, documents_source="docs-a"),
+        merged.OMerge("concept-b", "약정", "entity", "term-t", 0.95, documents_source="docs-b"),
+    ]
+    sources = {i["name"]: i["source"] for i in concept_items(model)}
+    assert sources == {"Contracts": "db", "계약": "docs-a", "약정": "docs-b"}
+    again = merged.MergedOntology.from_dict(model.to_dict())
+    assert [m.documents_source for m in again.merges] == ["docs-a", "docs-b"]
+
+
 def test_a_proposal_below_the_accept_threshold_changes_no_origin(env):
     """A judge ``related`` at 0.3 is exported as an axiom but is not an accepted edge: the
     Term stays ``structured`` and the link says ``accepted: False``."""

@@ -195,6 +195,7 @@ def test_build_runs_every_source_in_one_run_and_saves_a_snapshot(env):
     assert model.counts()["classes_structured"] == 2
     folded = {m.concept_name: model.classes[m.term_local].label for m in model.merges}
     assert folded == {"계약": "Contract", "고객": "Customer"}
+    assert {m.documents_source for m in model.merges} == {"hanbit-docs"}
     assert model.aligned_terms() == {"term-t-contract", "term-t-customer"}
     assert snap.counts["merged_concepts"] == 2
 
