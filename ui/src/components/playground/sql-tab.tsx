@@ -77,7 +77,7 @@ export function SqlTab({ source }: { source: string | null }) {
       <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); run(question) }}>
         <Textarea id="sql-input" value={question} onChange={(e) => setQuestion(e.target.value)} rows={2}
                   aria-label="Data question" maxLength={2000}
-                  placeholder="e.g. How many customers are there? / The 5 largest contracts by amount (계약금액)"
+                  placeholder="e.g. How many customers are there? / The 5 largest contracts by amount (the 계약금액 column)"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault()

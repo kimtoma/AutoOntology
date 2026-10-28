@@ -26,8 +26,8 @@ interface Msg {
   incomplete?: boolean
 }
 
-const EXAMPLES = ["What approval does a contract (계약) need?", "How are customers and contracts linked?",
-                  "Which payment states (수납상태) can an invoice have?"]
+const EXAMPLES = ["What approval does a contract (the 계약 table) need?", "How are customers and contracts linked?",
+                  "Which payment states (the 수납상태 column) can an invoice have?"]
 
 function Retrieved({ items }: { items: RetrievedElement[] }) {
   const [open, setOpen] = useState(false)
