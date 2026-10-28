@@ -29,7 +29,18 @@ interface Live {
   steps: Step[]
   progress: Progress
   status: RunStatus
+  /** the error of the latest `status` event (the run's own `error` is the snapshot before the stream) */
+  error: string | null
   ended: boolean
+}
+
+/** The JSON payload of an SSE event; null (the update is dropped) when a frame is malformed. */
+function payload<T>(e: Event): T | null {
+  try {
+    return JSON.parse((e as MessageEvent<string>).data) as T
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -58,6 +69,7 @@ function useRunStream(runId: string, logEl: HTMLPreElement | null) {
     let closed = false
     let es: EventSource | null = null
     let lastLogId = ""
+    let loggedError = ""  // a reconnect re-sends the status event: log its error once
     let pending: string[] = []
     let frame = 0
 
@@ -73,7 +85,7 @@ function useRunStream(runId: string, logEl: HTMLPreElement | null) {
 
     api.run(runId).then((run) => {
       if (closed) return
-      setLive({ run, steps: run.steps, progress: run.progress, status: run.status, ended: false })
+      setLive({ run, steps: run.steps, progress: run.progress, status: run.status, error: run.error, ended: false })
       es = new EventSource(api.runEventsUrl(runId))
       es.onopen = () => {
         if (!lastLogId) { clearLog(logEl); pending = [] }
@@ -84,7 +96,8 @@ function useRunStream(runId: string, logEl: HTMLPreElement | null) {
         appendLine(ev.data)
       })
       es.addEventListener("step", (e) => {
-        const step = JSON.parse((e as MessageEvent<string>).data) as Step
+        const step = payload<Step>(e)
+        if (!step) return
         setLive((cur) => {
           if (!cur) return cur
           const steps = [...cur.steps]
@@ -95,13 +108,18 @@ function useRunStream(runId: string, logEl: HTMLPreElement | null) {
         })
       })
       es.addEventListener("progress", (e) => {
-        const progress = JSON.parse((e as MessageEvent<string>).data) as Progress
+        const progress = payload<Progress>(e)
+        if (!progress) return
         setLive((cur) => cur && { ...cur, progress })
       })
       es.addEventListener("status", (e) => {
-        const s = JSON.parse((e as MessageEvent<string>).data) as { status: RunStatus; error?: string }
-        setLive((cur) => cur && { ...cur, status: s.status })
-        if (s.error) appendLine(`error: ${s.error}`)
+        const s = payload<{ status: RunStatus; error?: string | null }>(e)
+        if (!s) return
+        setLive((cur) => cur && { ...cur, status: s.status, error: s.error || cur.error })
+        if (s.error && s.error !== loggedError) {
+          loggedError = s.error
+          appendLine(`error: ${s.error}`)
+        }
       })
       es.addEventListener("end", () => {
         ended = true
@@ -194,7 +212,7 @@ function RunSheetBody({ runId }: { runId: string }) {
     if (!live?.ended || announced.current) return
     announced.current = true
     if (live.status === "failed") {
-      toast.error(`${RUN_LABEL[live.run.kind] ?? live.run.kind} failed`, { description: live.run.error?.slice(0, 200) ?? undefined })
+      toast.error(`${RUN_LABEL[live.run.kind] ?? live.run.kind} failed`, { description: live.error?.slice(0, 200) || undefined })
     }
   }, [live])
 

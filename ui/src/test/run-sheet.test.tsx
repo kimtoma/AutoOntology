@@ -1,5 +1,6 @@
-import { screen, waitFor } from "@testing-library/react"
+import { act, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { toast } from "sonner"
 
 import { RunSheet } from "@/components/run-sheet"
 import { mockFetch, renderPage } from "@/test/utils"
@@ -89,5 +90,22 @@ describe("run sheet", () => {
     await openStream({ ...RUN, status: "pending" })
     expect(await screen.findByText("Extract · Pending")).toBeInTheDocument()
     expect(screen.queryByText(/not run/)).toBeNull()
+  })
+
+  it("toasts the error of a run that fails while the sheet is open, logging it once", async () => {
+    const failed = vi.spyOn(toast, "error")
+    const es = await openStream({ ...RUN, status: "running" })
+    await screen.findByText("Load · Succeeded · 2.0 s")
+    act(() => {
+      es.emit("log", "step 1", "10")
+      es.emit("step", "{not json")  // a malformed frame is dropped, the stream goes on
+      es.emit("status", { status: "failed", error: "align: model timed out" })
+      es.emit("status", { status: "failed", error: "align: model timed out" })  // after a reconnect
+      es.emit("end", "")
+    })
+    await waitFor(() => expect(failed).toHaveBeenCalledWith("Build failed", { description: "align: model timed out" }))
+    await waitFor(() => expect(document.getElementById("live-log")!.textContent)
+      .toBe("step 1\nerror: align: model timed out\n"))
+    expect(document.getElementById("live-status")).toHaveAttribute("data-status", "failed")
   })
 })
