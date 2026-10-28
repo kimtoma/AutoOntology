@@ -442,9 +442,18 @@ def test_export_reads_the_snapshot_and_overwrites_its_folder(env):
     assert "Revision: 1" in report
     assert "upstream/ files reflect the backend state at export time, not at build time" in report
     assert marker["upstream_fetched_at"] and marker["upstream_fetched_at"] in report
-    (folder / "stale.txt").write_text("old")
     again = export_job.run_export(store, settings, revision=1, client=env["client"])
-    assert again.export_dir == folder and not (folder / "stale.txt").exists()
+    assert again.export_dir == folder and again.status == "succeeded"
+    assert sorted(marker["files"]) == sorted(
+        p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()
+    )
+    assert not [p for p in folder.parent.iterdir() if ".prev-" in p.name]  # backup removed
+    # even under the exports root, a file the exporter did not write is never deleted
+    (folder / "stale.txt").write_text("old")
+    with pytest.raises(JobError, match="refusing to replace .*stale.txt"):
+        export_job.run_export(store, settings, revision=1, client=env["client"])
+    assert (folder / "stale.txt").read_text() == "old"
+    (folder / "stale.txt").unlink()
     with pytest.raises(JobError, match="unknown revision 7"):
         export_job.run_export(store, settings, revision=7, client=env["client"])
     busy = store.create_run(kind="build", source_id=None, params={"pid": os.getpid()})
@@ -501,6 +510,70 @@ def test_export_out_never_deletes_foreign_files(env, tmp_path):
         with pytest.raises(JobError, match="refusing to export into"):
             export_job.run_export(store, settings, out=bad, client=env["client"])
     assert (out / "sentinel.txt").read_text() == "keep me"
+
+
+def test_export_out_refuses_user_files_inside_exporter_folders(env, tmp_path):
+    """export.json lists every file the exporter wrote; a user file anywhere under the
+    revision folder (here inside okf/) makes a re-export refuse, deleting nothing."""
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    out = tmp_path / "desk"
+    folder = export_job.run_export(store, settings, out=out, client=env["client"]).export_dir
+    listed = export_job.read_export_metadata(folder)["files"]
+    assert "okf/index.md" in listed and "ossie/mapping.yaml" in listed
+    assert "upstream/hanbit.ossie.zip" in listed and "export.json" in listed
+    for user_file in ("okf/personal-notes.md", "upstream/mine/a.txt", "ossie/x.yaml"):
+        target = folder / user_file
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("mine")
+        before = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*"))
+        with pytest.raises(JobError, match=f"refusing to replace .*{user_file}"):
+            export_job.run_export(store, settings, out=out, client=env["client"])
+        assert sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*")) == before
+        assert target.read_text() == "mine"
+        target.unlink()
+        if target.parent.name == "mine":
+            target.parent.rmdir()
+    # an edited marker cannot widen what may be removed
+    marker = export_job.read_export_metadata(folder)
+    (folder / "export.json").write_text(
+        json.dumps({**marker, "files": [*marker["files"], "../escape"]}), encoding="utf-8"
+    )
+    with pytest.raises(JobError, match="does not list the files it wrote"):
+        export_job.run_export(store, settings, out=out, client=env["client"])
+    (folder / "export.json").write_text(json.dumps(marker), encoding="utf-8")
+    assert export_job.run_export(store, settings, out=out, client=env["client"]).status == (
+        "succeeded"
+    )
+
+
+def test_export_swap_failure_restores_the_previous_folder(env, monkeypatch):
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    folder = export_job.run_export(store, settings, client=env["client"]).export_dir
+    before = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+    real_rename = Path.rename
+
+    def failing_rename(self, target):
+        if self.name.startswith(".r0001.") and self.name.endswith(".tmp"):
+            raise OSError("injected rename failure")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", failing_rename)
+    with pytest.raises(JobError, match="injected rename failure") as info:
+        export_job.run_export(store, settings, client=env["client"])
+    failed = store.get_run(info.value.run_id)
+    assert failed.status == "failed" and "injected rename failure" in failed.error
+    assert {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()} == before
+    leftovers = [p.name for p in folder.parent.iterdir() if p.name != "r0001"]
+    assert leftovers == []  # backup restored, work folder removed
+    monkeypatch.setattr(Path, "rename", real_rename)
+    ok = export_job.run_export(store, settings, client=env["client"])
+    assert store.get_run(ok.run_id).status == "succeeded"
 
 
 def test_export_format_keeps_the_other_formats_of_the_revision(env, tmp_path):

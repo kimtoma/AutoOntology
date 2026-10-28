@@ -1017,9 +1017,11 @@ def _execute(
     skip: dict[str, str],
     already: set[str],
     steps: dict[str, Callable[[Any], dict[str, Any]]] | None = None,
+    finish: bool = True,
 ) -> RunResult:
     """Run *step_names* in order on *ctx* (needs ``settings``, ``store``, ``run``),
-    persisting each step row; *steps* defaults to the build steps."""
+    persisting each step row; *steps* defaults to the build steps. With ``finish=False``
+    the run stays ``running`` after the last step: the caller records the outcome."""
     steps = STEPS if steps is None else steps
     log_path = jobs_log_path(ctx.settings)
     result = RunResult(run_id=ctx.run.id, status="running")
@@ -1081,8 +1083,9 @@ def _execute(
         logger.info("%s: ok (%.1fs)", label, detail["seconds"])
         result.steps[name] = "succeeded"
         result.details[name] = detail
-    ctx.store.update_run(ctx.run.id, status="succeeded")
-    result.status = "succeeded"
+    if finish:
+        ctx.store.update_run(ctx.run.id, status="succeeded")
+        result.status = "succeeded"
     return result
 
 

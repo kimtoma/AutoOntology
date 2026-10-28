@@ -16,9 +16,12 @@ and, per structured source, ``upstream/<source>.model.yaml`` and
 ``upstream/<source>.ossie.zip`` fetched from the backend, ``ossie/`` (semantic model,
 ontology, mapping, ``validation.json``: :mod:`autoontology.export.ossie`, built from those
 upstream zips) and ``okf/`` (:mod:`autoontology.export.okf`). Exporting a revision again
-replaces its folder; outside the exports root only a folder that holds nothing but what
-this exporter writes (:data:`EXPORT_ENTRIES`) -- one with any other file is refused, never
-deleted. A failed export leaves the old folder as it was; a failed Ossie/OKF validation
+replaces its folder, but only when every file in it is one its ``export.json`` lists as
+written by this exporter -- a folder with any other file, at any depth, is refused, never
+deleted. The new folder is built beside the old one and swapped in (the old one is kept
+as a backup until the new one is in place, and restored if the swap fails); the run is
+``succeeded`` only once the folder is installed. A failed export leaves the old folder as
+it was; a failed Ossie/OKF validation
 copies its ``validation.json`` to ``logs/<run>.<format>-validation.json``. A ``--format``
 export keeps the other formats' files of the previous export of
 the same revision.
@@ -32,9 +35,10 @@ import logging
 import os
 import re
 import shutil
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from autoontology.config import REPO_ROOT, Settings
@@ -127,51 +131,92 @@ def export_target(settings: Settings, revision: int, out: Path | None) -> Path:
     return parent / revision_dir_name(revision)
 
 
-def _owned(settings: Settings, final: Path) -> bool:
-    """A ``r<NNNN>`` folder directly under the configured exports root belongs to us."""
-    return bool(REVISION_DIR.fullmatch(final.name)) and (
-        final.parent.resolve() == settings.exports_dir.resolve()
-    )
+def _listed_files(marker: dict[str, Any] | None) -> set[str] | None:
+    """The ``files`` an :data:`EXPORT_MARKER` lists (relative POSIX paths), or None when
+    the marker has no valid list (missing, from an older exporter, or tampered with)."""
+    names = (marker or {}).get("files")
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        return None
+    listed = set()
+    for name in names:
+        path = PurePosixPath(name)
+        if not name or path.is_absolute() or ".." in path.parts or str(path) != name:
+            return None
+        listed.add(name)
+    return listed | {EXPORT_MARKER}
 
 
-def check_replaceable(settings: Settings, final: Path) -> None:
-    """Refuse to replace *final* unless it is a revision folder under the exports root or
-    holds only files this exporter writes, next to the :data:`EXPORT_MARKER` it wrote
-    (``upstream/``, ``ossie/`` and ``okf/`` are removed with their contents, so a folder
-    that merely uses those names is not enough)."""
+def _unlisted(folder: Path, listed: set[str]) -> list[str]:
+    """Every entry under *folder* (recursively, symlinks not followed) that is not a file
+    in *listed* nor a directory holding one; directories end with ``/``."""
+    parents = {p.as_posix() for name in listed for p in PurePosixPath(name).parents}
+    extra = []
+    for dirpath, dirnames, filenames in os.walk(folder):
+        base = Path(dirpath)
+        rel_dir = base.relative_to(folder).as_posix()
+        prefix = "" if rel_dir == "." else f"{rel_dir}/"
+        for name in dirnames:
+            rel = prefix + name
+            if (base / name).is_symlink() or rel not in parents:
+                extra.append(f"{rel}/" if not (base / name).is_symlink() else rel)
+        for name in filenames:
+            rel = prefix + name
+            path = base / name
+            if rel not in listed or path.is_symlink() or not path.is_file():
+                extra.append(rel)
+    return sorted(extra)
+
+
+def check_replaceable(settings: Settings, final: Path) -> set[str] | None:
+    """Refuse to replace *final* unless every file under it, at any depth, is one its
+    :data:`EXPORT_MARKER` lists as written by this exporter (inside ``upstream/``,
+    ``ossie/`` and ``okf/`` too, and under the exports root as well as under ``--out``).
+    Returns that list (None when *final* does not exist or is an empty folder)."""
     if not final.exists() and not final.is_symlink():
-        return
+        return None
     if final.is_symlink() or not final.is_dir():
         raise JobError(f"refusing to replace {final}: not an export folder")
-    if _owned(settings, final):
-        return
-    foreign = sorted(p.name for p in final.iterdir() if p.name not in EXPORT_ENTRIES)
+    if not any(final.iterdir()):
+        return None
+    marker = final / EXPORT_MARKER
+    if marker.is_symlink() or not marker.is_file():
+        raise JobError(
+            f"refusing to replace {final}: it has no {EXPORT_MARKER}, so it was not written "
+            "by autoontology export"
+        )
+    listed = _listed_files(read_export_metadata(final))
+    if listed is None:
+        raise JobError(
+            f"refusing to replace {final}: its {EXPORT_MARKER} does not list the files it "
+            "wrote (an older or edited export); move or delete the folder, then export again"
+        )
+    foreign = _unlisted(final, listed)
     if foreign:
         raise JobError(
             f"refusing to replace {final}: it holds files this exporter did not write "
             f"({', '.join(foreign[:5])}{', ...' if len(foreign) > 5 else ''})"
         )
-    marker = final / EXPORT_MARKER
-    if any(final.iterdir()) and (marker.is_symlink() or not marker.is_file()):
-        raise JobError(
-            f"refusing to replace {final}: it has no {EXPORT_MARKER}, so it was not written "
-            "by autoontology export"
-        )
+    return listed
 
 
-def _clear_export(settings: Settings, final: Path) -> None:
-    """Remove *final*: all of it under the exports root, elsewhere only the exporter's own
-    entries and then the (by then empty) folder."""
-    if _owned(settings, final):
-        shutil.rmtree(final)
-        return
-    for name in EXPORT_ENTRIES:
-        path = final / name
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
-        elif path.exists() or path.is_symlink():
+def _remove_listed(folder: Path, listed: set[str]) -> bool:
+    """Remove the *listed* files of *folder*, then the directories they leave empty, then
+    *folder* itself. Anything else is kept (then *folder* stays and False is returned)."""
+    for name in listed:
+        path = folder / name
+        if path.is_file() and not path.is_symlink():
             path.unlink()
-    final.rmdir()
+    dirs = {folder / p for name in listed for p in PurePosixPath(name).parents if str(p) != "."}
+    for path in sorted(dirs, key=lambda d: len(d.parts), reverse=True):
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+    try:
+        folder.rmdir()
+    except OSError:
+        return False
+    return True
 
 
 @dataclass
@@ -483,7 +528,17 @@ def _step_report(ctx: _ExportCtx) -> dict[str, Any]:
         upstream_fetched_at=ctx.upstream_fetched_at,
     )
     marker = ctx.out_dir / EXPORT_MARKER
-    marker.write_text(json.dumps(export_metadata(ctx), indent=2) + "\n", encoding="utf-8")
+    meta = export_metadata(ctx)
+    # every file of the folder: a later export removes these and refuses anything else
+    meta["files"] = sorted(
+        {
+            p.relative_to(ctx.out_dir).as_posix()
+            for p in ctx.out_dir.rglob("*")
+            if p.is_file() and not p.is_symlink()
+        }
+        | {EXPORT_MARKER}
+    )
+    marker.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     return {
         "report": str(path),
         "files": [*entries, _file_entry(path, ctx.out_dir), _file_entry(marker, ctx.out_dir)],
@@ -610,20 +665,52 @@ def _run_export_held(
     try:
         _carry_over(ctx, final)
         result = _execute(
-            ctx, list(EXPORT_STEPS), skip=skip, already=set(), steps=EXPORT_STEP_FUNCS
+            ctx,
+            list(EXPORT_STEPS),
+            skip=skip,
+            already=set(),
+            steps=EXPORT_STEP_FUNCS,
+            finish=False,
         )
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
         raise
-    try:
-        check_replaceable(settings, final)  # again: it may have changed meanwhile
-        if final.exists():
-            _clear_export(settings, final)
-    except BaseException as exc:
-        shutil.rmtree(work, ignore_errors=True)
-        store.update_run(run.id, status="failed", error=str(exc))
-        raise
-    final.parent.mkdir(parents=True, exist_ok=True)
-    work.rename(final)
+    _install(store, run, work, settings, final)
+    store.update_run(run.id, status="succeeded")  # only once the folder is in place
+    result.status = "succeeded"
     result.export_dir = final
     return result
+
+
+def _install(store: Store, run: Run, work: Path, settings: Settings, final: Path) -> None:
+    """Swap *work* in as *final*: the previous folder is first renamed to a backup
+    (``<final>.prev-<ts>``), restored on any failure, and deleted only once *work* is in
+    place. On failure the run is marked failed and :class:`JobError` is raised."""
+    backup: Path | None = None
+    listed: set[str] | None = None
+    try:
+        listed = check_replaceable(settings, final)  # again: it may have changed meanwhile
+        final.parent.mkdir(parents=True, exist_ok=True)
+        if final.exists():
+            stamp = time.strftime("%Y%m%dT%H%M%S")
+            backup = final.with_name(f"{final.name}.prev-{stamp}-{run.id}")
+            final.rename(backup)
+        work.rename(final)
+    except BaseException as exc:
+        restored = ""
+        if backup is not None and backup.exists() and not final.exists():
+            try:
+                backup.rename(final)
+            except OSError as undo:
+                restored = f"; the previous export is kept at {backup} ({undo})"
+        shutil.rmtree(work, ignore_errors=True)
+        message = f"install: {exc}{restored}"
+        interrupted = not isinstance(exc, Exception)
+        store.update_run(run.id, status="cancelled" if interrupted else "failed", error=message)
+        if interrupted or isinstance(exc, JobError):
+            raise
+        raise JobError(
+            f"could not install the export at {final}: {exc}{restored}", run_id=run.id
+        ) from exc
+    if backup is not None and not _remove_listed(backup, listed or set()):
+        logger.warning("  could not fully remove the previous export: %s is left", backup)
