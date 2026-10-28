@@ -214,6 +214,33 @@ large for the command line. `expand_model_profile` also raises the engine's
 Embeddings (`EMBED_*`) go directly to Ollama or to the OpenAI-compatible base URL. The
 router redacts upstream error bodies (keys, bearer tokens) and caps their size.
 
+## Internationalisation
+
+Two languages, English and Korean, with no extra dependency on either side.
+
+- **CLI** (`autoontology/i18n.py`): `msg(key, **kw)` looks the key up in
+  `autoontology/i18n_catalog/en.py` or `ko.py` (plain dicts with the same keys; a key
+  missing in Korean falls back to English) and fills `{name}` placeholders. The language
+  is `AUTOONTOLOGY_LANG` (shell, then `.env`), else `ko` when `LC_ALL` / `LC_MESSAGES` /
+  `LANG` starts with `ko`, else `en`. It covers the onboarding commands (`init`, `demo`,
+  `provider`, `setup`, `source add/rm`), their `--help` texts and the doctor table.
+  Commands, error codes, status words (OK/WARN/FAIL/SKIP), check names and details stay
+  English. Doctor `Check` objects and the web API keep English text: `format_checks`
+  translates the headers and the known remedy descriptions only when printing
+  (`i18n.remedy`), and `source rm` translates the known notices of `structured/remove.py`
+  in the CLI (`i18n.notice`). Tables pad by display width (Hangul is double-width).
+- **Web UI** (`ui/src/i18n/`): `en.ts` is the key set and `ko.ts` is typed as
+  `Record<keyof typeof en, string>`, so a missing key fails `tsc`. `LangProvider` holds the
+  language and `useT()` returns `t(key, vars?)` with `{name}` interpolation; dates, numbers
+  and durations go through `Intl` with the current language. The language comes from
+  `?lang=`, then `localStorage["autoontology.lang"]`, then `navigator.language` (`ko*`),
+  else English; the header's globe menu switches it without a reload and updates
+  `<html lang>`. Backend remedy commands and `detail` texts are shown verbatim.
+
+To add a language, add a catalogue on both sides, extend `LANGS` in `i18n.py` and the UI
+language list, and add it to the parity tests (`tests/test_i18n.py`,
+`ui/src/test/i18n.test.ts`).
+
 ## Extension points
 
 | To add | Start here |
