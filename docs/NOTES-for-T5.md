@@ -18,6 +18,11 @@ later cleanup:
 - **`export --out DIR` writes `DIR/r<rev>/`** and refuses to replace a folder that holds
   files the exporter did not write; every export has an `export.json` marker. Outside the
   exports root a non-empty folder without that marker is refused too.
+- **First `build --resume` after upgrading rebuilds once.** Step rows written before the
+  input hashes existed have no `inputs_sha`, so that resume re-runs every source (for
+  database sources also register/ingest/compile upstream, possibly LLM work); later
+  resumes skip unchanged sources. Likewise the first resume after the `identity-v2.1`
+  bump re-judges stored align verdicts (no LLM call). The README upgrade note should say so.
 - **`build --resume` sees changed input files** (content hashes) but not a schema change
   inside an external database source; a plain `build` picks that up.
 - **Upstream files in an export are fetched at export time**, not build time
