@@ -285,7 +285,7 @@ export function NewSourceDialog({ open, onOpenChange }: {
           )}
           {error && <p role="alert" className="text-sm break-words text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => { onOpenChange(false); reset() }}>Cancel</Button>
             <Button type="submit" disabled={add.isPending || (upload && tooLarge)}>
               {add.isPending && <Loader2 className="animate-spin" aria-hidden />}
               {add.isPending ? "Adding…" : "Add"}

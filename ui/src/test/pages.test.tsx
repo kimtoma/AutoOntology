@@ -106,6 +106,20 @@ describe("Sources page", () => {
       { name: "docs-2", kind: "documents", locator: "/data/docs", recursive: false })
   })
 
+  it("clears the add form on Cancel", async () => {
+    const user = userEvent.setup()
+    mockFetch({ "GET /sources": SOURCES, "GET /status": STATUS })
+    renderPage(<SourcesPage />)
+    await user.click(await screen.findByRole("button", { name: "Add source" }))
+    await user.click(await screen.findByRole("tab", { name: /Documents/ }))
+    await user.type(screen.getByLabelText("Name"), "draft")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await user.click(screen.getByRole("button", { name: "Add source" }))
+    expect(await screen.findByLabelText("Name")).toHaveValue("")
+    expect(screen.getByRole("tab", { name: /Structured/ })).toHaveAttribute("aria-selected", "true")
+  })
+
   it("refuses an upload over the limit before sending it", async () => {
     const user = userEvent.setup()
     const { calls } = mockFetch({ "GET /sources": SOURCES, "GET /status": STATUS })
