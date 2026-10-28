@@ -414,7 +414,7 @@ export default function GraphPage() {
             </SheetContent>
           </Sheet>
           <Sheet open={!!detail} onOpenChange={(o) => { if (!o) setSelectedId(null) }}>
-            <SheetContent side="bottom" className="max-h-[70svh] gap-0" onOpenAutoFocus={(e) => e.preventDefault()}>
+            <SheetContent side="bottom" className="max-h-[70svh] gap-0" focusSelf>
               <SheetHeader className="sr-only">
                 <SheetTitle>{selected?.label ?? "Node detail"}</SheetTitle>
                 <SheetDescription>{selected ? ORIGIN_LABELS[selected.originGroup] : ""}</SheetDescription>

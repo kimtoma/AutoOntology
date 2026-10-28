@@ -207,7 +207,7 @@ export function ConceptSheet({ conceptId, onClose, onOpen }: {
   return (
     <Sheet open={!!conceptId} onOpenChange={(o) => { if (!o) onClose() }}>
       <SheetContent className="w-full gap-0 sm:max-w-lg" id="drawer"
-                    onOpenAutoFocus={(e) => e.preventDefault()}>
+                    focusSelf>
         <SheetHeader className="border-b pr-12">
           <SheetTitle className="break-words">{c?.name ?? "Concept"}</SheetTitle>
           <SheetDescription asChild>

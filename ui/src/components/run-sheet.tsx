@@ -177,7 +177,7 @@ export function RunSheet({ runId, onClose }: { runId: string | null; onClose: ()
   return (
     <Sheet open={!!runId} onOpenChange={(o) => { if (!o) onClose() }}>
       <SheetContent className="w-full gap-0 sm:max-w-xl" id="live" aria-describedby="live-desc"
-                    onOpenAutoFocus={(e) => e.preventDefault()}>
+                    focusSelf>
         {runId && <RunSheetBody key={runId} runId={runId} />}
       </SheetContent>
     </Sheet>

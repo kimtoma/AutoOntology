@@ -48,11 +48,19 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  focusSelf = false,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  /** on open, focus the sheet itself (announced as a dialog by its title) instead of its
+      first control, so no focus ring lands on a button; focus returns to the opener on close */
+  focusSelf?: boolean
 }) {
+  // a sheet opened from state (no SheetTrigger) has no trigger for Radix to refocus on close
+  const opener = React.useRef<HTMLElement | null>(null)
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -68,8 +76,28 @@ function SheetContent({
             "inset-x-0 top-0 h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
           side === "bottom" &&
             "inset-x-0 bottom-0 h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+          focusSelf && "outline-none",
           className
         )}
+        tabIndex={focusSelf ? -1 : undefined}
+        onOpenAutoFocus={(e) => {
+          onOpenAutoFocus?.(e)
+          if (focusSelf && !e.defaultPrevented) {
+            opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+            e.preventDefault()
+            const content = e.target as HTMLElement  // the event is dispatched on the content
+            content.focus()
+          }
+        }}
+        onCloseAutoFocus={(e) => {
+          onCloseAutoFocus?.(e)
+          const el = opener.current
+          opener.current = null
+          if (focusSelf && !e.defaultPrevented && el?.isConnected) {
+            e.preventDefault()
+            el.focus()
+          }
+        }}
         {...props}
       >
         {children}
