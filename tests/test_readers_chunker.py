@@ -218,7 +218,74 @@ def test_csv_ragged_rows_and_empty(tmp_path):
     path = tmp_path / "a.csv"
     path.write_text("a,b\n1\n2,3,4\n", encoding="utf-8")
     lines = readers.read_document(path).sections[0].text.split("\n")
-    assert lines == ["| a | b |", "| --- | --- |", "| 1 |  |", "| 2 | 3 | 4 |"]
+    # rows are padded or cut to the header width (well-formed GFM)
+    assert lines == ["| a | b |", "| --- | --- |", "| 1 |  |", "| 2 | 3 |"]
     empty = tmp_path / "empty.csv"
     empty.write_text("", encoding="utf-8")
     assert readers.read_document(empty).sections == []
+
+
+def test_large_csv_is_streamed_with_bounded_memory(tmp_path):
+    import tracemalloc
+
+    path = tmp_path / "big.csv"
+    row = "가나다라마바사아자차카타파하,0123456789,abcdefghijklmnopqrstuvwxyz\n"
+    count = 20 * 1024 * 1024 // len(row.encode("utf-8")) + 1
+    with path.open("w", encoding="utf-8") as fh:
+        fh.write("이름,번호,메모\n")
+        for _ in range(count):
+            fh.write(row)
+    assert path.stat().st_size > 20 * 1024 * 1024
+    tracemalloc.start()
+    try:
+        doc = readers.read_document(path, max_table_rows=50)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    lines = doc.sections[0].text.split("\n")
+    assert len(lines) == 2 + 50 + 1
+    assert lines[-1] == f"… {count - 50} more rows ({count} total)"
+    assert peak < 100 * 1024 * 1024, peak
+
+
+def test_csv_falls_back_to_cp949_past_the_kept_rows(tmp_path):
+    path = tmp_path / "late.csv"
+    rows = ["code,name"] + [f"A{i},ascii" for i in range(300)] + ["B1,품목"]
+    path.write_bytes(("\n".join(rows) + "\n").encode("cp949"))
+    lines = readers.read_document(path, max_table_rows=2).sections[0].text.split("\n")
+    assert lines[2] == "| A0 | ascii |" and lines[-1] == "… 299 more rows (301 total)"
+
+
+@pytest.mark.parametrize(
+    "name, data",
+    [
+        ("a.csv", b"a,b\n" + b"1,2\n" * 400),
+        ("a.tsv", b"a\tb\n" + b"1\t2\n" * 400),
+        ("a.txt", b"x" * 2000),
+        ("a.md", b"# t\n" + b"x" * 2000),
+        ("a.html", b"<p>" + b"x" * 2000 + b"</p>"),
+        ("a.doc", b"\xd0\xcf\x11\xe0" + b"\0" * 2000),
+    ],
+)
+def test_documents_over_the_byte_cap_fail(tmp_path, monkeypatch, name, data):
+    path = tmp_path / name
+    path.write_bytes(data)
+    monkeypatch.setenv("AUTOONTOLOGY_DOC_MAX_BYTES", "1000")
+    with pytest.raises(readers.ReadError) as err:
+        readers.read_document(path)
+    assert err.value.code == "FILE_TOO_LARGE" and "AUTOONTOLOGY_DOC_MAX_BYTES" in str(err.value)
+    with pytest.raises(readers.ReadError) as err:
+        readers.read_document(path, max_bytes=1000)
+    assert err.value.code == "FILE_TOO_LARGE"
+    monkeypatch.delenv("AUTOONTOLOGY_DOC_MAX_BYTES")
+    assert readers.doc_max_bytes() == readers.DEFAULT_DOC_MAX_BYTES == 50 * 1024 * 1024
+
+
+@pytest.mark.parametrize("var", ["AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", "AUTOONTOLOGY_DOC_MAX_BYTES"])
+def test_bad_env_values_are_read_errors(tmp_path, monkeypatch, var):
+    path = tmp_path / "a.csv"
+    path.write_text("a\n1\n", encoding="utf-8")
+    monkeypatch.setenv(var, "lots")
+    with pytest.raises(readers.ReadError) as err:
+        readers.read_document(path)
+    assert err.value.code == "BAD_CONFIG" and var in str(err.value)

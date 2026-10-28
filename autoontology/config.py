@@ -342,6 +342,8 @@ class Settings:
     #: Optional Ollama vision model that captions image documents (AUTOONTOLOGY_VISION_MODEL;
     #: empty = OCR text only).
     vision_model: str = ""
+    #: Largest file the native document readers accept (AUTOONTOLOGY_DOC_MAX_BYTES).
+    doc_max_bytes: int = 50 * 1024 * 1024
 
     def __post_init__(self) -> None:
         validate_catalog_database_name(self.postgres_database)
@@ -385,6 +387,7 @@ class Settings:
             base_iri=_base_iri(env.get("AUTOONTOLOGY_BASE_IRI", "")),
             doc_table_max_rows=max(1, _int_env("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", 200)),
             vision_model=env.get("AUTOONTOLOGY_VISION_MODEL", "").strip(),
+            doc_max_bytes=max(1, _int_env("AUTOONTOLOGY_DOC_MAX_BYTES", 50 * 1024 * 1024)),
         )
 
     @property

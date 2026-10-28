@@ -99,3 +99,6 @@ def test_settings_read_the_new_variables(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", "50")
     s = Settings.from_env()
     assert s.vision_model == "gemma4:e4b" and s.doc_table_max_rows == 50
+    assert defaults.doc_max_bytes == 50 * 1024 * 1024
+    monkeypatch.setenv("AUTOONTOLOGY_DOC_MAX_BYTES", "1000")
+    assert Settings.from_env().doc_max_bytes == 1000

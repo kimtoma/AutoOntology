@@ -372,6 +372,7 @@ then `.env`, then the built-in default.
 | `KORDOC_NODE` | `node` on PATH | Node binary for kordoc. |
 | `AUTOONTOLOGY_KORDOC_TIMEOUT` | `300` | Seconds per document (kordoc always runs offline). |
 | `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS` | `200` | Rows a CSV/TSV document keeps. |
+| `AUTOONTOLOGY_DOC_MAX_BYTES` | `52428800` (50 MB) | Largest CSV/TSV, text, Markdown, HTML or `.doc` document the native readers accept; larger files fail with `FILE_TOO_LARGE`. |
 | `AUTOONTOLOGY_VISION_MODEL` | unset | Ollama vision model (for example `gemma4:e4b`) that describes image documents before their OCR text; `setup` pulls it. Unset: OCR text only. |
 | `AUTOONTOLOGY_CHUNK_TOKENS` / `_CHUNK_OVERLAP_TOKENS` / `_CHUNK_PACK_TOKENS` | `1200` / `100` / `400` | Chunk size, overlap when a section is split, and how far small neighbouring sections are packed together (tiktoken `cl100k_base` tokens). |
 | `AUTOONTOLOGY_LLM_WORKERS` | `1` with ollama, else `3` | Parallel chunk extraction calls. |

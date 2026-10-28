@@ -30,6 +30,7 @@ from autoontology.unstructured.readers import (
     Document,
     ReadError,
     Section,
+    check_size,
 )
 
 W_IDENT = 0xA5EC
@@ -41,6 +42,13 @@ CLX_PAIR_INDEX = 33
 CCP_TEXT_INDEX = 3
 REMEDY = "Save the file as .docx and add it again"
 HEADING_MAX_CHARS = 40
+#: Hard limits of the parser (hostile input must fail fast, never loop or blow up):
+#: pieces in the piece table, characters of the main text, a Prc's cbGrpprl ([MS-DOC]
+#: 2.9.209: > 0 and <= 0x3FA2) and the field nesting tracked exactly.
+MAX_PIECES = 10_000
+DOC_MAX_CHARS = 5_000_000
+PRC_MAX_CB = 0x3FA2
+MAX_FIELD_DEPTH = 256
 
 _CONTROL = re.compile(r"[\x00-\x08\x0e-\x1f\x7f]")
 _SPACES = re.compile(r"[ \t]+")
@@ -62,10 +70,11 @@ def _u32(data: bytes, offset: int) -> int:
     return struct.unpack_from("<I", data, offset)[0]
 
 
-def extract_text(path: Path) -> str:
+def extract_text(path: Path, *, max_bytes: int | None = None) -> str:
     """The raw main-document text (Word special characters still in place)."""
     import olefile
 
+    check_size(path, max_bytes)
     try:
         if not olefile.isOleFile(str(path)):
             raise _fail(path, "not an OLE compound file")
@@ -97,6 +106,11 @@ def extract_text(path: Path) -> str:
 
 
 def _main_text(word: bytes, table: bytes) -> str:
+    """The main text from the piece table. Every length and offset is checked against
+    its stream before use, the character positions must increase from 0, pieces may not
+    overlap, and ``ccpText`` cannot exceed the stream (a character takes at least one
+    byte) nor :data:`DOC_MAX_CHARS`: the output is at most one character per byte of
+    ``WordDocument``, and the work is linear in the stream sizes."""
     pos = 32
     csw = _u16(word, pos)
     pos += 2 + csw * 2
@@ -112,21 +126,35 @@ def _main_text(word: bytes, table: bytes) -> str:
         raise ValueError("FibRgFcLcb too short")
     fc_clx = _u32(word, blob + CLX_PAIR_INDEX * 8)
     lcb_clx = _u32(word, blob + CLX_PAIR_INDEX * 8 + 4)
-    if ccp_text < 0 or lcb_clx == 0 or fc_clx + lcb_clx > len(table):
+    if ccp_text < 0 or ccp_text > len(word):
+        raise ValueError(f"ccpText {ccp_text} does not fit the WordDocument stream")
+    if ccp_text > DOC_MAX_CHARS:
+        raise ValueError(f"the text has more than {DOC_MAX_CHARS:,} characters")
+    if lcb_clx == 0 or fc_clx + lcb_clx > len(table):
         raise ValueError("CLX outside the table stream")
     clx = table[fc_clx : fc_clx + lcb_clx]
     i = 0
-    while i < len(clx) and clx[i] == 0x01:  # Prc: skip
-        i += 3 + struct.unpack_from("<h", clx, i + 1)[0]
+    while i < len(clx) and clx[i] == 0x01:  # Prc: skip (i strictly increases)
+        cb = _u16(clx, i + 1)
+        if not 0 < cb <= PRC_MAX_CB:
+            raise ValueError(f"bad Prc size {cb}")
+        i += 3 + cb
     if i >= len(clx) or clx[i] != 0x02:
         raise ValueError("no Pcdt in CLX")
     lcb = _u32(clx, i + 1)
+    if lcb > len(clx) - (i + 5):
+        raise ValueError("PlcPcd outside the CLX")
     plc = clx[i + 5 : i + 5 + lcb]
-    if len(plc) != lcb or (lcb - 4) % 12:
+    if lcb < 16 or (lcb - 4) % 12:
         raise ValueError("bad PlcPcd size")
     n = (lcb - 4) // 12
+    if n > MAX_PIECES:
+        raise ValueError(f"{n} pieces in the piece table (at most {MAX_PIECES:,})")
     cps = struct.unpack_from(f"<{n + 1}I", plc, 0)
-    parts: list[str] = []
+    if cps[0] != 0 or any(b < a for a, b in zip(cps, cps[1:], strict=False)):
+        raise ValueError("piece character positions do not increase from 0")
+    # validate every piece (bounds, overlap) before decoding anything
+    pieces: list[tuple[int, int, bool]] = []  # (byte offset, char count, compressed)
     for k in range(n):
         start, end = cps[k], min(cps[k + 1], ccp_text)
         if start >= ccp_text:
@@ -134,36 +162,58 @@ def _main_text(word: bytes, table: bytes) -> str:
         if end <= start:
             continue
         fc_raw = _u32(plc, 4 * (n + 1) + k * 8 + 2)
+        compressed = bool(fc_raw & 0x40000000)
+        offset = (fc_raw & 0x3FFFFFFF) // 2 if compressed else fc_raw & 0x3FFFFFFF
         count = end - start
-        if fc_raw & 0x40000000:
-            offset = (fc_raw & 0x3FFFFFFF) // 2
-            chunk = word[offset : offset + count]
-            if len(chunk) != count:
-                raise ValueError("piece outside the WordDocument stream")
-            parts.append(chunk.decode("cp1252", errors="replace"))
+        if offset + count * (1 if compressed else 2) > len(word):
+            raise ValueError("piece outside the WordDocument stream")
+        pieces.append((offset, count, compressed))
+    spans = sorted((off, off + cnt * (1 if comp else 2)) for off, cnt, comp in pieces)
+    for (_, prev_end), (next_start, _) in zip(spans, spans[1:], strict=False):
+        if next_start < prev_end:
+            raise ValueError("pieces overlap")
+    parts: list[str] = []
+    for offset, count, compressed in pieces:
+        if compressed:
+            parts.append(word[offset : offset + count].decode("cp1252", errors="replace"))
         else:
-            offset = fc_raw & 0x3FFFFFFF
             chunk = word[offset : offset + 2 * count]
-            if len(chunk) != 2 * count:
-                raise ValueError("piece outside the WordDocument stream")
             parts.append(chunk.decode("utf-16-le", errors="replace"))
     return "".join(parts)
 
 
 def _strip_fields(text: str) -> str:
-    """Keep only the result of each field (between 0x14 and 0x15); nested fields too."""
+    """Keep only the result of each field (between 0x14 and 0x15); nested fields too.
+
+    One pass: *stack* holds, per open field, whether it is still in its code part, and
+    *in_code* counts those, so a character is kept when no open field is in code. Fields
+    nested deeper than :data:`MAX_FIELD_DEPTH` (only in hostile or corrupt files) are only
+    counted, assuming each 0x14 ends the code of the innermost of them."""
     out: list[str] = []
-    stack: list[bool] = []  # per open field: still in its code part
+    stack = bytearray()  # 1 = still in its code part
+    in_code = 0
+    deep = deep_code = 0  # fields beyond MAX_FIELD_DEPTH; how many of them in code
     for ch in text:
         if ch == "\x13":
-            stack.append(True)
+            if len(stack) < MAX_FIELD_DEPTH:
+                stack.append(1)
+                in_code += 1
+            else:
+                deep += 1
+                deep_code += 1
         elif ch == "\x14":
-            if stack:
-                stack[-1] = False
+            if deep:
+                deep_code = max(0, deep_code - 1)
+            elif stack and stack[-1]:
+                stack[-1] = 0
+                in_code -= 1
         elif ch == "\x15":
-            if stack:
-                stack.pop()
-        elif not any(stack):
+            if deep:
+                deep -= 1
+                deep_code = min(deep_code, deep)
+            elif stack:
+                in_code -= stack.pop()
+        elif not in_code and not deep_code:
             out.append(ch)
     return "".join(out)
 
@@ -210,8 +260,8 @@ def split_sections(text: str) -> tuple[str, list[Section]]:
     return first, sections
 
 
-def read_doc(path: Path) -> Document:
+def read_doc(path: Path, *, max_bytes: int | None = None) -> Document:
     path = Path(path)
-    text = normalize(extract_text(path))
+    text = normalize(extract_text(path, max_bytes=max_bytes))
     title, sections = split_sections(text)
     return Document(title or path.stem, path, MIME_TYPES[".doc"], sections)

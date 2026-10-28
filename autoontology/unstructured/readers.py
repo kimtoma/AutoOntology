@@ -11,7 +11,6 @@ tree, bs4). Everything else (HWP/HWPX/HWPML, PDF, DOCX, PPTX, XLS/XLSX, images) 
 from __future__ import annotations
 
 import csv
-import io
 import os
 import re
 from dataclasses import dataclass, field
@@ -26,6 +25,9 @@ SUPPORTED_EXTENSIONS: frozenset[str] = formats.DOCUMENT_SUFFIXES
 PATH_SEP = " > "
 #: Rows a CSV/TSV document keeps (``AUTOONTOLOGY_DOC_TABLE_MAX_ROWS``).
 DEFAULT_TABLE_MAX_ROWS = 200
+#: Largest file the native readers (CSV/TSV, text, Markdown, HTML, .doc) accept
+#: (``AUTOONTOLOGY_DOC_MAX_BYTES``).
+DEFAULT_DOC_MAX_BYTES = 50 * 1024 * 1024
 
 MIME_TYPES: dict[str, str] = {
     ".md": "text/markdown",
@@ -108,16 +110,44 @@ def discover_documents(target: Path, *, recursive: bool = False) -> list[Path]:
     return sorted(files)
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    try:
+        return int(raw) if raw else default
+    except ValueError as exc:
+        raise ReadError(
+            f"{name} must be an integer, got {raw!r}",
+            code="BAD_CONFIG",
+            remedy=f"fix {name} in .env or the environment",
+        ) from exc
+
+
 def table_max_rows() -> int:
     """``AUTOONTOLOGY_DOC_TABLE_MAX_ROWS`` (default 200, at least 1)."""
-    raw = os.environ.get("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", "").strip()
+    return max(1, _env_int("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", DEFAULT_TABLE_MAX_ROWS))
+
+
+def doc_max_bytes() -> int:
+    """``AUTOONTOLOGY_DOC_MAX_BYTES`` (default 50 MB, at least 1)."""
+    return max(1, _env_int("AUTOONTOLOGY_DOC_MAX_BYTES", DEFAULT_DOC_MAX_BYTES))
+
+
+def check_size(path: Path, max_bytes: int | None = None) -> int:
+    """The size of *path*, or ``ReadError(FILE_TOO_LARGE)`` above *max_bytes*
+    (default :func:`doc_max_bytes`)."""
+    limit = max_bytes or doc_max_bytes()
     try:
-        value = int(raw) if raw else DEFAULT_TABLE_MAX_ROWS
-    except ValueError as exc:
-        raise ValueError(
-            f"AUTOONTOLOGY_DOC_TABLE_MAX_ROWS must be an integer, got {raw!r}"
-        ) from exc
-    return max(1, value)
+        size = Path(path).stat().st_size
+    except OSError as exc:
+        raise ReadError(f"{Path(path).name}: {exc.strerror or exc}", code="FILE_NOT_FOUND") from exc
+    if size > limit:
+        raise ReadError(
+            f"{Path(path).name}: {size:,} bytes is over the {limit:,}-byte limit "
+            "(AUTOONTOLOGY_DOC_MAX_BYTES)",
+            code="FILE_TOO_LARGE",
+            remedy="split the file, or raise AUTOONTOLOGY_DOC_MAX_BYTES",
+        )
+    return size
 
 
 def read_document(
@@ -126,24 +156,31 @@ def read_document(
     home: Path | None = None,
     engine: kordoc.KordocEngine | None = None,
     max_table_rows: int | None = None,
+    max_bytes: int | None = None,
 ) -> Document:
+    """*path* as a :class:`Document`. The native readers refuse files over *max_bytes*
+    (default ``AUTOONTOLOGY_DOC_MAX_BYTES``) with ``FILE_TOO_LARGE``."""
     path = Path(path)
     ext = path.suffix.lower()
     mime = MIME_TYPES.get(ext, "application/octet-stream")
+    if ext in NATIVE_EXTENSIONS:
+        max_bytes = max_bytes or doc_max_bytes()
     if ext in (".csv", ".tsv"):
-        return read_delimited(path, max_rows=max_table_rows or table_max_rows())
+        return read_delimited(
+            path, max_rows=max_table_rows or table_max_rows(), max_bytes=max_bytes
+        )
     if ext == ".doc":
         from autoontology.unstructured import doc_word97
 
-        return doc_word97.read_doc(path)
+        return doc_word97.read_doc(path, max_bytes=max_bytes)
     if ext in (".md", ".markdown"):
-        return read_markdown(path)
+        return read_markdown(path, max_bytes=max_bytes)
     if ext == ".txt":
-        text = _read_text(path)
+        text = _read_text(path, max_bytes=max_bytes)
         sections = [Section("", None, text.strip(), 0)] if text.strip() else []
         return Document(path.stem, path, mime, sections)
     if ext in (".html", ".htm"):
-        return read_html(path)
+        return read_html(path, max_bytes=max_bytes)
     if ext in kordoc.EXTENSIONS:
         if engine is None:
             try:
@@ -156,7 +193,8 @@ def read_document(
     )
 
 
-def _read_text(path: Path) -> str:
+def _read_text(path: Path, *, max_bytes: int | None = None) -> str:
+    check_size(path, max_bytes)
     raw = path.read_bytes()
     for encoding in ("utf-8-sig", "cp949"):
         try:
@@ -173,50 +211,83 @@ def _cell(value: str) -> str:
     return " ".join(value.replace("|", "\\|").split())
 
 
-def gfm_table(rows: list[list[str]], *, max_rows: int) -> str:
+def gfm_table(rows: list[list[str]], *, max_rows: int, total: int | None = None) -> str:
     """*rows* (first = header) as a GFM table, keeping *max_rows* body rows and a closing
-    "… N more rows (M total)" line when it cut some."""
+    "… N more rows (M total)" line when it cut some (*total* = body rows in the source
+    when *rows* holds only the first ones). Body rows are padded or cut to the header
+    width."""
     header, body = rows[0], rows[1:]
+    total = len(body) if total is None else total
     lines = [
         "| " + " | ".join(_cell(c) for c in header) + " |",
         "| " + " | ".join("---" for _ in header) + " |",
     ]
     width = len(header)
     for row in body[:max_rows]:
-        cells = [_cell(c) for c in row] + [""] * (width - len(row))
+        cells = [_cell(c) for c in row[:width]] + [""] * (width - len(row))
         lines.append("| " + " | ".join(cells) + " |")
-    if len(body) > max_rows:
-        lines.append(f"… {len(body) - max_rows} more rows ({len(body)} total)")
+    if total > max_rows:
+        lines.append(f"… {total - max_rows} more rows ({total} total)")
     return "\n".join(lines)
 
 
-def read_delimited(path: Path, *, max_rows: int = DEFAULT_TABLE_MAX_ROWS) -> Document:
+def _scan_delimited(
+    path: Path, encoding: str, delimiter: str, max_rows: int
+) -> tuple[list[list[str]], int]:
+    """``(header + first *max_rows* body rows, total body rows)``, streaming the file
+    row by row (only the kept rows are held in memory)."""
+    kept: list[list[str]] = []
+    total = 0
+    with path.open(encoding=encoding, newline="") as fh:
+        for row in csv.reader(fh, delimiter=delimiter):
+            if not any(c.strip() for c in row):
+                continue
+            if not kept:
+                kept.append(row)
+                continue
+            total += 1
+            if total <= max_rows:
+                kept.append(row)
+    return kept, total
+
+
+def read_delimited(
+    path: Path, *, max_rows: int = DEFAULT_TABLE_MAX_ROWS, max_bytes: int | None = None
+) -> Document:
     """A CSV/TSV file as one ``table`` section (UTF-8 with or without BOM, else CP949;
-    the delimiter follows the extension; the first row is the header)."""
+    the delimiter follows the extension; the first row is the header). The file is read
+    as a stream: only the first *max_rows* body rows are kept, the rest only counted."""
+    path = Path(path)
     ext = path.suffix.lower()
-    text = _read_text(path)
+    check_size(path, max_bytes)
     delimiter = "\t" if ext == ".tsv" else ","
-    try:
-        rows = [
-            r
-            for r in csv.reader(io.StringIO(text), delimiter=delimiter)
-            if any(c.strip() for c in r)
-        ]
-    except csv.Error as exc:
-        raise ReadError(
-            f"{path.name}: not a valid {ext[1:].upper()} file ({exc})", code="BAD_TABLE"
-        ) from exc
-    sections = [Section("", None, gfm_table(rows, max_rows=max_rows), 0, "table")] if rows else []
+    for encoding in ("utf-8-sig", "cp949"):
+        try:
+            rows, total = _scan_delimited(path, encoding, delimiter, max_rows)
+            break
+        except UnicodeDecodeError:
+            continue  # restart the scan with the next encoding
+        except csv.Error as exc:
+            raise ReadError(
+                f"{path.name}: not a valid {ext[1:].upper()} file ({exc})", code="BAD_TABLE"
+            ) from exc
+    else:
+        raise ReadError(f"{path.name}: not UTF-8 or CP949 text", code="BAD_ENCODING")
+    sections = (
+        [Section("", None, gfm_table(rows, max_rows=max_rows, total=total), 0, "table")]
+        if rows
+        else []
+    )
     return Document(path.stem, path, MIME_TYPES[ext], sections)
 
 
 # --- Markdown ---------------------------------------------------------------------------
 
 
-def read_markdown(path: Path) -> Document:
+def read_markdown(path: Path, *, max_bytes: int | None = None) -> Document:
     from markdown_it import MarkdownIt
 
-    source = _read_text(path)
+    source = _read_text(path, max_bytes=max_bytes)
     lines = source.split("\n")
     offsets = [0]
     for line in lines:
@@ -250,10 +321,10 @@ _BLOCKS = ("p", "li", "pre", "blockquote", "tr", "dt", "dd", "td", "th", "captio
 _HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 
 
-def read_html(path: Path) -> Document:
+def read_html(path: Path, *, max_bytes: int | None = None) -> Document:
     from bs4 import BeautifulSoup
 
-    soup = BeautifulSoup(_read_text(path), "html.parser")
+    soup = BeautifulSoup(_read_text(path, max_bytes=max_bytes), "html.parser")
     for tag in soup(["script", "style", "nav", "noscript", "template", "iframe", "svg"]):
         tag.decompose()
     title = soup.title.get_text(" ", strip=True) if soup.title else ""

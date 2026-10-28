@@ -228,6 +228,7 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
                 home=ctx.settings.home,
                 engine=engine,
                 max_table_rows=ctx.settings.doc_table_max_rows,
+                max_bytes=ctx.settings.doc_max_bytes,
             )
             if is_image and ctx.settings.vision_model:
                 doc = _with_caption(ctx, path, doc)
