@@ -485,8 +485,8 @@ def _invalidate_semantic(
         return
     logger.warning(
         "  schema changed for %s (changed: %s; removed: %s): resetting the "
-        "semantic layer of %s so compile rebuilds it; re-run `align` for documents "
-        "sources aligned to %s",
+        "semantic layer of %s so compile rebuilds it; the build's align steps then "
+        "realign documents sources to %s",
         ctx.source.name,
         ", ".join(changes["changed"]) or "-",
         ", ".join(changes["removed"]) or "-",
@@ -621,8 +621,8 @@ def _invalidate_database_source(
     # else links them; detach/reset the rest so compile rebuilds
     logger.warning(
         "  schema of %s changed (changed: %s; removed: %s): resetting its semantic "
-        "layer so compile rebuilds it; re-run `align` for documents sources "
-        "aligned to %s",
+        "layer so compile rebuilds it; the build's align steps then realign documents "
+        "sources to %s",
         ctx.database_name,
         ", ".join(changed) or "-",
         ", ".join(removed) or "-",
