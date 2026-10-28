@@ -1,4 +1,6 @@
 .env
+# backups `init` / `provider use` write next to .env (may hold secrets)
+.env.bak-*
 .venv/
 data/
 exports/
