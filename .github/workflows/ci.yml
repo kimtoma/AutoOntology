@@ -12,10 +12,11 @@ jobs:
   python:
     name: Python (ruff + unit tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -28,11 +29,14 @@ jobs:
   ui:
     name: Web UI (lint, test, build)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: ui
     steps:
       - uses: actions/checkout@v4
+      # pnpm must be on PATH before setup-node, whose `cache: pnpm` runs `pnpm store path`.
+      # The version comes from `packageManager` in ui/package.json.
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: ui/package.json
@@ -42,6 +46,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: node ../scripts/ui-licenses.mjs --check
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
