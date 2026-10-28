@@ -47,11 +47,15 @@ them, and each keeps its own license (see `uv.lock` and `ui/pnpm-lock.yaml`).
 |---|---|---|---|---|
 | olefile | >= 0.47 (locked 0.47) | BSD-2-Clause | https://github.com/decalage2/olefile | Runtime: opens legacy Word `.doc` files (OLE compound files) for the native `.doc` reader. |
 | python-calamine | >= 0.4 (locked 0.9.0) | MIT | https://github.com/dimastbk/python-calamine | Runtime: reads Excel 97-2003 `.xls` workbooks in structured sources. |
-| xlwt | >= 1.3 (locked 1.3.0) | BSD | https://github.com/python-excel/xlwt | Development only: writes `.xls` test fixtures. |
+| xlwt | >= 1.3 (locked 1.3.0) | BSD | https://github.com/python-excel/xlwt | Development only: writes `.xls` test fixtures and the `.xls` samples (`scripts/gen_samples.py`). |
+| Pillow | >= 13.0 (locked 13.0.0) | MIT-CMU (HPND) | https://github.com/python-pillow/Pillow | Development only: draws and degrades the sample images (`scripts/gen_samples.py`). |
+| matplotlib | >= 3.11 (locked 3.11.2) | Matplotlib License (PSF-based, BSD-compatible) | https://matplotlib.org | Development only: draws the sample chart `매출추이.png`. |
+| python-pptx | >= 1.0 (locked 1.0.2) | MIT | https://github.com/scanny/python-pptx | Development only: writes the sample `.pptx` decks. |
 
 - **Python development only:** pytest, pytest-asyncio, ruff, playwright and python-docx are
   permissive. `pymupdf` (AGPL-3.0 or commercial) is a development-only dependency, used
-  solely to regenerate the sample PDF (`scripts/gen_unstructured_samples.py`). It is not a
+  solely to regenerate the sample PDFs and render the scanned sample images
+  (`scripts/gen_samples.py`). It is not a
   runtime dependency, and AutoOntology does not import it at runtime.
 - **JavaScript build and test tooling** (Vite, TypeScript, Vitest, oxlint, Tailwind CSS,
   Testing Library, jsdom): permissive licenses. It is used only to build and test the UI.

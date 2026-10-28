@@ -42,7 +42,9 @@ def live():
         pytest.skip("upstream backend not running (uv run autoontology up)")
     store = Store.for_home(settings.home)
     if store.get_source(STRUCTURED) is None:
-        pipeline.add_source(store, str(REPO_ROOT / "samples" / "quickstart" / "structured"), name=STRUCTURED)
+        pipeline.add_source(
+            store, str(REPO_ROOT / "samples" / "quickstart" / "structured"), name=STRUCTURED
+        )
     if store.get_source(DOCS) is None:
         ensure_documents_source(store, DOCS, REPO_ROOT / "samples" / "quickstart" / "documents")
     setup_job_logging(settings, console=True)
