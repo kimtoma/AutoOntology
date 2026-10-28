@@ -25,8 +25,11 @@ cd ui && pnpm install && pnpm lint && pnpm test && pnpm build
   `AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration`. Please run the ones related
   to your change if you can.
 - If you change `ui/`, rebuild the committed bundle with `uv run autoontology tools build-ui`
-  and commit `autoontology/web/static/dist/` in the same pull request. If the lockfile
-  changes, regenerate `docs/licenses/ui-bundle.md`.
+  and commit `autoontology/web/static/dist/` in the same pull request.
+- If `ui/pnpm-lock.yaml` changes, regenerate `docs/licenses/ui-bundle.md` and commit it
+  with the lockfile: run `pnpm install --frozen-lockfile` and then `pnpm licenses:generate`
+  in `ui/` (or `node scripts/ui-licenses.mjs` from the repository root). Add
+  `--check` to the node command to only verify that the file is up to date.
 - Never edit `vendor/auto-ontology`. It is the unmodified NVIDIA Auto Ontology submodule;
   work around engine behaviour in `autoontology/` and pin the behaviour with a test.
 - New Python files start with `# SPDX-License-Identifier: MIT`.
