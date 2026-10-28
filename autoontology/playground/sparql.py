@@ -3,9 +3,12 @@
 * The parsed Graph is cached per export run id (LRU, ``CACHE_SIZE``).
 * Queries only: SELECT/ASK -> columns/rows (IRIs shortened with the graph's prefixes),
   CONSTRUCT/DESCRIBE -> Turtle text. SPARQL Update is never executed (``Graph.query``
-  only parses queries); queries using ``SERVICE``, ``FROM`` or ``LOAD`` as keywords are
-  refused before parsing and rdflib's remote graph loading is off, so a query never
-  reaches the network.
+  only parses queries). The parsed algebra is the authoritative check: a query whose
+  algebra federates (``SERVICE``) or names a dataset (``FROM``/``FROM NAMED``) is refused,
+  and rdflib's remote graph loading is off, so a query never reaches the network. A
+  keyword pre-filter (after ``\\u`` escape expansion, skipping strings, IRIs and comments
+  in one left-to-right scan) refuses ``SERVICE``/``FROM``/``LOAD`` early with a clearer
+  message; it is a convenience, not the security boundary.
 * Evaluation runs in a worker thread with a deadline (default 10 s): past it the request
   answers 408. The evaluation reads the graph through a deadline-checking view, so the
   thread aborts itself at the next triple it pulls and frees its slot (at most
@@ -28,6 +31,7 @@ from typing import Any
 import rdflib.plugins.sparql as rdflib_sparql
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.plugins.sparql import prepareQuery
+from rdflib.plugins.sparql.parser import expandUnicodeEscapes
 
 rdflib_sparql.SPARQL_LOAD_GRAPHS = False  # FROM <url> must never fetch anything
 
@@ -41,16 +45,17 @@ MAX_CONCURRENT = 2
 CACHE_SIZE = 2
 #: Keywords refused anywhere outside strings, IRIs and comments.
 FORBIDDEN_KEYWORDS = ("SERVICE", "FROM", "LOAD")
-_STRING_RE = re.compile(
-    r'"""(?:[^"\\]|\\.|"(?!""))*"""'  # """long"""
+#: One left-to-right scan: whichever of string / IRI / comment / keyword starts first
+#: wins, so a ``#`` inside a string or a quote inside a comment cannot hide a keyword.
+_TOKEN_RE = re.compile(
+    r'(?P<skip>"""(?:[^"\\]|\\.|"(?!""))*"""'  # """long"""
     r"|'''(?:[^'\\]|\\.|'(?!''))*'''"  # '''long'''
     r'|"(?:[^"\\\n]|\\.)*"'  # "short"
     r"|'(?:[^'\\\n]|\\.)*'"  # 'short'
-)
-_IRI_RE = re.compile(r"<[^<>\s]*>")
-_COMMENT_RE = re.compile(r"#[^\n]*")
-_KEYWORD_RE = re.compile(
-    r"(?<![\w?$:])(" + "|".join(FORBIDDEN_KEYWORDS) + r")(?![\w:-])", re.IGNORECASE
+    r"|<[^<>\s]*>"  # IRI
+    r"|#[^\n]*)"  # comment
+    r"|(?<![\w?$:])(?P<kw>" + "|".join(FORBIDDEN_KEYWORDS) + r")(?![\w:-])",
+    re.IGNORECASE,
 )
 
 
@@ -194,10 +199,16 @@ def _walk(node: Any, seen: set[int] | None = None) -> Any:
 
 def forbidden_keyword(query: str) -> str | None:
     """The first of ``SERVICE``/``FROM``/``LOAD`` used as a keyword in *query* (strings,
-    IRIs, comments, variables and prefixed names do not count), else None."""
-    bare = _COMMENT_RE.sub(" ", _IRI_RE.sub(" ", _STRING_RE.sub(" ", query)))
-    found = _KEYWORD_RE.search(bare)
-    return found.group(1).upper() if found else None
+    IRIs, comments, variables and prefixed names do not count), else None. ``\\uXXXX``
+    escapes are expanded first, as rdflib's parser does."""
+    try:
+        query = expandUnicodeEscapes(query)
+    except ValueError:
+        pass  # an invalid escape is the parser's sparql_syntax error
+    for token in _TOKEN_RE.finditer(query):
+        if token.group("kw"):
+            return token.group("kw").upper()
+    return None
 
 
 def check_query(query: str, init_ns: dict[str, Any] | None = None) -> Any:

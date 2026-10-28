@@ -530,6 +530,30 @@ def test_sparql_timed_out_evaluation_aborts_and_frees_its_slot(ttl):
     assert runner.run_file("r", ttl, "ASK { ?s ?p ?o }")["boolean"] is True
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        # \\u escapes are expanded by rdflib before parsing: S\\u0045RVICE == SERVICE
+        "SELECT * WHERE { S\\u0045RVICE <http://example.org/sparql> { ?s ?p ?o } }",
+        "SELECT * \\u0046ROM <http://example.org/x.ttl> WHERE { ?s ?p ?o }",
+        # a quote inside a comment must not open a string that swallows the keyword
+        "SELECT * # '''\nWHERE { SERVICE <http://example.org/sparql> { ?s ?p ?o } }\n# '''",
+        'SELECT * # "\nFROM <http://example.org/x.ttl> WHERE { ?s ?p ?o } # "',
+    ],
+)
+def test_sparql_keyword_prefilter_sees_escapes_and_comments(query):
+    """Review M-1: the pre-filter itself refuses these (the algebra check is the backstop)."""
+    assert sparql.forbidden_keyword(query) in {"SERVICE", "FROM"}
+    with pytest.raises(SparqlError) as err:
+        sparql.check_query(query)
+    assert err.value.code == "sparql_forbidden"
+
+
+def test_sparql_keyword_prefilter_ignores_comment_and_string_hashes():
+    assert sparql.forbidden_keyword('SELECT * WHERE { ?s ?p "a # FROM" } # SERVICE') is None
+    assert sparql.forbidden_keyword("SELECT * WHERE { ?s ?p <urn:x#SERVICE> }") is None
+
+
 # --- store --------------------------------------------------------------------------------
 
 
