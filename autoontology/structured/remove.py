@@ -58,7 +58,7 @@ def remove_source(
     """Remove *src*. Raises :class:`RemoveError` (source kept) when the backend teardown
     fails or does not finish and *force* is not set, or another operation holds the
     source's lease."""
-    from autoontology.config import validate_pg_database_name
+    from autoontology.config import assert_source_database
     from autoontology.store.db import SourceBusy
 
     def say(message: str, warning: bool = False) -> None:
@@ -68,7 +68,7 @@ def remove_source(
     timeout = RM_GRAPH_WAIT_S if timeout is None else timeout
     if drop_db and src.kind == "files" and src.pg_database:
         try:  # before anything is torn down: never DROP a name Postgres would truncate
-            validate_pg_database_name(src.pg_database)
+            assert_source_database(settings, src.pg_database)
         except ValueError as exc:
             raise RemoveError(f"refusing --drop-db: {exc}") from exc
     try:  # held through the whole teardown: no build/extract/align may start meanwhile
@@ -112,7 +112,7 @@ def _remove_held(
     poll: float | None,
     held: Any = None,
 ) -> None:
-    from autoontology.config import PG_MAINTENANCE_DB, validate_pg_database_name
+    from autoontology.config import PG_MAINTENANCE_DB, assert_source_database
     from autoontology.engine import pg
     from autoontology.engine.client import BackendClient, BackendError, BackendUnavailable
     from autoontology.structured import pipeline
@@ -175,7 +175,8 @@ def _remove_held(
         if src.kind != "files" or not src.pg_database:
             say("--drop-db ignored: only files sources own a local database")
         else:
-            validate_pg_database_name(src.pg_database)  # never DROP a truncated name
+            # never DROP a truncated name, nor the catalog database itself
+            assert_source_database(settings, src.pg_database)
             if held is not None and not held.owned():
                 raise RemoveError("lease lost before DROP DATABASE; nothing was dropped")
             with pg.connect(settings, PG_MAINTENANCE_DB) as conn:

@@ -76,7 +76,8 @@ PLACEHOLDER_KEY_MARKERS: tuple[str, ...] = ("your-api-key-here",)
 
 
 # The Postgres server is shared with other apps: AutoOntology only ever touches its catalog
-# DB and its per-source DBs. engine/pg.py creates only names that pass this regex.
+# DB and its per-source DBs. engine/pg.py creates only names that pass this regex; the
+# catalog name itself must not use the per-source prefix (validate_catalog_database_name).
 PG_DATABASE_RE = re.compile(r"^autoontology(_src_[a-z0-9_]+)?$")
 #: Maintenance DB used only for server/existence checks (never migrated or written).
 PG_MAINTENANCE_DB = "postgres"
@@ -100,6 +101,38 @@ def validate_pg_database_name(name: str) -> str:
             f"database name {name!r} is {len(name.encode('utf-8'))} bytes; Postgres truncates "
             f"identifiers to {PG_IDENTIFIER_MAX_BYTES} bytes, so it could address another "
             f"database (source names are limited to {SOURCE_NAME_MAX_LEN} characters)."
+        )
+    return name
+
+
+#: Prefix of every per-source database; the catalog database may never carry it.
+SOURCE_DB_PREFIX = "autoontology_src_"
+
+
+def validate_catalog_database_name(name: str) -> str:
+    """``validate_pg_database_name`` plus: not a per-source name (``autoontology_src_*``),
+    so a files source can never load into, or ``--drop-db``, the catalog database."""
+    validate_pg_database_name(name)
+    if name.startswith(SOURCE_DB_PREFIX):
+        raise ValueError(
+            f"POSTGRES_DATABASE {name!r} is reserved for per-source databases "
+            f"({SOURCE_DB_PREFIX}<name>); the catalog database must be a different name "
+            "(default 'autoontology'). Fix POSTGRES_DATABASE in .env or your shell."
+        )
+    return name
+
+
+def assert_source_database(settings: Settings, name: str) -> str:
+    """Return *name* if it is a per-source database distinct from the catalog; else raise.
+
+    Called right before every CREATE / load / DROP of a source database."""
+    validate_pg_database_name(name)
+    if not name.startswith(SOURCE_DB_PREFIX):
+        raise ValueError(f"{name!r} is not a per-source database ({SOURCE_DB_PREFIX}<name>)")
+    if name == settings.postgres_database:
+        raise ValueError(
+            f"refusing to touch {name!r}: it is the catalog database (POSTGRES_DATABASE), "
+            "not a source database"
         )
     return name
 
@@ -306,7 +339,7 @@ class Settings:
     base_iri: str = DEFAULT_BASE_IRI
 
     def __post_init__(self) -> None:
-        validate_pg_database_name(self.postgres_database)
+        validate_catalog_database_name(self.postgres_database)
 
     @classmethod
     def from_env(cls, env_file: Path | None = None) -> Settings:

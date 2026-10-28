@@ -190,7 +190,7 @@ export POSTGRES_HOST=db.local   # inline comment
 POSTGRES_PORT = 5433
 POSTGRES_USER="quoted user" # trailing
 POSTGRES_PASSWORD=p#ss  # only whitespace-prefixed # starts a comment
-export POSTGRES_DATABASE='autoontology_src_crm' # quoted
+export POSTGRES_DATABASE='autoontology' # quoted
 """
 
 
@@ -269,3 +269,58 @@ def test_remove_revalidates_before_drop(isolated_env, monkeypatch):
         remove.remove_source(settings, store, src, drop_db=True)
     assert executed == []
     assert store.get_source("x") is not None
+
+
+def test_catalog_database_may_not_use_the_source_prefix(isolated_env, monkeypatch):
+    """POSTGRES_DATABASE=autoontology_src_demo would make the files source ``demo`` load
+    into (and ``source rm demo --drop-db`` drop) the catalog database itself."""
+    monkeypatch.setenv("POSTGRES_DATABASE", "autoontology_src_demo")
+    with pytest.raises(ValueError, match="reserved for per-source databases"):
+        Settings.from_env()
+    with pytest.raises(ValueError, match="POSTGRES_DATABASE"):
+        Settings(home=isolated_env, postgres_database="autoontology_src_demo")
+
+
+def _catalog_named_like_a_source(isolated_env):
+    settings = Settings(home=isolated_env)
+    object.__setattr__(settings, "postgres_database", "autoontology_src_demo")  # bypass
+    return settings
+
+
+def test_source_database_writes_refuse_the_catalog(isolated_env, monkeypatch, tmp_path):
+    from autoontology.config import assert_source_database
+    from autoontology.structured import loaders
+
+    settings = _catalog_named_like_a_source(isolated_env)
+    called = []
+    monkeypatch.setattr(pg, "connect", lambda *a, **k: called.append(a))
+    monkeypatch.setattr(pg, "database_exists", lambda *a, **k: called.append(a) or True)
+    with pytest.raises(ValueError, match="catalog database"):
+        assert_source_database(settings, "autoontology_src_demo")
+    with pytest.raises(ValueError, match="not a per-source database"):
+        assert_source_database(settings, "autoontology")
+    assert assert_source_database(settings, "autoontology_src_other") == "autoontology_src_other"
+    with pytest.raises(ValueError, match="catalog database"):
+        loaders.ensure_database(settings, "autoontology_src_demo")
+    csv = tmp_path / "a.csv"
+    csv.write_text("id,name\n1,x\n")
+    with pytest.raises(ValueError, match="catalog database"):
+        loaders.load_files_to_postgres([csv], "autoontology_src_demo", settings)
+    assert called == []
+
+
+def test_remove_refuses_to_drop_the_catalog_database(isolated_env, monkeypatch):
+    from autoontology.store.db import Store
+    from autoontology.structured import remove
+
+    settings = _catalog_named_like_a_source(isolated_env)
+    store = Store.for_home(settings.home)
+    src = store.add_source(
+        name="demo", kind="files", locator="{}", pg_database="autoontology_src_demo"
+    )
+    executed = []
+    monkeypatch.setattr(pg, "connect", lambda *a, **k: executed.append(a))
+    with pytest.raises(remove.RemoveError, match="catalog database"):
+        remove.remove_source(settings, store, src, drop_db=True, force=True)
+    assert executed == []
+    assert store.get_source("demo") is not None

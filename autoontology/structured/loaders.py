@@ -26,7 +26,7 @@ from typing import Any
 
 import duckdb
 
-from autoontology.config import PG_MAINTENANCE_DB, Settings, validate_pg_database_name
+from autoontology.config import PG_MAINTENANCE_DB, Settings, assert_source_database
 
 CSV_SUFFIXES = {".csv", ".tsv"}
 PARQUET_SUFFIXES = {".parquet", ".pq"}
@@ -506,7 +506,7 @@ def ensure_database(settings: Settings, pg_database: str) -> bool:
     """Create *pg_database* if missing. Returns True when it was created."""
     from autoontology.engine import pg
 
-    validate_pg_database_name(pg_database)
+    assert_source_database(settings, pg_database)
     if pg.database_exists(settings, pg_database):
         return False
     with pg.connect(settings, PG_MAINTENANCE_DB) as conn:
@@ -567,12 +567,13 @@ def load_files_to_postgres(
 
     if not paths:
         raise LoadError("no supported files to load")
-    report = LoadReport(pg_database=validate_pg_database_name(pg_database))
+    report = LoadReport(pg_database=assert_source_database(settings, pg_database))
     duck = duckdb.connect()
     try:
         plans = read_tables(paths, duck, report.warnings)
         report.manifest = table_manifest(plans)
         report.created_database = ensure_database(settings, pg_database)
+        assert_source_database(settings, pg_database)  # never clean the catalog's tables
         with pg.connect(settings, pg_database) as conn:
             old = previous if previous is not None else existing_schema(conn)
             report.schema_changes = diff_manifest(old, report.manifest)
