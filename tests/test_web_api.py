@@ -1301,3 +1301,27 @@ def test_app_startup_restores_an_export_interrupted_between_the_renames(isolated
         assert (final / "ontology.ttl").read_text(encoding="utf-8") == "# kept"
         assert not backup.exists()
     assert str(backup) in caplog.text
+
+
+def test_startup_recovery_continues_after_one_folder_fails(isolated_env, monkeypatch, caplog):
+    """Round 4 #2: an error restoring one revision folder is logged with its path and the
+    next folder is still restored."""
+    settings = Settings.from_env()
+    finals = [settings.exports_dir / "r0001", settings.exports_dir / "r0002"]
+    for final in finals:
+        backup = final.with_name(f"{final.name}.prev-20260101T000000-crashed")
+        backup.mkdir(parents=True)
+        (backup / export_job.EXPORT_MARKER).write_text("{}", encoding="utf-8")
+    real_rename = Path.rename
+
+    def rename(self, target):
+        if self.name.startswith("r0001.prev-"):
+            raise PermissionError("injected rename failure")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    with caplog.at_level(logging.INFO):
+        restored = export_job.recover_interrupted_exports(settings, _store(settings))
+    assert restored == [finals[1]]
+    assert (finals[1] / export_job.EXPORT_MARKER).is_file()
+    assert str(finals[0]) in caplog.text and "injected rename failure" in caplog.text

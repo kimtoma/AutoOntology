@@ -273,8 +273,13 @@ def recover_interrupted_exports(settings: Settings, store: Store) -> list[Path]:
     try:
         with hold_sources(store, [WORKSPACE_LEASE], EXPORT_KIND):
             for name in finals:
-                if name and recover_interrupted_install(root / name) is not None:
-                    restored.append(root / name)
+                if not name:
+                    continue
+                try:
+                    if recover_interrupted_install(root / name) is not None:
+                        restored.append(root / name)
+                except Exception as exc:  # noqa: BLE001 - this folder only; the others go on
+                    logger.warning("startup: could not restore the export %s: %s", root / name, exc)
     except JobError as exc:
         logger.warning("startup export recovery skipped: %s", exc)
     if restored:
