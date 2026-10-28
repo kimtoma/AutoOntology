@@ -838,13 +838,18 @@ def test_status_reports_backend_postgres_ollama_kordoc_and_providers(env, monkey
     assert "docker compose up -d" in body["checks"]["postgres"]["remedy"]
     assert body["checks"]["ollama"]["status"] == "error"
     assert isinstance(body["kordoc_available"], bool)
-    assert body["providers"] == {
+    providers = dict(body["providers"])
+    chat, embed = providers.pop("chat"), providers.pop("embed")
+    assert providers == {
         "chat_provider": "ollama",
         "chat_model": "openai/qwen3:8b",
         "embed_provider": "ollama",
         "embed_model": "bge-m3",
         "openai_base_url": "",
     }
+    assert chat["name"] == "ollama" and chat["available"] is False and chat["remedy"]
+    assert chat["last_test"] is None
+    assert embed == {"name": "ollama", "model": "bge-m3"}
     assert body["status"] == "error"
     assert body["upload_max_mb"] == web_api.upload_limit_bytes() / (1024 * 1024)
     # cached: a second call within STATUS_CACHE_S does not probe again

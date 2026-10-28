@@ -12,6 +12,7 @@ from typing import Literal
 import httpx
 
 from autoontology.config import (
+    CLI_PROVIDERS,
     PG_MAINTENANCE_DB,
     Settings,
     env_file_path,
@@ -272,7 +273,8 @@ def check_profile(settings: Settings) -> Check:
             f"model profile {settings.model_profile}",
             "FAIL",
             "; ".join(problems[:3]),
-            "set the AUTOONTOLOGY_OPENAI_* values in .env (see .env.example)",
+            "set the AUTOONTOLOGY_OPENAI_* / _CLAUDE_* / _CODEX_* values in .env "
+            "(see .env.example)",
         )
     models = expand_model_profile(settings)
     chat = resolve_triplet_field(models, "REASONING", "MODEL") or "(upstream default)"
@@ -285,7 +287,9 @@ def check_profile(settings: Settings) -> Check:
             "WARN",
             f"{detail}; " + "; ".join(warnings),
             "set AUTOONTOLOGY_OLLAMA_CHAT_MODEL to an openai/<name> Ollama alias "
-            "(`uv run autoontology setup` creates openai/qwen3:8b)",
+            "(`uv run autoontology setup` creates openai/qwen3:8b)"
+            if settings.chat_provider == "ollama"
+            else "pick a listed model (see .env.example)",
         )
     return Check(f"model profile {settings.model_profile}", "OK", detail)
 
@@ -294,9 +298,19 @@ SETUP_OLLAMA = "uv run autoontology setup"
 
 
 def check_chat_provider(settings: Settings) -> Check:
-    """Which chat provider/model is selected and where upstream sends chat calls."""
+    """Which chat provider/model is selected and where upstream sends chat calls; for the
+    CLI providers (claude/codex) whether the CLI is installed and logged in."""
     chat = settings.chat_provider
     origin = settings.selection_origin.get("chat_provider", "?")
+    if chat in CLI_PROVIDERS:
+        from autoontology.web.providers.router import Registry
+
+        st = Registry(settings).status(refresh=True)
+        detail = (
+            f"{chat} {settings.effective_chat_model} via {settings.llm_proxy_endpoint} "
+            f"(from {origin}): {st.detail}"
+        )
+        return Check("chat provider", "OK" if st.ok else "FAIL", detail, st.remedy)
     target = (
         settings.ollama_endpoint
         if chat == "ollama"
@@ -480,6 +494,34 @@ def check_openai_chat(settings: Settings) -> Check:
     return _with_timeout(name, run, MODEL_CHECK_TIMEOUT_S, remedy)
 
 
+def check_cli_chat(settings: Settings) -> Check:
+    """One structured pong through the selected CLI provider, in-process (no service)."""
+    import asyncio
+
+    from autoontology.web.providers.openai_compat import ProviderError, parse_request
+    from autoontology.web.providers.probe import ping_body
+    from autoontology.web.providers.router import Registry
+
+    name = "chat endpoint"
+    remedy = "uv run autoontology doctor (chat provider row)"
+
+    def run() -> Check:
+        model = settings.upstream_chat_model
+        try:
+            request = parse_request(ping_body(model), model)
+            resp = asyncio.run(Registry(settings).complete(model, request))
+        except ProviderError as exc:
+            return Check(name, "FAIL", f"{model}: {exc.status} {exc.message}", exc.remedy or remedy)
+        return Check(
+            name,
+            "OK",
+            f"{model}: {resp.content} in {resp.duration_s:.1f}s, "
+            f"tokens {resp.prompt_tokens}/{resp.completion_tokens}",
+        )
+
+    return _with_timeout(name, run, MODEL_CHECK_TIMEOUT_S * 2, remedy)
+
+
 def check_embed(settings: Settings) -> Check:
     from autoontology.engine.jobs import apply_model_env
 
@@ -543,6 +585,8 @@ def run_checks(settings: Settings, *, skip_models: bool = False) -> list[Check]:
         checks.append(check_chat_route(settings))
         checks.append(check_ollama_chat(settings))
         checks.append(check_no_think(settings))
+    elif settings.chat_provider in CLI_PROVIDERS:
+        checks.append(check_cli_chat(settings))
     else:
         checks.append(check_openai_chat(settings))
     embed = check_embed(settings)

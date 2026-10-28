@@ -208,6 +208,10 @@ class Api:
         self._status: tuple[float, dict[str, Any]] | None = None
         #: One probe round at a time: concurrent cache misses wait for it and share it.
         self._status_lock = threading.Lock()
+        #: The service's chat provider registry (set by ``create_app``).
+        self.providers: Any = None
+        #: One provider test (``POST /api/providers/test``) at a time.
+        self._provider_test_lock = threading.Lock()
 
     @property
     def store(self) -> Store:
@@ -460,6 +464,15 @@ class Api:
                 ocr_ready = False
         from autoontology import formats
 
+        from autoontology.config import CLI_PROVIDERS
+
+        chat = self._chat_provider_status()
+        if s.chat_provider in CLI_PROVIDERS:
+            checks[s.chat_provider] = {
+                "status": "ok" if chat["available"] and chat["logged_in"] else "error",
+                "detail": chat["detail"],
+                **({"remedy": chat["remedy"]} if chat["remedy"] else {}),
+            }
         overall = "error" if any(c["status"] == "error" for c in checks.values()) else "ok"
         result = {
             "status": overall,
@@ -472,6 +485,8 @@ class Api:
                 "openai_base_url": s.openai_base_url
                 if "openai" in (s.chat_provider, s.embed_provider)
                 else "",
+                "chat": chat,
+                "embed": {"name": s.embed_provider, "model": s.effective_embed_model},
             },
             "kordoc_available": kordoc_ok,
             "ocr_ready": ocr_ready,
@@ -482,6 +497,47 @@ class Api:
             "doctor": "uv run autoontology doctor",
             "upload_max_mb": round(upload_limit_bytes() / (1024 * 1024), 1),
         }
+        return mask(result)
+
+    def _chat_provider_status(self) -> dict[str, Any]:
+        """The active chat provider's status (CLI login, endpoint) and its last test."""
+        from autoontology.web.providers import probe
+        from autoontology.web.providers.router import Registry
+
+        s = self.settings
+        out: dict[str, Any] = {"name": s.chat_provider, "model": s.effective_chat_model}
+        try:
+            st = (self.providers or Registry(s)).status()
+            out.update(
+                available=st.available, logged_in=st.logged_in, detail=st.detail, remedy=st.remedy
+            )
+        except Exception as exc:  # noqa: BLE001 - reported, not raised
+            out.update(
+                available=False,
+                logged_in=False,
+                detail=f"status failed: {type(exc).__name__}",
+                remedy="uv run autoontology doctor",
+            )
+        from autoontology.web.providers.base import scrub
+
+        out["detail"] = scrub(out["detail"], 300)
+        out["last_test"] = probe.last_test(s)
+        return out
+
+    async def test_provider(self, app: Any) -> dict[str, Any]:
+        """One pong through this service's own /v1 router, in-process (409 while another
+        test runs)."""
+        from autoontology.web.providers import probe
+
+        if not self._provider_test_lock.acquire(blocking=False):
+            raise ApiError(409, "test_in_progress", "a provider test is already running")
+        try:
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
+                result = await probe.run_test_async(self.settings, client=c, via="service")
+        finally:
+            self._provider_test_lock.release()
+        self._status = None  # the next /api/status shows the new last_test
         return mask(result)
 
 
@@ -763,6 +819,10 @@ def build_router(api: Api) -> APIRouter:
     @router.get("/status")
     def status() -> dict[str, Any]:
         return api.status()
+
+    @router.post("/providers/test")
+    async def test_provider(request: Request) -> dict[str, Any]:
+        return await api.test_provider(request.app)
 
     return router
 
