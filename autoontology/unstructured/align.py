@@ -264,7 +264,7 @@ def judge_key(
 
 
 #: :func:`judge_key`: a Term whose description apply set before the text was recorded,
-#: until the next judge step records the description it sees as the baseline
+#: until a successful judge call against that Term records the description it saw
 #: (:meth:`~autoontology.store.alignments.AlignmentStore.settle_legacy_descriptions`).
 ANY_DESCRIPTION = "\0any"
 

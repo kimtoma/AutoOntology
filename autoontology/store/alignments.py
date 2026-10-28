@@ -231,8 +231,8 @@ class AlignmentStore:
 
     def settle_legacy_descriptions(self, current: dict[str, str]) -> int:
         """A ``description_set`` record from before the text was kept gets a concrete
-        baseline: the description its Term has now (*current*: term id -> description, the
-        Terms the judge step sees), so :func:`auto_descriptions` stops answering
+        baseline: the description its Term had when a judge call saw it (*current*: term
+        id -> description; called only after that call succeeded), so :func:`auto_descriptions` stops answering
         ``ANY_DESCRIPTION`` for it and a later change of the description re-judges.
         Returns the number of records settled."""
         settled = 0

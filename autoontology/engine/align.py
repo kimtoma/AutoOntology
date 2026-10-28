@@ -313,10 +313,11 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
     stats = {"judged": 0, "cached": 0, "resumed": 0, "failed": 0, "proposals": 0}
     failed: list[dict[str, str]] = []
     auto_added = ctx.aligns.alias_additions()  # synonyms AutoOntology wrote: never evidence
-    # a legacy description record without its text: the description seen now becomes its
-    # baseline (never a permanent wildcard), here and in the step's Terms fingerprint
-    ctx.aligns.settle_legacy_descriptions({t.id: t.description for t in terms.values()})
     auto_descriptions = ctx.aligns.auto_descriptions()  # left out of the judge key too
+    # Terms with a legacy description record (no text): every concept judged against one
+    # is judged again (no resume, no cache), and only that successful judge call confirms
+    # the description it saw as the baseline (never a permanent wildcard)
+    legacy = {tid for tid, texts in auto_descriptions.items() if al.ANY_DESCRIPTION in texts}
 
     def guard(
         raw: al.ValidatedVerdict, concept: al.ConceptInfo
@@ -357,8 +358,9 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
             if found
             else None
         )
+        unconfirmed = [t for t in cand_terms if t.id in legacy]
         prior = steps.get(name)
-        if prior is not None and prior.status == "succeeded":
+        if prior is not None and prior.status == "succeeded" and not unconfirmed:
             # the verdict this run already wrote -- in either table: the resumed run may
             # differ in --dry-run/--min-conf (or the identity policy) from the one that
             # judged, so relation and acceptance are recomputed from the judge's verdict
@@ -448,6 +450,8 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
             ),
             None,
         )
+        if unconfirmed:
+            hit = None  # judged once against the current description (legacy record)
         path = "cached"
         if hit is not None:
             verdict = _raw_verdict(hit)
@@ -500,6 +504,8 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
                 proposal=proposal,
             )
         )
+        if unconfirmed and path == "judged":  # after the put, which may carry the old record
+            ctx.aligns.settle_legacy_descriptions({t.id: t.description for t in unconfirmed})
         counts[verdict.relation] += 1
         seconds = round(time.monotonic() - started, 1)
         ctx.store.finish_step(
@@ -979,9 +985,11 @@ def terms_fingerprint(store: Store, client: BackendClient, structured: list[Sour
     ``build --resume`` compares to decide whether an ``align:<docs>`` step is reusable."""
     aligns = AlignmentStore(store)
     snap = combine([fetch_snapshot(client, s) for s in structured])
-    return al.terms_fingerprint(
-        list(snap.term_map().values()), aligns.alias_additions(), aligns.auto_descriptions()
-    )
+    terms = snap.term_map()
+    described = aligns.auto_descriptions()
+    if any(al.ANY_DESCRIPTION in described.get(tid, ()) for tid in terms):
+        return ""  # a legacy description not confirmed by a judge call yet: never reusable
+    return al.terms_fingerprint(list(terms.values()), aligns.alias_additions(), described)
 
 
 def align_pass(

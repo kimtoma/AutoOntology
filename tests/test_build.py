@@ -556,6 +556,26 @@ def test_legacy_description_record_is_not_a_permanent_wildcard(env):
     assert again.details["align:hanbit-docs"]["judged"] == 1
 
 
+def test_resume_right_after_the_upgrade_rejudges_a_legacy_description(env):
+    """Round 4 #1: with an unconfirmed legacy ``description_set`` record (no text) and no
+    other change, ``--resume`` must not reuse the align step and the concept must be
+    judged against the current description before it becomes the baseline; a later
+    description change re-judges again."""
+    add_structured(env)
+    add_documents(env)
+    client, store = env["client"], env["store"]
+    first = run(env)
+    assert first.status == "succeeded"
+    assert _forget_description_texts(store) >= 1
+    upgraded = run(env, resume=True)
+    assert upgraded.run_id == first.run_id and upgraded.status == "succeeded"
+    assert upgraded.details["align:hanbit-docs"]["judged"] >= 1
+    assert "align:hanbit-docs" not in run(env, resume=True).details  # settled now
+    client.terms["t-customer"]["description"] = "판매 고객이 아닌 고용 상대방"
+    again = run(env, resume=True)
+    assert again.details["align:hanbit-docs"]["judged"] >= 1
+
+
 def test_resume_runs_align_again_when_an_upstream_term_changed(env):
     """Follow-up of recheck #2: with unchanged inputs `--resume` used to keep the whole
     align step, so an edited upstream Term was never re-judged. The step records a
