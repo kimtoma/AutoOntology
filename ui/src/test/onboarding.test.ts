@@ -1,6 +1,6 @@
 import type { ExportEntry, OntologySummary, Run, SampleSet, ServiceStatus, Source } from "@/lib/api"
 import {
-  allDone, checklist, expectedTime, loginCommand, modelsReady, sampleSetFor,
+  allDone, checklist, expectedTime, loginCommand, modelsReady, otherSources, sampleSetFor,
 } from "@/lib/checklist"
 import { acceptList, classifyFile, extensionOf, extensionsByEngine, type Formats } from "@/lib/formats"
 import { humanStep, runSeconds, splitStep, stepFailure, stepLabel, stepSeconds } from "@/lib/labels"
@@ -204,5 +204,29 @@ describe("sample sets", () => {
     expect(expectedTime(SETS[0], "ollama")).toBe("20-50 min")
     expect(expectedTime(SETS[0], "codex")).toBeNull()
     expect(expectedTime(SETS[1], "claude")).toBeNull()
+  })
+})
+
+describe("other sources of a sample set", () => {
+  const SETS = [
+    { set: "quickstart", path: "/s/q", registered: true, sources: [
+      { name: "quick", kind: "structured", path: "/s/q/structured", files: 3, bytes: 1 },
+      { name: "quick-docs", kind: "documents", path: "/s/q/documents", files: 5, bytes: 1 }] },
+    { set: "hanbit", path: "/s/h", registered: false, sources: [
+      { name: "hanbit", kind: "structured", path: "/s/h/structured", files: 9, bytes: 1 }] },
+  ] as SampleSet[]
+  const src = (name: string, kind: string, locator: string) => ({ name, kind, locator }) as Source
+
+  it("counts a source as a sample source only by kind and folder, never by name alone", () => {
+    const sources = [
+      src("quick", "files", "/s/q/structured"),            // the sample
+      src("quick-docs", "documents", "/home/me/docs"),       // same name, own folder
+      src("mine", "files", "/s/q/documents"),                // sample folder, other name and kind
+      src("hanbit", "files", "/s/h/structured"),
+    ]
+    const { others, otherSamples } = otherSources(SETS[1], sources, SETS)
+    expect(others.map((s) => s.name)).toEqual(["quick", "quick-docs", "mine"])
+    expect(otherSamples.map((s) => s.name)).toEqual(["quick"])
+    expect(otherSources(SETS[1], [src("quick", "documents", "/s/q/structured")], SETS).otherSamples).toEqual([])
   })
 })

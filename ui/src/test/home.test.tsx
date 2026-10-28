@@ -216,6 +216,11 @@ describe("Sample loading conflicts", () => {
     expect(note).toHaveTextContent(/will be built together with this set/)
     expect(within(dialog).getByRole("button", { name: /Keep both/ })).toBeInTheDocument()
     await user.click(within(dialog).getByRole("button", { name: /Remove the other sample sources first/ }))
+    // a confirmation lists exactly what goes; nothing is deleted before it
+    const confirm = await within(dialog).findByRole("alertdialog")
+    expect(confirm).toHaveTextContent("This deletes quick, quick-docs (their database and extracted concepts).")
+    expect(calls.some((c) => c.method === "DELETE" || c.method === "POST")).toBe(false)
+    await user.click(within(confirm).getByRole("button", { name: /Remove and load/ }))
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true))
     const order = calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`)
     expect(order).toEqual(["DELETE /sources/quick", "DELETE /sources/quick-docs", "POST /samples/load"])
@@ -224,6 +229,41 @@ describe("Sample loading conflicts", () => {
     const urls = (fetch as unknown as { mock: { calls: [string][] } }).mock.calls.map((c) => String(c[0]))
     expect(urls).toContain("/api/sources/quick?drop_db=true")       // its sample database goes too
     expect(urls).toContain("/api/sources/quick-docs")
+  })
+
+  it("never offers to delete a user's own source that only shares a sample name", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockFetch(HOME_ROUTES({
+      "GET /sources": { sources: [{ name: "quick", kind: "files", locator: "/Users/someone/crm-export" }] },
+      "POST /samples/load": { set: "hanbit", messages: [], sources: [{ name: "hanbit", kind: "files", action: "created" }] },
+    }))
+    renderPage(<HomePage />)
+    await user.click(await screen.findByRole("button", { name: /Load sample data/ }))
+    const dialog = await screen.findByRole("dialog")
+    const note = await waitFor(() => {
+      const el = dialog.querySelector("[data-other-sources=hanbit]")
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(note).toHaveTextContent("Your other source (quick) stays registered")
+    expect(within(dialog).queryByRole("button", { name: /Remove the other sample sources first/ })).toBeNull()
+    expect(within(dialog).queryByRole("button", { name: /Keep both/ })).toBeNull()
+    await user.click(within(dialog).getByRole("button", { name: /Load hanbit/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true))
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false)
+  })
+
+  it("cancelling the removal deletes nothing", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockFetch(HOME_ROUTES({ "GET /sources": LOADED }))
+    renderPage(<HomePage />)
+    await user.click(await screen.findByRole("button", { name: /Load sample data/ }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(await within(dialog).findByRole("button", { name: /Remove the other sample sources first/ }))
+    const confirm = await within(dialog).findByRole("alertdialog")
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }))
+    expect(within(dialog).queryByRole("alertdialog")).toBeNull()
+    expect(calls.some((c) => c.method !== "GET")).toBe(false)
   })
 
   it("keeps both when asked", async () => {

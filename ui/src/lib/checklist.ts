@@ -114,13 +114,19 @@ export function expectedTime(set: SampleSet | undefined, provider: string | unde
   return d ? `${d.text}${d.measured ? "" : " (estimate)"}` : null
 }
 
+const sampleKind = (kind: string) => (kind === "documents" ? "documents" : "files")
+
 /** The registered sources a build would add to *set*'s own: `others` (every other source)
-    and `otherSamples` (those that belong to another sample set). */
+    and `otherSamples`, those that really are another sample set's sources: same kind and a
+    locator equal to that sample source's folder. A name alone never counts (a user's own
+    source may be called `quick`), since these are the ones offered for deletion. */
 export function otherSources(set: SampleSet, sources: Source[] | undefined, sets: SampleSet[] | undefined) {
   const mine = new Set(set.sources.map((s) => s.name))
-  const sampleNames = new Set((sets ?? []).filter((x) => x.set !== set.set).flatMap((x) => x.sources.map((s) => s.name)))
+  const samples = (sets ?? []).filter((x) => x.set !== set.set).flatMap((x) => x.sources)
   const others = (sources ?? []).filter((s) => !mine.has(s.name))
-  return { others, otherSamples: others.filter((s) => sampleNames.has(s.name)) }
+  const isSample = (s: Source) => samples.some((x) =>
+    x.name === s.name && x.path === s.locator && sampleKind(x.kind) === s.kind)
+  return { others, otherSamples: others.filter(isSample) }
 }
 
 /** The sample sets *sourceNames* touch (a build over two sets has no single estimate). */

@@ -64,7 +64,7 @@ function SetCard({ set, provider, pending, others, otherSamples, onLoad, onRemov
       </p>
       {others.length > 0 && !set.registered && (
         <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs" data-other-sources={set.set}>
-          Your other source{others.length === 1 ? "" : "s"} ({names(others)}) stay registered and will be built
+          Your other source{others.length === 1 ? "" : "s"} ({names(others)}) {others.length === 1 ? "stays" : "stay"} registered and will be built
           together with this set, so the build takes longer than the time above.
           {otherSamples.length > 0 && <> To build only {set.set}, remove the other sample sources first.</>}
         </p>
@@ -89,6 +89,36 @@ function SetCard({ set, provider, pending, others, otherSamples, onLoad, onRemov
         )}
       </div>
     </li>
+  )
+}
+
+/** Confirms deleting the other sample set's sources before loading *set*. */
+function RemovePanel({ set, remove, pending, onConfirm, onCancel }: {
+  set: string
+  remove: Source[]
+  pending: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div role="alertdialog" aria-labelledby="sample-remove-title" id="sample-remove"
+         className="grid gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+      <p id="sample-remove-title" className="font-medium">
+        This deletes {remove.map((s) => s.name).join(", ")} (their database and extracted concepts).
+      </p>
+      <ul className="grid gap-0.5 text-xs">
+        {remove.map((s) => (
+          <li key={s.name} data-remove-source={s.name}><b>{s.name}</b> ({KIND_WORD[s.kind] ?? s.kind})</li>
+        ))}
+      </ul>
+      <p className="text-xs">The sample files stay in the samples folder; you can load them again. Remove and load {set}?</p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="destructive" onClick={onConfirm} disabled={pending} id="btn-sample-remove">
+          {pending && <Loader2 className="animate-spin" aria-hidden /> } Remove and load
+        </Button>
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={pending}>Cancel</Button>
+      </div>
+    </div>
   )
 }
 
@@ -137,6 +167,7 @@ export function SamplesDialog({ open, onOpenChange, onLoaded }: {
   const provider = status.data?.providers.chat_provider
   const [result, setResult] = useState<SampleLoad | null>(null)
   const [conflict, setConflict] = useState<{ set: string; conflicts: SampleConflict[] } | null>(null)
+  const [removal, setRemoval] = useState<{ set: string; remove: Source[] } | null>(null)
   const load = useMutation({
     mutationFn: async ({ set, replace = false, remove = [] }: { set: string; replace?: boolean; remove?: Source[] }) => {
       for (const s of remove) await api.deleteSource(s.name, s.kind === "files")
@@ -145,6 +176,7 @@ export function SamplesDialog({ open, onOpenChange, onLoaded }: {
     onSuccess: (r) => {
       setResult(r)
       setConflict(null)
+      setRemoval(null)
       try { localStorage.setItem(LAST_SAMPLE_KEY, r.set) } catch { /* private mode */ }
       toast.success(`Loaded the ${r.set} samples`, { description: "Build the ontology next." })
       onLoaded?.(r)
@@ -164,7 +196,7 @@ export function SamplesDialog({ open, onOpenChange, onLoaded }: {
   return (
     <Dialog open={open} onOpenChange={(o) => {
       onOpenChange(o)
-      if (!o) { setResult(null); setConflict(null); load.reset() }
+      if (!o) { setResult(null); setConflict(null); setRemoval(null); load.reset() }
     }}>
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg" id="samples-dialog">
         <DialogHeader>
@@ -188,11 +220,16 @@ export function SamplesDialog({ open, onOpenChange, onLoaded }: {
                   <SetCard key={s.set} set={s} provider={provider} others={others} otherSamples={otherSamples}
                            pending={load.isPending && load.variables?.set === s.set}
                            onLoad={() => load.mutate({ set: s.set })}
-                           onRemoveAndLoad={() => load.mutate({ set: s.set, remove: otherSamples })} />
+                           onRemoveAndLoad={() => { setConflict(null); setRemoval({ set: s.set, remove: otherSamples }) }} />
                 )
               })}
             </ul>
           )}
+        {removal && (
+          <RemovePanel set={removal.set} remove={removal.remove} pending={load.isPending}
+                       onConfirm={() => load.mutate({ set: removal.set, remove: removal.remove })}
+                       onCancel={() => setRemoval(null)} />
+        )}
         {conflict && (
           <ConflictPanel set={conflict.set} conflicts={conflict.conflicts} pending={load.isPending}
                          onReplace={() => load.mutate({ set: conflict.set, replace: true })}
