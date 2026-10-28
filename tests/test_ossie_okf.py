@@ -262,6 +262,18 @@ def test_schema_errors_name_the_json_pointer():
         },
     )
     assert errors and errors[0].startswith("/ontology/0/type:")
+    many = ossie.schema_errors(
+        "ontology",
+        {
+            "version": "0.2.0.dev0",
+            "name": "x",
+            "ontology": [
+                {"concept": f"C{i}", "type": "Thing" if i in (2, 10) else "EntityType"}
+                for i in range(11)
+            ],
+        },
+    )
+    assert [e.split(":")[0] for e in many] == ["/ontology/2/type", "/ontology/10/type"]
     sm = ossie.schema_errors("semantic_model", {"version": "0.2.0.dev0", "name": "x"})
     assert sm == ["/: 'datasets' is a required property"]
 
@@ -677,6 +689,16 @@ def test_okf_concept_frontmatter_and_body(bundle):
     assert "is related to [Invoices](/concepts/invoices.md)" in body
     rule, _ = _okf(out, "concepts/승인-기준.md")
     assert rule["tags"][1] == "kind:rule" and rule["resource"].endswith("#concept-c7")
+
+
+def test_okf_is_byte_deterministic(model, tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    for out in (a, b):
+        okf.write(model, out, revision=1, created_at=CREATED)
+    files = sorted(p.relative_to(a).as_posix() for p in a.rglob("*") if p.is_file())
+    assert files == sorted(p.relative_to(b).as_posix() for p in b.rglob("*") if p.is_file())
+    for rel in files:
+        assert (a / rel).read_bytes() == (b / rel).read_bytes(), rel
 
 
 def test_okf_tables_documents_index_and_log(bundle):

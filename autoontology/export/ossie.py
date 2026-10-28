@@ -123,7 +123,11 @@ def pointer(path: Any) -> str:
 
 def schema_errors(kind: str, doc: Any) -> list[str]:
     """``"<json pointer>: <message>"`` for every violation of the *kind* schema."""
-    errors = sorted(_validator(kind).iter_errors(doc), key=lambda e: [str(p) for p in e.path])
+    errors = sorted(
+        _validator(kind).iter_errors(doc),
+        # array indexes in numeric order (/2 before /10), then keys
+        key=lambda e: [(0, p, "") if isinstance(p, int) else (1, 0, str(p)) for p in e.path],
+    )
     return [f"{pointer(e.absolute_path)}: {e.message}" for e in errors]
 
 
