@@ -15,10 +15,11 @@ Steps, in order (each persisted as a ``steps`` row of the single ``build`` run):
 ``sources`` (``--source N``) restricts the per-source steps (the others are recorded as
 skipped); align, merge and snapshot always cover everything. ``resume`` reuses the latest
 build run (also a succeeded one): a succeeded step is kept unless its source's inputs
-changed since it ran (:func:`input_fingerprint`: the files' contents, or the database
-locator) or something it depends on runs again (a step of the same source, or -- for
-align/merge/snapshot -- any step). A schema change *inside* an external database is not
-visible to that check; a plain ``build`` (no ``--resume``) picks it up. Unchanged inputs are no-ops
+changed since it ran (:func:`input_fingerprint`: the files' contents, kordoc's
+availability, or the database locator plus its live schema -- an unreachable database is
+never reused) or something it depends on runs again (a step of the same source, or -- for
+align/merge/snapshot -- any step), and align/merge/snapshot also run again when the set of
+registered sources changed since that run (:func:`source_set`). Unchanged inputs are no-ops
 inside the steps too (file manifests, document hashes, the consolidation fingerprint, the
 judge cache), so a plain re-run does no LLM work for what did not change.
 
@@ -75,6 +76,8 @@ class BuildResult:
     counts: dict[str, Any] = field(default_factory=dict)
     #: what made a finished run partial (failed chunks/documents/concepts)
     problems: list[str] = field(default_factory=list)
+    #: what a succeeded run left out on purpose (documents that need kordoc)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -99,10 +102,25 @@ def step_names(sources: list[Source]) -> list[str]:
     return [*names, "merge", "snapshot"]
 
 
-def input_fingerprint(source: Source) -> str:
+def kordoc_state(home: Path) -> str:
+    """What a documents read can do with kordoc files: the engine resolved (CLI path,
+    its mtime and Node), or ``none`` -- so installing kordoc changes the fingerprint."""
+    from autoontology.unstructured import kordoc
+
+    try:
+        engine = kordoc.resolve_engine(home)
+        stamp = Path(engine.cli).stat().st_mtime_ns
+    except (kordoc.KordocError, OSError):
+        return "none"
+    return f"{engine.cli}:{stamp}:{engine.node}"
+
+
+def input_fingerprint(source: Source, home: Path | None = None) -> str:
     """A hash of what the per-source steps of *source* read: the locator plus, for files
-    and documents sources, every input file's path and content hash ("" when the inputs
-    cannot be listed -- never equal to a recorded fingerprint, so the steps run again)."""
+    and documents sources, every input file's path and content hash -- and, for documents
+    sources holding kordoc formats, whether kordoc is available (*home*). "" when the
+    inputs cannot be listed -- never equal to a recorded fingerprint, so the steps run
+    again."""
     digest = hashlib.sha256(f"{source.kind}\0{source.locator}\0".encode())
     try:
         if source.kind == "files":
@@ -110,6 +128,10 @@ def input_fingerprint(source: Source) -> str:
         elif source.kind == "documents":
             target, recursive = extract_job.documents_target(source)
             files = extract_job.readers.discover_documents(target, recursive=recursive)
+            if home is not None and any(
+                p.suffix.lower() in extract_job.readers.kordoc.EXTENSIONS for p in files
+            ):
+                digest.update(f"kordoc\0{kordoc_state(home)}\0".encode())
         else:
             files = []
         for path in sorted(p.resolve() for p in files):
@@ -163,7 +185,9 @@ class _Build:
 
         def run() -> dict[str, Any]:
             if source.name not in self._fingerprints:
-                self._fingerprints[source.name] = input_fingerprint(self.fresh(source))
+                self._fingerprints[source.name] = input_fingerprint(
+                    self.fresh(source), self.settings.home
+                )
             detail = fn()
             detail[INPUTS_KEY] = self._fingerprints[source.name]
             return detail
@@ -399,7 +423,7 @@ def _resume_reuse(
         kept = {n for n in already if n.startswith(f"{group}:{source.name}:")}
         if not kept:
             continue
-        current = input_fingerprint(source)
+        current = input_fingerprint(source, settings.home)
         if not current or any(rows[n].detail.get(INPUTS_KEY) != current for n in kept):
             logger.info("--resume: inputs of %s changed since run %s: rebuilt", source.name, run.id)
             already -= kept
@@ -693,6 +717,23 @@ def _problems(store: Store, run_id: str) -> list[str]:
     return out
 
 
+def _warnings(store: Store, run_id: str) -> list[str]:
+    """What the run skipped without failing: documents that need the kordoc engine."""
+    from autoontology.unstructured.kordoc import INSTALL_COMMAND
+    from autoontology.unstructured.report import display_path
+
+    out = []
+    for step in store.get_steps(run_id):
+        skipped = step.detail.get("needs_kordoc") if step.name.endswith(":read") else None
+        if skipped:
+            names = ", ".join(display_path(f["path"]) for f in skipped)
+            out.append(
+                f"{step.name}: {len(skipped)} document(s) need kordoc and were skipped "
+                f"({names}): run `{INSTALL_COMMAND}`, then build again"
+            )
+    return out
+
+
 def _finish(build: _Build, result: BuildResult) -> BuildResult:
     store, run = build.store, build.run
     snap = next(
@@ -703,6 +744,7 @@ def _finish(build: _Build, result: BuildResult) -> BuildResult:
         result.revision = snap.detail.get("revision")
         result.counts = snap.detail.get("counts", {})
     result.problems = _problems(store, run.id)
+    result.warnings = _warnings(store, run.id)  # the CLI prints them after the run
     if result.problems:
         error = "partial: " + " | ".join(result.problems)
         store.update_run(

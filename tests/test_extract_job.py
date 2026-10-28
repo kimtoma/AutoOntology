@@ -188,8 +188,10 @@ def test_failed_chunks_and_missing_engine(env, monkeypatch):
 
     result = _run(settings, store, docs_dir, _backends(settings, Flaky()))
     read = result.details["read"]
-    assert [f["code"] for f in read["failed"]] == ["ENGINE_MISSING"]
-    assert "install-kordoc" in read["failed"][0]["error"]
+    # kordoc is missing: the HWP file is skipped (named, with the install command), not failed
+    assert read["failed"] == []
+    assert [f["code"] for f in read["needs_kordoc"]] == ["ENGINE_MISSING"]
+    assert "install-kordoc" in read["needs_kordoc"][0]["error"]
     assert result.details["extract"]["failed"] == 1
     failed = [
         s
@@ -198,7 +200,7 @@ def test_failed_chunks_and_missing_engine(env, monkeypatch):
     ]
     assert len(failed) == 1 and "model said no" in failed[0].detail["structured_error"]
     report = (result.export_dir / "report.md").read_text(encoding="utf-8")
-    assert "## Failed chunks" in report and "ENGINE_MISSING" in report
+    assert "## Failed chunks" in report
     # a partial run is not "succeeded": failed, with the failed chunks named
     run = store.get_run(result.run_id)
     assert result.status == "failed" and run.status == "failed"
@@ -206,19 +208,15 @@ def test_failed_chunks_and_missing_engine(env, monkeypatch):
     assert run.params["partial"] is True and len(run.params["failed_chunks"]) == 1
     assert result.details["extract"]["partial"] is True
 
-    assert "1 document(s) failed to read" in run.error and "규정.hwp" in run.error
-    assert run.params["failed_documents"][0].endswith("규정.hwp")
+    assert "failed to read" not in run.error and "규정.hwp" not in run.error
 
-    # --resume retries the failed chunk (and the unreadable document, still unreadable:
-    # the run stays failed, review #9)
+    # --resume retries the failed chunk; the skipped document does not fail the run
     llm = FakeLLM()
     resumed = _run(settings, store, docs_dir, _backends(settings, llm), resume=True)
-    assert resumed.run_id == result.run_id and resumed.status == "failed"
+    assert resumed.run_id == result.run_id and resumed.status == "succeeded"
     assert resumed.details["extract"]["attempted"] == 1
-    assert [f["code"] for f in resumed.details["read"]["failed"]] == ["ENGINE_MISSING"]
     assert llm.calls - 1 == resumed.details["consolidate"]["stats"]["judge_calls"]
-    run = store.get_run(result.run_id)
-    assert run.status == "failed" and "of 1 chunk(s)" not in run.error
+    assert store.get_run(result.run_id).status == "succeeded"
     # the document goes away: the run succeeds
     (docs_dir / "규정.hwp").unlink()
     resumed = _run(settings, store, docs_dir, _backends(settings), resume=True)

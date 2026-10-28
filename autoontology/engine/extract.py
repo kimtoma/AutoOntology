@@ -111,6 +111,10 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+#: Read error codes meaning "the kordoc engine (or Node) is not installed".
+KORDOC_UNAVAILABLE_CODES = frozenset({"ENGINE_MISSING", "NODE_MISSING"})
+
+
 def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
     files = readers.discover_documents(ctx.target, recursive=ctx.recursive)
     if not files:
@@ -121,6 +125,10 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
     max_tokens, overlap, pack = chunker.env_sizes()
     documents: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
+    #: documents that need the kordoc engine, which is not installed: skipped (not a
+    #: failure); kordoc's availability is part of the source's input fingerprint, so the
+    #: next build after `tools install-kordoc` reads them
+    needs_kordoc: list[dict[str, str]] = []
     duplicates: list[dict[str, str]] = []
     superseded: list[dict[str, str]] = []
     # Ownership comes from the *current* contents of the whole input set, decided before
@@ -184,6 +192,9 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
         except (readers.ReadError, readers.kordoc.KordocError) as exc:
             code = getattr(exc, "code", "READ_FAILED")
             message = getattr(exc, "message", None) or str(exc)
+            if code in KORDOC_UNAVAILABLE_CODES:
+                needs_kordoc.append({"path": shown, "code": code, "error": message})
+                continue
             failed.append({"path": shown, "code": code, "error": message})
             logger.warning("  %s: FAILED (%s) %s", display_path(shown), code, message)
             continue
@@ -219,7 +230,14 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
     if not documents:
         raise RuntimeError(
             "every document failed to read: "
-            + "; ".join(f"{f['path']}: {f['error']}" for f in failed)
+            + "; ".join(f"{f['path']}: {f['error']}" for f in [*failed, *needs_kordoc])
+        )
+    if needs_kordoc:
+        logger.warning(
+            "  %d document(s) need kordoc, skipped: %s; run `%s`, then build again",
+            len(needs_kordoc),
+            ", ".join(display_path(f["path"]) for f in needs_kordoc),
+            readers.kordoc.INSTALL_COMMAND,
         )
     pruned: list[str] = []
     if ctx.full_scan:
@@ -241,6 +259,7 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
     return {
         "documents": documents,
         "failed": failed,
+        "needs_kordoc": needs_kordoc,
         "duplicates": duplicates,
         "pruned": pruned,
         "superseded": superseded,

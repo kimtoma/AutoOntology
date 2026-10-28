@@ -396,6 +396,50 @@ def test_step_names_and_partial_runs(env):
     assert env["store"].get_run(result.run_id).error.startswith("partial:")
 
 
+def test_documents_that_need_kordoc_are_skipped_not_failed(env, monkeypatch):
+    """Without kordoc the canonical quickstart must still exit 0: the HWP/PDF files are
+    skipped with a warning naming them and the install command, and once kordoc is
+    available a --resume reads them (kordoc is part of the input fingerprint)."""
+    monkeypatch.delenv("KORDOC_CLI", raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    (env["docs"] / "규정.hwp").write_bytes(b"x")
+    add_documents(env)
+    result = run(env)
+    assert result.status == "succeeded", result.problems
+    assert result.problems == []
+    read = result.details["documents:hanbit-docs:read"]
+    assert read["failed"] == [] and [f["code"] for f in read["needs_kordoc"]] == ["ENGINE_MISSING"]
+    assert len(result.warnings) == 1
+    assert "규정.hwp" in result.warnings[0] and "tools install-kordoc" in result.warnings[0]
+    assert env["store"].get_run(result.run_id).status == "succeeded"
+    # nothing changed: a resume keeps the read
+    again = run(env, resume=True)
+    assert "documents:hanbit-docs:read" not in again.details
+    # kordoc becomes available: the documents source is read again
+    monkeypatch.setattr(bj, "kordoc_state", lambda home: "/opt/kordoc/cli.js:1:node")
+    after = run(env, resume=True)
+    assert "documents:hanbit-docs:read" in after.details
+
+
+def test_cli_build_prints_the_kordoc_warning_and_exits_0(env, monkeypatch):
+    from typer.testing import CliRunner
+
+    from autoontology.cli import app
+
+    monkeypatch.delenv("KORDOC_CLI", raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    (env["docs"] / "규정.hwp").write_bytes(b"x")
+    add_documents(env)
+
+    real = bj.run_build
+    result = run(env)  # with the fake backends, then reported by the CLI
+    monkeypatch.setattr(bj, "run_build", lambda *a, **k: result)
+    assert real is not bj.run_build
+    res = CliRunner().invoke(app, ["build"])
+    assert res.exit_code == 0, res.output
+    assert "need kordoc" in res.output and "tools install-kordoc" in res.output
+
+
 # --- export from a snapshot ---------------------------------------------------------------
 
 

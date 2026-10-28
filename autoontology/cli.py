@@ -449,6 +449,8 @@ def build(
             f"document), {counts.get('individuals', 0)} individuals, "
             f"{counts.get('merged_concepts', 0)} concepts folded into Terms"
         )
+    for warning in result.warnings:
+        typer.echo(f"  warning: {warning}", err=True)
     if result.status != "succeeded":
         for problem in result.problems:
             typer.echo(f"  partial: {problem}", err=True)
