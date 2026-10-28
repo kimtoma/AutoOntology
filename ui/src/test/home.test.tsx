@@ -133,6 +133,151 @@ describe("Home page", () => {
   })
 })
 
+const HOME_ROUTES = (over: Record<string, unknown> = {}) => ({
+  "GET /status": STATUS(true), "GET /sources": { sources: [] }, "GET /ontology": no_snapshot,
+  "GET /runs": { runs: [] }, "GET /exports": { exports: [] }, "GET /samples": SAMPLES, ...over,
+})
+
+describe("Sample loading conflicts", () => {
+  it("asks before replacing same-named sources, then re-posts with replace: true", async () => {
+    const user = userEvent.setup()
+    let posts = 0
+    const { calls } = mockFetch(HOME_ROUTES({
+      "POST /samples/load": () => {
+        posts += 1
+        if (posts === 1) {
+          return new Response(JSON.stringify({
+            error: "sample_conflict",
+            detail: 'source(s) quick already exist with other data; send "replace": true to replace them',
+            conflicts: [{ name: "quick", kind: "files", registered: "/home/me/data/mine", sample: "/repo/samples/quickstart/structured" }],
+          }), { status: 409, headers: { "content-type": "application/json" } })
+        }
+        return { set: "quickstart", messages: ["quick: replaced"],
+                 sources: [{ name: "quick", kind: "files", action: "replaced" }, { name: "quick-docs", kind: "documents", action: "created" }] }
+      },
+    }))
+    renderPage(<><HomePage /><Toaster /></>)
+    await user.click(await screen.findByRole("button", { name: /Load sample data/ }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(await within(dialog).findByRole("button", { name: /Load quickstart/ }))
+    const panel = await within(dialog).findByRole("alertdialog")
+    expect(panel).toHaveTextContent("These sources already exist and point elsewhere:")
+    expect(panel).toHaveTextContent("quick (tables)")
+    expect(panel).toHaveTextContent(/deletes their database and the concepts/)
+    expect(dialog).not.toHaveTextContent("/home/me/data/mine")  // no absolute paths
+    expect(dialog).not.toHaveTextContent('"replace"')            // no API language
+    expect(posts).toBe(1)
+    await user.click(within(panel).getByRole("button", { name: /Replace and load/ }))
+    await waitFor(() => expect(posts).toBe(2))
+    const bodies = calls.filter((c) => c.path === "/samples/load").map((c) => JSON.parse(String(c.init?.body)))
+    expect(bodies).toEqual([{ set: "quickstart" }, { set: "quickstart", replace: true }])
+    expect(await within(dialog).findByText("Sources ready:")).toBeInTheDocument()
+    expect(within(dialog).queryByRole("alertdialog")).toBeNull()
+  })
+
+  it("cancelling the conflict sends nothing more", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockFetch(HOME_ROUTES({
+      "POST /samples/load": () => new Response(JSON.stringify({
+        error: "sample_conflict", detail: "x", conflicts: [{ name: "quick-docs", kind: "documents" }] }),
+        { status: 409, headers: { "content-type": "application/json" } }),
+    }))
+    renderPage(<HomePage />)
+    await user.click(await screen.findByRole("button", { name: /Load sample data/ }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(await within(dialog).findByRole("button", { name: /Load quickstart/ }))
+    await user.click(await within(dialog).findByRole("button", { name: "Cancel" }))
+    expect(within(dialog).queryByRole("alertdialog")).toBeNull()
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1)
+  })
+
+  const LOADED = { sources: [
+    { name: "quick", kind: "files", locator: "/repo/samples/quickstart/structured" },
+    { name: "quick-docs", kind: "documents", locator: "/repo/samples/quickstart/documents" },
+  ] }
+
+  it("offers to remove another set's sources before loading a second set", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockFetch(HOME_ROUTES({
+      "GET /sources": LOADED,
+      "DELETE /sources/quick": { removed: "quick", messages: [] },
+      "DELETE /sources/quick-docs": { removed: "quick-docs", messages: [] },
+      "POST /samples/load": { set: "hanbit", messages: [], sources: [{ name: "hanbit", kind: "files", action: "created" }] },
+    }))
+    renderPage(<HomePage />)
+    await user.click(await screen.findByRole("button", { name: /Load sample data/ }))
+    const dialog = await screen.findByRole("dialog")
+    const note = await waitFor(() => {
+      const el = dialog.querySelector("[data-other-sources=hanbit]")
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(note).toHaveTextContent("quick, quick-docs")
+    expect(note).toHaveTextContent(/will be built together with this set/)
+    expect(within(dialog).getByRole("button", { name: /Keep both/ })).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: /Remove the other sample sources first/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true))
+    const order = calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`)
+    expect(order).toEqual(["DELETE /sources/quick", "DELETE /sources/quick-docs", "POST /samples/load"])
+    const del = calls.filter((c) => c.method === "DELETE").map((c) => c.init)
+    expect(del).toHaveLength(2)
+    const urls = (fetch as unknown as { mock: { calls: [string][] } }).mock.calls.map((c) => String(c[0]))
+    expect(urls).toContain("/api/sources/quick?drop_db=true")       // its sample database goes too
+    expect(urls).toContain("/api/sources/quick-docs")
+  })
+
+  it("keeps both when asked", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockFetch(HOME_ROUTES({
+      "GET /sources": LOADED,
+      "POST /samples/load": { set: "hanbit", messages: [], sources: [{ name: "hanbit", kind: "files", action: "created" }] },
+    }))
+    renderPage(<HomePage />)
+    await user.click(await screen.findByRole("button", { name: /Load sample data/ }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(await within(dialog).findByRole("button", { name: /Keep both/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true))
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false)
+  })
+})
+
+describe("Home minors", () => {
+  it("names each help button after its step and gates Start build on the model", async () => {
+    mockFetch(HOME_ROUTES({ "GET /status": STATUS(false), "GET /sources": { sources: [{ name: "mine", kind: "files" }] } }))
+    renderPage(<HomePage />)
+    for (const title of ["Models connected", "Sources added", "Ontology built", "Explore", "Export"]) {
+      expect(await screen.findByRole("button", { name: `What is "${title}"?` })).toBeInTheDocument()
+    }
+    await waitFor(() => expect(document.querySelector("[data-step=models]")?.getAttribute("data-state")).toBe("active"))
+    expect(screen.getByRole("button", { name: /Start build/ })).toBeDisabled()
+    expect(screen.getByText(/Connect the model first/)).toBeInTheDocument()
+  })
+
+  it("ticks the elapsed time of a running build", async () => {
+    const started = new Date(Date.now() - 65_000).toISOString()
+    mockFetch(HOME_ROUTES({
+      "GET /sources": { sources: [{ name: "mine", kind: "files" }] },
+      "GET /runs": { runs: [{ id: "r9", kind: "build", status: "running", started_at: started, finished_at: null,
+                              error: null, params: {}, managed: true, progress: {}, steps: [] }] },
+    }))
+    renderPage(<HomePage />)
+    const el = await screen.findByText(/running for 1 min/)
+    expect(el.id).toBe("last-build-elapsed")
+  })
+
+  it("says a test is already running on a 409 test_in_progress", async () => {
+    const user = userEvent.setup()
+    mockFetch(HOME_ROUTES({
+      "POST /providers/test": () => new Response(JSON.stringify({ error: "test_in_progress", detail: "a provider test is already running" }),
+                                                 { status: 409, headers: { "content-type": "application/json" } }),
+    }))
+    renderPage(<HomePage />)
+    await user.click(await screen.findByRole("button", { name: "Test" }))
+    expect(await screen.findByText(/A test is already running/)).toBeInTheDocument()
+    expect(screen.queryByText(/Test failed/)).toBeNull()
+  })
+})
+
 describe("Sources dialog preview", () => {
   it("derives accept from the formats API and classifies .doc and .xyz before upload", async () => {
     const user = userEvent.setup({ applyAccept: false })
@@ -160,6 +305,16 @@ describe("Sources dialog preview", () => {
     expect(document.querySelector("[data-file='data.xyz']")).toBeNull()
     expect(screen.getByRole("button", { name: "Add" })).toBeEnabled()
     expect(calls.some((c) => c.method === "POST")).toBe(false)
+  })
+
+  it("names the OCR install command when only the models are missing", async () => {
+    const user = userEvent.setup()
+    mockFetch({ "GET /sources": { sources: [] }, "GET /status": STATUS(true) })
+    renderPage(<SourcesPage />)
+    await user.click((await screen.findAllByRole("button", { name: "Add source" }))[0])
+    await user.click(await screen.findByRole("tab", { name: /Documents/ }))
+    expect(screen.getByText(/The OCR models are missing/)).toBeInTheDocument()
+    expect(screen.queryByText(/Images need kordoc/)).toBeNull()
   })
 
   it("lists .xls for tables and no SQLite URL wording", async () => {

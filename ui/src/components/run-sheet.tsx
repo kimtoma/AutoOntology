@@ -13,6 +13,7 @@ import { keys } from "@/hooks/queries"
 import { api, errorMessage, type Progress, type Run, type RunStatus, type Step } from "@/lib/api"
 import { Code } from "@/components/provider-card"
 import { useSamples, useSources, useStatus } from "@/hooks/queries"
+import { useNow } from "@/hooks/use-now"
 import { expectedTime, sampleSetFor } from "@/lib/checklist"
 import {
   fmtSeconds, fmtTime, groupSteps, humanStep, progressText, RUN_LABEL, runSeconds, STATUS_LABEL,
@@ -171,17 +172,6 @@ function runScope(run: Run): string {
   }
   const sources = Array.isArray(p.sources) && p.sources.length ? ` · ${p.sources.join(", ")}` : " · all sources"
   return `${sources}${p.resume ? " · resume" : ""}`
-}
-
-/** Re-render every *ms* while *on* (elapsed time of a running step). */
-function useNow(on: boolean, ms = 1000): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!on) return
-    const t = setInterval(() => setNow(Date.now()), ms)
-    return () => clearInterval(t)
-  }, [on, ms])
-  return now
 }
 
 /** The run's steps grouped as the build runs them: `structured:<name>`, `documents:<name>`,

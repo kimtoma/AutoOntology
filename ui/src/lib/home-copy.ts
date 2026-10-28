@@ -12,7 +12,7 @@ export const STEP_COPY: Record<StepId, StepCopy> = {
     title: "Models connected",
     description: "The service, its database and the language model that reads your data are running.",
     help: ["A language model reads your tables and documents and writes down the business concepts it finds.",
-           "It runs on this machine (Ollama) or through your Claude or ChatGPT subscription; the Test button sends it one short question."],
+           "It runs on this machine (Ollama), through your Claude or ChatGPT subscription, or at an OpenAI-compatible endpoint; the Test button sends it one short question."],
   },
   sources: {
     title: "Sources added",

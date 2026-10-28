@@ -4,10 +4,13 @@ import { Loader2, Zap } from "lucide-react"
 import { CheckChip } from "@/components/status-chip"
 import { Button } from "@/components/ui/button"
 import { keys } from "@/hooks/queries"
-import { api, errorMessage, type ProviderTest, type ServiceStatus } from "@/lib/api"
+import { api, ApiError, errorMessage, type ProviderTest, type ServiceStatus } from "@/lib/api"
 import { loginCommand, RESTART_COMMAND } from "@/lib/checklist"
-import { CHECK_NAME, fmtSeconds, fmtTime } from "@/lib/labels"
+import { fmtSeconds, fmtTime } from "@/lib/labels"
 import { cn } from "@/lib/utils"
+
+/** Plain names on the Home card (the Status table keeps the technical ones). */
+const SERVICE_NAME = { backend: "Ontology engine", postgres: "Database" } as const
 
 export function Code({ children, className }: { children: string; className?: string }) {
   return (
@@ -50,6 +53,8 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
   const state = !chat ? "Configured" : !chat.available ? "Unavailable" : !chat.logged_in ? "Not logged in" : "Ready"
   const login = ready ? null : loginCommand(status)
   const result = test.data ?? null
+  // 409 test_in_progress: another tab or the CLI is testing; the status poll brings its result
+  const busy = test.error instanceof ApiError && test.error.code === "test_in_progress"
   return (
     <div className="grid min-w-0 gap-3 text-sm" id="provider-card" data-provider={chat?.name ?? p.chat_provider}
          data-ready={ready}>
@@ -59,7 +64,7 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
             const c = status.checks?.[k]
             return (
               <li key={k} data-service={k} data-status={c?.status ?? "error"}>
-                <CheckChip status={c?.status ?? "error"} label={`${CHECK_NAME[k]} ${c?.status === "ok" ? "OK" : "down"}`} />
+                <CheckChip status={c?.status ?? "error"} label={`${SERVICE_NAME[k]} ${c?.status === "ok" ? "OK" : "down"}`} />
               </li>
             )
           })}
@@ -68,7 +73,7 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
       {services && (["backend", "postgres"] as const).map((k) => {
         const c = status.checks?.[k]
         return c && c.status !== "ok" && c.remedy
-          ? <p key={k} className="text-xs">{CHECK_NAME[k]}: <Code>{c.remedy}</Code></p> : null
+          ? <p key={k} className="text-xs">{SERVICE_NAME[k]}: <Code>{c.remedy}</Code></p> : null
       })}
       <dl className="grid min-w-0 gap-2 sm:grid-cols-2">
         <div className="min-w-0">
@@ -101,13 +106,17 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
         </Button>
         <span className="text-xs text-muted-foreground">Sends one short question to the chat model.</span>
       </div>
-      {test.isError && (
+      {test.isError && (busy ? (
+        <p className="text-xs text-muted-foreground" role="status" data-test-result="busy">
+          A test is already running; its result shows here when it ends.
+        </p>
+      ) : (
         <p className="text-xs break-words text-destructive" role="status" data-test-result="error">
           Test failed: {errorMessage(test.error)}
         </p>
-      )}
+      ))}
       {result ? <TestResult result={result} fresh />
-        : !test.isError && chat?.last_test ? <TestResult result={chat.last_test} fresh={false} /> : null}
+        : (!test.isError || busy) && chat?.last_test ? <TestResult result={chat.last_test} fresh={false} /> : null}
     </div>
   )
 }

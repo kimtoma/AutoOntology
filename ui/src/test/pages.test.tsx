@@ -97,10 +97,11 @@ describe("Sources page", () => {
     expect(screen.getByRole("tab", { name: /DB URL/ })).toBeInTheDocument()
     await user.click(screen.getByRole("tab", { name: /Documents/ }))
     expect(screen.queryByRole("tab", { name: /DB URL/ })).toBeNull()
-    expect(screen.getByText(/need kordoc/)).toBeInTheDocument()
+    expect(screen.getByText(/These need kordoc/)).toBeInTheDocument()
+    expect(screen.getByText(/Images need kordoc and its OCR models/)).toBeInTheDocument()
     await user.click(screen.getByRole("tab", { name: "Folder" }))
     await user.type(screen.getByLabelText("Name"), "docs-2")
-    await user.type(screen.getByLabelText("Folder or file path"), "/data/docs")
+    await user.type(screen.getByLabelText("Folder on the server"), "/data/docs")
     await user.click(screen.getByRole("button", { name: "Add" }))
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true))
     const post = calls.find((c) => c.method === "POST")!

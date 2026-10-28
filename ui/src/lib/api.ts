@@ -9,11 +9,14 @@ export const API = "/api"
 export class ApiError extends Error {
   status: number
   code?: string
-  constructor(message: string, status: number, code?: string) {
+  /** the whole JSON error body: extra fields such as `conflicts` (409 sample_conflict) */
+  body?: Record<string, unknown>
+  constructor(message: string, status: number, code?: string, body?: Record<string, unknown>) {
     super(message)
     this.name = "ApiError"
     this.status = status
     this.code = code
+    this.body = body
   }
 }
 
@@ -320,6 +323,9 @@ export interface SampleSet {
   /** expected build time per chat provider (`demo` prints the same table) */
   durations?: Record<string, { text: string; measured: boolean }>
 }
+/** One entry of a 409 `sample_conflict`: a source with a sample source's name and other data. */
+export interface SampleConflict { name: string; kind?: string; registered?: string; sample?: string }
+
 export interface SampleLoad {
   set: string
   sources: (Source & { action: "created" | "kept" | "replaced" | string })[]
@@ -445,7 +451,7 @@ async function send(path: string, init: RequestInit, asText: boolean): Promise<u
   if (!resp.ok) {
     const obj = (body && typeof body === "object" ? body : {}) as { detail?: unknown; error?: string }
     const detail = typeof obj.detail === "string" ? obj.detail : `HTTP ${resp.status}`
-    throw new ApiError(detail, resp.status, obj.error)
+    throw new ApiError(detail, resp.status, obj.error, obj as Record<string, unknown>)
   }
   return body
 }
@@ -484,7 +490,9 @@ export const api = {
   status: () => request<ServiceStatus>("/status"),
   testProvider: () => request<ProviderTest>("/providers/test", { method: "POST" }),
   samples: () => request<SampleSet[]>("/samples"),
-  loadSamples: (set: string) => request<SampleLoad>("/samples/load", json("POST", { set })),
+  /** *replace*: consent to replacing same-named sources that point elsewhere (409 sample_conflict). */
+  loadSamples: (set: string, replace = false) =>
+    request<SampleLoad>("/samples/load", json("POST", replace ? { set, replace: true } : { set })),
   sources: () => request<{ sources: Source[] }>("/sources").then((r) => r.sources),
   addSourceUpload: (name: string, kind: "files" | "documents", files: File[]) => {
     const fd = new FormData()

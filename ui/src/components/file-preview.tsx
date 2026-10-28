@@ -129,9 +129,9 @@ export function FolderCheck({ recursive, onNames }: {
          onDrop={onDrop} id="folder-check"
          className={cn("flex flex-wrap items-center gap-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground",
                        over && "border-primary bg-accent")}>
-      <span className="min-w-0 flex-1">Check what will be read: drop the folder here or pick it (nothing is uploaded).</span>
+      <span className="min-w-0 flex-1">Optional: preview which files will be read by dropping or picking the same folder from this computer. Your browser may call this an upload; nothing is sent.</span>
       <Button type="button" size="sm" variant="outline" onClick={() => input.current?.click()}>
-        <FolderSearch aria-hidden /> Check a folder
+        <FolderSearch aria-hidden /> Preview a folder
       </Button>
       <input ref={input} type="file" className="hidden" aria-label="Folder to check" multiple
              {...{ webkitdirectory: "" }}

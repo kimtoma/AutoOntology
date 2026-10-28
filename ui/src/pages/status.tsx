@@ -45,7 +45,7 @@ export default function StatusPage() {
   return (
     <>
       <PageHeader title="Status"
-                  description="Read-only health of the service, its backend, Postgres, the models and kordoc (cached for 15 s). Providers are configured in .env."
+                  description="Read-only health of the service, its backend, Postgres, the models and kordoc (cached for 15 s). Switch providers with the command below."
                   actions={<Button variant="outline" id="btn-status" disabled={isFetching} onClick={() => refetch()}>
                     <RefreshCw className={cn(isFetching && "animate-spin")} aria-hidden /> Check again
                   </Button>} />
@@ -99,7 +99,8 @@ export default function StatusPage() {
             <p className="text-sm text-muted-foreground">
               Full check from a terminal: <code className="rounded bg-muted px-1">{data.doctor}</code>.
               {" "}Start the service with <code className="rounded bg-muted px-1">uv run autoontology up</code>.
-              {" "}Switch providers by editing <code className="rounded bg-muted px-1">.env</code> (AUTOONTOLOGY_CHAT_PROVIDER, …) and restarting.
+              {" "}Switch the chat model with <code className="rounded bg-muted px-1">uv run autoontology provider use &lt;name&gt;</code>
+              {" "}(ollama, claude, codex or openai), then restart with <code className="rounded bg-muted px-1">uv run autoontology down && uv run autoontology up</code>.
             </p>
           </div>
         )}

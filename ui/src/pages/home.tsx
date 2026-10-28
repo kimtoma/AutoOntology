@@ -18,13 +18,15 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import { keys, retryServerErrors, useSamples } from "@/hooks/queries"
+import { useNow } from "@/hooks/use-now"
 import {
   api, ApiError, errorMessage, isNoSnapshot, type ExportEntry, type OntologySummary, type Run, type RunRequest,
   type ServiceStatus, type Source,
 } from "@/lib/api"
 import { GUIDE_URL, STEP_COPY } from "@/lib/home-copy"
 import {
-  allDone, checklist, expectedTime, isActiveRun, latestExport, latestRun, sampleSetFor, STEP_ORDER, type StepId,
+  allDone, checklist, expectedTime, isActiveRun, latestExport, latestRun, sampleSetFor, sampleSetsTouched,
+  STEP_ORDER, type StepId,
   type StepState,
 } from "@/lib/checklist"
 import { fmtSeconds, fmtTime, progressText, RUN_LABEL, runSeconds } from "@/lib/labels"
@@ -81,7 +83,7 @@ function StepCard({ id, n, state, children }: { id: StepId; n: number; state: St
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground"
-                        data-help={id}>
+                        data-help={id} aria-label={`What is "${copy.title}"?`}>
                   <HelpCircle aria-hidden /> What is this?
                 </Button>
               </PopoverTrigger>
@@ -162,6 +164,8 @@ export default function HomePage() {
   const build = latestRun(runs.data, "build")
   const active = (runs.data ?? []).find(isActiveRun)
   useRunEvents(active?.id)
+  const now = useNow(!!build && isActiveRun(build))
+  const buildSecs = build ? runSeconds(build, build.steps, isActiveRun(build) ? now : undefined) : null
 
   const start = useMutation({
     mutationFn: (body: RunRequest) => api.startRun(body),
@@ -176,6 +180,8 @@ export default function HomePage() {
   const names = (sources.data ?? []).map((s) => s.name)
   const set = sampleSetFor(names, samples.data)
   const eta = expectedTime(set, status.data?.providers.chat_provider)
+  const touched = sampleSetsTouched(names, samples.data)
+  const modelsOk = states.models === "done"
   const latest = latestExport(exports.data)
   const busy = !!active || start.isPending
 
@@ -220,9 +226,9 @@ export default function HomePage() {
               <div className="flex flex-wrap items-center gap-2 text-sm" id="last-build" data-status={build.status}>
                 <span>Last build:</span>
                 <StatusChip status={build.status} />
-                {runSeconds(build, build.steps) != null && (
-                  <span className="text-muted-foreground">
-                    {isActiveRun(build) ? "running, " : ""}{fmtSeconds(runSeconds(build, build.steps))}
+                {buildSecs != null && (
+                  <span className="text-muted-foreground" id="last-build-elapsed">
+                    {isActiveRun(build) ? "running for " : ""}{fmtSeconds(buildSecs)}
                   </span>
                 )}
                 <span className="text-muted-foreground">{fmtTime(build.started_at)}</span>
@@ -242,13 +248,27 @@ export default function HomePage() {
                 Expected for the {set?.set} sample set with {status.data?.providers.chat_provider}: {eta}
               </p>
             )}
+            {!set && touched.length > 1 && !ontologyValue && (
+              <p className="text-xs text-muted-foreground" id="build-eta">
+                No time estimate: your sources come from more than one sample set ({touched.map((t) => t.set).join(", ")}),
+                so the build takes about as long as each of them together.
+              </p>
+            )}
+            {!modelsOk && names.length > 0 && (
+              <p className="text-xs text-muted-foreground" id="build-needs-models">
+                Connect the model first (step 1): a build without it would fail after a few minutes.
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
-              <Button id="btn-home-build" disabled={busy || !names.length}
+              <span title={!modelsOk ? "Connect the model first (step 1)" : !names.length ? "Add a source first (step 2)" : undefined}
+                    className="inline-flex">
+              <Button id="btn-home-build" disabled={busy || !names.length || !modelsOk}
                       variant={states.build === "active" ? "default" : "outline"}
                       onClick={() => start.mutate({ kind: "build" })}>
                 {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />}
                 {active?.kind === "build" ? "Building…" : ontologyValue ? "Build again" : "Start build"}
               </Button>
+              </span>
               {(active ?? build) && (
                 <Button variant="ghost" id="btn-live-run" onClick={() => setRunId((active ?? build)!.id)}>
                   Open the live run

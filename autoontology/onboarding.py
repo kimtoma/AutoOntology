@@ -542,7 +542,7 @@ def register_sample_set(
 DEMO_DURATIONS: dict[str, dict[str, tuple[str, bool]]] = {
     "quickstart": {
         "ollama": ("20-50 min (qwen3:8b, 1-2 min per chunk)", False),
-        "claude": ("~5 min", False),
+        "claude": ("~8 min", True),  # measured: build 461 s, demo 479 s (2026-10-29)
         "codex": ("~10 min", False),
         "openai": ("5-15 min (depends on the endpoint)", False),
     },

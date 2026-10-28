@@ -113,3 +113,18 @@ export function expectedTime(set: SampleSet | undefined, provider: string | unde
   const d = provider ? set?.durations?.[provider] : undefined
   return d ? `${d.text}${d.measured ? "" : " (estimate)"}` : null
 }
+
+/** The registered sources a build would add to *set*'s own: `others` (every other source)
+    and `otherSamples` (those that belong to another sample set). */
+export function otherSources(set: SampleSet, sources: Source[] | undefined, sets: SampleSet[] | undefined) {
+  const mine = new Set(set.sources.map((s) => s.name))
+  const sampleNames = new Set((sets ?? []).filter((x) => x.set !== set.set).flatMap((x) => x.sources.map((s) => s.name)))
+  const others = (sources ?? []).filter((s) => !mine.has(s.name))
+  return { others, otherSamples: others.filter((s) => sampleNames.has(s.name)) }
+}
+
+/** The sample sets *sourceNames* touch (a build over two sets has no single estimate). */
+export function sampleSetsTouched(sourceNames: string[], sets: SampleSet[] | undefined): SampleSet[] {
+  const names = new Set(sourceNames)
+  return (sets ?? []).filter((set) => set.sources.some((s) => names.has(s.name)))
+}

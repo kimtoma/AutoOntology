@@ -8,6 +8,7 @@ Run with: AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_ui_
 last test also rewrites ``docs/screenshots/{home,ontology,graph,exports}.png`` at 1280 px.
 """
 
+import json
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -226,14 +227,59 @@ def test_home_sample_dialog_lists_the_sets(live, browser):
             text = card.locator(f"[data-sample-source='{src['name']}']").inner_text()
             assert str(src["files"]) in text and all(ext in text for ext in src["formats"]), text
         assert "Expected build time" in card.locator("[data-expected-time]").inner_text()
-    loaded = next((s for s in sets if s["registered"]), None)
-    if loaded:  # loading a registered set again keeps its sources (idempotent, like demo)
-        page.click(f"[data-load-set={loaded['set']}]")
-        page.locator("#samples-result").wait_for(timeout=30000)
-        for src in loaded["sources"]:
-            assert (
-                page.locator(f"[data-loaded-source='{src['name']}']").inner_text().endswith("kept")
+    # loading is intercepted (no data changes): a 409 sample_conflict first, then success
+    first = sets[0]
+    bodies = []
+
+    def fake_load(route):
+        bodies.append(json.loads(route.request.post_data or "{}"))
+        if len(bodies) == 1:
+            route.fulfill(
+                status=409,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "error": "sample_conflict",
+                        "detail": 'source(s) x already exist; send "replace": true',
+                        "conflicts": [
+                            {"name": src["name"], "kind": src["kind"], "registered": "/elsewhere"}
+                            for src in first["sources"]
+                        ],
+                    }
+                ),
             )
+        else:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "set": first["set"],
+                        "messages": [],
+                        "sources": [
+                            {"name": src["name"], "kind": src["kind"], "action": "replaced"}
+                            for src in first["sources"]
+                        ],
+                    }
+                ),
+            )
+
+    page.route("**/api/samples/load", fake_load)
+    card = page.locator(f"[data-sample-set={first['set']}]")
+    button = card.locator(f"[data-load-set={first['set']}]")
+    button.click()
+    panel = page.locator("#sample-conflict")
+    panel.wait_for()
+    for src in first["sources"]:
+        assert panel.locator(f"[data-conflict='{src['name']}']").count() == 1
+    assert "/elsewhere" not in page.locator("#samples-dialog").inner_text()
+    page.click("#btn-sample-replace")
+    page.locator("#samples-result").wait_for()
+    assert bodies == [{"set": first["set"]}, {"set": first["set"], "replace": True}], bodies
+    for src in first["sources"]:
+        assert (
+            page.locator(f"[data-loaded-source='{src['name']}']").inner_text().endswith("replaced")
+        )
     assert page.evaluate(NO_HSCROLL)
     assert page.errors == []
     page.close()

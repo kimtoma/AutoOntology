@@ -283,14 +283,14 @@ export function NewSourceDialog({ open, onOpenChange }: {
           ) : (
             <>
               <div className="grid gap-2">
-                <Label htmlFor="source-locator">{effectiveMode === "database" ? "Database URL" : "Folder or file path"}</Label>
+                <Label htmlFor="source-locator">{effectiveMode === "database" ? "Database URL" : "Folder on the server"}</Label>
                 <Input id="source-locator" required value={locator}
                        onChange={(e) => setLocator(e.target.value)} autoComplete="off"
                        className="font-mono text-xs"
                        placeholder={effectiveMode === "database" ? "postgresql://user:pass@host:5432/db"
                          : "/absolute/path/to/folder"} />
                 {effectiveMode === "path" && (
-                  <p className="text-xs text-muted-foreground">A folder (or one file) on the machine that runs the service.</p>
+                  <p className="text-xs text-muted-foreground">The path of a folder (or one file) on the machine that runs the service. Nothing is uploaded: the service reads it in place.</p>
                 )}
               </div>
               {effectiveMode === "path" && (
@@ -347,6 +347,7 @@ function FormatHint({ family, formats, kordoc, ocr }: {
       <p>
         Images, read by OCR{kordoc && ocr ? " (models ready)" : ""}: {extLabel(by["kordoc-ocr"])}.
         {kordoc && !ocr && <> The OCR models are missing: <Code>{KORDOC_INSTALL}</Code></>}
+        {!kordoc && <> Images need kordoc and its OCR models: <Code>{KORDOC_INSTALL}</Code></>}
       </p>
     </div>
   )
