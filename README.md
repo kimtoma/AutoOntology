@@ -247,7 +247,7 @@ before this list existed) is refused, and nothing in it is removed. During the s
 previous folder is renamed to `r<NNNN>.prev-<timestamp>-<run>` and deleted once the new
 one is in place; the export run is `succeeded` only after that (a backup that cannot be
 deleted is left with a warning). An export interrupted between the two renames is restored
-from its `.prev-*` backup by the next export.
+from its `.prev-*` backup when the service starts, or by the next export.
 
 ## How the unified ontology is built
 
@@ -381,9 +381,9 @@ are overridden.
 - **`build --resume` cannot always see a database's schema.** It reads a Postgres source's
   live schema, but a MySQL or Snowflake source, or a database it cannot reach, is never
   reused: its steps run again on every resume.
-- **Export folders from before the `files` list refuse re-export.** An `exports/rNNNN/` (or
-  `--out`) folder written before `export.json` listed its files cannot be replaced. Move or
-  delete it once, then export again.
+- **Export folders from before the `files` list or `file_sha256` refuse re-export.** An
+  `exports/rNNNN/` (or `--out`) folder written before `export.json` listed its files and
+  their hashes cannot be replaced. Move or delete it once, then export again.
 - **A stray file inside an export folder blocks re-export** (by design). Anything you put
   in `exports/rNNNN/` that the exporter did not write makes the next export of that
   revision refuse, instead of deleting your file. Keep notes outside the revision folder.
