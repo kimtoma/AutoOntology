@@ -372,7 +372,7 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
   }
 }
 
-export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function send(path: string, init: RequestInit, asText: boolean): Promise<unknown> {
   let resp: Response
   try {
     resp = await fetch(API + path, init)
@@ -380,13 +380,23 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     throw new ApiError(NETWORK_HINT, 0, "network")
   }
   const type = resp.headers.get("content-type") || ""
-  const body: unknown = type.includes("json") ? await resp.json() : await resp.text()
+  const body: unknown = type.includes("json") && !(asText && resp.ok) ? await resp.json() : await resp.text()
   if (!resp.ok) {
     const obj = (body && typeof body === "object" ? body : {}) as { detail?: unknown; error?: string }
     const detail = typeof obj.detail === "string" ? obj.detail : `HTTP ${resp.status}`
     throw new ApiError(detail, resp.status, obj.error)
   }
-  return body as T
+  return body
+}
+
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await send(path, init, false)) as T
+}
+
+/** Like `request`, but a successful body is always the raw text, whatever its content type
+    (an export file is text even if the server ever labels a .json file as JSON). */
+export async function requestText(path: string, init: RequestInit = {}): Promise<string> {
+  return (await send(path, init, true)) as string
 }
 
 const json = (method: string, body: unknown): RequestInit => ({
@@ -446,7 +456,7 @@ export const api = {
   exports: () => request<{ exports: ExportEntry[] }>("/exports").then((r) => r.exports),
   exportFileUrl: (dir: string, file: string) => `${API}/exports/${enc(dir)}/${encPath(file)}`,
   exportText: (dir: string, file: string) =>
-    request<string>(`/exports/${enc(dir)}/${encPath(file)}?inline=true`),
+    requestText(`/exports/${enc(dir)}/${encPath(file)}?inline=true`),
   playground: {
     index: () => request<IndexStatus>("/playground/index"),
     chat: (body: { question: string; history?: ChatTurn[]; top_k?: number; conversation_id?: string | null },

@@ -21,6 +21,17 @@ describe("api client", () => {
     expect(err).toMatchObject({ status: 409, code: "run_active", message: "busy" })
   })
 
+  it("reads an export file as text whatever its content type, errors still as ApiError", async () => {
+    mockFetch({
+      "GET /exports/r0002/okf/validation.json": () =>
+        new Response('{"ok": true}', { headers: { "content-type": "application/json" } }),
+      "GET /exports/r0002/gone.ttl": () => new Response(JSON.stringify({ error: "not_found", detail: "no file" }),
+                                                       { status: 404, headers: { "content-type": "application/json" } }),
+    })
+    expect(await api.exportText("r0002", "okf/validation.json")).toBe('{"ok": true}')
+    await expect(api.exportText("r0002", "gone.ttl")).rejects.toMatchObject({ status: 404, code: "not_found", message: "no file" })
+  })
+
   it("posts the unified run bodies", async () => {
     const { calls } = mockFetch({ "POST /runs": { run_id: "r" } })
     await api.startRun({ kind: "build", sources: ["hanbit"], resume: true })
