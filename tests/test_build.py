@@ -274,6 +274,34 @@ def test_resume_keeps_unchanged_sources_and_continues_the_run(env):
     assert env["store"].latest_revision() == 1
 
 
+def test_resume_of_a_succeeded_build_rebuilds_sources_whose_inputs_changed(env):
+    add_structured(env)
+    add_documents(env)
+    first = run(env)
+    assert first.status == "succeeded" and first.revision == 1
+    # nothing changed: everything is kept, no new snapshot
+    same = run(env, resume=True)
+    assert same.run_id == first.run_id and same.details == {}
+    assert env["store"].latest_revision() == 1
+    # a document changed: that source's steps (and align/merge/snapshot) run again
+    (env["docs"] / "청구.md").write_text("# 청구규정\n\n고객에게 청구서를 보낸다.", "utf-8")
+    edited = run(env, resume=True)
+    assert edited.status == "succeeded" and edited.run_id == first.run_id
+    assert {*DOCUMENT_STEPS, "align:hanbit-docs", "merge", "snapshot"} <= set(edited.details)
+    assert not any(n.startswith("structured:") for n in edited.details)
+    assert edited.revision == 2 and env["store"].latest_revision() == 2
+    read = edited.details["documents:hanbit-docs:read"]
+    assert read["new_or_changed"] >= 1
+    assert env["calls"].count("ingest:autoontology_src_hanbit") == 1
+    # a structured input file changed: its steps run again
+    (env["data"] / "contracts.csv").write_text("x\n1\n2\n")
+    again = run(env, resume=True)
+    assert "structured:hanbit:ingest" in again.details and again.revision == 3
+    assert not any(n.startswith("documents:") for n in again.details)
+    assert env["calls"].count("ingest:autoontology_src_hanbit") == 2
+    assert run(env, resume=True).details == {}
+
+
 def test_build_refuses_while_another_build_or_export_is_active(env):
     add_documents(env)
     store = env["store"]

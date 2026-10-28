@@ -13,8 +13,11 @@ Steps, in order (each persisted as a ``steps`` row of the single ``build`` run):
 
 ``sources`` (``--source N``) restricts the per-source steps (the others are recorded as
 skipped); align, merge and snapshot always cover everything. ``resume`` reuses the latest
-build run: a succeeded step is kept unless something it depends on runs again (a step of
-the same source, or -- for align/merge/snapshot -- any step). Unchanged inputs are no-ops
+build run (also a succeeded one): a succeeded step is kept unless its source's inputs
+changed since it ran (:func:`input_fingerprint`: the files' contents, or the database
+locator) or something it depends on runs again (a step of the same source, or -- for
+align/merge/snapshot -- any step). A schema change *inside* an external database is not
+visible to that check; a plain ``build`` (no ``--resume``) picks it up. Unchanged inputs are no-ops
 inside the steps too (file manifests, document hashes, the consolidation fingerprint, the
 judge cache), so a plain re-run does no LLM work for what did not change.
 
@@ -24,6 +27,7 @@ it refuses to start while another build or export (or a source operation) is act
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -56,6 +60,8 @@ SUB_STEP_PREFIXES: tuple[str, ...] = (extract_job.CHUNK_STEP_PREFIX, align_job.C
 #: Run params that change the align verdicts: a resumed build with other values re-aligns.
 ALIGN_PARAMS: tuple[str, ...] = ("min_sim", "min_conf", "top_k", "identity_policy")
 GLOBAL = "*"
+#: Step detail key: the :func:`input_fingerprint` of the source when the step ran.
+INPUTS_KEY = "inputs_sha"
 
 
 @dataclass
@@ -92,6 +98,26 @@ def step_names(sources: list[Source]) -> list[str]:
     return [*names, "merge", "snapshot"]
 
 
+def input_fingerprint(source: Source) -> str:
+    """A hash of what the per-source steps of *source* read: the locator plus, for files
+    and documents sources, every input file's path and content hash ("" when the inputs
+    cannot be listed -- never equal to a recorded fingerprint, so the steps run again)."""
+    digest = hashlib.sha256(f"{source.kind}\0{source.locator}\0".encode())
+    try:
+        if source.kind == "files":
+            files = pipeline.files_locator(source).files()
+        elif source.kind == "documents":
+            target, recursive = extract_job.documents_target(source)
+            files = extract_job.readers.discover_documents(target, recursive=recursive)
+        else:
+            files = []
+        for path in sorted(p.resolve() for p in files):
+            digest.update(f"{path}\0{extract_job.sha256_file(path)}\0".encode())
+    except Exception:  # noqa: BLE001 - a missing/unreadable input: the step reports it
+        return ""
+    return digest.hexdigest()
+
+
 def registration_order(store: Store) -> list[Source]:
     return sorted(store.list_sources(), key=lambda s: (s.created_at, s.name))
 
@@ -124,6 +150,24 @@ class _Build:
         self.writer = writer
         self.model: Any = None
         self.reuse_concepts = True
+        #: sources whose inputs changed since the resumed run (full document re-scan)
+        self.changed: set[str] = set()
+        self._fingerprints: dict[str, str] = {}
+
+    def fingerprinted(
+        self, source: Source, fn: Callable[[], dict[str, Any]]
+    ) -> Callable[[], dict[str, Any]]:
+        """*fn*, with the source's input fingerprint (taken before the first of its steps
+        runs) recorded in the step detail for a later ``--resume``."""
+
+        def run() -> dict[str, Any]:
+            if source.name not in self._fingerprints:
+                self._fingerprints[source.name] = input_fingerprint(self.fresh(source))
+            detail = fn()
+            detail[INPUTS_KEY] = self._fingerprints[source.name]
+            return detail
+
+        return run
 
     @property
     def structured(self) -> list[Source]:
@@ -159,7 +203,7 @@ class _Build:
             "ingest": jobs._step_ingest,
             "compile": jobs._step_compile,
         }[step]
-        return lambda: fn(self._structured_ctx(source))
+        return self.fingerprinted(source, lambda: fn(self._structured_ctx(source)))
 
     def _extract_ctx(self, source: Source) -> extract_job._ExtractCtx:
         from autoontology.unstructured.extractor import workers_default
@@ -177,7 +221,7 @@ class _Build:
             workers=workers_default(self.settings),
             max_chunks=None,
             backends=self.extract_backends,
-            full_scan=not self.resume,
+            full_scan=not self.resume or source.name in self.changed,
         )
 
     def documents_step(self, source: Source, step: str) -> Callable[[], dict[str, Any]]:
@@ -193,7 +237,7 @@ class _Build:
                 raise RuntimeError(f"no such file or directory: {ctx.target}")
             return fn(ctx)
 
-        return run
+        return self.fingerprinted(source, run)
 
     # --- global steps ----------------------------------------------------------------
 
@@ -317,10 +361,7 @@ def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[di
 
 
 def _previous_build(store: Store) -> Run | None:
-    return next(
-        (r for r in store.list_runs(None, limit=200) if r.kind == BUILD_KIND and not r.source_id),
-        None,
-    )
+    return store.latest_workspace_run(BUILD_KIND)
 
 
 def refuse_if_active(store: Store, *, log_path: Path | None = None) -> None:
@@ -339,15 +380,29 @@ def refuse_if_active(store: Store, *, log_path: Path | None = None) -> None:
         )
 
 
-def _resume_reuse(store: Store, run: Run, sources: list[Source], settings: Settings) -> set[str]:
-    """Succeeded steps of the resumed *run* that can be reused as they are (mirrors the
-    per-kind resume rules: re-read documents that failed, re-enter an extraction that
-    left chunks, re-consolidate an incomplete/stale consolidation, re-align after
-    failed concepts)."""
+def _resume_reuse(
+    store: Store, run: Run, sources: list[Source], settings: Settings
+) -> tuple[set[str], set[str]]:
+    """``(steps, changed)``: the succeeded steps of the resumed *run* that can be reused as
+    they are, and the sources whose inputs changed since their steps ran (all their steps
+    run again). Mirrors the per-kind resume rules too: re-read documents that failed,
+    re-enter an extraction that left chunks, re-consolidate an incomplete/stale
+    consolidation, re-align after failed concepts."""
     from autoontology.unstructured import consolidate
 
     rows = {s.name: s for s in store.get_steps(run.id)}
     already = {n for n, s in rows.items() if s.status == "succeeded" and is_top_step(n)}
+    changed: set[str] = set()
+    for source in sources:
+        group = "documents" if source.kind == "documents" else "structured"
+        kept = {n for n in already if n.startswith(f"{group}:{source.name}:")}
+        if not kept:
+            continue
+        current = input_fingerprint(source)
+        if not current or any(rows[n].detail.get(INPUTS_KEY) != current for n in kept):
+            logger.info("--resume: inputs of %s changed since run %s: rebuilt", source.name, run.id)
+            already -= kept
+            changed.add(source.name)
     docs = DocumentStore(store)
     for source in sources:
         if source.kind != "documents":
@@ -377,7 +432,7 @@ def _resume_reuse(store: Store, run: Run, sources: list[Source], settings: Setti
         aligned = rows.get(f"align:{source.name}")
         if aligned is not None and aligned.detail.get("partial"):
             already.discard(f"align:{source.name}")
-    return already
+    return already, changed
 
 
 def _align_params() -> dict[str, Any]:
@@ -472,8 +527,9 @@ def _run_held(
     }
     previous = _previous_build(store) if resume else None
     reuse_concepts = True
+    changed: set[str] = set()
     if previous is not None:
-        already = _resume_reuse(store, previous, registered, settings)
+        already, changed = _resume_reuse(store, previous, registered, settings)
         if any(previous.params.get(k) != params[k] for k in ALIGN_PARAMS):
             logger.info(
                 "--resume: align settings changed since run %s: aligning again", previous.id
@@ -512,6 +568,7 @@ def _run_held(
         writer=writer,
     )
     build.reuse_concepts = reuse_concepts
+    build.changed = changed
     plan: list[_Step] = []
     skip: dict[str, str] = {}
     for s in build.structured:

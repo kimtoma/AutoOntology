@@ -884,6 +884,14 @@ class Store:
             rows = conn.execute(sql + " ORDER BY started_at", args).fetchall()
         return [_run(r) for r in rows]
 
+    def latest_workspace_run(self, kind: str) -> Run | None:
+        """The newest workspace-wide run (no source) of *kind*, whatever its status."""
+        sql = "SELECT * FROM runs WHERE kind = ? AND source_id IS NULL"
+        sql += " ORDER BY started_at DESC, rowid DESC LIMIT 1"
+        with self._conn() as conn:
+            row = conn.execute(sql, (kind,)).fetchone()
+        return _run(row) if row is not None else None
+
     def list_runs(self, source_id: str | None = None, limit: int = 50) -> list[Run]:
         sql = "SELECT * FROM runs"
         args: list[Any] = []
