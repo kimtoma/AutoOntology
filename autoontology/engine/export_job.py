@@ -17,7 +17,9 @@ ontology, mapping, ``validation.json``: :mod:`autoontology.export.ossie`, built 
 upstream zips) and ``okf/`` (:mod:`autoontology.export.okf`). Exporting a revision again
 replaces its folder; outside the exports root only a folder that holds nothing but what
 this exporter writes (:data:`EXPORT_ENTRIES`) -- one with any other file is refused, never
-deleted. A ``--format`` export keeps the other formats' files of the previous export of
+deleted. A failed export leaves the old folder as it was; a failed Ossie/OKF validation
+copies its ``validation.json`` to ``logs/<run>.<format>-validation.json``. A ``--format``
+export keeps the other formats' files of the previous export of
 the same revision.
 """
 
@@ -304,13 +306,16 @@ def _step_ossie(ctx: _ExportCtx) -> dict[str, Any]:
     """``ossie/``: the merged semantic model of the upstream zips, the unified ontology and
     the mapping, each validated against the vendored Ossie schemas (any error fails)."""
     assert ctx.model is not None
-    result = ossie.write(
-        ctx.model,
-        ctx.out_dir,
-        revision=ctx.snapshot.revision,
-        created_at=ctx.snapshot.created_at,
-        upstream=ctx.ossie_zips,
-    )
+    try:
+        result = ossie.write(
+            ctx.model,
+            ctx.out_dir,
+            revision=ctx.snapshot.revision,
+            created_at=ctx.snapshot.created_at,
+            upstream=ctx.ossie_zips,
+        )
+    except ossie.OssieError as exc:
+        _keep_validation(ctx, exc, ctx.out_dir / ossie.OSSIE_DIR / ossie.VALIDATION, "ossie")
     ctx.files += result["files"]
     ctx.validation["ossie"] = result["validation"]
     record = result["validation"]
@@ -327,9 +332,15 @@ def _step_ossie(ctx: _ExportCtx) -> dict[str, Any]:
 def _step_okf(ctx: _ExportCtx) -> dict[str, Any]:
     """``okf/``: an OKF v0.2 bundle, validated with :func:`autoontology.export.okf.validate`."""
     assert ctx.model is not None
-    result = okf.write(
-        ctx.model, ctx.out_dir, revision=ctx.snapshot.revision, created_at=ctx.snapshot.created_at
-    )
+    try:
+        result = okf.write(
+            ctx.model,
+            ctx.out_dir,
+            revision=ctx.snapshot.revision,
+            created_at=ctx.snapshot.created_at,
+        )
+    except okf.OkfError as exc:
+        _keep_validation(ctx, exc, ctx.out_dir / okf.OKF_DIR / okf.VALIDATION, "okf")
     ctx.files += result["files"]
     ctx.validation["okf"] = result["validation"]
     record = result["validation"]
@@ -341,6 +352,18 @@ def _step_okf(ctx: _ExportCtx) -> dict[str, Any]:
     for warning in record["warnings"][:20]:
         logger.warning("  okf: %s", warning)
     return {"validation": {k: v for k, v in record.items() if k != "warnings"}}
+
+
+def _keep_validation(ctx: _ExportCtx, exc: Exception, record: Path, fmt: str) -> None:
+    """A failed export removes its work folder, so copy the full ``validation.json`` to
+    ``logs/<run>.<fmt>-validation.json`` and name it in the error."""
+    if not record.is_file():
+        raise exc
+    ctx.settings.logs_dir.mkdir(parents=True, exist_ok=True)
+    kept = ctx.settings.logs_dir / f"{ctx.run.id}.{fmt}-validation.json"
+    shutil.copyfile(record, kept)
+    # the path first: the run's error keeps only the first 600 characters
+    raise type(exc)(f"[full record: {kept}] {exc}") from exc
 
 
 def _short(value: Any) -> str:

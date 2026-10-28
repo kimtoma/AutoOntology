@@ -150,7 +150,8 @@ def write(
     model: MergedOntology, out_dir: Path, *, revision: int, created_at: str
 ) -> dict[str, Any]:
     """Write ``<out_dir>/okf/``, validate it and return ``{files, validation}``; raises
-    :class:`OkfError` (after writing ``validation.json``) when the bundle is not
+    :class:`OkfError` (after writing ``validation.json``, which the export job copies to
+    ``logs/`` because it removes the failed work folder) when the bundle is not
     conformant."""
     root = out_dir / OKF_DIR
     generated = {"by": GENERATOR, "at": created_at}

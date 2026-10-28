@@ -524,6 +524,28 @@ def test_export_format_keeps_the_other_formats_of_the_revision(env, tmp_path):
     assert sorted(p.name for p in folder.iterdir()) == ["export.json", "okf", "report.md"]
 
 
+def test_failed_validation_keeps_the_record_and_the_previous_folder(env, monkeypatch):
+    from autoontology.export import okf
+
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    folder = export_job.run_export(store, settings, client=env["client"]).export_dir
+    before = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+    monkeypatch.setattr(okf, "CONCEPT_TYPE", "")  # every concept file is now non-conformant
+    with pytest.raises(JobError, match=r"step okf failed: OkfError: \[full record: ") as info:
+        export_job.run_export(store, settings, client=env["client"])
+    failed = store.get_run(info.value.run_id)
+    assert failed.status == "failed" and failed.error.startswith("okf: OkfError")
+    kept = settings.logs_dir / f"{failed.id}.okf-validation.json"
+    assert str(kept) in str(info.value)
+    record = json.loads(kept.read_text(encoding="utf-8"))
+    assert record["ok"] is False and record["errors"]
+    assert {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()} == before
+    assert not [p for p in folder.parent.iterdir() if p.name.startswith(".")]
+
+
 # --- CLI ----------------------------------------------------------------------------------
 
 

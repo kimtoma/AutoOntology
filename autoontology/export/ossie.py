@@ -862,7 +862,8 @@ def write(
     upstream: list[tuple[str, Path]],
 ) -> dict[str, Any]:
     """Write ``<out_dir>/ossie/`` and return the validation record; raises
-    :class:`OssieError` (after writing ``validation.json``) when anything fails."""
+    :class:`OssieError` (after writing ``validation.json``, which the export job copies to
+    ``logs/`` because it removes the failed work folder) when anything fails."""
     folder = out_dir / OSSIE_DIR
     folder.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
