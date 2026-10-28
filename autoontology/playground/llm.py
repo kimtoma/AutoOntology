@@ -177,7 +177,7 @@ def llm_for(settings: Settings, *, transport: httpx.AsyncBaseTransport | None = 
         raise LLMError(
             400,
             "provider_unsupported",
-            f"the playground uses the service's chat router (ollama, openai);"
+            f"the playground uses the service's chat router ({', '.join(ROUTED)});"
             f" chat provider {settings.chat_provider!r} is not routed there",
         )
     return RouterLLM(

@@ -108,11 +108,13 @@ def setup(
     typer.echo(f"migrations: database at {current_revision(settings)} (head {head_revision()})")
     if skip_models:
         typer.echo("models: skipped (--skip-models)")
-    elif settings.chat_provider == "openai" and settings.embed_provider == "openai":
-        typer.echo(
-            "models: skipped (chat and embeddings use the openai provider; "
-            "`uv run autoontology doctor` checks the endpoint)"
+    elif settings.chat_provider != "ollama" and settings.embed_provider == "openai":
+        roles = (
+            "chat and embeddings use the openai provider"
+            if settings.chat_provider == "openai"
+            else f"chat uses the {settings.chat_provider} provider, embeddings the openai one"
         )
+        typer.echo(f"models: skipped ({roles}; `uv run autoontology doctor` checks the endpoint)")
     else:
         from autoontology.config import OLLAMA_DEFAULT_CHAT_MODEL
         from autoontology.engine.ollama import (
@@ -123,7 +125,7 @@ def setup(
         )
 
         if (
-            settings.chat_provider == "openai"
+            settings.chat_provider != "ollama"
             or settings.ollama_chat_model != OLLAMA_DEFAULT_CHAT_MODEL
         ):
             # only the default alias is built here; any other model is pulled as-is

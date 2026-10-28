@@ -18,10 +18,39 @@ from dotenv import dotenv_values, load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VENDOR_DIR = REPO_ROOT / "vendor" / "auto-ontology"
 
-#: Chat providers. Both go through the service's /v1 router (web/providers/router.py):
-#: ``ollama`` (local, default) and ``openai`` (any OpenAI-compatible endpoint: OpenAI,
-#: NVIDIA build.nvidia.com, vLLM, LM Studio, ...).
-CHAT_PROVIDERS: tuple[str, ...] = ("ollama", "openai")
+#: Chat providers. All go through the service's /v1 router (web/providers/router.py):
+#: ``ollama`` (local, default), ``openai`` (any OpenAI-compatible endpoint: OpenAI,
+#: NVIDIA build.nvidia.com, vLLM, LM Studio, ...), ``claude`` and ``codex`` (the user's
+#: logged-in ``claude`` / ``codex`` CLI, i.e. a Claude or ChatGPT subscription).
+CHAT_PROVIDERS: tuple[str, ...] = ("ollama", "openai", "claude", "codex")
+#: Providers backed by a subscription CLI login (no API key, no embeddings).
+CLI_PROVIDERS: tuple[str, ...] = ("claude", "codex")
+#: Default chat model per CLI provider (verified with the installed CLIs, 2026-10-28).
+CLI_DEFAULT_CHAT_MODELS: dict[str, str] = {"claude": "claude-sonnet-5-5", "codex": "gpt-6-astra"}
+#: Model names each CLI provider is known to accept (listed by /v1/models; another valid
+#: name still works, doctor warns about it).
+CLI_KNOWN_MODELS: dict[str, tuple[str, ...]] = {
+    "claude": (
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
+        "claude-fable-5-1",
+        "claude-haiku-5-5",
+        "sonnet",
+        "opus",
+        "fable",
+        "haiku",
+    ),
+    "codex": ("gpt-6-astra", "gpt-5.5"),
+}
+#: Model-name prefix upstream sends for each CLI provider (``openai/<prefix>:<model>``).
+#: Codex is "chatgpt", not "codex": langchain_openai sends every model name containing
+#: "codex" to the Responses API (/v1/responses), which the router does not serve.
+CLI_MODEL_PREFIXES: dict[str, str] = {"claude": "claude", "codex": "chatgpt"}
+#: Env var naming each CLI provider's model.
+CLI_MODEL_VARS: dict[str, str] = {
+    "claude": "AUTOONTOLOGY_CLAUDE_MODEL",
+    "codex": "AUTOONTOLOGY_CODEX_MODEL",
+}
 #: Embedding providers: ``ollama`` goes to Ollama directly, ``openai`` to
 #: ``AUTOONTOLOGY_OPENAI_BASE_URL`` directly (no router).
 EMBED_PROVIDERS: tuple[str, ...] = ("ollama", "openai")
@@ -66,6 +95,23 @@ OLLAMA_LLM_LIMITS: dict[str, str] = {
     "LLM_MAX_INFLIGHT": "2",
     "SEMANTIC_LLM_MAX_INFLIGHT": "1",
 }
+#: Subscription CLIs: each provider runs at most AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT (2)
+#: calls at once in the service, and one request (slot wait + call + schema re-ask) has one
+#: deadline, AUTOONTOLOGY_PROVIDER_TIMEOUT_S (default 120 s).
+DEFAULT_PROVIDER_TIMEOUT_S = 120.0
+CLI_LLM_LIMITS: dict[str, str] = {
+    "LLM_MAX_INFLIGHT": "2",
+    "SEMANTIC_LLM_MAX_INFLIGHT": "2",
+}
+
+
+def cli_llm_limits(provider_timeout_s: float) -> dict[str, str]:
+    """Upstream's per-call timeout sits above the router's whole-request deadline
+    (2 x deadline + 30 s), so the router always answers (504 at worst) before upstream
+    gives up and retries on top of a call that is still running."""
+    return {"LLM_INVOKE_TIMEOUT_S": str(int(2 * provider_timeout_s + 30)), **CLI_LLM_LIMITS}
+
+
 #: Key upstream sends to the service's /v1 router when chat uses the ``openai`` provider
 #: (upstream refuses empty keys; the router replaces it with AUTOONTOLOGY_OPENAI_API_KEY).
 ROUTER_API_KEY = "autoontology-router"
@@ -310,7 +356,7 @@ class Settings:
     postgres_user: str = "autoontology"
     postgres_password: str = "autoontology"
     postgres_database: str = "autoontology"
-    #: ollama | openai
+    #: ollama | openai | claude | codex
     chat_provider: str = "ollama"
     #: ollama | openai
     embed_provider: str = "ollama"
@@ -330,6 +376,11 @@ class Settings:
     openai_embed_model: str = ""
     #: Whole-request timeout of the router's openai passthrough (AUTOONTOLOGY_OPENAI_TIMEOUT_S).
     openai_timeout_s: float = DEFAULT_OPENAI_TIMEOUT_S
+    #: Subscription CLI providers (AUTOONTOLOGY_CLAUDE_MODEL / AUTOONTOLOGY_CODEX_MODEL).
+    claude_model: str = CLI_DEFAULT_CHAT_MODELS["claude"]
+    codex_model: str = CLI_DEFAULT_CHAT_MODELS["codex"]
+    #: One CLI request's whole deadline (AUTOONTOLOGY_PROVIDER_TIMEOUT_S).
+    provider_timeout_s: float = DEFAULT_PROVIDER_TIMEOUT_S
     #: LLM_* limits the user set explicitly (shell or .env); the provider never overrides them.
     llm_limits: dict[str, str] = field(default_factory=dict)
     #: The workspace = the one ontology this home builds (AUTOONTOLOGY_WORKSPACE); its name
@@ -382,6 +433,13 @@ class Settings:
             openai_chat_model=env.get("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "").strip(),
             openai_embed_model=env.get("AUTOONTOLOGY_OPENAI_EMBED_MODEL", "").strip(),
             openai_timeout_s=_float_env("AUTOONTOLOGY_OPENAI_TIMEOUT_S", DEFAULT_OPENAI_TIMEOUT_S),
+            claude_model=env.get("AUTOONTOLOGY_CLAUDE_MODEL", "").strip()
+            or CLI_DEFAULT_CHAT_MODELS["claude"],
+            codex_model=env.get("AUTOONTOLOGY_CODEX_MODEL", "").strip()
+            or CLI_DEFAULT_CHAT_MODELS["codex"],
+            provider_timeout_s=_float_env(
+                "AUTOONTOLOGY_PROVIDER_TIMEOUT_S", DEFAULT_PROVIDER_TIMEOUT_S
+            ),
             llm_limits={k: env[k] for k in OLLAMA_LLM_LIMITS if env.get(k, "").strip()},
             workspace=_workspace(env.get("AUTOONTOLOGY_WORKSPACE", "")),
             base_iri=_base_iri(env.get("AUTOONTOLOGY_BASE_IRI", "")),
@@ -403,7 +461,13 @@ class Settings:
         """The model the chat provider runs."""
         if self.chat_provider == "openai":
             return self.openai_chat_model
+        if self.chat_provider in CLI_PROVIDERS:
+            return self.cli_model(self.chat_provider)
         return self.ollama_chat_model
+
+    def cli_model(self, provider: str) -> str:
+        """The model a CLI provider (``claude`` / ``codex``) runs."""
+        return self.claude_model if provider == "claude" else self.codex_model
 
     @property
     def effective_embed_model(self) -> str:
@@ -420,6 +484,9 @@ class Settings:
         model = self.effective_chat_model
         if self.chat_provider == "openai":
             return f"openai/{model}"
+        if self.chat_provider in CLI_PROVIDERS:
+            # the router dispatches by this prefix (web/providers/router.py:split_model)
+            return f"openai/{CLI_MODEL_PREFIXES[self.chat_provider]}:{model}"
         return model
 
     @property
@@ -474,7 +541,11 @@ def expand_model_profile(settings: Settings) -> dict[str, str]:
     * embed ``ollama``: EMBED points at Ollama (``bge-m3``); ``openai``: at
       ``AUTOONTOLOGY_OPENAI_BASE_URL`` with the API key and ``AUTOONTOLOGY_OPENAI_EMBED_MODEL``.
 
-    Plus the Ollama LLM_* limits (chat ``ollama`` only) for any limit the user has not set.
+    * chat ``claude`` / ``codex``: the same router with model ``openai/claude:<m>`` /
+      ``openai/chatgpt:<m>`` (the router runs the user's logged-in CLI).
+
+    Plus the provider's LLM_* limits (Ollama's, or ``cli_llm_limits`` for the CLI
+    providers) for any limit the user has not set.
     """
     key = OLLAMA_API_KEY if settings.chat_provider == "ollama" else ROUTER_API_KEY
     env: dict[str, str] = {}
@@ -491,9 +562,14 @@ def expand_model_profile(settings: Settings) -> dict[str, str]:
         env["EMBED_API_KEY"] = OLLAMA_API_KEY
         env["EMBED_MODEL"] = settings.ollama_embed_model
     if settings.chat_provider == "ollama":
-        for name, value in OLLAMA_LLM_LIMITS.items():
-            if name not in settings.llm_limits:
-                env[name] = value
+        limits = OLLAMA_LLM_LIMITS
+    elif settings.chat_provider in CLI_PROVIDERS:
+        limits = cli_llm_limits(settings.provider_timeout_s)
+    else:
+        limits = {}
+    for name, value in limits.items():
+        if name not in settings.llm_limits:
+            env[name] = value
     return env
 
 
@@ -518,6 +594,14 @@ def model_profile_warnings(settings: Settings) -> list[str]:
             "uses its ChatNVIDIA client (60 s timeout) instead of ChatOpenAI; name an Ollama "
             "alias such as openai/qwen3:8b"
         )
+    if settings.chat_provider in CLI_PROVIDERS:
+        model = settings.cli_model(settings.chat_provider)
+        known = CLI_KNOWN_MODELS[settings.chat_provider]
+        if model not in known:
+            warnings.append(
+                f"{CLI_MODEL_VARS[settings.chat_provider]} {model!r} is not one of the "
+                f"models known to work ({', '.join(known)})"
+            )
     return warnings
 
 
@@ -542,4 +626,10 @@ def validate_model_profile(settings: Settings) -> list[str]:
             )
     if settings.embed_provider == "openai" and not settings.openai_embed_model:
         problems.append("AUTOONTOLOGY_OPENAI_EMBED_MODEL is not set")
+    if settings.chat_provider in CLI_PROVIDERS:
+        model = settings.cli_model(settings.chat_provider)
+        if not CHAT_MODEL_RE.fullmatch(model):
+            problems.append(
+                f"{CLI_MODEL_VARS[settings.chat_provider]} {model!r} is not a valid model name"
+            )
     return problems

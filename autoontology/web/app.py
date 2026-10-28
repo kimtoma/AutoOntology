@@ -5,7 +5,8 @@
 ``POST /ingest`` and ``POST /ingest/delete`` stand in for the upstream ingestion service
 (``INGESTION_SERVICE_URL``): upstream calls them when a connection is created/deleted.
 Both answer 202 and do the work in a background thread. ``/v1/*`` is the OpenAI-compatible
-chat router (``autoontology/web/providers/``): Ollama or OpenAI-compatible passthrough.
+chat router (``autoontology/web/providers/``): Ollama or OpenAI-compatible passthrough,
+or the user's logged-in ``claude`` / ``codex`` CLI.
 """
 
 from __future__ import annotations
@@ -157,13 +158,15 @@ def create_app(
 
     app = FastAPI(title="AutoOntology", version=__version__, lifespan=lifespan)
     app.state.settings = settings
-    # /v1/*: OpenAI-compatible chat router (Ollama or OpenAI-compatible passthrough).
+    # /v1/*: OpenAI-compatible chat router (Ollama/OpenAI passthrough or a CLI provider).
     registry = providers or Registry(settings, llm_transport)
     app.state.providers = registry
     app.include_router(build_router(settings, llm_transport, registry))
     # /api/* + the UI at /ui/ (/ redirects there)
     state = api.install(app, settings, runs)
+    state.providers = registry  # /api/status.providers, POST /api/providers/test
     _sweep_stale_runs(state.store)
+    _sweep_provider_workdirs(settings)
 
     @app.get("/health/live")
     def health_live() -> dict[str, str]:
@@ -218,6 +221,19 @@ def create_app(
         return {"status": "accepted"}
 
     return app
+
+
+def _sweep_provider_workdirs(settings: Settings) -> None:
+    """Remove per-call CLI workdirs a killed service left in the temp dir."""
+    from autoontology.web.providers.base import sweep_workdirs
+
+    try:
+        removed = sweep_workdirs(settings.home)
+    except Exception:  # noqa: BLE001 - a sweep must never keep the service from starting
+        logger.exception("provider workdir sweep failed")
+        return
+    if removed:
+        logger.info("startup sweep: removed %d stale provider workdir(s)", removed)
 
 
 def _provider_logging() -> None:

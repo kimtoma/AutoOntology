@@ -116,7 +116,7 @@ def test_openai_validation_names_missing_values(isolated_env, monkeypatch):
     )
 
 
-@pytest.mark.parametrize("value", ["claude", "codex", "nvidia", "custom"])
+@pytest.mark.parametrize("value", ["nvidia", "custom", "gemini"])
 def test_removed_providers_are_refused(isolated_env, monkeypatch, value):
     monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", value)
     with pytest.raises(ValueError, match="AUTOONTOLOGY_CHAT_PROVIDER"):
