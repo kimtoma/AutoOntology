@@ -1,0 +1,869 @@
+"""SQLite job/source store at ``<home>/autoontology.db`` (stdlib ``sqlite3``, WAL mode).
+
+The schema is a list of numbered migrations applied in order and recorded in
+``schema_version`` (v1 is the whole initial schema). Later changes append to
+:data:`MIGRATIONS`; never edit a migration that has shipped.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import threading
+import time
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Literal
+
+SourceKind = Literal["files", "database", "documents"]
+RunStatus = Literal["pending", "running", "succeeded", "failed", "cancelled"]
+#: Step statuses are free text in the schema; these are the ones AutoOntology writes.
+StepStatus = Literal["pending", "running", "succeeded", "failed", "skipped"]
+ACTIVE_RUN_STATUSES: tuple[str, ...] = ("pending", "running")
+
+MIGRATIONS: list[tuple[int, str]] = [
+    (
+        1,
+        # Schema v1. sources/runs/steps: registered sources and their runs. documents ..
+        # evidence: the documents pipeline. term_embeddings/alignments/alignment_previews:
+        # alignment of document concepts to upstream Terms (previews = `--dry-run`
+        # verdicts, never accepted; proposal_json keeps a `same` verdict the identity
+        # policy refused, for review). source_leases: cross-process reservation of a source
+        # name. file_manifests: the input -> table manifest of the last load.
+        # ontology_revision: bumped whenever a run finishes or a source is removed (cache
+        # key of derived views). semantic_baselines: the catalog schema the semantic layer
+        # was compiled from plus a pending invalidation. playground_*: the element index,
+        # conversations and messages (incomplete = the stream ended without [DONE]).
+        # term_alias_additions: synonyms AutoOntology wrote to upstream Terms;
+        # term_refresh_pending: Terms whose embedding refresh is still owed.
+        """
+        CREATE TABLE IF NOT EXISTS sources (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            kind TEXT NOT NULL CHECK (kind IN ('files', 'database', 'documents')),
+            locator TEXT NOT NULL,
+            pg_database TEXT,
+            catalog_database_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            source_id TEXT,
+            status TEXT NOT NULL
+                CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')),
+            started_at TEXT,
+            finished_at TEXT,
+            error TEXT,
+            params_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS runs_source_idx ON runs (source_id, started_at);
+        CREATE TABLE IF NOT EXISTS steps (
+            id INTEGER PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            detail_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE (run_id, name)
+        );
+        CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES sources (id) ON DELETE CASCADE,
+            path TEXT NOT NULL,
+            title TEXT NOT NULL,
+            mime TEXT NOT NULL,
+            engine TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            bytes INTEGER NOT NULL,
+            pages INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (source_id, sha256)
+        );
+        CREATE INDEX IF NOT EXISTS documents_path_idx ON documents (source_id, path);
+        CREATE TABLE IF NOT EXISTS chunks (
+            id TEXT PRIMARY KEY,
+            doc_id TEXT NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+            idx INTEGER NOT NULL,
+            section_path TEXT NOT NULL DEFAULT '',
+            page INTEGER,
+            kind TEXT NOT NULL DEFAULT 'text',
+            text TEXT NOT NULL,
+            tokens INTEGER NOT NULL DEFAULT 0,
+            extraction_json TEXT,
+            extract_detail_json TEXT,
+            extracted_at TEXT,
+            UNIQUE (doc_id, idx)
+        );
+        CREATE TABLE IF NOT EXISTS concepts (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES sources (id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            name_en TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL,
+            definition TEXT NOT NULL DEFAULT '',
+            synonyms_json TEXT NOT NULL DEFAULT '[]',
+            attributes_json TEXT NOT NULL DEFAULT '[]',
+            merged_from_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            UNIQUE (source_id, name)
+        );
+        CREATE TABLE IF NOT EXISTS relations (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES sources (id) ON DELETE CASCADE,
+            subject_concept_id TEXT NOT NULL REFERENCES concepts (id) ON DELETE CASCADE,
+            predicate TEXT NOT NULL,
+            object_concept_id TEXT NOT NULL REFERENCES concepts (id) ON DELETE CASCADE,
+            label TEXT NOT NULL DEFAULT '',
+            UNIQUE (source_id, subject_concept_id, predicate, object_concept_id)
+        );
+        CREATE TABLE IF NOT EXISTS evidence (
+            id INTEGER PRIMARY KEY,
+            concept_id TEXT REFERENCES concepts (id) ON DELETE CASCADE,
+            relation_id TEXT REFERENCES relations (id) ON DELETE CASCADE,
+            chunk_id TEXT NOT NULL REFERENCES chunks (id) ON DELETE CASCADE,
+            quote TEXT NOT NULL,
+            verified INTEGER NOT NULL CHECK (verified IN (0, 1)),
+            CHECK ((concept_id IS NULL) <> (relation_id IS NULL))
+        );
+        CREATE INDEX IF NOT EXISTS evidence_concept_idx ON evidence (concept_id);
+        CREATE INDEX IF NOT EXISTS evidence_relation_idx ON evidence (relation_id);
+        CREATE TABLE IF NOT EXISTS term_embeddings (
+            term_id TEXT NOT NULL,
+            text_sha256 TEXT NOT NULL,
+            model TEXT NOT NULL,
+            dim INTEGER NOT NULL,
+            vector_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (term_id, text_sha256, model)
+        );
+        CREATE TABLE IF NOT EXISTS alignments (
+            id INTEGER PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES sources (id) ON DELETE CASCADE,
+            concept_id TEXT NOT NULL REFERENCES concepts (id) ON DELETE CASCADE,
+            concept_name TEXT NOT NULL,
+            structured_source TEXT NOT NULL DEFAULT '',
+            term_id TEXT NOT NULL DEFAULT '',
+            term_name TEXT NOT NULL DEFAULT '',
+            relation TEXT NOT NULL CHECK (relation IN
+                ('same', 'broader', 'narrower', 'related', 'none', 'skipped')),
+            similarity REAL,
+            confidence REAL,
+            rationale TEXT NOT NULL DEFAULT '',
+            accepted INTEGER NOT NULL DEFAULT 0 CHECK (accepted IN (0, 1)),
+            judge_key TEXT NOT NULL DEFAULT '',
+            candidates_json TEXT NOT NULL DEFAULT '[]',
+            applied_json TEXT NOT NULL DEFAULT '{}',
+            run_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            dry_run INTEGER NOT NULL DEFAULT 0 CHECK (dry_run IN (0, 1)),
+            proposal_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE (concept_id, term_id)
+        );
+        CREATE INDEX IF NOT EXISTS alignments_source_idx ON alignments (source_id);
+        CREATE TABLE IF NOT EXISTS source_leases (
+            source_name TEXT PRIMARY KEY,
+            token TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            pid INTEGER NOT NULL,
+            acquired_at TEXT NOT NULL,
+            expires_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS file_manifests (
+            source_id TEXT PRIMARY KEY REFERENCES sources (id) ON DELETE CASCADE,
+            manifest_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS alignment_previews (
+            id INTEGER PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES sources (id) ON DELETE CASCADE,
+            concept_id TEXT NOT NULL REFERENCES concepts (id) ON DELETE CASCADE,
+            concept_name TEXT NOT NULL,
+            structured_source TEXT NOT NULL DEFAULT '',
+            term_id TEXT NOT NULL DEFAULT '',
+            term_name TEXT NOT NULL DEFAULT '',
+            relation TEXT NOT NULL CHECK (relation IN
+                ('same', 'broader', 'narrower', 'related', 'none', 'skipped')),
+            similarity REAL,
+            confidence REAL,
+            rationale TEXT NOT NULL DEFAULT '',
+            accepted INTEGER NOT NULL DEFAULT 0 CHECK (accepted = 0),
+            dry_run INTEGER NOT NULL DEFAULT 1 CHECK (dry_run = 1),
+            judge_key TEXT NOT NULL DEFAULT '',
+            candidates_json TEXT NOT NULL DEFAULT '[]',
+            applied_json TEXT NOT NULL DEFAULT '{}',
+            run_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            proposal_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE (concept_id)
+        );
+        CREATE INDEX IF NOT EXISTS alignment_previews_source_idx
+            ON alignment_previews (source_id);
+        CREATE TABLE IF NOT EXISTS ontology_revision (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            value INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO ontology_revision (id, value) VALUES (1, 0);
+        CREATE TABLE IF NOT EXISTS semantic_baselines (
+            source_id TEXT PRIMARY KEY REFERENCES sources (id) ON DELETE CASCADE,
+            baseline_json TEXT,
+            pending_json TEXT,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS playground_index (
+            source_id TEXT NOT NULL REFERENCES sources (id) ON DELETE CASCADE,
+            element_id TEXT NOT NULL,
+            element_type TEXT NOT NULL,
+            text_sha TEXT NOT NULL,
+            embedding BLOB,
+            model TEXT NOT NULL,
+            PRIMARY KEY (source_id, element_id)
+        );
+        CREATE TABLE IF NOT EXISTS playground_index_meta (
+            source_id TEXT PRIMARY KEY REFERENCES sources (id) ON DELETE CASCADE,
+            revision INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            elements INTEGER NOT NULL,
+            built_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS playground_conversations (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES sources (id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS playground_conversations_source
+            ON playground_conversations (source_id, updated_at);
+        CREATE TABLE IF NOT EXISTS playground_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL
+                REFERENCES playground_conversations (id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            retrieved_json TEXT NOT NULL DEFAULT '[]',
+            citations_json TEXT NOT NULL DEFAULT '{}',
+            provider TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            incomplete INTEGER NOT NULL DEFAULT 0 CHECK (incomplete IN (0, 1))
+        );
+        CREATE INDEX IF NOT EXISTS playground_messages_conversation
+            ON playground_messages (conversation_id, id);
+        CREATE TABLE IF NOT EXISTS term_alias_additions (
+            term_id TEXT NOT NULL,
+            alias TEXT NOT NULL,
+            run_id TEXT NOT NULL DEFAULT '',
+            concepts_json TEXT NOT NULL DEFAULT '[]',
+            added_at TEXT NOT NULL,
+            removed_at TEXT,
+            PRIMARY KEY (term_id, alias)
+        );
+        CREATE TABLE IF NOT EXISTS term_refresh_pending (
+            term_id TEXT PRIMARY KEY,
+            reason TEXT NOT NULL DEFAULT '',
+            since TEXT NOT NULL
+        )
+        """,
+    ),
+]
+
+#: Seconds a lease stays valid without a heartbeat (the holder refreshes it every third).
+LEASE_TTL_S = 120.0
+
+
+class SourceBusy(RuntimeError):
+    """Another operation holds the source's lease (an HTTP 409 for the API)."""
+
+    def __init__(self, name: str, operation: str, pid: int) -> None:
+        super().__init__(f"source {name!r} already has an active {operation} (pid {pid}); "
+                         "wait for it to finish")
+        self.name, self.operation, self.pid = name, operation, pid
+
+
+class LeaseLost(RuntimeError):
+    """The operation's lease is no longer its own: it must stop before mutating more."""
+
+
+@dataclass
+class Lease:
+    store: Store
+    token: str
+    names: list[str]
+    operation: str
+    lost: threading.Event
+
+    def owned(self) -> bool:
+        """True while every reserved name still carries this lease's token."""
+        if self.lost.is_set():
+            return False
+        with self.store._conn() as conn:
+            n = conn.execute("SELECT count(*) FROM source_leases WHERE token = ?",
+                             (self.token,)).fetchone()[0]
+        if n != len(self.names):
+            self.lost.set()
+        return not self.lost.is_set()
+
+    def check(self) -> None:
+        if not self.owned():
+            raise LeaseLost(f"lease lost: the {self.operation} reservation of "
+                            f"{', '.join(self.names)} was taken over; stopping")
+
+
+def pid_alive(pid: int) -> bool:
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+@dataclass(frozen=True)
+class Source:
+    id: str
+    name: str
+    kind: str
+    locator: str
+    pg_database: str | None
+    catalog_database_id: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class Run:
+    id: str
+    kind: str
+    source_id: str | None
+    status: str
+    started_at: str | None
+    finished_at: str | None
+    error: str | None
+    params: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Step:
+    run_id: str
+    name: str
+    status: str
+    started_at: str | None
+    finished_at: str | None
+    detail: dict[str, Any]
+
+
+def _source(row: sqlite3.Row) -> Source:
+    return Source(**{k: row[k] for k in row.keys()})
+
+
+def _run(row: sqlite3.Row) -> Run:
+    data = {k: row[k] for k in row.keys() if k != "params_json"}
+    return Run(**data, params=json.loads(row["params_json"] or "{}"))
+
+
+def _step(row: sqlite3.Row) -> Step:
+    return Step(
+        run_id=row["run_id"],
+        name=row["name"],
+        status=row["status"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        detail=json.loads(row["detail_json"] or "{}"),
+    )
+
+
+#: Busy timeout of every store connection (ms) and the bounded retry for lock errors
+#: SQLite does not route through the busy handler (switching a new database to WAL).
+BUSY_TIMEOUT_MS = 30_000
+LOCK_RETRIES = 60
+#: Total wait for a store lock across all attempts (``AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S``).
+DEFAULT_LOCK_TIMEOUT_S = 120.0
+
+
+class StoreLocked(sqlite3.OperationalError):
+    """The store stayed locked past ``AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S``."""
+
+
+def store_lock_timeout_s() -> float:
+    raw = os.environ.get("AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S", "").strip()
+    try:
+        value = float(raw) if raw else DEFAULT_LOCK_TIMEOUT_S
+    except ValueError:
+        return DEFAULT_LOCK_TIMEOUT_S
+    return value if value > 0 else DEFAULT_LOCK_TIMEOUT_S
+
+
+def _locked(exc: sqlite3.OperationalError) -> bool:
+    text = str(exc).lower()
+    return "locked" in text or "busy" in text
+
+
+def _retry_locked(fn: Any, conn: sqlite3.Connection, what: str) -> Any:
+    """Run *fn*, retrying "database is locked" with capped exponential backoff, all within
+    one monotonic deadline (``AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S``): each attempt's
+    busy_timeout is capped to the time left, so a lock that never clears fails after the
+    deadline (:class:`StoreLocked`) instead of after every attempt's full busy timeout."""
+    timeout = store_lock_timeout_s()
+    deadline = time.monotonic() + timeout
+    last: sqlite3.OperationalError | None = None
+    for attempt in range(LOCK_RETRIES):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        conn.execute(f"PRAGMA busy_timeout={max(1, min(BUSY_TIMEOUT_MS, int(left * 1000)))}")
+        try:
+            return fn()
+        except sqlite3.OperationalError as exc:
+            if not _locked(exc):
+                raise
+            last = exc
+        time.sleep(max(0.0, min(0.5, 0.005 * 2 ** attempt, deadline - time.monotonic())))
+    raise StoreLocked(
+        f"the AutoOntology store is locked ({what}) for more than {timeout:.0f}s: another "
+        "process holds a write transaction on autoontology.db (see `autoontology status` / running "
+        "jobs); retry later or raise AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S") from last
+
+
+def _ensure_wal(conn: sqlite3.Connection) -> None:
+    """WAL mode, set once per database. Changing the journal mode needs an exclusive lock
+    and fails with "database is locked" *without* waiting on the busy handler when another
+    connection is opening the same fresh database, so it is retried."""
+    def apply() -> None:
+        if str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() != "wal":
+            conn.execute("PRAGMA journal_mode=WAL")
+
+    _retry_locked(apply, conn, "switching to WAL")
+
+
+class Store:
+    """Thin typed wrapper. Opens a short-lived connection per call (safe across threads)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.migrate()
+        # The store can hold external DB credentials (database sources): owner-only.
+        os.chmod(self.path, 0o600)
+
+    @classmethod
+    def for_home(cls, home: Path) -> Store:
+        return cls(Path(home) / "autoontology.db")
+
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            _ensure_wal(conn)
+            conn.execute("PRAGMA foreign_keys=ON")
+            with conn:  # one transaction per call
+                yield conn
+        finally:
+            conn.close()
+
+    @contextmanager
+    def _immediate(self) -> Iterator[sqlite3.Connection]:
+        """A connection inside ``BEGIN IMMEDIATE`` (write lock up front): check-then-write
+        sequences in it are atomic across threads and processes."""
+        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000,
+                               isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            conn.execute("PRAGMA foreign_keys=ON")
+            _retry_locked(lambda: conn.execute("BEGIN IMMEDIATE"), conn, "write transaction")
+            conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            try:
+                yield conn
+                conn.execute("COMMIT")
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+        finally:
+            conn.close()
+
+    # --- schema ---------------------------------------------------------------
+
+    def schema_version(self) -> int:
+        with self._conn() as conn:
+            row = conn.execute("SELECT max(version) FROM schema_version").fetchone()
+        return int(row[0] or 0)
+
+    def migrate(self) -> int:
+        """Apply the pending :data:`MIGRATIONS`, each in its own explicit transaction.
+
+        ``sqlite3``'s implicit transactions do not cover DDL, so a crash between a
+        migration's statements and its ``schema_version`` row used to leave a half-applied
+        schema that the retry could not re-apply (``duplicate column``). Here every
+        migration runs between ``BEGIN IMMEDIATE`` and ``COMMIT`` (SQLite DDL is
+        transactional) and the write lock taken by ``BEGIN IMMEDIATE`` serialises
+        concurrent migrators, which re-read the version inside the transaction.
+        """
+        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000,
+                               isolation_level=None)
+        try:
+            conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            _ensure_wal(conn)
+            current = 0
+            while True:
+                _retry_locked(lambda: conn.execute("BEGIN IMMEDIATE"), conn, "migration")
+                try:
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS schema_version "
+                        "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+                    )
+                    current = conn.execute(
+                        "SELECT max(version) FROM schema_version").fetchone()[0] or 0
+                    pending = [(v, sql) for v, sql in MIGRATIONS if v > current]
+                    if not pending:
+                        conn.execute("COMMIT")
+                        return current
+                    version, sql = pending[0]
+                    for statement in (s.strip() for s in sql.split(";")):
+                        if statement:
+                            conn.execute(statement)
+                    conn.execute(
+                        "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+                        (version, now_iso()),
+                    )
+                    conn.execute("COMMIT")
+                except BaseException:
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
+                    raise
+        finally:
+            conn.close()
+
+    # --- sources --------------------------------------------------------------
+
+    def add_source(
+        self, *, name: str, kind: SourceKind, locator: str, pg_database: str | None = None
+    ) -> Source:
+        ts = now_iso()
+        source_id = uuid.uuid4().hex
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    "INSERT INTO sources (id, name, kind, locator, pg_database, "
+                    "catalog_database_id, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+                    (source_id, name, kind, locator, pg_database, ts, ts),
+                )
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE" not in str(exc):
+                raise
+            raise ValueError(f"source {name!r} already exists") from exc
+        return self.get_source(name)  # type: ignore[return-value]
+
+    def get_source(self, name: str) -> Source | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM sources WHERE name = ?", (name,)).fetchone()
+        return _source(row) if row else None
+
+    def get_source_by_id(self, source_id: str) -> Source | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
+        return _source(row) if row else None
+
+    def list_sources(self) -> list[Source]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM sources ORDER BY name").fetchall()
+        return [_source(r) for r in rows]
+
+    def set_locator(self, source_id: str, locator: str) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE sources SET locator = ?, updated_at = ? WHERE id = ?",
+                         (locator, now_iso(), source_id))
+
+    def set_catalog_database_id(self, source_id: str, catalog_database_id: str | None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE sources SET catalog_database_id = ?, updated_at = ? WHERE id = ?",
+                (catalog_database_id, now_iso(), source_id),
+            )
+
+    def delete_source(self, source_id: str) -> None:
+        """Delete a source together with its runs and their steps (documents, chunks,
+        concepts, relations and evidence go with it through ON DELETE CASCADE)."""
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM steps WHERE run_id IN (SELECT id FROM runs WHERE source_id = ?)",
+                (source_id,),
+            )
+            conn.execute("DELETE FROM runs WHERE source_id = ?", (source_id,))
+            conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+            self._bump_revision(conn)
+
+    def get_file_manifest(self, source_id: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT manifest_json FROM file_manifests WHERE source_id = ?",
+                               (source_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def set_file_manifest(self, source_id: str, manifest: dict[str, Any]) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO file_manifests (source_id, manifest_json, updated_at) "
+                "VALUES (?, ?, ?) ON CONFLICT (source_id) DO UPDATE SET "
+                "manifest_json = excluded.manifest_json, updated_at = excluded.updated_at",
+                (source_id, json.dumps(manifest, ensure_ascii=False), now_iso()))
+
+    def _semantic_row(self, source_id: str) -> sqlite3.Row | None:
+        with self._conn() as conn:
+            return conn.execute("SELECT * FROM semantic_baselines WHERE source_id = ?",
+                                (source_id,)).fetchone()
+
+    def get_semantic_baseline(self, source_id: str) -> dict[str, Any] | None:
+        row = self._semantic_row(source_id)
+        return json.loads(row["baseline_json"]) if row and row["baseline_json"] else None
+
+    def get_pending_invalidation(self, source_id: str) -> dict[str, Any] | None:
+        row = self._semantic_row(source_id)
+        return json.loads(row["pending_json"]) if row and row["pending_json"] else None
+
+    def _set_semantic(self, source_id: str, column: str, value: Any) -> None:
+        payload = None if value is None else json.dumps(value, ensure_ascii=False)
+        with self._conn() as conn:
+            conn.execute(
+                f"INSERT INTO semantic_baselines (source_id, {column}, updated_at) "
+                f"VALUES (?, ?, ?) ON CONFLICT (source_id) DO UPDATE SET "
+                f"{column} = excluded.{column}, updated_at = excluded.updated_at",
+                (source_id, payload, now_iso()))
+
+    def set_semantic_baseline(self, source_id: str, baseline: dict[str, Any]) -> None:
+        self._set_semantic(source_id, "baseline_json", baseline)
+
+    def set_pending_invalidation(self, source_id: str, pending: dict[str, Any] | None) -> None:
+        self._set_semantic(source_id, "pending_json", pending)
+
+    # --- runs -----------------------------------------------------------------
+
+    def create_run(
+        self,
+        *,
+        kind: str,
+        source_id: str | None,
+        params: dict[str, Any] | None = None,
+        status: RunStatus = "running",
+    ) -> Run:
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, kind, source_id, status, started_at, params_json) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (run_id, kind, source_id, status, now_iso(),
+                 json.dumps(params or {}, ensure_ascii=False, default=str)),
+            )
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def get_run(self, run_id: str) -> Run | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        return _run(row) if row else None
+
+    def update_run(
+        self,
+        run_id: str,
+        *,
+        status: RunStatus,
+        error: str | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        finished = None if status in ACTIVE_RUN_STATUSES else now_iso()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ?",
+                (status, error, finished, run_id),
+            )
+            if params is not None:
+                conn.execute(
+                    "UPDATE runs SET params_json = ? WHERE id = ?",
+                    (json.dumps(params, ensure_ascii=False, default=str), run_id),
+                )
+            if finished is not None:  # a run finished: what it wrote is now visible
+                self._bump_revision(conn)
+
+    @staticmethod
+    def _bump_revision(conn: sqlite3.Connection) -> None:
+        conn.execute("UPDATE ontology_revision SET value = value + 1 WHERE id = 1")
+
+    def bump_ontology_revision(self) -> None:
+        """Derived views (web graph, playground index) are stale: e.g. after ``align
+        repair`` changed Term synonyms outside a run."""
+        with self._conn() as conn:
+            self._bump_revision(conn)
+
+    def ontology_revision(self) -> int:
+        """Counter bumped by every finished run and every source removal."""
+        with self._conn() as conn:
+            row = conn.execute("SELECT value FROM ontology_revision WHERE id = 1").fetchone()
+        return int(row[0]) if row else 0
+
+    def latest_run(self, source_id: str, kind: str | None = None) -> Run | None:
+        sql = "SELECT * FROM runs WHERE source_id = ?"
+        args: list[Any] = [source_id]
+        if kind:
+            sql += " AND kind = ?"
+            args.append(kind)
+        sql += " ORDER BY started_at DESC, rowid DESC LIMIT 1"
+        with self._conn() as conn:
+            row = conn.execute(sql, args).fetchone()
+        return _run(row) if row else None
+
+    def active_runs(self, source_id: str | None = None) -> list[Run]:
+        sql = "SELECT * FROM runs WHERE status IN ('pending', 'running')"
+        args: list[Any] = []
+        if source_id is not None:
+            sql += " AND source_id = ?"
+            args.append(source_id)
+        with self._conn() as conn:
+            rows = conn.execute(sql + " ORDER BY started_at", args).fetchall()
+        return [_run(r) for r in rows]
+
+    def list_runs(self, source_id: str | None = None, limit: int = 50) -> list[Run]:
+        sql = "SELECT * FROM runs"
+        args: list[Any] = []
+        if source_id is not None:
+            sql += " WHERE source_id = ?"
+            args.append(source_id)
+        sql += " ORDER BY started_at DESC, rowid DESC LIMIT ?"
+        args.append(limit)
+        with self._conn() as conn:
+            rows = conn.execute(sql, args).fetchall()
+        return [_run(r) for r in rows]
+
+    # --- steps ----------------------------------------------------------------
+
+    def start_step(self, run_id: str, name: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO steps (run_id, name, status, started_at, finished_at, detail_json) "
+                "VALUES (?, ?, 'running', ?, NULL, '{}') "
+                "ON CONFLICT (run_id, name) DO UPDATE SET status = 'running', "
+                "started_at = excluded.started_at, finished_at = NULL, detail_json = '{}'",
+                (run_id, name, now_iso()),
+            )
+
+    def finish_step(
+        self, run_id: str, name: str, *, status: StepStatus, detail: dict[str, Any] | None = None
+    ) -> None:
+        ts = now_iso()
+        payload = json.dumps(detail or {}, ensure_ascii=False, default=str)
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO steps (run_id, name, status, started_at, finished_at, detail_json) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (run_id, name) DO UPDATE SET status = excluded.status, "
+                "finished_at = excluded.finished_at, detail_json = excluded.detail_json",
+                (run_id, name, status, ts, ts, payload),
+            )
+
+    def reset_steps(self, run_id: str, names: list[str]) -> None:
+        """Mark *names* pending again (a resumed run invalidated them)."""
+        with self._conn() as conn:
+            conn.executemany(
+                "UPDATE steps SET status = 'pending', started_at = NULL, finished_at = NULL "
+                "WHERE run_id = ? AND name = ?", [(run_id, n) for n in names])
+
+    def get_steps(self, run_id: str) -> list[Step]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM steps WHERE run_id = ? ORDER BY id", (run_id,)
+            ).fetchall()
+        return [_step(r) for r in rows]
+
+    def succeeded_steps(self, run_id: str) -> set[str]:
+        return {s.name for s in self.get_steps(run_id) if s.status == "succeeded"}
+
+    # --- source leases --------------------------------------------------------
+
+    def acquire_leases(self, names: list[str], operation: str, *,
+                       ttl: float = LEASE_TTL_S) -> str:
+        """Reserve every source in *names* for *operation*, all or nothing; return the
+        lease token. Raises :class:`SourceBusy` while a lease's holder pid is alive (also
+        past its expiry: a suspended or slow holder keeps exclusivity). Only a lease whose
+        pid is gone is reclaimed."""
+        token = uuid.uuid4().hex
+        now = time.time()
+        wanted = sorted(set(names))
+        with self._immediate() as conn:
+            for name in wanted:
+                row = conn.execute("SELECT * FROM source_leases WHERE source_name = ?",
+                                   (name,)).fetchone()
+                if row is not None and pid_alive(row["pid"]):
+                    raise SourceBusy(name, row["operation"], row["pid"])
+            for name in wanted:
+                conn.execute(
+                    "INSERT INTO source_leases (source_name, token, operation, pid, "
+                    "acquired_at, expires_at) VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT (source_name) DO UPDATE SET token = excluded.token, "
+                    "operation = excluded.operation, pid = excluded.pid, "
+                    "acquired_at = excluded.acquired_at, expires_at = excluded.expires_at",
+                    (name, token, operation, os.getpid(), now_iso(), now + ttl))
+        return token
+
+    def heartbeat_lease(self, token: str, *, ttl: float = LEASE_TTL_S) -> bool:
+        """Extend the lease; False when it was lost (reclaimed by someone else)."""
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE source_leases SET expires_at = ? WHERE token = ?",
+                               (time.time() + ttl, token))
+        return cur.rowcount > 0
+
+    def release_lease(self, token: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM source_leases WHERE token = ?", (token,))
+
+    def lease_holder(self, name: str) -> dict[str, Any] | None:
+        """The live lease on *name* (``operation``, ``pid``, ...), if any."""
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM source_leases WHERE source_name = ?",
+                               (name,)).fetchone()
+        if row is None or not pid_alive(row["pid"]):
+            return None
+        return dict(row)
+
+    @contextmanager
+    def lease(self, names: list[str], operation: str, *,
+              ttl: float = LEASE_TTL_S) -> Iterator[Lease]:
+        """Hold the sources' lease for the ``with`` body, refreshed by a heartbeat thread.
+        A failed heartbeat (the row is no longer ours) marks the :class:`Lease` lost; the
+        holder checks it (:meth:`Lease.check`) before each step and stops."""
+        token = self.acquire_leases(names, operation, ttl=ttl)
+        stop = threading.Event()
+        held = Lease(self, token, sorted(set(names)), operation, threading.Event())
+
+        def beat() -> None:
+            while not stop.wait(ttl / 3):
+                try:
+                    if not self.heartbeat_lease(token, ttl=ttl):
+                        held.lost.set()
+                except sqlite3.Error:  # busy store: the next beat retries
+                    pass
+
+        thread = threading.Thread(target=beat, name=f"autoontology-lease-{operation}",
+                                  daemon=True)
+        thread.start()
+        try:
+            yield held
+        finally:
+            stop.set()
+            thread.join(timeout=5)
+            self.release_lease(token)
