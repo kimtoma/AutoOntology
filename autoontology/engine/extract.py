@@ -227,10 +227,12 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             len(doc.sections),
             len(chunks),
         )
-    if not documents:
+    if not documents and not needs_kordoc:
+        # documents that only wait for kordoc are a warning, not a failure: the step
+        # succeeds with 0 documents and the next build after the install reads them
         raise RuntimeError(
             "every document failed to read: "
-            + "; ".join(f"{f['path']}: {f['error']}" for f in [*failed, *needs_kordoc])
+            + "; ".join(f"{f['path']}: {f['error']}" for f in failed)
         )
     if needs_kordoc:
         logger.warning(
@@ -447,7 +449,21 @@ def _materialised(ctx: _ExtractCtx, previous: dict[str, Any], current: str) -> b
 
 
 def _step_consolidate(ctx: _ExtractCtx) -> dict[str, Any]:
-    chunks = [c for c in ctx.docs.chunks_for_source(ctx.source.id) if c.extraction is not None]
+    stored = ctx.docs.chunks_for_source(ctx.source.id)
+    if not stored and not ctx.docs.list_documents(ctx.source.id):
+        # a source with no readable documents yet (e.g. all of them wait for kordoc):
+        # it contributes an empty ontology instead of failing the run
+        counts = ctx.docs.replace_ontology(ctx.source.id, [], [])
+        logger.info("  no documents read yet: nothing to consolidate")
+        return {
+            "action": "empty",
+            "fingerprint": None,
+            "chunks": 0,
+            "partial": False,
+            "ontology_sha": ctx.docs.ontology_identity(ctx.source.id),
+            **counts,
+        }
+    chunks = [c for c in stored if c.extraction is not None]
     if not chunks:
         raise RuntimeError("no extracted chunks to consolidate")
     # stored flags were computed by the rules of the run that extracted the chunk: apply the

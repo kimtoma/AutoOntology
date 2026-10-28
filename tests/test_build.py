@@ -495,6 +495,29 @@ def test_documents_that_need_kordoc_are_skipped_not_failed(env, monkeypatch):
     assert "documents:hanbit-docs:read" in after.details
 
 
+def test_documents_source_that_only_needs_kordoc_reads_zero_documents(env, monkeypatch):
+    """When every document of a source needs kordoc and kordoc is absent, the read step
+    succeeds with 0 documents and the same warning (files + install command)."""
+    monkeypatch.delenv("KORDOC_CLI", raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    for md in list(env["docs"].iterdir()):
+        md.unlink()
+    (env["docs"] / "규정.hwp").write_bytes(b"x")
+    (env["docs"] / "지침.pdf").write_bytes(b"%PDF-1.4")
+    add_documents(env)
+    result = run(env)
+    assert result.status == "succeeded", result.problems
+    assert result.problems == []
+    read = result.details["documents:hanbit-docs:read"]
+    assert read["documents"] == [] and read["failed"] == []
+    assert sorted(f["code"] for f in read["needs_kordoc"]) == ["ENGINE_MISSING"] * 2
+    assert len(result.warnings) == 1
+    warning = result.warnings[0]
+    assert "2 document(s) need kordoc" in warning
+    assert "규정.hwp" in warning and "지침.pdf" in warning
+    assert "tools install-kordoc" in warning
+
+
 def test_cli_build_prints_the_kordoc_warning_and_exits_0(env, monkeypatch):
     from typer.testing import CliRunner
 
