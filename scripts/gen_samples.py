@@ -62,18 +62,21 @@ GIVEN = [
     "다은", "준서", "윤서", "현우", "서아", "건우", "지유", "우진", "은서", "선우", "예은", "유준", "소윤", "연우", "가은",
     "정우", "민서", "승현", "수빈", "태윤", "나연", "재원", "하린", "동현", "유나",
 ]
+# Invented stems only: no generated name may be a well-known real company
+# (tests/test_samples.py holds a denylist of listed-company names and group stems).
 COMPANY_CORE = [
-    "가람", "푸른", "한결", "다온", "새봄", "미래", "동해", "서해", "대성", "한마음", "금강", "백두", "태백", "청솔", "늘봄",
-    "은하", "우리", "세진", "삼우", "동진", "새솔", "신일", "여울", "해솔", "온빛", "누리", "하늘", "보람", "참빛", "한울",
+    "다봄", "루온", "미솔", "벼리", "소담", "아띠", "윤슬", "나래솔", "가람빛", "해든", "별하", "온솔", "다온빛", "새라",
+    "늘품", "마루솔", "도담", "시나브", "여울빛", "라온솔", "하람", "예솔빛", "단미", "그루터", "해랑", "미르온", "슬기솔",
+    "보담", "새길빛", "너울",
 ]
 COMPANY_KIND = [
-    "산업", "물산", "건설", "테크", "정밀", "유통", "기계", "철강", "전기", "화학", "공업", "물류", "개발",
+    "상사", "물산", "테크", "유통", "정밀", "기공", "건설", "물류", "전기", "기계", "솔루션", "자재", "엔지니어링",
 ]
 SUPPLIER_CORE = [
-    "대양", "성원", "동방", "솔빛", "가온", "중앙", "다솜", "제일", "우성", "광명", "신화", "새벽", "경동", "화신", "진흥",
-    "남양", "동녘", "세원", "영진", "태광",
+    "청람", "묵향", "석류", "백야", "은솔", "초롱", "금빛솔", "들빛", "해솔길", "산마루", "바람꽃", "구름솔", "솔바람",
+    "돌담", "모래빛", "물빛", "별솔", "숲길", "달빛솔", "이슬",
 ]
-SUPPLIER_KIND = ["정공", "산업", "화학", "금속", "전자", "케미칼", "상사", "기공"]
+SUPPLIER_KIND = ["정공", "소재", "화성", "금속", "전자", "케미칼", "상사", "기공"]
 INDUSTRIES = ["도소매", "제조", "건설", "물류", "공공기관"]
 INDUSTRY_WEIGHTS = [30, 35, 20, 10, 5]
 REGIONS = {
@@ -100,91 +103,56 @@ REGION_WEIGHTS = {
     "제주": 1,
 }
 CONTRACT_KINDS = ["정기 납품", "자재 공급", "일시 납품", "연간 단가 계약", "현장 자재 공급"]
+# (code, name, description, [(item, unit, low price, high price)])
 CATEGORIES = [
-    (
-        "CAT-01",
-        "배관자재",
-        "배관, 이음관, 밸브 등 유체 이송 자재",
-        ["PVC 배관", "스테인리스 배관", "엘보 이음관", "볼밸브", "플랜지"],
-        "m",
-    ),
-    (
-        "CAT-02",
-        "공구류",
-        "전동 공구와 수공구",
-        ["전동 드릴", "임팩트 렌치", "앵글 그라인더", "토크 렌치", "공구 세트"],
-        "개",
-    ),
-    (
-        "CAT-03",
-        "안전용품",
-        "개인 보호구와 현장 안전 장비",
-        ["안전모", "안전화", "보안경", "방진 마스크", "안전대"],
-        "개",
-    ),
-    (
-        "CAT-04",
-        "체결부품",
-        "볼트, 너트 등 체결용 부품",
-        ["육각 볼트", "육각 너트", "평 와셔", "앵커 볼트", "블라인드 리벳"],
-        "박스",
-    ),
-    (
-        "CAT-05",
-        "전기자재",
-        "배선과 배전 자재",
-        ["전선 케이블", "누전 차단기", "배선 덕트", "분전반", "접지봉"],
-        "개",
-    ),
-    (
-        "CAT-06",
-        "공압유압",
-        "공압, 유압 기기와 부품",
-        ["에어 호스", "공압 실린더", "솔레노이드 밸브", "유압 펌프", "원터치 커플러"],
-        "개",
-    ),
-    (
-        "CAT-07",
-        "동력전달",
-        "베어링, 체인, 벨트 등 동력 전달 부품",
-        ["볼 베어링", "롤러 체인", "V벨트", "기어 감속기", "축 커플링"],
-        "개",
-    ),
-    (
-        "CAT-08",
-        "포장자재",
-        "출하와 보관을 위한 포장 자재",
-        ["스트레치 필름", "골판지 상자", "플라스틱 팔레트", "에어 완충재", "결속 밴드"],
-        "롤",
-    ),
-    (
-        "CAT-09",
-        "용접자재",
-        "용접 소모품과 보호구",
-        ["피복 용접봉", "용접 와이어", "자동 용접 마스크", "용접 토치", "용접 장갑"],
-        "박스",
-    ),
-    (
-        "CAT-10",
-        "윤활제",
-        "윤활유와 방청제",
-        ["다목적 그리스", "수용성 절삭유", "유압 작동유", "방청 윤활제", "기어 오일"],
-        "통",
-    ),
-    (
-        "CAT-11",
-        "측정기기",
-        "치수, 압력 등 측정 기기",
-        ["버니어 캘리퍼스", "외측 마이크로미터", "레이저 거리계", "디지털 수평계", "압력 게이지"],
-        "개",
-    ),
-    (
-        "CAT-12",
-        "청소위생",
-        "산업 현장 청소와 위생 용품",
-        ["산업용 와이퍼", "유흡착포", "중성 세척제", "집진기 필터", "폐기물 봉투"],
-        "박스",
-    ),
+    ("CAT-01", "배관자재", "배관, 이음관, 밸브 등 유체 이송 자재", [
+        ("PVC 배관", "m", 2_500, 9_000), ("스테인리스 배관", "m", 18_000, 60_000),
+        ("엘보 이음관", "개", 1_500, 12_000), ("볼밸브", "개", 15_000, 120_000),
+        ("플랜지", "개", 8_000, 70_000)]),
+    ("CAT-02", "공구류", "전동 공구와 수공구", [
+        ("전동 드릴", "대", 90_000, 380_000), ("임팩트 렌치", "대", 150_000, 520_000),
+        ("앵글 그라인더", "대", 60_000, 260_000), ("토크 렌치", "개", 70_000, 300_000),
+        ("공구 세트", "세트", 120_000, 600_000)]),
+    ("CAT-03", "안전용품", "개인 보호구와 현장 안전 장비", [
+        ("안전모", "개", 8_000, 30_000), ("안전화", "켤레", 35_000, 120_000),
+        ("보안경", "개", 4_000, 25_000), ("방진 마스크", "박스", 15_000, 60_000),
+        ("안전대", "개", 45_000, 180_000)]),
+    ("CAT-04", "체결부품", "볼트, 너트 등 체결용 부품", [
+        ("육각 볼트", "박스", 12_000, 60_000), ("육각 너트", "박스", 8_000, 40_000),
+        ("평 와셔", "박스", 5_000, 25_000), ("앵커 볼트", "박스", 25_000, 110_000),
+        ("블라인드 리벳", "박스", 10_000, 45_000)]),
+    ("CAT-05", "전기자재", "배선과 배전 자재", [
+        ("전선 케이블", "m", 1_200, 15_000), ("누전 차단기", "개", 12_000, 90_000),
+        ("배선 덕트", "m", 3_000, 18_000), ("분전반", "면", 250_000, 1_200_000),
+        ("접지봉", "개", 9_000, 40_000)]),
+    ("CAT-06", "공압유압", "공압, 유압 기기와 부품", [
+        ("에어 호스", "m", 2_000, 12_000), ("공압 실린더", "개", 45_000, 300_000),
+        ("솔레노이드 밸브", "개", 35_000, 220_000), ("유압 펌프", "대", 400_000, 2_500_000),
+        ("원터치 커플러", "개", 3_000, 18_000)]),
+    ("CAT-07", "동력전달", "베어링, 체인, 벨트 등 동력 전달 부품", [
+        ("볼 베어링", "개", 4_000, 60_000), ("롤러 체인", "m", 12_000, 70_000),
+        ("V벨트", "개", 6_000, 40_000), ("기어 감속기", "대", 300_000, 1_800_000),
+        ("축 커플링", "개", 15_000, 120_000)]),
+    ("CAT-08", "포장자재", "출하와 보관을 위한 포장 자재", [
+        ("스트레치 필름", "롤", 9_000, 25_000), ("골판지 상자", "묶음", 15_000, 60_000),
+        ("플라스틱 팔레트", "개", 35_000, 120_000), ("에어 완충재", "롤", 20_000, 70_000),
+        ("결속 밴드", "롤", 12_000, 45_000)]),
+    ("CAT-09", "용접자재", "용접 소모품과 보호구", [
+        ("피복 용접봉", "박스", 25_000, 90_000), ("용접 와이어", "롤", 40_000, 160_000),
+        ("자동 용접 마스크", "개", 45_000, 250_000), ("용접 토치", "개", 60_000, 300_000),
+        ("용접 장갑", "켤레", 5_000, 20_000)]),
+    ("CAT-10", "윤활제", "윤활유와 방청제", [
+        ("다목적 그리스", "통", 25_000, 120_000), ("수용성 절삭유", "통", 60_000, 220_000),
+        ("유압 작동유", "드럼", 250_000, 700_000), ("방청 윤활제", "박스", 30_000, 90_000),
+        ("기어 오일", "통", 50_000, 200_000)]),
+    ("CAT-11", "측정기기", "치수, 압력 등 측정 기기", [
+        ("버니어 캘리퍼스", "개", 30_000, 250_000), ("외측 마이크로미터", "개", 60_000, 400_000),
+        ("레이저 거리계", "개", 80_000, 450_000), ("디지털 수평계", "개", 40_000, 200_000),
+        ("압력 게이지", "개", 15_000, 120_000)]),
+    ("CAT-12", "청소위생", "산업 현장 청소와 위생 용품", [
+        ("산업용 와이퍼", "박스", 20_000, 70_000), ("유흡착포", "박스", 40_000, 150_000),
+        ("중성 세척제", "통", 15_000, 60_000), ("집진기 필터", "개", 30_000, 200_000),
+        ("폐기물 봉투", "묶음", 10_000, 40_000)]),
 ]
 GRADES = ["표준형", "고급형"]
 # (code, name, parent, location, headcount, head rank)
@@ -254,6 +222,12 @@ def _people(rng: random.Random, count: int) -> list[str]:
     return rng.sample(names, count)
 
 
+def price_at(price_history: list[dict], code: str, day: str) -> int:
+    """The 단가 of *code* valid on *day* (ISO date): the latest entry with 적용일 <= day."""
+    rows = [r for r in price_history if r["제품코드"] == code and r["적용일"] <= day]
+    return max(rows, key=lambda r: r["적용일"])["단가"]
+
+
 def build_data() -> Data:
     rng = random.Random(SEED)
 
@@ -297,7 +271,7 @@ def build_data() -> Data:
     # categories, suppliers, products, price history
     categories = [
         {"카테고리코드": code, "카테고리명": name, "설명": desc}
-        for code, name, desc, _, _ in CATEGORIES
+        for code, name, desc, _ in CATEGORIES
     ]
     supplier_names = rng.sample(sorted({c + k for c in SUPPLIER_CORE for k in SUPPLIER_KIND}), 40)
     suppliers: list[dict] = []
@@ -325,9 +299,9 @@ def build_data() -> Data:
         dt.date(2026, 10, 1),
     ]
     reasons = ["원자재 가격 상승", "공급사 단가 조정", "환율 변동", "물량 할인 반영"]
-    for code, _, _, items, unit in CATEGORIES:
-        for item in items:
-            base = math.exp(rng.uniform(math.log(3_000), math.log(600_000)))
+    for code, _, _, items in CATEGORIES:
+        for item, unit, low, high in items:
+            base = math.exp(rng.uniform(math.log(low), math.log(high)))
             for g, grade in enumerate(GRADES):
                 pcode = f"P-{1001 + len(products)}"
                 price = _round(base * (1.0 if g == 0 else rng.uniform(1.4, 1.9)), 100)
@@ -365,11 +339,7 @@ def build_data() -> Data:
         prices[row["제품코드"]].append((row["적용일"], row["단가"]))
 
     def price_on(pcode: str, day: dt.date) -> int:
-        current = prices[pcode][0][1]
-        for start, value in prices[pcode]:
-            if start <= day.isoformat():
-                current = value
-        return current
+        return price_at(price_history, pcode, day.isoformat())
 
     # customers
     customer_names = rng.sample(sorted({c + k for c in COMPANY_CORE for k in COMPANY_KIND}), 300)
@@ -397,7 +367,7 @@ def build_data() -> Data:
         if n < len(customers):  # the first contract follows registration closely
             start = registered + dt.timedelta(days=rng.randrange(120))
         else:
-            start = _date(rng, registered, max(registered, dt.date(2026, 8, 31)))
+            start = _date(rng, registered, max(registered, dt.date(2026, 6, 30)))
         months = rng.choice([6, 12, 12, 12, 24, 24, 36])
         end = _add_months(start, months) - dt.timedelta(days=1)
         drafts.append((start, cust, end))
@@ -442,10 +412,13 @@ def build_data() -> Data:
         if c["상태"] == "해지":
             last = min(last, start + (last - start) / 2)
         days = sorted(
-            _date(rng, start + dt.timedelta(days=min(14, (last - start).days)), last)
+            _date(rng, start + dt.timedelta(days=min(30, (last - start).days)), last)
             for _ in range(n)
         )
-        share = rng.uniform(0.55, 0.95) * c["계약금액"]
+        # bill in proportion to the elapsed part of the contract (no back-loading at AS_OF)
+        end = dt.date.fromisoformat(c["종료일"])
+        elapsed = (last - start).days / max(1, (end - start).days)
+        share = rng.uniform(0.55, 0.95) * c["계약금액"] * min(1.0, max(0.05, elapsed))
         parts = [rng.uniform(0.6, 1.4) for _ in range(n)]
         total = sum(parts)
         for day, part in zip(days, parts, strict=True):
@@ -724,8 +697,10 @@ def write_structured(data: Data, out: Path) -> None:
 
 
 def korean_words(text: str) -> int:
-    """Whitespace-separated tokens that contain Hangul (the "≥ 600 words" rule)."""
-    return sum(1 for w in text.split() if re.search("[가-힣]", w))
+    """Whitespace-separated tokens that contain Hangul in body lines (the "≥ 600 words"
+    rule): Markdown heading lines do not count, readers keep them as section paths."""
+    body = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    return sum(1 for w in body.split() if re.search("[가-힣]", w))
 
 
 def md_html(text: str) -> str:
@@ -1032,6 +1007,11 @@ def report_text(data: Data) -> str:
     best_team = max(teams, key=lambda kv: kv[1][1])[0]
     cats = sorted(by_cat.items(), key=lambda kv: (-kv[1][1], kv[0]))[:6]
     industries = sorted(by_industry.items(), key=lambda kv: (-kv[1][1], kv[0]))
+    best_rate = max(industries, key=lambda kv: kv[1][2] / kv[1][1])
+    worst_rate = min(industries, key=lambda kv: kv[1][2] / kv[1][1])
+    last_year = [i for i in data.invoices if "2025-01-01" <= i["청구일"] <= "2025-09-30"]
+    billed_ly = sum(i["청구금액"] for i in last_year)
+    paid_ly = sum(i["수납금액"] for i in last_year)
     active = sum(1 for c in data.contracts if c["상태"] == "진행중")
     new_2026 = sum(1 for c in data.contracts if c["시작일"].startswith("2026"))
     overdue_total = sum(v[1] for v in overdue.values())
@@ -1044,11 +1024,13 @@ def report_text(data: Data) -> str:
         "## 요약",
         f"- 2026년 1월부터 9월까지 청구서 {len(this_year):,}건, 청구금액 {won(billed)}을 발행했고 "
         f"수납금액은 {won(paid)}으로 수납률은 {pct(paid, billed)}이다",
-        f"- 3분기 청구금액은 {won(q3[1])}으로 2분기 {won(q2[1])}와 비교하여 "
+        f"- 3분기 청구금액은 {won(q3[1])}으로 2분기 {won(q2[1])}과 비교하여 "
         f"{'늘었다' if q3[1] >= q2[1] else '줄었다'}",
         f"- 기준일 현재 진행중인 계약은 {active}건이며 올해 새로 시작한 계약은 {new_2026}건이다",
         f"- 연체 청구서의 미수금 합계는 {won(overdue_total)}으로 연체 고객 관리가 계속 필요하다",
         "- 이 보고서의 금액은 모두 부가가치세를 제외한 원 단위 금액을 억원으로 줄여 표시하였다",
+        f"- 지난해 같은 기간(1~9월) 수납률은 {pct(paid_ly, billed_ly)}이었고 올해는 "
+        f"{pct(paid, billed)}이며, 연체 미수금이 많은 고객은 별도 장에 정리하였다",
         "",
         "| 지표 | 값 |",
         "| --- | --- |",
@@ -1062,7 +1044,7 @@ def report_text(data: Data) -> str:
         "- 수납금액은 그 청구서들에 기준일까지 입금된 금액의 합계이므로 최근 분기일수록 수납률이 낮다",
         "- 납기일은 청구일부터 30일이므로 3분기 말에 발행한 청구서는 아직 납기일이 지나지 않았다",
         "- 정기 납품 계약은 매월 청구하므로 분기별 청구 건수의 변화는 주문 실적의 변화와 함께 움직인다",
-        "- 2025년 같은 분기와 비교하면 계약 갱신이 늘어난 분기에 청구금액도 함께 늘었다",
+        "- 2025년 같은 분기와 비교할 때는 그 분기의 계약 갱신 건수와 신규 계약 건수를 함께 본다",
         "",
         "| 분기 | 청구 건수 | 청구금액 | 수납금액 | 수납률 |",
         "| --- | --- | --- | --- | --- |",
@@ -1074,9 +1056,10 @@ def report_text(data: Data) -> str:
         "",
         "## 영업팀별 실적",
         "- 영업팀별 실적은 계약의 담당자ID가 속한 부서를 기준으로 집계하였다",
-        f"- 올해 청구금액이 가장 많은 팀은 {best_team}이며, 대형 건설 계약의 정기 청구가 큰 몫을 차지했다",
+        f"- 올해 청구금액이 가장 많은 팀은 {best_team}이며, 팀별 금액은 아래 표와 같다",
         "- 영업1팀은 서울·경기·인천·강원, 영업2팀은 영남, 영업3팀은 호남·충청·제주 지역의 고객을 맡는다",
         "- 수납률이 낮은 팀은 연체 고객 주간 보고를 바탕으로 담당자별 방문 계획을 세운다",
+        "- 팀별 청구 건수에는 담당자가 바뀐 계약도 새 담당자의 팀으로 포함하였다",
         "",
         "| 영업팀 | 청구 건수 | 청구금액 | 수납률 |",
         "| --- | --- | --- | --- |",
@@ -1087,10 +1070,12 @@ def report_text(data: Data) -> str:
         "",
         "## 업종별 고객 실적",
         "- 업종은 고객 등록 때 정한 도소매, 제조, 건설, 물류, 공공기관 다섯 가지 분류를 따른다",
-        "- 제조 업종 고객이 고객 수와 청구금액 모두에서 가장 큰 비중을 차지한다",
-        "- 공공기관 고객은 건수는 적지만 연체가 거의 없어 수납률이 높다",
-        "- 건설 업종은 현장 일정에 따라 주문이 몰리므로 분기마다 청구금액의 변동이 크다",
-        "- 도소매 업종은 주문 한 건의 금액은 작지만 주문 건수가 많아 출고 업무의 부담이 크다",
+        f"- 올해 청구금액이 가장 많은 업종은 {industries[0][0]}이고 가장 적은 업종은 "
+        f"{industries[-1][0]}이다",
+        f"- 수납률이 가장 높은 업종은 {best_rate[0]}({pct(best_rate[1][2], best_rate[1][1])})이고 "
+        f"가장 낮은 업종은 {worst_rate[0]}({pct(worst_rate[1][2], worst_rate[1][1])})이다",
+        "- 건설 업종은 현장 일정에 따라 주문이 몰리므로 분기별 청구금액을 함께 살펴야 한다",
+        "- 도소매 업종 고객에게는 소량 주문을 묶어 출고하는 방안을 영업팀과 물류팀이 함께 검토한다",
         "",
         "| 업종 | 청구 건수 | 청구금액 | 수납률 |",
         "| --- | --- | --- | --- |",
@@ -1132,6 +1117,7 @@ def report_text(data: Data) -> str:
         "- 담당자는 이 고객들을 2주 안에 방문하여 지급 계획을 받고 상담 기록에 남긴다",
         "- 90일 이상 연체가 계속되는 고객은 계약관리규정에 따라 계약 해지와 신용등급 조정을 검토한다",
         "- 연체가 해소된 고객은 다음 보고에서 목록에서 빼고 그 사실을 따로 적는다",
+        "- 신용등급이 D로 낮아진 고객과의 새 거래는 선입금이나 보증보험 증권을 조건으로 한다",
         "",
         "| 고객ID | 고객명 | 연체 건수 | 미수금 |",
         "| --- | --- | --- | --- |",
@@ -1230,11 +1216,12 @@ def contacts_rows(data: Data) -> list[dict]:
 def write_documents(data: Data, out: Path) -> dict[str, str]:
     """Write samples/hanbit/documents; returns the text of each document for the word check."""
     texts: dict[str, str] = {}
-    contract = (out / "계약관리규정.md").read_text("utf-8")
-    billing = (out / "청구수납규정.md").read_text("utf-8")
+    contract = (SOURCES / "계약관리규정.md").read_text("utf-8")
+    billing = (SOURCES / "청구수납규정.md").read_text("utf-8")
     texts["계약관리규정"] = contract
     texts["청구수납규정"] = billing
-    WRITTEN.extend([out / "계약관리규정.md", out / "청구수납규정.md"])  # hand-written sources
+    write_bytes(out / "계약관리규정.md", contract.encode("utf-8"))
+    write_bytes(out / "청구수납규정.md", billing.encode("utf-8"))
     write_bytes(out / "계약관리규정.pdf", pdf_bytes(contract, "계약관리규정"))
     write_bytes(out / "계약관리규정.hwpx", hwpx_bytes(contract))
     write_bytes(out / "청구수납규정.docx", docx_bytes(billing, "청구수납규정"))
@@ -1269,6 +1256,7 @@ def write_documents(data: Data, out: Path) -> dict[str, str]:
 
     for name in ("사업수행계획서.hwp", "LICENSE"):
         write_bytes(out / name, (QUICKSTART / "documents" / name).read_bytes())
+        (out / name).chmod((QUICKSTART / "documents" / name).stat().st_mode & 0o777)
     return texts
 
 
@@ -1323,7 +1311,7 @@ def org_chart(data: Data) -> bytes:
     for d in data.departments:
         if d["상위부서코드"]:
             children[d["상위부서코드"]].append(d["부서코드"])
-    width, height = 1800, 900
+    width, height = 1900, 800
     img = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(img)
     title = font(40, bold=True)
@@ -1332,7 +1320,7 @@ def org_chart(data: Data) -> bytes:
         (60, 96), f"기준일 {AS_OF.isoformat()} · 부서코드와 부서장", font=font(22), fill="#56606b"
     )
     big, small = font(26, bold=True), font(20)
-    box_w, box_h = 200, 92
+    box_w, box_h = 180, 92
     leaves = [c for top in children["D01"] for c in children[top]]
     gap = (width - 120 - box_w * len(leaves)) / max(1, len(leaves) - 1)
     pos: dict[str, tuple[float, float]] = {}
@@ -1538,7 +1526,7 @@ def contract_scan_text(data: Data) -> tuple[str, str]:
     codes = sorted({o["제품코드"] for o in lines})[:3] or [data.products[0]["제품코드"]]
     rows = "\n".join(
         f"| {code} | {products[code]['제품명']} | {products[code]['단위']} | "
-        f"{products[code]['표준단가']:,}원 |"
+        f"{price_at(data.price_history, code, contract['시작일']):,}원 |"
         for code in codes
     )
     text = f"""# 물품 공급 계약서

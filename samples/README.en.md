@@ -10,7 +10,7 @@ The content is in Korean. There are two sets.
 | Set | Use it for | Structured | Documents | Images | Document chunks (with kordoc) |
 |---|---|---|---|---|---|
 | `quickstart/` | a first run, a fast build | 3 CSV files (155 rows) | 5 | - | 28 (9 without kordoc) |
-| `hanbit/` | many formats, more data | 9 files -> 11 tables (5,586 rows) | 15 | 6 (OCR) | 120 + 8 from images (38 without kordoc) |
+| `hanbit/` | many formats, more data | 9 files -> 11 tables (5,603 rows) | 15 | 6 (OCR) | 132 + 9 from images (42 without kordoc) |
 
 The chunk counts come from running this repository's readers (`read_document` +
 `chunker.chunk`, default sizes) on the files. Build time grows roughly with the number of
@@ -50,7 +50,7 @@ Generated from a fixed seed by `scripts/gen_samples.py` (see "Regenerating"). Th
 | `products.xlsx` | Excel | sheets `제품` 120, `카테고리` 12 | 제품코드 (`P-####`), name, 카테고리코드 (`CAT-##`), unit, list price, 공급사ID |
 | `employees.sqlite` | SQLite | `employees` 80, `departments` 13 | 사원ID (`E###`), name, 부서코드 (`D##`), rank / department name, parent, head |
 | `suppliers.xls` | Excel 97-2003 | 40 | 공급사ID (`S###`), name, region, main category, since, rating (A-C) |
-| `payments.jsonl` | JSON Lines | 1,672 | payments: 수납ID (`PAY-######`), 청구ID, date, amount, method |
+| `payments.jsonl` | JSON Lines | 1,689 | payments: 수납ID (`PAY-######`), 청구ID, date, amount, method |
 | `price_history.tsv` | TSV | 349 | price history: 제품코드, effective date, price, reason |
 | `orders.parquet` | Parquet | 900 | orders: 주문ID (`O-2025-00042`), 계약ID, 제품코드, date, quantity, unit price, amount |
 
@@ -83,16 +83,16 @@ customers and contracts are members of the three sales teams.
 
 | File | Format | Size | Chunks | Defines |
 |---|---|---|---|---|
-| `계약관리규정.md` `.pdf` `.hwpx` | Markdown / PDF / HWPX | 17 articles, PDF 3 pages | 9 / 10 / 9 | customer, contract, 계약ID/고객ID/담당자ID, contract status, order, product code, approver |
-| `청구수납규정.md` `.docx` | Markdown / Word | 19 articles | 9 / 9 | invoice, 청구ID, due date, payment, 수납ID/method, the four payment statuses, dunning |
-| `품질관리절차서.hwpx` | HWPX | 12 sections | 9 | **concepts no table has**: inspection, lot, defect, non-conformance report, corrective and preventive action |
-| `거래처관리매뉴얼.doc` | Word 97-2003 | 11 sections | 9 | customer and supplier registration, credit grade, supplier rating, industry, region, sales team |
-| `영업전략회의록.pptx` | PowerPoint | 9 slides | 10 | sales targets, focus categories, overdue accounts, renewals, supplier price talks |
-| `분기실적보고.pptx` | PowerPoint | 9 slides | 13 | quarterly billed/paid and collection rate by team, industry, category (computed from the tables) |
+| `계약관리규정.md` `.pdf` `.hwpx` | Markdown / PDF / HWPX | 19 articles, PDF 4 pages | 9 / 11 / 10 | customer, contract, 계약ID/고객ID/담당자ID, contract status, order, product code, approver |
+| `청구수납규정.md` `.docx` | Markdown / Word | 21 articles | 10 / 10 | invoice, 청구ID, due date, payment, 수납ID/method, the four payment statuses, dunning |
+| `품질관리절차서.hwpx` | HWPX | 13 sections | 10 | **concepts no table has**: inspection, lot, defect, non-conformance report, corrective and preventive action |
+| `거래처관리매뉴얼.doc` | Word 97-2003 | 11 sections | 10 | customer and supplier registration, credit grade, supplier rating, industry, region, sales team |
+| `영업전략회의록.pptx` | PowerPoint | 9 slides | 13 | sales targets, focus categories, overdue accounts, renewals, supplier price talks |
+| `분기실적보고.pptx` | PowerPoint | 9 slides | 14 | quarterly billed/paid and collection rate by team, industry, category (computed from the tables) |
 | `조직도.xlsx` | Excel | 3 sheets | 6 | department codes, departments, employee IDs, ranks, what each department does |
 | `단가표.xls` | Excel 97-2003 | 2 sheets | 6 | price per product code, effective date, supplier, pricing rules |
 | `담당자연락망.csv` | CSV | 59 rows | 2 | employee ID, department, rank, extension, sales region |
-| `고객FAQ.html` | HTML | 20 questions | 8 | customer-facing answers on orders, invoices, payments, returns |
+| `고객FAQ.html` | HTML | 24 questions | 10 | customer-facing answers on orders, invoices, payments, returns |
 | `공지사항.txt` | text | 4 notices | 1 | price list change, shipping schedule, account change |
 | `사업수행계획서.hwp` | HWP | 17 sections | 10 | the rhwp HWP sample (same file as in `quickstart`) |
 
@@ -103,10 +103,10 @@ customers and contracts are members of the three sales teams.
 
 | File | Size | Chunks | Content |
 |---|---|---|---|
-| `조직도.png` | 1800x900 | 1 | org chart: department boxes with codes and heads |
+| `조직도.png` | 1900x800 | 1 | org chart: department boxes with codes and heads |
 | `매출추이.png` | 1100x616 | 1 | chart: billed amount per year (bars) and collection rate (line) |
 | `계약서_스캔.jpg` | 1278x1781 | 2 | tilted, noisy scan of a contract (계약ID, 고객ID, product codes, prices) |
-| `청구서_스캔.png` | 1284x1785 | 1 | scan of an invoice of the same contract (청구ID, due date, lines) |
+| `청구서_스캔.png` | 1284x1785 | 2 | scan of an invoice of the same contract (청구ID, due date, lines) |
 | `업무흐름도.webp` | 1600x820 | 2 | flow: register customer -> contract -> order -> outbound inspection -> invoice -> payment -> overdue |
 | `창고현황판.jpg` | 1500x1050 | 1 | photographed whiteboard stock table (product code, stock, safety stock) |
 
@@ -132,8 +132,9 @@ uv run --group dev python scripts/gen_samples.py
 
 Needs macOS (`/usr/bin/textutil`, the AppleGothic font) and kordoc (to write `.hwpx`).
 Re-runs produce the same bytes (pinned timestamps, seeded noise) and end with a manifest of
-bytes and rows/pages per file. The hand-written texts are `documents/*.md` and
-`scripts/sample_sources/`. `--quickstart` also re-renders the quickstart PDF/DOCX from their
+bytes and rows/pages per file. All hand-written texts live in
+`scripts/sample_sources/` (`documents/*.md` are copied from there), so the whole set can be
+rebuilt from an empty `samples/hanbit`. `--quickstart` also re-renders the quickstart PDF/DOCX from their
 Markdown (the bytes then differ from the committed ones).
 
 ## Licences

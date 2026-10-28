@@ -268,13 +268,18 @@ def test_quickstart_foreign_keys_resolve():
     assert {r["계약ID"] for r in _csv(s / "invoices.csv")} <= {r["계약ID"] for r in contracts}
 
 
-def test_generator_reproduces_the_committed_tables(monkeypatch):
+@pytest.fixture
+def gen(monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "gen_samples", REPO_ROOT / "scripts" / "gen_samples.py"
     )
-    gen = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "gen_samples", gen)  # dataclasses need it
-    spec.loader.exec_module(gen)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "gen_samples", module)  # dataclasses need it
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_generator_reproduces_the_committed_tables(gen):
     data = gen.build_data()
     for name in ("customers", "contracts", "invoices"):
         buf = io.StringIO()
@@ -283,6 +288,49 @@ def test_generator_reproduces_the_committed_tables(monkeypatch):
         writer.writeheader()
         writer.writerows(rows)
         assert buf.getvalue().encode() == (HANBIT / "structured" / f"{name}.csv").read_bytes(), name
+
+
+#: Well-known Korean listed companies and business-group stems: no generated customer or
+#: supplier name may match one (the sample company and its partners are fictional).
+REAL_COMPANIES = {
+    "태광산업", "금강공업", "신일산업", "대성산업", "경동나비엔", "남양유업", "동방", "화신",
+    "진흥기업", "우성사료", "제일산업", "삼성물산", "현대건설", "대림산업", "동아건설산업",
+    "한화솔루션", "효성", "두산에너빌리티", "한진", "금호석유", "코오롱인더스트리", "한솔제지",
+    "동원산업", "풍산", "세아베스틸", "영풍", "동국제강", "포스코", "농심", "오뚜기", "대상",
+    "삼양사", "한일시멘트", "일진전기", "대우건설", "쌍용건설", "신세계", "고려아연", "한라",
+    "만도", "넥센타이어", "동양", "LS전선", "GS건설", "롯데케미칼", "SK케미칼", "LG화학",
+}  # fmt: skip
+REAL_STEMS = (
+    "삼성", "현대", "엘지", "LG", "SK", "롯데", "한화", "대림", "동아", "대한", "고려", "태광",
+    "금강", "신일", "대성", "경동", "남양", "효성", "두산", "한진", "금호", "코오롱", "한솔",
+    "동원", "풍산", "세아", "영풍", "동국", "포스코", "농심", "삼양", "한일", "일진", "대우",
+    "쌍용", "신세계", "동양", "한라", "만도", "넥센", "동방", "화신", "진흥", "우성", "제일",
+)  # fmt: skip
+
+
+def _bare(name: str) -> str:
+    return re.sub(r"^주식회사 |\(주\)$", "", name)
+
+
+def test_company_names_are_not_real_companies(hanbit):
+    names = [_bare(r["고객명"]) for r in hanbit["customers"]]
+    names += [_bare(r["공급사명"]) for r in hanbit["suppliers"]]
+    assert len(names) == 340
+    clashes = [n for n in names if n in REAL_COMPANIES or n.startswith(REAL_STEMS)]
+    assert not clashes, clashes
+
+
+def test_contract_scan_prices_match_the_price_history(gen):
+    data = gen.build_data()
+    contract, invoice = gen.scan_pair(data)
+    _, text = gen.contract_scan_text(data)
+    rows = re.findall(r"^\| (P-\d{4}) \|.*\| ([\d,]+)원 \|$", text, re.M)
+    assert rows
+    for code, price in rows:
+        assert int(price.replace(",", "")) == gen.price_at(
+            data.price_history, code, contract["시작일"]
+        )
+    assert invoice["계약ID"] == contract["계약ID"]
 
 
 # --------------------------------------------------------------------------- documents
@@ -314,7 +362,8 @@ def test_document_text_contains_key_terms(name):
     missing = [t for t in KEY_TERMS[name] if t not in text]
     assert not missing, f"{name}: {missing}"
     if name not in ("공지사항.txt", "담당자연락망.csv", "사업수행계획서.hwp"):
-        assert _korean_words(text) >= 600, (name, _korean_words(text))
+        body = "\n".join(s.text for s in doc.sections)  # headings (section paths) excluded
+        assert _korean_words(body) >= 600, (name, _korean_words(body))
 
 
 def test_quality_procedure_defines_document_only_concepts(hanbit):
