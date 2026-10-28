@@ -1,5 +1,5 @@
-"""the align step of ``autoontology build``: link a documents source's concepts to a structured source's
-upstream Terms and enrich the Terms.
+"""The align step of ``autoontology build``: link a documents source's concepts to the
+upstream Terms of every structured source and enrich the Terms.
 
 Steps ``terms -> candidates -> judge -> apply -> report``, persisted like ``build`` and
 ``extract`` (:func:`autoontology.engine.jobs._execute`). The judge writes one
@@ -39,7 +39,7 @@ from autoontology.engine.jobs import (
 from autoontology.store.alignments import AlignmentRecord, AlignmentStore
 from autoontology.store.db import Run, Source, Store, now_iso
 from autoontology.store.documents import DocumentStore
-from autoontology.structured.semantic import StructuredSnapshot, fetch_snapshot
+from autoontology.structured.semantic import StructuredSnapshot, combine, fetch_snapshot
 from autoontology.unstructured import align as al
 from autoontology.unstructured.extractor import LLMBackend, _is_connection_error, upstream_backend
 
@@ -138,7 +138,8 @@ class _AlignCtx:
     docs: DocumentStore
     aligns: AlignmentStore
     source: Source
-    structured: Source
+    #: every structured source whose Terms are candidates (their union)
+    structured: list[Source]
     run: Run
     client: BackendClient
     backends: AlignBackends
@@ -148,15 +149,22 @@ class _AlignCtx:
     min_conf: float
     top_k: int
     _snapshot: StructuredSnapshot | None = None
+    #: sub-step details of this pass (the unified build runs align as one step)
     details: dict[str, Any] = field(default_factory=dict)
+    #: the report folder (None: no align-report.md)
+    report_dir: Path | None = None
 
     @property
     def export_dir(self) -> Path:
-        return self.settings.exports_dir / self.source.name / self.run.id
+        return self.report_dir or self.settings.exports_dir / self.source.name / self.run.id
+
+    @property
+    def structured_label(self) -> str:
+        return "+".join(s.name for s in self.structured)
 
     def snapshot(self, refresh: bool = False) -> StructuredSnapshot:
         if self._snapshot is None or refresh:
-            self._snapshot = fetch_snapshot(self.client, self.structured)
+            self._snapshot = combine([fetch_snapshot(self.client, s) for s in self.structured])
         return self._snapshot
 
 
@@ -188,9 +196,8 @@ def _step_terms(ctx: _AlignCtx) -> dict[str, Any]:
     snap = ctx.snapshot()
     if not snap.terms:
         raise RuntimeError(
-            f"structured source {ctx.structured.name!r} has no Terms in the "
-            f"upstream semantic layer; run `uv run autoontology build "
-            f"--source {ctx.structured.name}` first"
+            f"structured source(s) {ctx.structured_label} have no Terms in the upstream "
+            "semantic layer; run `uv run autoontology build` first"
         )
     for t in snap.terms:
         logger.info(
@@ -201,7 +208,8 @@ def _step_terms(ctx: _AlignCtx) -> dict[str, Any]:
             " [fallback]" if t.is_fallback else "",
         )
     return {
-        "structured_source": ctx.structured.name,
+        "structured_source": ctx.structured_label,
+        "structured_sources": [s.name for s in ctx.structured],
         "database_id": snap.database_id,
         "terms": len(snap.terms),
         "term_names": [t.name for t in snap.terms],
@@ -261,13 +269,15 @@ def _step_candidates(ctx: _AlignCtx) -> dict[str, Any]:
 
 def _record(ctx: _AlignCtx, concept: al.ConceptInfo, relation: str, **kw: Any) -> AlignmentRecord:
     kw.setdefault("dry_run", ctx.dry_run)
+    term_id = kw.get("term_id") or ""
     return AlignmentRecord(
         source_id=ctx.source.id,
         concept_id=concept.id,
         concept_name=concept.name,
         relation=relation,
         run_id=ctx.run.id,
-        structured_source=ctx.structured.name,
+        # the structured source that owns the verdict's Term (none: every candidate source)
+        structured_source=ctx.snapshot().source_of(term_id) if term_id else ctx.structured_label,
         **kw,
     )
 
@@ -289,7 +299,12 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
     snap = ctx.snapshot()
     terms = snap.term_map()
     steps = {s.name: s for s in ctx.store.get_steps(ctx.run.id)}
-    candidates = steps["candidates"].detail.get("candidates", {}) if "candidates" in steps else {}
+    if "candidates" in ctx.details:
+        candidates = ctx.details["candidates"].get("candidates", {})
+    else:
+        candidates = (
+            steps["candidates"].detail.get("candidates", {}) if "candidates" in steps else {}
+        )
     judge = al.make_alignment_judge(ctx.backends.judge())
     model = ctx.backends.judge_model()
     concepts = _concepts(ctx)
@@ -403,9 +418,8 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
             (
                 r
                 for r in (existing, ctx.aligns.get(concept.id, preview=True))
-                if r is not None
-                and r.judge_key == key
-                and r.structured_source == ctx.structured.name
+                # the key covers the candidate Term ids, so it never matches across sources
+                if r is not None and r.judge_key == key
             ),
             None,
         )
@@ -518,12 +532,11 @@ def _raw_verdict(record: AlignmentRecord) -> al.ValidatedVerdict:
 def _step_apply(ctx: _AlignCtx) -> dict[str, Any]:
     # eligible rather than `accepted`: a dry run persists accepted=False but still plans
     # the verdicts of this mode's table: a dry run plans from its previews
+    known = ctx.snapshot().term_map()
     eligible = [
         a
         for a in ctx.aligns.list(ctx.source.id, preview=ctx.dry_run)
-        if _eligible(ctx, a.relation, a.confidence)
-        and a.structured_source == ctx.structured.name
-        and a.term_id
+        if _eligible(ctx, a.relation, a.confidence) and a.term_id in known
     ]
     concepts = {c.id: c for c in ctx.docs.list_concepts(ctx.source.id)}
     matches: dict[str, list[al.SameMatch]] = {}
@@ -642,10 +655,11 @@ def _step_report(ctx: _AlignCtx) -> dict[str, Any]:
     from autoontology.export import align_report
 
     steps = {s.name: s.detail for s in ctx.store.get_steps(ctx.run.id)}
+    steps.update(ctx.details)
     path = align_report.write(
         ctx.export_dir,
         source=ctx.source.name,
-        structured=ctx.structured.name,
+        structured=ctx.structured_label,
         run_id=ctx.run.id,
         alignments=ctx.aligns.list(ctx.source.id, preview=ctx.dry_run),
         concepts=ctx.docs.list_concepts(ctx.source.id),
@@ -842,7 +856,7 @@ def _run_align_held(
         docs=docs,
         aligns=AlignmentStore(store),
         source=source,
-        structured=structured,
+        structured=[structured],
         run=run,
         client=client,
         backends=backends or AlignBackends(settings),
@@ -929,3 +943,84 @@ def _retry_pending_refreshes(
             "done" if ok else "FAILED again",
         )
     return out
+
+
+def align_pass(
+    *,
+    settings: Settings,
+    store: Store,
+    run: Run,
+    source: Source,
+    structured: list[Source],
+    client: BackendClient,
+    backends: AlignBackends | None = None,
+    writer: al.TermWriter | None = None,
+    report_dir: Path | None = None,
+    min_sim: float | None = None,
+    min_conf: float | None = None,
+    top_k: int = al.DEFAULT_TOP_K,
+) -> dict[str, Any]:
+    """Align documents *source* to the union of the Terms of *structured*, inside the run
+    *run* (the ``align:<source>`` step of ``autoontology build``): the align steps run in
+    order in memory; the judge's ``concept:<id>`` rows are written to *run*, so a resumed
+    build continues per concept. Returns the step detail (no per-concept candidate lists)."""
+    try:
+        min_sim = al.min_sim_from_env() if min_sim is None else min_sim
+        min_conf = al.min_conf_from_env() if min_conf is None else min_conf
+    except ValueError as exc:
+        raise JobError(str(exc)) from exc
+    ctx = _AlignCtx(
+        settings=settings,
+        store=store,
+        docs=DocumentStore(store),
+        aligns=AlignmentStore(store),
+        source=source,
+        structured=structured,
+        run=run,
+        client=client,
+        backends=backends or AlignBackends(settings),
+        writer=writer or UpstreamTermWriter(settings, client),
+        dry_run=False,
+        min_sim=min_sim,
+        min_conf=min_conf,
+        top_k=top_k,
+        report_dir=report_dir,
+    )
+    for name in ALIGN_STEPS:
+        if name == "report" and report_dir is None:
+            continue
+        started = time.monotonic()
+        detail = ALIGN_STEP_FUNCS[name](ctx)
+        detail["seconds"] = round(time.monotonic() - started, 1)
+        ctx.details[name] = detail
+        logger.info("  align %s: ok (%.1fs)", name, detail["seconds"])
+    terms, judge, apply = (ctx.details[k] for k in ("terms", "judge", "apply"))
+    rows = [a for a in ctx.aligns.list(source.id) if not a.dry_run]
+    return {
+        "structured_sources": terms["structured_sources"],
+        "terms": terms["terms"],
+        "fallback_terms": terms["fallback_terms"],
+        "alignable": ctx.details["candidates"]["alignable"],
+        "with_candidates": ctx.details["candidates"]["with_candidates"],
+        "relations": judge["relations"],
+        "judged": judge["judged"],
+        "cached": judge["cached"],
+        "resumed": judge["resumed"],
+        "failed": judge["failed"],
+        "failed_concepts": judge["failed_concepts"],
+        "partial": judge["partial"],
+        "accepted": sum(a.accepted for a in rows),
+        "accepted_same": sorted(
+            f"{a.concept_name} -> {a.term_name}"
+            for a in rows
+            if a.accepted and a.relation == "same"
+        ),
+        "applied": apply["applied"],
+        "unchanged": apply["unchanged"],
+        "refresh_failed": apply["refresh_failed"],
+        "min_sim": min_sim,
+        "min_conf": min_conf,
+        "top_k": top_k,
+        "identity_policy": al.IDENTITY_POLICY_VERSION,
+        **({"report": ctx.details["report"]["report"]} if "report" in ctx.details else {}),
+    }

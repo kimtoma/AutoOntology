@@ -11,7 +11,8 @@ from fastapi.testclient import TestClient
 
 from autoontology.config import Settings
 from autoontology.engine import export_job
-from autoontology.export import merged, rdf
+from autoontology.export import rdf
+from autoontology.ontology import model as merged
 from autoontology.playground import prompts
 from autoontology.playground.elements import elements_from_model
 from autoontology.playground.index import ElementIndex, build_index
@@ -21,7 +22,6 @@ from autoontology.playground.sparql import (
     EXAMPLES,
     SparqlError,
     SparqlRunner,
-    latest_ttl,
 )
 from autoontology.playground.store import PlaygroundStore
 from autoontology.store.alignments import AlignmentRecord, AlignmentStore
@@ -375,8 +375,7 @@ def ttl(tmp_path, model):
 
 def test_sparql_examples_all_execute(ttl):
     runner = SparqlRunner()
-    run_id, path = latest_ttl(ttl.parents[2], "hanbit-docs")
-    assert run_id == "20261028T000000Z-abcdef"
+    run_id, path = "r1", ttl
     assert len(EXAMPLES) == 8
     results = {ex["id"]: runner.run_file(run_id, path, ex["query"]) for ex in EXAMPLES}
     assert list(runner._graphs) == [run_id]  # parsed once, cached for every example
@@ -384,7 +383,7 @@ def test_sparql_examples_all_execute(ttl):
     assert all(r["type"] == "SELECT" for r in results.values())
     labels = {row[1] for row in results["classes"]["rows"]}
     assert {"Contracts", "Customers", "담당자"} <= labels
-    assert results["classes"]["rows"][0][0].startswith("os:")
+    assert results["classes"]["rows"][0][0].startswith("ao:")
     syn = {r[1]: r[2] for r in results["term-synonyms"]["rows"]}
     assert "계약서" in syn["Contracts"]
     assert any(r[0] == "신규 계약" for r in results["aligned-concepts"]["rows"])
@@ -520,9 +519,8 @@ def test_store_conversations(tmp_path):
     assert [m["role"] for m in msgs] == ["user", "assistant"]
     assert msgs[1]["retrieved"] == ["term-t-c"] and msgs[1]["citations"]["E1"]["id"]
     assert pg.list_conversations(src.id)[0]["messages"] == 2
-    # deleting the source removes everything of it
-    store.delete_source(src.id)
-    assert pg.get_conversation(cid) is None
+    assert pg.list_conversations("other") == []  # keyed by scope
+    assert pg.delete_conversation(cid) and pg.get_conversation(cid) is None
 
 
 # --- router LLM ----------------------------------------------------------------------------
@@ -668,14 +666,22 @@ def _sse(text):
 def client(isolated_env, monkeypatch):
     settings = Settings.from_env()
     store, src = _seed(settings)
-    monkeypatch.setattr(export_job, "fetch_snapshot", lambda client, source: _snapshot())
+    store.save_snapshot(
+        "r1",
+        merged.build(
+            settings.workspace,
+            structured=[_snapshot()],
+            documents=export_job.documents_inputs(store, [src]),
+            base=settings.base_iri,
+        ),
+    )
     app = web.create_app(settings)
     llm = FakeLLM()
     embed = FakeEmbedder()
     api = app.state.api
     app.state.playground = Playground(
         api.store,
-        model_for=api.graph_model,
+        model_for=api.latest_model,
         llm_factory=lambda: llm,
         embedder_factory=lambda: (embed, "fake-embed"),
     )
@@ -684,7 +690,7 @@ def client(isolated_env, monkeypatch):
 
 def test_chat_streams_cites_and_persists(client):
     c, settings, app, llm, embed = client
-    resp = c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "계약이란?"})
+    resp = c.post(f"{API}/chat", json={"question": "계약이란?"})
     assert resp.status_code == 200, resp.text
     events = _sse(resp.text)
     names = [n for n, _ in events]
@@ -712,7 +718,6 @@ def test_chat_streams_cites_and_persists(client):
     resp = c.post(
         f"{API}/chat",
         json={
-            "source": "hanbit-docs",
             "question": "담당자는?",
             "conversation_id": done["conversation_id"],
         },
@@ -720,34 +725,31 @@ def test_chat_streams_cites_and_persists(client):
     assert _sse(resp.text)[-1][0] == "done"
     assert embed.calls == [(1, "query")]
     assert [m["content"] for m in llm.messages[-1][1:3]] == ["계약이란?", llm.answer]
-    lst = c.get(f"{API}/conversations", params={"source": "hanbit-docs"}).json()
+    lst = c.get(f"{API}/conversations").json()
     assert lst["conversations"][0]["messages"] == 4
-    status = c.get(f"{API}/index", params={"source": "hanbit-docs"}).json()
+    status = c.get(f"{API}/index").json()
     assert status["stale"] is False and status["index"]["model"] == "fake-embed"
     # errors before the stream starts are plain JSON errors
-    assert c.post(f"{API}/chat", json={"source": "nope", "question": "x"}).status_code == 404
     assert (
         c.post(
             f"{API}/chat",
-            json={"source": "hanbit-docs", "question": "x", "conversation_id": "0" * 32},
+            json={"question": "x", "conversation_id": "0" * 32},
         ).status_code
         == 404
     )
-    assert c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": ""}).status_code == 400
+    assert c.post(f"{API}/chat", json={"question": ""}).status_code == 400
 
 
-def test_one_llm_call_per_source(client):
+def test_one_llm_call_per_workspace(client):
     c, settings, app, llm, _ = client
     pg = app.state.playground
-    src = pg.store.get_source("hanbit-docs")
-    with pg.slot(src):
-        resp = c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "x"})
+    with pg.slot(settings.workspace):
+        resp = c.post(f"{API}/chat", json={"question": "x"})
         assert resp.status_code == 409 and resp.json()["error"] == "playground_busy"
-        # another source is not blocked
-        other = c.post(f"{API}/chat", json={"source": "hanbit", "question": "x"})
-        assert other.status_code == 200
+        old = c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "x"})
+        assert old.status_code == 400  # no per-source scope any more
     # released after the stream
-    assert c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "x"}).status_code == 200
+    assert c.post(f"{API}/chat", json={"question": "x"}).status_code == 200
 
 
 def test_chat_error_event_when_the_provider_fails(client):
@@ -758,7 +760,7 @@ def test_chat_error_event_when_the_provider_fails(client):
         yield  # pragma: no cover
 
     llm.stream = broken
-    events = _sse(c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "x"}).text)
+    events = _sse(c.post(f"{API}/chat", json={"question": "x"}).text)
     assert events[-1] == (
         "error",
         {"status": 504, "error": "provider_timeout", "detail": "ollama did not answer within 270s"},
@@ -767,19 +769,19 @@ def test_chat_error_event_when_the_provider_fails(client):
 
 def test_sparql_endpoint(client, model):
     c, settings, _, _, _ = client
-    assert (
-        c.post(f"{API}/sparql", json={"source": "hanbit-docs", "query": "ASK {}"}).json()["error"]
-        == "no_export"
-    )
-    out = settings.exports_dir / "hanbit-docs" / "20261028T000000Z-abcdef"
+    # no export of the latest snapshot yet: its Turtle is written to the cache on demand
+    first = c.post(f"{API}/sparql", json={"query": "ASK { ?s a owl:Class }"}).json()
+    assert first["revision"] == 1 and first["ttl"] == "ontology-r1.ttl"
+    assert (settings.home / "cache" / "ontology-r1.ttl").is_file()
+    out = settings.exports_dir / "r0001"
     out.mkdir(parents=True)
     rdf.write(model, out)
     examples = c.get(f"{API}/sparql/examples").json()["examples"]
     for ex in examples:
-        r = c.post(f"{API}/sparql", json={"source": "hanbit-docs", "query": ex["query"]})
+        r = c.post(f"{API}/sparql", json={"query": ex["query"]})
         assert r.status_code == 200, (ex["id"], r.text)
-        assert r.json()["export"] == "20261028T000000Z-abcdef"
-    bad = c.post(f"{API}/sparql", json={"source": "hanbit-docs", "query": "SELECT * WHERE {"})
+        assert r.json()["ttl"] == "ontology.ttl" and r.json()["revision"] == 1
+    bad = c.post(f"{API}/sparql", json={"query": "SELECT * WHERE {"})
     assert bad.status_code == 400 and bad.json()["error"] == "sparql_syntax"
 
 
@@ -823,7 +825,7 @@ def test_sql_passthrough_relays_events_and_handles_storage_and_409(client, monke
     events = _sse(
         c.post(
             f"{API}/sql",
-            json={"source": "hanbit-docs", "question": "고객 수는?", "conversation_id": conv},
+            json={"question": "고객 수는?", "conversation_id": conv},
         ).text
     )
     assert [n for n, _ in events] == ["meta", "step", "result", "done"]
@@ -885,7 +887,7 @@ def _asgi_post_then_leave(app, path, body):
 @pytest.mark.parametrize(
     "path,body",
     [
-        ("/chat", {"source": "hanbit-docs", "question": "계약이란?"}),
+        ("/chat", {"question": "계약이란?"}),
     ],
 )
 def test_slot_is_released_when_the_client_leaves_before_the_stream(client, path, body):
@@ -909,7 +911,7 @@ def test_slot_is_released_when_the_client_leaves_before_the_stream(client, path,
     assert _asgi_post_then_leave(bare, f"{API}{path}", body) == [200]
     assert pg._busy == set()  # leaked before the BackgroundTask release (409 forever)
     assert calls == []  # the generator really never ran
-    assert c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "x"}).status_code == 200
+    assert c.post(f"{API}/chat", json={"question": "x"}).status_code == 200
 
 
 def test_labels_and_history_are_escaped_in_prompts(model):
@@ -926,7 +928,7 @@ def test_labels_and_history_are_escaped_in_prompts(model):
 
 
 def test_graph_links_are_encoded_and_only_for_graph_nodes():
-    from autoontology.export.merged import LITERAL, MergedOntology, OClass, OProperty
+    from autoontology.ontology.model import LITERAL, MergedOntology, OClass, OProperty
 
     m = MergedOntology(name="x", base="https://x#")
     m.classes["term-a b"] = OClass("term-a b", "A", "structured")
@@ -996,7 +998,7 @@ def test_conversation_delete_and_pruning(tmp_path, monkeypatch, client):
     assert len(kept) == 3 and set(kept) == set(ids[2:])
     # REST delete
     c = client[0]
-    done = _sse(c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "x"}).text)
+    done = _sse(c.post(f"{API}/chat", json={"question": "x"}).text)
     cid = done[-1][1]["conversation_id"]
     assert c.delete(f"{API}/conversations/{cid}").json() == {"deleted": cid}
     assert c.get(f"{API}/conversations/{cid}").status_code == 404
@@ -1009,7 +1011,7 @@ def test_sparql_query_length_cap(ttl, client):
     with pytest.raises(SparqlError) as err:
         runner.run_file("r", ttl, long)
     assert err.value.code == "sparql_too_long"
-    r = client[0].post(f"{API}/sparql", json={"source": "hanbit-docs", "query": long})
+    r = client[0].post(f"{API}/sparql", json={"query": long})
     assert r.status_code == 400 and r.json()["error"] == "invalid_request"
 
 
@@ -1076,7 +1078,7 @@ def test_truncated_chat_is_saved_incomplete_and_never_done(client):
     c, settings, app, llm, embed = client
     trunc = TruncatingLLM()
     app.state.playground.llm_factory = lambda: trunc
-    resp = c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "계약이란?"})
+    resp = c.post(f"{API}/chat", json={"question": "계약이란?"})
     events = _sse(resp.text)
     names = [n for n, _ in events]
     assert "done" not in names and "citations" not in names
@@ -1092,7 +1094,6 @@ def test_truncated_chat_is_saved_incomplete_and_never_done(client):
     c.post(
         f"{API}/chat",
         json={
-            "source": "hanbit-docs",
             "question": "다시",
             "conversation_id": info["conversation_id"],
         },

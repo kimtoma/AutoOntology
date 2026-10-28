@@ -7,7 +7,7 @@ from pathlib import Path
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import DCTERMS, OWL, PROV, RDF, RDFS, SKOS, XSD
 
-from autoontology.export.merged import LITERAL, THING, MergedOntology, lang_of
+from autoontology.ontology.model import LITERAL, THING, MergedOntology, lang_of
 
 VOCAB = {
     "Metric": "Metric (metric concept)",
@@ -22,7 +22,7 @@ def _text(value: str) -> Literal:
 
 def to_graph(model: MergedOntology) -> Graph:
     g = Graph()
-    os_ = Namespace(model.base)
+    ao = Namespace(model.base)
     for prefix, ns in (
         ("owl", OWL),
         ("rdfs", RDFS),
@@ -31,7 +31,7 @@ def to_graph(model: MergedOntology) -> Graph:
         ("prov", PROV),
         ("dcterms", DCTERMS),
         ("xsd", XSD),
-        ("os", os_),
+        ("ao", ao),
     ):
         g.bind(prefix, ns, override=True)
     onto = URIRef(model.base.rstrip("#"))
@@ -49,12 +49,12 @@ def to_graph(model: MergedOntology) -> Graph:
             return XSD[local[4:]]
         if local in ("Concept",):
             return SKOS.Concept
-        return os_[local]
+        return ao[local]
 
     # vocabulary: rdfs:Class (not owl:Class), so owl:Class counts only the ontology's
     for local, label in VOCAB.items():
-        g.add((os_[local], RDF.type, RDFS.Class))
-        g.add((os_[local], RDFS.label, _text(label)))
+        g.add((ao[local], RDF.type, RDFS.Class))
+        g.add((ao[local], RDFS.label, _text(label)))
     for prop, label in (
         ("source", "source"),
         ("sourceColumn", "source column"),
@@ -66,30 +66,30 @@ def to_graph(model: MergedOntology) -> Graph:
         ("alignmentConfidence", "alignment confidence"),
         ("verified", "quote verified"),
     ):
-        g.add((os_[prop], RDF.type, OWL.AnnotationProperty))
-        g.add((os_[prop], RDFS.label, Literal(label, lang="en")))
+        g.add((ao[prop], RDF.type, OWL.AnnotationProperty))
+        g.add((ao[prop], RDFS.label, Literal(label, lang="en")))
 
     for ev in model.evidence.values():
-        e = os_[ev.local]
+        e = ao[ev.local]
         g.add((e, RDF.type, PROV.Entity))
-        g.add((e, DCTERMS.source, os_[ev.document]))
-        g.add((e, os_.quote, _text(ev.quote)))
-        g.add((e, os_.verified, Literal(ev.verified)))
+        g.add((e, DCTERMS.source, ao[ev.document]))
+        g.add((e, ao.quote, _text(ev.quote)))
+        g.add((e, ao.verified, Literal(ev.verified)))
         if ev.page is not None:
-            g.add((e, os_.page, Literal(int(ev.page))))
+            g.add((e, ao.page, Literal(int(ev.page))))
     for d in model.documents.values():
-        u = os_[d.local]
+        u = ao[d.local]
         g.add((u, RDF.type, PROV.Entity))
         g.add((u, DCTERMS.title, _text(d.title)))
         g.add((u, DCTERMS.identifier, Literal(d.sha256)))
-        g.add((u, os_.path, Literal(d.path)))
-        g.add((u, os_.source, Literal("document")))
+        g.add((u, ao.path, Literal(d.path)))
+        g.add((u, ao.source, Literal("document")))
 
     for c in model.classes.values():
-        u = os_[c.local]
+        u = ao[c.local]
         g.add((u, RDF.type, OWL.Class))
         for t in c.extra_types:
-            g.add((u, RDF.type, os_[t]))
+            g.add((u, RDF.type, ao[t]))
         g.add((u, RDFS.label, _text(c.label)))
         g.add((u, SKOS.prefLabel, _text(c.label)))
         for alt in c.alt_labels:
@@ -98,14 +98,14 @@ def to_graph(model: MergedOntology) -> Graph:
             g.add((u, RDFS.comment, _text(c.comment)))
         for definition in c.definitions:
             g.add((u, SKOS.definition, _text(definition)))
-        g.add((u, os_.source, Literal(c.source)))
+        g.add((u, ao.source, Literal(c.source)))
         for table in c.tables:
             g.add((u, DCTERMS.source, Literal(table)))
         for ev in c.derived_from:
-            g.add((u, PROV.wasDerivedFrom, os_[ev]))
+            g.add((u, PROV.wasDerivedFrom, ao[ev]))
 
     for i in model.individuals.values():
-        u = os_[i.local]
+        u = ao[i.local]
         g.add((u, RDF.type, OWL.NamedIndividual))
         g.add((u, RDF.type, node(i.type)))
         g.add((u, RDFS.label, _text(i.label)))
@@ -114,29 +114,29 @@ def to_graph(model: MergedOntology) -> Graph:
             g.add((u, SKOS.altLabel, _text(alt)))
         if i.comment:
             g.add((u, RDFS.comment, _text(i.comment)))
-        g.add((u, os_.source, Literal("document")))
+        g.add((u, ao.source, Literal("document")))
         for ev in i.derived_from:
-            g.add((u, PROV.wasDerivedFrom, os_[ev]))
+            g.add((u, PROV.wasDerivedFrom, ao[ev]))
 
     for p in model.properties.values():
-        u = os_[p.local]
+        u = ao[p.local]
         g.add((u, RDF.type, OWL.ObjectProperty if p.kind == "object" else OWL.DatatypeProperty))
         g.add((u, RDFS.label, _text(p.label)))
         g.add((u, RDFS.domain, node(p.domain)))
         g.add((u, RDFS.range, node(p.range)))
-        g.add((u, os_.source, Literal(p.source)))
+        g.add((u, ao.source, Literal(p.source)))
         if p.comment:
             g.add((u, RDFS.comment, _text(p.comment)))
         if p.source_column:
-            g.add((u, os_.sourceColumn, Literal(p.source_column)))
+            g.add((u, ao.sourceColumn, Literal(p.source_column)))
         if p.datatype:
-            g.add((u, os_.datatype, Literal(p.datatype)))
+            g.add((u, ao.datatype, Literal(p.datatype)))
         if p.sub_property_of:
-            g.add((u, RDFS.subPropertyOf, os_[p.sub_property_of]))
+            g.add((u, RDFS.subPropertyOf, ao[p.sub_property_of]))
         if p.value_concept:
-            g.add((u, os_.valueConcept, os_[p.value_concept]))
+            g.add((u, ao.valueConcept, ao[p.value_concept]))
         for ev in p.derived_from:
-            g.add((u, PROV.wasDerivedFrom, os_[ev]))
+            g.add((u, PROV.wasDerivedFrom, ao[ev]))
 
     for a in model.axioms:
         s, o = node(a.subject), node(a.object)
@@ -148,13 +148,13 @@ def to_graph(model: MergedOntology) -> Graph:
         g.add((st, RDF.subject, s))
         g.add((st, RDF.predicate, predicate))
         g.add((st, RDF.object, o))
-        g.add((st, os_.source, Literal(a.source)))
+        g.add((st, ao.source, Literal(a.source)))
         if a.confidence is not None:
-            g.add((st, os_.alignmentConfidence, Literal(round(float(a.confidence), 3))))
+            g.add((st, ao.alignmentConfidence, Literal(round(float(a.confidence), 3))))
         if a.rationale:
             g.add((st, RDFS.comment, _text(a.rationale)))
         for ev in a.derived_from:
-            g.add((st, PROV.wasDerivedFrom, os_[ev]))
+            g.add((st, PROV.wasDerivedFrom, ao[ev]))
     return g
 
 
@@ -166,7 +166,7 @@ def write(model: MergedOntology, out_dir: Path) -> dict[str, Path]:
     context = {
         k: str(v)
         for k, v in g.namespaces()
-        if k in ("owl", "rdfs", "rdf", "skos", "prov", "dcterms", "xsd", "os")
+        if k in ("owl", "rdfs", "rdf", "skos", "prov", "dcterms", "xsd", "ao")
     }
     jsonld.write_text(
         g.serialize(format="json-ld", context=context, indent=2, ensure_ascii=False),
@@ -181,7 +181,7 @@ def roundtrip(
     """Re-parse the Turtle file and check the invariants the export promises:
 
     * owl:Class count = *expected_classes* (computed by the caller from the inputs,
-      :func:`autoontology.export.merged.expected_class_count`, not from the model);
+      :func:`autoontology.ontology.model.expected_class_count`, not from the model);
     * every owl:ObjectProperty / owl:DatatypeProperty has an rdfs:domain and rdfs:range;
     * every document concept (own class, individual, or folded into a Term) has at least
       one ``prov:wasDerivedFrom`` -- except concepts that have no evidence row at all, which
@@ -205,16 +205,16 @@ def roundtrip(
     }
     ok = not no_domain_range and (expected_classes is None or len(classes) == expected_classes)
     if model is not None:
-        os_ = Namespace(model.base)
+        ao = Namespace(model.base)
         nodes: dict[str, list[str]] = {}  # node IRI -> its evidence in the model
         for c in model.classes.values():
             if c.source == "document":
-                nodes[str(os_[c.local])] = c.derived_from
+                nodes[str(ao[c.local])] = c.derived_from
         for i in model.individuals.values():
-            nodes[str(os_[i.local])] = i.derived_from
+            nodes[str(ao[i.local])] = i.derived_from
         for m in model.merges:
-            nodes.setdefault(str(os_[m.term_local]), [])
-            nodes[str(os_[m.term_local])] = nodes[str(os_[m.term_local])] + m.derived_from
+            nodes.setdefault(str(ao[m.term_local]), [])
+            nodes[str(ao[m.term_local])] = nodes[str(ao[m.term_local])] + m.derived_from
         missing = sorted(n for n in nodes if (URIRef(n), PROV.wasDerivedFrom, None) not in g)
         no_evidence = [n for n in missing if not nodes[n]]
         unexpected = [n for n in missing if nodes[n]]

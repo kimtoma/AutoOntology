@@ -1,8 +1,11 @@
-"""Build orchestration with persisted steps (``autoontology build``).
+"""Structured-source steps and the shared job machinery (logging, leases, stale runs,
+the step executor).
 
-Steps, in order: ``load`` (files sources only) -> ``register_connection`` -> ``ingest``
--> ``compile`` -> ``export``. Every step writes its ``steps`` row when it starts and when
-it ends; ``--resume`` reuses the source's latest build run and skips its succeeded steps.
+``autoontology build`` (:mod:`autoontology.engine.build`) runs the step functions here
+(``load`` -> ``register`` -> ``ingest`` -> ``compile``) for every structured source inside
+its one run. :func:`run_structured` is the single-source runner of the same steps (plus
+the per-source upstream ``export``), kept for library use and the step tests; every step
+writes its ``steps`` row when it starts and when it ends.
 
 Ingest and compile run upstream code **in-process and synchronously** so completion and
 exceptions are known. ``auto_ontology`` freezes model/DB settings at import time, so all
@@ -1082,7 +1085,7 @@ def _execute(
     return result
 
 
-def run_build(
+def run_structured(
     source_name: str,
     *,
     resume: bool,

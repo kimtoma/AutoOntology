@@ -131,11 +131,12 @@ def test_concurrent_migrators_apply_each_migration_once(tmp_path):
     assert Store(path).schema_version() == MIGRATIONS[-1][0]
 
 
-def test_schema_v1_has_every_table_and_no_playground_tests(store):
+def test_schema_has_every_table_and_no_playground_tests(store):
     with store._conn() as conn:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         cols = {r[1] for r in conn.execute("PRAGMA table_info(alignments)")}
         msg_cols = {r[1] for r in conn.execute("PRAGMA table_info(playground_messages)")}
+        conv_cols = {r[1] for r in conn.execute("PRAGMA table_info(playground_conversations)")}
     assert {
         "sources",
         "runs",
@@ -143,7 +144,7 @@ def test_schema_v1_has_every_table_and_no_playground_tests(store):
         "source_leases",
         "file_manifests",
         "semantic_baselines",
-        "ontology_revision",
+        "ontology_snapshots",
         "documents",
         "chunks",
         "concepts",
@@ -160,9 +161,10 @@ def test_schema_v1_has_every_table_and_no_playground_tests(store):
         "playground_messages",
         "schema_version",
     } <= tables
-    assert not {"playground_tests", "playground_test_runs"} & tables
+    assert not {"playground_tests", "playground_test_runs", "ontology_revision"} & tables
     assert {"dry_run", "proposal_json"} <= cols and "incomplete" in msg_cols
-    assert store.schema_version() == 1
+    assert "scope" in conv_cols and "source_id" not in conv_cols  # v2: workspace-scoped
+    assert store.schema_version() == 2
 
 
 def _hold_write_lock(path):

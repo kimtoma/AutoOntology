@@ -3,6 +3,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from autoontology.cli import app
+from autoontology.engine import build as build_job
 from autoontology.engine import jobs
 from autoontology.structured import remove
 
@@ -21,7 +22,7 @@ def test_source_add_list_and_runs(isolated_env):
     res = runner.invoke(app, ["source", "list"])
     assert "demo" in res.output and "files" in res.output
     assert "no runs" in runner.invoke(app, ["runs"]).output
-    assert runner.invoke(app, ["runs", "--source", "nope"]).exit_code == 1
+    assert runner.invoke(app, ["runs", "--source", "nope"]).exit_code == 2  # no such option
 
 
 def _demo_source(isolated_env) -> None:
@@ -70,53 +71,26 @@ def test_build_failure_exits_1_with_log_path(isolated_env, monkeypatch):
             "step compile failed: boom", run_id="r1", step="compile", log_path=Path("/x/jobs.log")
         )
 
-    monkeypatch.setattr(jobs, "run_build", fail)
+    monkeypatch.setattr(build_job, "run_build", fail)
     res = runner.invoke(app, ["build"])
     assert res.exit_code == 1
-    assert "build demo failed: step compile failed: boom" in res.output
+    assert "build failed: step compile failed: boom" in res.output
     assert "log: /x/jobs.log" in res.output and "--resume" in res.output
 
 
-def test_build_runs_every_kind_in_order(isolated_env, monkeypatch):
-    from autoontology.engine import align as align_job
-    from autoontology.engine import extract as extract_job
-
+def test_build_passes_sources_and_resume(isolated_env, monkeypatch):
     _demo_source(isolated_env)
-    docs = Path(isolated_env) / "docs"
-    docs.mkdir()
-    (docs / "a.md").write_text("# A\n")
-    runner.invoke(app, ["source", "add", str(docs), "--name", "demo-docs", "--kind", "documents"])
     calls = []
 
-    class _R:
-        def __init__(self, run_id):
-            self.run_id, self.status, self.export_dir, self.details = run_id, "succeeded", None, {}
+    def fake(store, settings, **kw):
+        calls.append(kw)
+        return build_job.BuildResult(run_id="b1", status="succeeded", revision=3, counts={})
 
-    def build(name, **kw):
-        calls.append(("build", name, kw["resume"]))
-        store = kw["store"]
-        store.set_catalog_database_id(store.get_source(name).id, "db1")
-        return _R("b1")
-
-    def extract(name, target, **kw):
-        calls.append(("extract", name, Path(target).name, kw["resume"]))
-        return _R("e1")
-
-    def align(name, **kw):
-        calls.append(("align", name, kw["structured_source"], kw["resume"]))
-        return _R("a1")
-
-    monkeypatch.setattr(jobs, "run_build", build)
-    monkeypatch.setattr(extract_job, "run_extract", extract)
-    monkeypatch.setattr(align_job, "run_align", align)
-    res = runner.invoke(app, ["build", "--resume"])
+    monkeypatch.setattr(build_job, "run_build", fake)
+    res = runner.invoke(app, ["build", "--resume", "--source", "demo"])
     assert res.exit_code == 0, res.output
-    assert calls == [
-        ("build", "demo", True),
-        ("extract", "demo-docs", "docs", True),
-        ("align", "demo-docs", "demo", True),
-    ]
-    assert "build: succeeded" in res.output
+    assert calls == [{"sources": ["demo"], "resume": True}]
+    assert "revision 3:" in res.output and "build b1: succeeded" in res.output
 
 
 def test_build_with_backend_down_points_to_up(isolated_env, monkeypatch):
@@ -282,10 +256,10 @@ def test_build_unexpected_error_is_one_line(isolated_env, monkeypatch):
     def explode(*a, **k):
         raise KeyError("weird\nsecond line")
 
-    monkeypatch.setattr(jobs, "run_build", explode)
+    monkeypatch.setattr(build_job, "run_build", explode)
     res = runner.invoke(app, ["build"])
     assert res.exit_code == 1
-    assert "build demo failed: KeyError" in res.output and "jobs.log" in res.output
+    assert "build failed: KeyError" in res.output and "jobs.log" in res.output
     assert "Traceback" not in res.output
     monkeypatch.setenv("AUTOONTOLOGY_DEBUG", "1")
     res = runner.invoke(app, ["build"])

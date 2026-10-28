@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from autoontology.config import Settings
+from autoontology.engine import build as build_job
 from autoontology.engine import export_job, jobs
 from autoontology.store.alignments import AlignmentRecord, AlignmentStore
 from autoontology.store.db import Store
@@ -48,9 +49,8 @@ class FakeJobs:
         self.gate = threading.Event()
         self.gate.set()
 
-    def _run(self, kind, source_name, store, steps):
-        src = store.get_source(source_name)
-        run = store.create_run(kind=kind, source_id=src.id, params={"pid": 1})
+    def _run(self, kind, store, steps):
+        run = store.create_run(kind=kind, source_id=None, params={"pid": 1})
         ctx = type("Ctx", (), {"settings": None, "store": store, "run": run})()
         ctx.settings = Settings.from_env()
 
@@ -64,36 +64,18 @@ class FakeJobs:
 
         return jobs._execute(ctx, steps, skip={}, already=set(), steps={n: step(n) for n in steps})
 
-    def build(self, name, **kw):
-        self.calls.append(("build", name, kw))
-        return self._run(
-            "build",
-            name,
-            kw["store"],
-            ["load", "register_connection", "ingest", "compile", "export"],
-        )
+    def build(self, store, settings, **kw):
+        self.calls.append(("build", kw))
+        if kw.get("resume"):
+            raise jobs.JobError("nothing to resume (fake pre-check)")
+        return self._run("build", store, build_job.step_names(build_job.registration_order(store)))
 
-    def extract(self, name, target, **kw):
-        self.calls.append(("extract", name, {"target": target, **kw}))
-        return self._run("extract", name, kw["store"], ["read", "extract", "consolidate", "report"])
-
-    def align(self, name, **kw):
-        self.calls.append(("align", name, kw))
-        raise jobs.JobError(f"source {name!r} has no concepts; run `autoontology extract` first")
-
-    def export(self, name, **kw):
-        self.calls.append(("export", name, kw))
-        return self._run(
-            "export", name, kw["store"], ["collect", "serialize", "upstream", "report"]
-        )
+    def export(self, store, settings, **kw):
+        self.calls.append(("export", kw))
+        return self._run("export", store, ["collect", "serialize", "upstream", "report"])
 
     def table(self):
-        return {
-            "build": self.build,
-            "extract": self.extract,
-            "align": self.align,
-            "export": self.export,
-        }
+        return {"build": self.build, "export": self.export}
 
 
 @pytest.fixture
@@ -157,7 +139,7 @@ def test_source_validation_errors_are_structured(env, isolated_env):
     )
     assert resp.json()["error"] == "invalid_locator"
     assert c.get(f"{API}/sources/../etc").status_code in (404, 405)
-    resp = c.get(f"{API}/concepts", params={"page": 0})
+    resp = c.get(f"{API}/ontology/concepts", params={"page": 0})
     assert resp.status_code == 400 and resp.json()["error"] == "invalid_request"
 
 
@@ -249,32 +231,39 @@ def _files_source(c, isolated_env, name="shop"):
     )
 
 
+SHOP_STEPS = [
+    "structured:shop:load",
+    "structured:shop:register",
+    "structured:shop:ingest",
+    "structured:shop:compile",
+    "merge",
+    "snapshot",
+]
+
+
 def test_run_lifecycle_lock_and_sse(env, isolated_env):
     c, settings, fake, manager = env
     _files_source(c, isolated_env)
     fake.gate.clear()
-    resp = c.post(
-        f"{API}/runs", json={"kind": "build", "source": "shop", "options": {"skip_compile": True}}
-    )
+    resp = c.post(f"{API}/runs", json={"kind": "build"})
     assert resp.status_code == 202, resp.text
     run_id = resp.json()["run_id"]
-    assert fake.calls[0][2]["skip_compile"] is True and fake.calls[0][2]["resume"] is False
-    busy = c.post(f"{API}/runs", json={"kind": "build", "source": "shop"})
+    assert fake.calls[0] == ("build", {"sources": None, "resume": False})
+    busy = c.post(f"{API}/runs", json={"kind": "build"})
     assert busy.status_code == 409 and busy.json()["error"] == "run_active"
+    busy = c.post(f"{API}/runs", json={"kind": "export"})
+    assert busy.status_code in (404, 409)  # no snapshot yet / workspace busy
+    gone = c.delete(f"{API}/sources/shop")
+    assert gone.status_code == 409 and gone.json()["error"] == "run_active"
     state = c.get(f"{API}/runs/{run_id}").json()
     assert state["status"] == "running" and state["managed"] is True
-    assert [s["name"] for s in state["steps"]] == [
-        "load",
-        "register_connection",
-        "ingest",
-        "compile",
-        "export",
-    ]
+    assert [s["name"] for s in state["steps"]] == SHOP_STEPS
     assert state["steps"][0]["status"] == "running" and state["steps"][1]["status"] == "pending"
     fake.gate.set()
     manager.join(run_id, 5)
     state = c.get(f"{API}/runs/{run_id}").json()
     assert state["status"] == "succeeded" and state["managed"] is False
+    assert [s["name"] for s in state["steps"]] == SHOP_STEPS
     assert all(s["status"] == "succeeded" for s in state["steps"])
 
     with c.stream("GET", f"{API}/runs/{run_id}/events") as resp:
@@ -282,45 +271,46 @@ def test_run_lifecycle_lock_and_sse(env, isolated_env):
         text = "".join(resp.iter_text())
     events = [line.split(": ", 1)[1] for line in text.splitlines() if line.startswith("event: ")]
     assert events[0] == "log" and events[-1] == "end"
-    assert events.count("step") == 5 and "status" in events
-    assert "[1/5] load" in text and "doing compile" in text
+    assert events.count("step") == 6 and "status" in events
+    assert "[1/6] structured:shop:load" in text and "doing merge" in text
     assert "hunter2" not in text and "s3cret" not in text  # masked in the log stream
     assert '"status": "succeeded"' in text
 
-    runs = c.get(f"{API}/runs", params={"source": "shop"}).json()["runs"]
-    assert [r["id"] for r in runs] == [run_id] and runs[0]["source"] == "shop"
+    runs = c.get(f"{API}/runs").json()["runs"]
+    assert [r["id"] for r in runs] == [run_id] and runs[0]["source"] is None
     assert "pid" not in runs[0]["params"]
     # the per-run log file holds the run's lines only
     run_log = Path(settings.logs_dir) / "runs" / f"{run_id}.log"
-    assert "[5/5] export" in run_log.read_text()
+    assert "[6/6] snapshot" in run_log.read_text()
 
 
 def test_run_precheck_failure_is_returned(env, isolated_env):
-    c, *_ = env
-    d = _docs_dir(isolated_env)
-    c.post(f"{API}/sources", json={"name": "docs", "kind": "documents", "locator": str(d)})
-    resp = c.post(f"{API}/runs", json={"kind": "align", "source": "docs"})
-    assert resp.status_code == 400 and "has no concepts" in resp.json()["detail"]
+    c, _, fake, manager = env
+    resp = c.post(f"{API}/runs", json={"kind": "build"})
+    assert resp.status_code == 400 and resp.json()["error"] == "no_sources"
+    _files_source(c, isolated_env)
+    resp = c.post(f"{API}/runs", json={"kind": "build", "resume": True})
+    assert resp.status_code == 400 and "nothing to resume" in resp.json()["detail"]
     assert c.get(f"{API}/runs").json()["runs"] == []
     # the lock is released after a failed start
-    resp = c.post(
-        f"{API}/runs", json={"kind": "extract", "source": "docs", "options": {"workers": 1}}
-    )
+    resp = c.post(f"{API}/runs", json={"kind": "build", "sources": ["shop"]})
     assert resp.status_code == 202, resp.text
+    manager.join(resp.json()["run_id"], 5)
+    assert fake.calls[-1] == ("build", {"sources": ["shop"], "resume": False})
 
 
 def test_run_kind_and_options_validated(env, isolated_env):
     c, _, fake, _ = env
     _files_source(c, isolated_env)
-    d = _docs_dir(isolated_env)
-    c.post(f"{API}/sources", json={"name": "docs", "kind": "documents", "locator": str(d)})
     cases = [
-        ({"kind": "extract", "source": "shop"}, "wrong_source_kind"),
-        ({"kind": "build", "source": "docs"}, "wrong_source_kind"),
-        ({"kind": "build", "source": "shop", "options": {"out": "/tmp"}}, "invalid_request"),
-        ({"kind": "drop", "source": "shop"}, "invalid_request"),
-        ({"kind": "export", "source": "shop", "options": {"sources": ["nope"]}}, "unknown_source"),
-        ({"kind": "build", "source": "missing"}, "unknown_source"),
+        ({"kind": "build", "source": "shop"}, "invalid_request"),
+        ({"kind": "build", "options": {}}, "invalid_request"),
+        ({"kind": "extract"}, "invalid_request"),
+        ({"kind": "drop"}, "invalid_request"),
+        ({"kind": "build", "sources": ["missing"]}, "unknown_source"),
+        ({"kind": "export"}, "no_snapshot"),
+        ({"kind": "export", "revision": 0}, "invalid_request"),
+        ({"kind": "export", "resume": True}, "invalid_request"),
     ]
     for body, error in cases:
         resp = c.post(f"{API}/runs", json=body)
@@ -328,27 +318,22 @@ def test_run_kind_and_options_validated(env, isolated_env):
     assert fake.calls == []
 
 
-def test_extract_uses_the_source_locator(env, isolated_env):
-    c, _, fake, manager = env
-    d = _docs_dir(isolated_env)
-    c.post(
-        f"{API}/sources",
-        json={"name": "docs", "kind": "documents", "locator": str(d), "recursive": True},
-    )
-    run_id = c.post(
-        f"{API}/runs", json={"kind": "extract", "source": "docs", "options": {"max_chunks": 2}}
-    ).json()["run_id"]
+def test_export_run_takes_a_revision(env, isolated_env):
+    c, settings, fake, manager = env
+    _seed_snapshot(settings)
+    assert c.post(f"{API}/runs", json={"kind": "export", "revision": 9}).status_code == 404
+    run_id = c.post(f"{API}/runs", json={"kind": "export", "revision": 1}).json()["run_id"]
     manager.join(run_id, 5)
-    _, name, kw = fake.calls[0]
-    assert name == "docs" and kw["target"] == d.resolve() and kw["recursive"] is True
-    assert kw["max_chunks"] == 2 and kw["workers"] is None
+    assert fake.calls == [("export", {"revision": 1})]
+    state = c.get(f"{API}/runs/{run_id}").json()
+    assert [s["name"] for s in state["steps"]] == ["collect", "serialize", "upstream", "report"]
 
 
 def test_cancel_stops_before_the_next_step(env, isolated_env):
     c, _, fake, manager = env
     _files_source(c, isolated_env)
     fake.gate.clear()
-    run_id = c.post(f"{API}/runs", json={"kind": "build", "source": "shop"}).json()["run_id"]
+    run_id = c.post(f"{API}/runs", json={"kind": "build"}).json()["run_id"]
     resp = c.post(f"{API}/runs/{run_id}/cancel")
     assert resp.status_code == 202
     fake.gate.set()
@@ -356,7 +341,8 @@ def test_cancel_stops_before_the_next_step(env, isolated_env):
     state = c.get(f"{API}/runs/{run_id}").json()
     assert state["status"] == "cancelled" and "cancelled before step" in state["error"]
     statuses = {s["name"]: s["status"] for s in state["steps"]}
-    assert statuses["load"] == "succeeded" and statuses["ingest"] == "pending"
+    assert statuses["structured:shop:load"] == "succeeded"
+    assert "structured:shop:register" not in statuses  # never started (finished runs: rows only)
     assert c.post(f"{API}/runs/{run_id}/cancel").status_code == 409
     assert c.get(f"{API}/runs/bad id").status_code == 400
     assert c.get(f"{API}/runs/20990101T000000Z-abcdef").status_code == 404
@@ -467,109 +453,124 @@ def _snapshot():
     )
 
 
-def test_concept_search_and_detail(env):
+def _seed_snapshot(settings):
+    """The documents + structured fixture merged and saved as snapshot revision 1."""
+    from autoontology.ontology import model as merged
+
+    src = _seed_documents(settings)
+    store = _store(settings)
+    model = merged.build(
+        settings.workspace,
+        structured=[_snapshot()],
+        documents=export_job.documents_inputs(store, [src]),
+        base=settings.base_iri,
+    )
+    run = store.create_run(kind="build", source_id=None)
+    store.update_run(run.id, status="succeeded")
+    return store.save_snapshot(run.id, model), model
+
+
+def test_ontology_summary(env):
     c, settings, _, _ = env
-    _seed_documents(settings)
-    body = c.get(f"{API}/concepts").json()
-    assert body["total"] == 4 and {i["source"] for i in body["items"]} == {"hanbit-docs"}
-    by_syn = c.get(f"{API}/concepts", params={"q": "계약서"}).json()["items"]
-    assert [i["name"] for i in by_syn] == ["계약"]
-    assert by_syn[0]["alignment"] == {
-        "relation": "same",
-        "term": "Contracts",
-        "accepted": True,
-        "dry_run": False,
+    resp = c.get(f"{API}/ontology")
+    assert resp.status_code == 404 and resp.json()["error"] == "no_snapshot"
+    assert c.get(f"{API}/ontology/graph").json()["error"] == "no_snapshot"
+    revision, model = _seed_snapshot(settings)
+    body = c.get(f"{API}/ontology").json()
+    assert body["revision"] == revision == 1
+    assert body["workspace"] == "default" and body["base_iri"] == "http://example.com/autoontology#"
+    assert {(s["name"], s["kind"]) for s in body["sources"]} == {
+        ("hanbit", "structured"),
+        ("hanbit-docs", "documents"),
     }
-    by_en = c.get(f"{API}/concepts", params={"q": "contract"}).json()["items"]
-    assert [i["name"] for i in by_en] == ["계약"]
-    # LIKE wildcards in the query are literal
-    assert c.get(f"{API}/concepts", params={"q": "%"}).json()["total"] == 1
-    assert c.get(f"{API}/concepts", params={"q": "_"}).json()["total"] == 0
-    metrics = c.get(f"{API}/concepts", params={"kind": "metric"}).json()["items"]
+    assert body["counts"]["classes"] == len(model.classes)
+    assert body["counts"]["merged_concepts"] == 1
+    assert c.get(f"{API}/ontology", params={"revision": 2}).json()["error"] == "unknown_revision"
+
+
+def test_ontology_concepts_search_and_detail(env):
+    c, settings, _, _ = env
+    _seed_snapshot(settings)
+    body = c.get(f"{API}/ontology/concepts").json()
+    items = {i["name"]: i for i in body["items"]}
+    assert body["total"] == 6 and body["revision"] == 1
+    assert set(items) == {"Contracts", "Customers", "계약", "계약금액", "담당자", "승인 기준"}
+    assert [i["kind"] for i in body["items"][:2]] == ["term", "term"]  # Terms first
+    contracts = items["Contracts"]
+    assert contracts["origin"] == "aligned" and contracts["source"] == "hanbit"
+    assert contracts["merged_concepts"] == ["계약"] and "계약서" in contracts["synonyms"]
+    assert contracts["alignment"]["counts"] == {"same": 1, "related": 1}
+    assert items["Customers"]["origin"] == "structured"
+    folded = items["계약"]
+    assert folded["origin"] == "document" and folded["folded_into"]["name"] == "Contracts"
+    assert items["계약금액"]["alignment"]["best"]["relation"] == "related"
+    assert items["승인 기준"]["kind"] == "rule" and items["승인 기준"]["source"] == "hanbit-docs"
+    by_syn = c.get(f"{API}/ontology/concepts", params={"q": "계약서"}).json()["items"]
+    assert [i["name"] for i in by_syn] == ["Contracts"]
+    origin = c.get(f"{API}/ontology/concepts", params={"origin": "document"}).json()
+    assert {i["origin"] for i in origin["items"]} == {"document"} and origin["total"] == 4
+    metrics = c.get(f"{API}/ontology/concepts", params={"kind": "metric"}).json()["items"]
     assert [i["name"] for i in metrics] == ["계약금액"]
-    page2 = c.get(f"{API}/concepts", params={"size": 3, "page": 2}).json()
-    assert page2["pages"] == 2 and len(page2["items"]) == 1
+    page2 = c.get(f"{API}/ontology/concepts", params={"size": 4, "page": 2}).json()
+    assert page2["pages"] == 2 and len(page2["items"]) == 2
+    bad = c.get(f"{API}/ontology/concepts", params={"origin": "x"})
+    assert bad.status_code == 400 and bad.json()["error"] == "invalid_origin"
 
-    cid = by_syn[0]["id"]
-    detail = c.get(f"{API}/concepts/{cid}").json()
-    assert detail["synonyms"] == ["계약서"] and detail["name_en"] == "Contract"
-    assert detail["evidence"][0] == {
-        "quote": "계약은 고객과 맺는 약정",
-        "verified": True,
-        "page": 3,
-        "section": "1장 > 계약",
-        "document": "계약관리규정",
-        "path": "samples/계약관리규정.md",
-    }
-    assert detail["alignments"][0]["term"] == "Contracts"
-    assert detail["relations"][0]["predicate"] == "owns"
-    assert c.get(f"{API}/concepts/{'0' * 32}").status_code == 404
-    assert c.get(f"{API}/concepts/xyz").status_code == 400
-    rel = c.get(f"{API}/relations", params={"source": "hanbit-docs"}).json()["relations"]
-    assert rel[0]["subject"] == "담당자" and rel[0]["object"] == "계약"
+    detail = c.get(f"{API}/ontology/concepts/{contracts['id']}").json()
+    assert detail["description"] == "계약 정보" and detail["tables"] == ["public.contracts"]
+    assert [a["label"] for a in detail["attributes"]] == ["계약금액"]
+    assert detail["evidence"][0]["quote"] == "계약은 고객과 맺는 약정"
+    assert detail["evidence"][0]["document"] == "계약관리규정"
+    assert {r["predicate"] for r in detail["relations"]} >= {"owns", "semantic_fk"}
+    assert {a["relation"] for a in detail["alignments"]} == {"same", "related"}
+    folded_detail = c.get(f"{API}/ontology/concepts/{folded['id']}").json()
+    assert folded_detail["folded_into"]["id"] == contracts["id"]
+    assert c.get(f"{API}/ontology/concepts/concept-{'0' * 32}").status_code == 404
+    assert c.get(f"{API}/ontology/concepts/xyz").status_code == 400
+    for gone in ("/concepts", "/relations", "/graph"):
+        assert c.get(f"{API}{gone}").status_code == 404
 
 
-def test_graph_endpoint_builds_from_the_merged_model(env, monkeypatch):
+def test_ontology_graph_from_the_snapshot(env):
     c, settings, _, _ = env
-    _seed_documents(settings)
-    calls = []
-
-    def fake_snapshot(client, source):
-        calls.append(source.name)
-        return _snapshot()
-
-    monkeypatch.setattr(export_job, "fetch_snapshot", fake_snapshot)
-    g = c.get(f"{API}/graph", params={"sources": "hanbit,hanbit-docs"}).json()
-    assert g["warnings"] == [] and calls == ["hanbit"]
+    _, model = _seed_snapshot(settings)
+    g = c.get(f"{API}/ontology/graph").json()
+    assert g["revision"] == 1 and g["warnings"] == []
     nodes = {n["id"]: n for n in g["nodes"]}
     contracts = nodes["term-t-c"]
-    assert contracts["type"] == "class" and contracts["origin"] == "structured"
+    assert contracts["type"] == "class" and contracts["origin"] == "aligned"
+    assert nodes["term-t-k"]["origin"] == "structured"
     assert contracts["source"] == "hanbit" and contracts["enriched_by"] == "hanbit-docs"
     assert "계약" in contracts["synonyms"] and contracts["attributes"] == ["계약금액"]
     folded = [n for n in g["nodes"] if n["type"] == "concept"]
     assert [n["label"] for n in folded] == ["계약"] and folded[0]["folded_into"] == "term-t-c"
+    assert {n["origin"] for n in g["nodes"]} == {"structured", "document", "aligned"}
+    assert g["counts"]["origins"] == {"aligned": 1, "document": 4, "structured": 1}
     types = {e["type"] for e in g["edges"]}
     assert {"semantic_fk", "aligned_same", "related", "document"} <= types
-    assert {n["type"] for n in g["nodes"]} == {"class", "concept", "individual"}
-    # same model the exporter builds -> same class count
-    model = export_job.collect_model(
-        "hanbit-docs",
-        _store(settings),
-        None,
-        [_store(settings).get_source("hanbit")],
-        [_store(settings).get_source("hanbit-docs")],
-    )[0]
     assert sum(n["type"] == "class" for n in g["nodes"]) == len(model.classes)
 
-    structured = c.get(
-        f"{API}/graph", params={"sources": "hanbit,hanbit-docs", "layer": "structured"}
-    ).json()
-    assert {n["origin"] for n in structured["nodes"]} == {"structured"}
+    structured = c.get(f"{API}/ontology/graph", params={"layer": "structured"}).json()
+    assert {n["origin"] for n in structured["nodes"]} == {"structured", "aligned"}
     assert {e["type"] for e in structured["edges"]} == {"semantic_fk"}
-    aligned = c.get(
-        f"{API}/graph", params={"sources": "hanbit,hanbit-docs", "layer": "aligned"}
-    ).json()
+    aligned = c.get(f"{API}/ontology/graph", params={"layer": "aligned"}).json()
     assert {e["type"] for e in aligned["edges"]} == {"aligned_same", "related"}
     assert {n["id"] for n in aligned["nodes"]} >= {"term-t-c"}
-    docs_only = c.get(
-        f"{API}/graph", params={"sources": "hanbit,hanbit-docs", "layer": "documents"}
-    ).json()
+    docs_only = c.get(f"{API}/ontology/graph", params={"layer": "documents"}).json()
     endpoints = {x for e in docs_only["edges"] for x in (e["source"], e["target"])}
     assert all(n["origin"] == "document" or n["id"] in endpoints for n in docs_only["nodes"])
     assert {e["layer"] for e in docs_only["edges"]} == {"documents"}
-    assert c.get(f"{API}/graph", params={"layer": "bogus"}).json()["error"] == "invalid_layer"
-    assert c.get(f"{API}/graph", params={"sources": "nope"}).status_code == 404
+    bad = c.get(f"{API}/ontology/graph", params={"layer": "bogus"})
+    assert bad.json()["error"] == "invalid_layer"
 
 
-def test_graph_evidence_layer_relations_and_env_cap(env, monkeypatch):
+def test_ontology_graph_evidence_layer_and_env_cap(env, monkeypatch):
     c, settings, _, _ = env
-    _seed_documents(settings)
-    monkeypatch.setattr(export_job, "fetch_snapshot", lambda client, source: _snapshot())
-    params = {"sources": "hanbit,hanbit-docs"}
-    plain = c.get(f"{API}/graph", params=params).json()
+    _seed_snapshot(settings)
+    plain = c.get(f"{API}/ontology/graph").json()
     assert not any(n["type"] == "document" for n in plain["nodes"])
     assert plain["max_nodes"] == 1500
-    g = c.get(f"{API}/graph", params={**params, "evidence": "true"}).json()
+    g = c.get(f"{API}/ontology/graph", params={"evidence": "true"}).json()
     docs = [n for n in g["nodes"] if n["type"] == "document"]
     assert [n["label"] for n in docs] == ["계약관리규정"] and docs[0]["layer"] == "evidence"
     assert docs[0]["path"] == "계약관리규정.md"  # basename only
@@ -580,13 +581,28 @@ def test_graph_evidence_layer_relations_and_env_cap(env, monkeypatch):
     rel = {e["type"]: e.get("relation") for e in g["edges"] if e["layer"] == "aligned"}
     assert rel == {"aligned_same": "same", "related": "related"}
     monkeypatch.setenv("AUTOONTOLOGY_GRAPH_MAX_NODES", "2")
-    capped = c.get(f"{API}/graph", params=params).json()
+    capped = c.get(f"{API}/ontology/graph").json()
     assert capped["truncated"] is True and capped["max_nodes"] == 2
     assert len(capped["nodes"]) == 2
 
 
+def test_ontology_follows_the_latest_snapshot(env):
+    from autoontology.ontology import model as merged
+
+    c, settings, _, _ = env
+    _seed_snapshot(settings)
+    assert c.get(f"{API}/ontology").json()["revision"] == 1
+    store = _store(settings)
+    store.save_snapshot("r2", merged.build(settings.workspace, structured=[_snapshot()]))
+    body = c.get(f"{API}/ontology").json()
+    assert body["revision"] == 2 and body["counts"]["classes"] == 2
+    assert c.get(f"{API}/ontology/graph").json()["revision"] == 2
+    old = c.get(f"{API}/ontology/graph", params={"revision": 1}).json()
+    assert old["revision"] == 1 and old["counts"]["nodes"] > 2
+
+
 def test_graph_cap_applies_before_the_evidence_layer():
-    from autoontology.export import merged
+    from autoontology.ontology import model as merged
     from autoontology.web.graph import to_view
 
     model = merged.MergedOntology(name="g", base="x")
@@ -615,7 +631,7 @@ def test_graph_cap_applies_before_the_evidence_layer():
 
 
 def test_graph_alignment_subclass_relation_direction():
-    from autoontology.export import merged
+    from autoontology.ontology import model as merged
     from autoontology.web.graph import to_view
 
     model = merged.MergedOntology(name="g", base="x")
@@ -630,50 +646,45 @@ def test_graph_alignment_subclass_relation_direction():
     assert rels == ["narrower", "broader", None]
 
 
-def test_graph_degrades_to_documents_when_backend_down(env, monkeypatch):
-    c, settings, _, _ = env
-    _seed_documents(settings)
-    from autoontology.engine.client import BackendUnavailable
-
-    def down(client, source):
-        raise BackendUnavailable("backend not reachable")
-
-    monkeypatch.setattr(export_job, "fetch_snapshot", down)
-    g = c.get(f"{API}/graph").json()
-    assert g["warnings"] and all(n["origin"] == "document" for n in g["nodes"])
-    resp = c.get(f"{API}/graph", params={"sources": "hanbit"})
-    assert resp.status_code == 503 and resp.json()["error"] == "backend_unavailable"
-
-
 def test_exports_list_and_path_safe_download(env):
     c, settings, _, _ = env
-    run_dir = Path(settings.exports_dir) / "hanbit-docs" / "20261027T145834Z-5ba517"
-    run_dir.mkdir(parents=True)
-    (run_dir / "ontology.ttl").write_text("@prefix os: <x#> .\n", encoding="utf-8")
-    (run_dir / "report.md").write_text("# 보고서\n", encoding="utf-8")
+    rev_dir = Path(settings.exports_dir) / "r0003"
+    (rev_dir / "upstream").mkdir(parents=True)
+    (rev_dir / "ontology.ttl").write_text("@prefix ao: <x#> .\n", encoding="utf-8")
+    (rev_dir / "report.md").write_text("# 보고서\n", encoding="utf-8")
+    (rev_dir / "upstream" / "hanbit.ossie.zip").write_bytes(b"PK")
+    (Path(settings.exports_dir) / "r0001").mkdir()
+    (Path(settings.exports_dir) / "hanbit-docs").mkdir()  # not a revision folder
     (Path(settings.exports_dir) / "secret.txt").write_text("top secret")
-    (Path(settings.home)).mkdir(parents=True, exist_ok=True)
     listed = c.get(f"{API}/exports").json()["exports"]
-    assert listed[0]["run_id"] == "20261027T145834Z-5ba517"
-    assert [f["name"] for f in listed[0]["files"]] == ["ontology.ttl", "report.md"]
-    assert c.get(f"{API}/exports", params={"source": "hanbit-docs"}).json()["exports"]
+    assert [e["revision"] for e in listed] == [3, 1] and listed[0]["dir"] == "r0003"
+    assert [f["name"] for f in listed[0]["files"]] == [
+        "ontology.ttl",
+        "report.md",
+        "upstream/hanbit.ossie.zip",
+    ]
 
-    resp = c.get(f"{API}/exports/20261027T145834Z-5ba517/ontology.ttl")
+    resp = c.get(f"{API}/exports/r0003/ontology.ttl")
     assert resp.status_code == 200 and resp.text.startswith("@prefix")
     assert "attachment" in resp.headers["content-disposition"]
-    inline = c.get(f"{API}/exports/20261027T145834Z-5ba517/ontology.ttl", params={"inline": True})
+    assert c.get(f"{API}/exports/3/ontology.ttl").status_code == 200  # bare revision number
+    zipped = c.get(f"{API}/exports/r0003/upstream/hanbit.ossie.zip")
+    assert zipped.status_code == 200 and zipped.content == b"PK"
+    inline = c.get(f"{API}/exports/r0003/ontology.ttl", params={"inline": True})
     assert inline.headers["content-type"].startswith("text/plain")
     for bad in [
-        "20261027T145834Z-5ba517/..%2Fsecret.txt",
+        "r0003/..%2Fsecret.txt",
         "..%2F..%2Fsecret.txt/x",
-        "20261027T145834Z-5ba517/.hidden",
-        "20261027T145834Z-5ba517/%2Fetc%2Fpasswd",
+        "r0003/.hidden",
+        "r0003/%2Fetc%2Fpasswd",
+        "r0003/upstream/../../secret.txt",
+        "r0003/a/b/c.txt",
         "x/ontology.ttl",
     ]:
         resp = c.get(f"{API}/exports/{bad}")
         assert resp.status_code in (400, 404), bad
         assert "top secret" not in resp.text
-    assert c.get(f"{API}/exports/20261027T145834Z-5ba517/missing.ttl").status_code == 404
+    assert c.get(f"{API}/exports/r0003/missing.ttl").status_code == 404
 
 
 def test_status_reports_backend_postgres_ollama_kordoc_and_providers(env, monkeypatch):
@@ -1001,7 +1012,7 @@ def test_sse_resumes_from_last_event_id(env):
 
 
 def test_graph_view_dedupes_edge_ids_and_caps_nodes():
-    from autoontology.export import merged
+    from autoontology.ontology import model as merged
     from autoontology.web.graph import to_view
 
     model = merged.MergedOntology(name="g", base="x")
@@ -1021,55 +1032,6 @@ def test_graph_view_dedupes_edge_ids_and_caps_nodes():
     assert {n["id"] for n in capped["nodes"]} == {"a", "b"}  # the connected ones
     assert all(e["source"] in {"a", "b"} and e["target"] in {"a", "b"} for e in capped["edges"])
     assert to_view(model)["edges"][0]["id"] == ids[0]  # the model is not mutated
-
-
-def test_graph_cache_follows_runs_of_other_sources(env, monkeypatch):
-    c, settings, _, _ = env
-    _seed_documents(settings)
-    calls = []
-    monkeypatch.setattr(
-        export_job,
-        "fetch_snapshot",
-        lambda client, source: calls.append(source.name) or _snapshot(),
-    )
-    c.get(f"{API}/graph", params={"sources": "hanbit"})
-    c.get(f"{API}/graph", params={"sources": "hanbit"})
-    assert calls == ["hanbit"]  # cached
-    store = _store(settings)
-    other = store.add_source(name="other-docs", kind="documents", locator="{}")
-    run = store.create_run(kind="align", source_id=other.id)  # e.g. aligned against hanbit
-    c.get(f"{API}/graph", params={"sources": "hanbit"})
-    assert calls == ["hanbit"]  # still running: nothing written yet
-    store.update_run(run.id, status="succeeded")
-    c.get(f"{API}/graph", params={"sources": "hanbit"})
-    assert calls == ["hanbit", "hanbit"]
-
-
-def test_graph_cache_invalidated_when_an_older_run_finishes_last(env, monkeypatch):
-    """Review #14: long run A starts, short run B starts and finishes, the graph is cached;
-    A finishing must invalidate it (the cache used to key on the latest-started run)."""
-    c, settings, _, _ = env
-    _seed_documents(settings)
-    calls = []
-    monkeypatch.setattr(
-        export_job,
-        "fetch_snapshot",
-        lambda client, source: calls.append(source.name) or _snapshot(),
-    )
-    store = _store(settings)
-    docs = store.get_source("hanbit-docs") or store.add_source(
-        name="docs-a", kind="documents", locator="{}"
-    )
-    run_a = store.create_run(kind="extract", source_id=docs.id)
-    other = store.add_source(name="other-docs", kind="documents", locator="{}")
-    run_b = store.create_run(kind="align", source_id=other.id)
-    store.update_run(run_b.id, status="succeeded")
-    c.get(f"{API}/graph", params={"sources": "hanbit"})
-    c.get(f"{API}/graph", params={"sources": "hanbit"})
-    assert calls == ["hanbit"]
-    store.update_run(run_a.id, status="succeeded")
-    c.get(f"{API}/graph", params={"sources": "hanbit"})
-    assert calls == ["hanbit", "hanbit"]
 
 
 def test_upload_checks_content_length_and_holds_the_source(env, monkeypatch):

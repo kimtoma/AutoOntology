@@ -1,8 +1,10 @@
-"""The merged ontology model behind ``autoontology export``: structured Terms (upstream) and
-document concepts (AutoOntology store) joined through the ``align`` verdicts.
+"""The unified ontology model: structured Terms (upstream) and document concepts
+(AutoOntology store) joined through the alignment verdicts.
 
-Built once by :func:`build`, then serialised by the format writers (``rdf.py`` for
-Turtle/JSON-LD, ``graphml.py``, ``report.py``). Everything here is plain data and
+Built once per ``autoontology build`` by :func:`build` (its ``merge`` step), persisted as a
+JSON snapshot (:meth:`MergedOntology.to_dict` / :meth:`MergedOntology.from_dict`, table
+``ontology_snapshots``), then read by the API, the playground and the format writers
+(``export/rdf.py`` for Turtle/JSON-LD, ``export/graphml.py``, ``export/report.py``). Everything here is plain data and
 deterministic (sorted, ids derived from upstream/store ids), so two exports of unchanged
 inputs are identical.
 
@@ -13,11 +15,11 @@ Modelling (README "Ontology modelling"):
 * Accepted ``same`` alignment -> the concept is folded into the Term's class (alt labels,
   document definition, evidence). ``broader``: concept ⊑ Term; ``narrower``: Term ⊑
   concept; ``related``: ``skos:related``. Other entity/metric/attribute concepts -> their
-  own class ``concept-<id>`` (source ``document``); metric also typed ``os:Metric``;
-  rule/process (and other) concepts -> individuals of ``os:BusinessRule``/``os:Process``
+  own class ``concept-<id>`` (source ``document``); metric also typed ``ao:Metric``;
+  rule/process (and other) concepts -> individuals of ``ao:BusinessRule``/``ao:Process``
   (``skos:Concept``).
 * Document relations -> one property per relation ``rel-<id>`` (sub-property of
-  ``os:<predicate>``), ``is_a`` -> subclass axiom, ``has_attribute`` to an attribute
+  ``ao:<predicate>``), ``is_a`` -> subclass axiom, ``has_attribute`` to an attribute
   concept -> datatype property; evidence -> ``prov:Entity`` nodes ``ev-<id>``.
 """
 
@@ -25,14 +27,16 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
+from autoontology.config import DEFAULT_BASE_IRI
 from autoontology.store.alignments import AlignmentRecord
 from autoontology.store.documents import ConceptRow, DocumentRow, RelationRow
 from autoontology.structured.semantic import StructuredSnapshot, qualified
 
-BASE_IRI = "https://autoontology.local/ontology/{name}#"
+#: Version of the snapshot JSON (:meth:`MergedOntology.to_dict`).
+MODEL_FORMAT = 1
 CLASS_KINDS = frozenset({"entity", "metric", "attribute"})
 INDIVIDUAL_TYPES = {"rule": "BusinessRule", "process": "Process"}
 #: catalog datatype -> XSD local name (anything else stays rdfs:Literal)
@@ -91,7 +95,7 @@ class OClass:
     definitions: list[str] = field(default_factory=list)  # skos:definition (documents)
     tables: list[str] = field(default_factory=list)  # dcterms:source (schema.table)
     derived_from: list[str] = field(default_factory=list)  # evidence locals
-    extra_types: list[str] = field(default_factory=list)  # os:Metric
+    extra_types: list[str] = field(default_factory=list)  # ao:Metric
     term_id: str = ""
     concept_ids: list[str] = field(default_factory=list)
     kind: str = ""  # concept kind (document classes)
@@ -116,7 +120,7 @@ class OProperty:
     comment: str = ""
     owner: str = ""  # the source (structured or documents) it comes from
     #: document relations: the endpoints' own nodes (an individual's domain/range is its
-    #: type, e.g. os:Process, so the graph view needs the individual itself)
+    #: type, e.g. ao:Process, so the graph view needs the individual itself)
     subject_node: str = ""
     object_node: str = ""
 
@@ -210,6 +214,54 @@ class MergedOntology:
     collapsed_relations: list[str] = field(default_factory=list)
     without_evidence: list[str] = field(default_factory=list)
     alignment_counts: dict[str, int] = field(default_factory=dict)
+    #: owl:Class count the Turtle must have (:func:`expected_class_count` over the inputs)
+    expected_classes: int | None = None
+
+    # --- snapshot (de)serialisation ------------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe dict; :meth:`from_dict` rebuilds an equal model."""
+        return {"format": MODEL_FORMAT, **asdict(self)}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MergedOntology:
+        data = {k: v for k, v in data.items() if k != "format"}
+        nested: dict[str, type] = {
+            "classes": OClass,
+            "properties": OProperty,
+            "individuals": OIndividual,
+            "documents": ODocument,
+            "evidence": OEvidence,
+        }
+        known = {f.name for f in fields(cls)}
+        kw: dict[str, Any] = {k: v for k, v in data.items() if k in known}
+        for key, typ in nested.items():
+            kw[key] = {k: _make(typ, v) for k, v in (data.get(key) or {}).items()}
+        kw["axioms"] = [_make(OAxiom, a) for a in data.get("axioms") or []]
+        kw["merges"] = [_make(OMerge, m) for m in data.get("merges") or []]
+        return cls(**kw)
+
+    # --- origins -----------------------------------------------------------------------
+
+    def aligned_terms(self) -> set[str]:
+        """Term classes joined to documents: a folded (``same``) concept, or an alignment
+        axiom (broader/narrower/related) touching them."""
+        out = {c.local for c in self.classes.values() if c.source == "structured" and c.concept_ids}
+        for a in self.axioms:
+            if a.source == "alignment":
+                for end in (a.subject, a.object):
+                    cls = self.classes.get(end)
+                    if cls is not None and cls.source == "structured":
+                        out.add(end)
+        return out
+
+    def origin(self, local: str, aligned: set[str] | None = None) -> str:
+        """``structured`` | ``document`` | ``aligned`` of a class/individual node."""
+        aligned = self.aligned_terms() if aligned is None else aligned
+        if local in aligned:
+            return "aligned"
+        cls = self.classes.get(local)
+        return "structured" if cls is not None and cls.source == "structured" else "document"
 
     def node_class(self, local: str) -> str:
         """The class standing for a node in domain/range: itself for classes, the
@@ -263,6 +315,11 @@ class MergedOntology:
             "merged_concepts": len(self.merges),
             "by_source": by_source,
         }
+
+
+def _make(typ: type, value: dict[str, Any]) -> Any:
+    known = {f.name for f in fields(typ)}
+    return typ(**{k: v for k, v in value.items() if k in known})
 
 
 def _xsd(datatype: str | None) -> str:
@@ -554,10 +611,13 @@ def build(
     *,
     structured: Sequence[StructuredSnapshot] = (),
     documents: Sequence[DocumentsInput] = (),
+    base: str = DEFAULT_BASE_IRI,
 ) -> MergedOntology:
+    """The unified model of *structured* and *documents*; *name* is the workspace name and
+    *base* the namespace of every IRI (``AUTOONTOLOGY_BASE_IRI``)."""
     model = MergedOntology(
         name=name,
-        base=BASE_IRI.format(name=slug(name)),
+        base=base,
         structured_sources=[s.source for s in structured],
         documents_sources=[d.source for d in documents],
     )
@@ -566,4 +626,5 @@ def build(
         term_class.update(_add_structured(model, snap))
     for docs in documents:
         _add_documents(model, docs, term_class)
+    model.expected_classes = expected_class_count(structured, documents)
     return model

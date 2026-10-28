@@ -1,12 +1,12 @@
 """Background run manager for the web API (``POST /api/runs``).
 
-Each run executes one of the CLI job functions (``run_build``, ``run_extract``,
-``run_align``, ``run_export``) in its own thread, so runs started from the UI persist
-exactly like CLI runs (``runs``/``steps`` rows, ``<home>/logs/jobs.log``).
+Each run executes one of the CLI job functions (``build.run_build``,
+``export_job.run_export``) in its own thread, so runs started from the UI persist exactly
+like CLI runs (``runs``/``steps`` rows, ``<home>/logs/jobs.log``).
 
-- One active run per source: an in-process lock per source name, on top of the jobs' own
-  store lease (``Store.lease`` via ``jobs.hold_sources``, atomic across processes, so it
-  also sees CLI runs and ``source rm``).
+- One active run per workspace: an in-process lock on the workspace key, on top of the
+  jobs' own store lease (``Store.lease`` via ``jobs.hold_sources``, atomic across
+  processes, so it also sees CLI runs and ``source rm``).
 - The run id is known only once the job has created (or resumed) its run row, so the job
   gets a :class:`TrackingStore` that reports it; :meth:`RunManager.start` waits for that
   (or for the job failing its pre-checks, which is returned as an error).
@@ -31,7 +31,9 @@ from autoontology.store.db import Run, Store
 
 logger = logging.getLogger("autoontology.web.runs")
 
-RUN_KINDS: tuple[str, ...] = ("build", "extract", "align", "export")
+RUN_KINDS: tuple[str, ...] = ("build", "export")
+#: The run manager's key for workspace-wide runs (build, export).
+WORKSPACE = "*workspace*"
 RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{6}$")
 #: How long ``start`` waits for the job to create its run row.
 START_TIMEOUT_S = 60.0
@@ -62,12 +64,12 @@ class TrackingStore(Store):
         path: Path,
         on_run: Callable[[str], None],
         cancelled: Callable[[], bool],
-        top_steps: tuple[str, ...],
+        is_top: Callable[[str], bool],
     ) -> None:
         super().__init__(path)
         self._on_run = on_run
         self._cancelled = cancelled
-        self._top_steps = top_steps
+        self._is_top = is_top
         self.run_id: str | None = None
 
     def _seen(self, run_id: str) -> None:
@@ -86,7 +88,7 @@ class TrackingStore(Store):
             self._seen(run_id)
 
     def start_step(self, run_id: str, name: str) -> None:
-        if name in self._top_steps and self._cancelled():
+        if self._is_top(name) and self._cancelled():
             raise RunCancelled(name)
         super().start_step(run_id, name)
 
@@ -166,22 +168,23 @@ JobFn = Callable[..., Any]
 
 def default_jobs() -> dict[str, JobFn]:
     """The job entry points by run kind, looked up at call time (tests monkeypatch them)."""
-    from autoontology.engine import align, export_job, extract, jobs
+    from autoontology.engine import build, export_job
 
-    return {
-        "build": jobs.run_build,
-        "extract": extract.run_extract,
-        "align": align.run_align,
-        "export": export_job.run_export,
-    }
+    return {"build": build.run_build, "export": export_job.run_export}
 
 
+#: Fixed top-level steps per kind (a build's steps depend on its sources).
 TOP_STEPS: dict[str, tuple[str, ...]] = {
-    "build": ("load", "register_connection", "ingest", "compile", "export"),
-    "extract": ("read", "extract", "consolidate", "report"),
-    "align": ("terms", "candidates", "judge", "apply", "report"),
+    "build": (),
     "export": ("collect", "serialize", "upstream", "report"),
 }
+
+
+def is_top_step(name: str) -> bool:
+    """A step the run manager can cancel before (not a per-chunk/per-concept row)."""
+    from autoontology.engine.build import is_top_step as top
+
+    return top(name)
 
 
 class RunManager:
@@ -199,8 +202,9 @@ class RunManager:
     # --- queries ----------------------------------------------------------------
 
     def active_source(self, source: str) -> _Active | None:
+        """The run holding *source*: its own, or a workspace-wide build/export."""
         with self._lock:
-            return self._by_source.get(source)
+            return self._by_source.get(source) or self._by_source.get(WORKSPACE)
 
     def is_managed(self, run_id: str) -> bool:
         with self._lock:
@@ -252,7 +256,7 @@ class RunManager:
             Path(self.settings.home) / "autoontology.db",
             on_run,
             active.cancel.is_set,
-            TOP_STEPS[kind],
+            is_top_step,
         )
 
         def body() -> None:
@@ -324,8 +328,8 @@ class RunManager:
         """Hold *source* for a non-run operation (an upload): runs and other claims get 409
         until :meth:`release`."""
         with self._lock:
-            if source in self._by_source:
-                busy = self._by_source[source]
+            busy = self._by_source.get(source) or self._by_source.get(WORKSPACE)
+            if busy is not None:
                 raise RunStartError(f"source {source!r} is busy ({busy.kind})", status=409)
             self._by_source[source] = _Active(source=source, kind=kind, thread_name="")
 

@@ -28,7 +28,6 @@ from rdflib.plugins.sparql import prepareQuery
 
 rdflib_sparql.SPARQL_LOAD_GRAPHS = False  # FROM <url> must never fetch anything
 
-RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{6}$")
 DEFAULT_TIMEOUT_S = 10.0
 DEFAULT_LIMIT = 200
 MAX_QUERY_CHARS = 4000
@@ -37,7 +36,6 @@ MAX_LIMIT = 500
 MAX_CONCURRENT = 2
 #: Graphs kept parsed (by export run id).
 CACHE_SIZE = 2
-TTL_NAME = "ontology.ttl"
 #: Keywords refused anywhere outside strings, IRIs and comments.
 FORBIDDEN_KEYWORDS = ("SERVICE", "FROM", "LOAD")
 _STRING_RE = re.compile(
@@ -69,7 +67,7 @@ EXAMPLES: list[dict[str, str]] = [
         "query": """SELECT ?class ?label ?source WHERE {
   ?class a owl:Class ;
          rdfs:label ?label ;
-         os:source ?source .
+         ao:source ?source .
 }
 ORDER BY ?source ?label""",
     },
@@ -80,7 +78,7 @@ ORDER BY ?source ?label""",
         "query": """SELECT ?term ?label (GROUP_CONCAT(DISTINCT ?name; separator=", ") AS ?synonyms)
 WHERE {
   ?term a owl:Class ;
-        os:source "structured" ;
+        ao:source "structured" ;
         rdfs:label ?label .
   OPTIONAL { ?term skos:altLabel ?alt }
   BIND(COALESCE(STR(?alt), "") AS ?name)
@@ -97,10 +95,10 @@ ORDER BY ?label""",
       rdf:subject ?s ;
       rdf:predicate ?relation ;
       rdf:object ?o ;
-      os:source "alignment" .
-  OPTIONAL { ?st os:alignmentConfidence ?confidence }
+      ao:source "alignment" .
+  OPTIONAL { ?st ao:alignmentConfidence ?confidence }
   ?s rdfs:label ?sl . ?o rdfs:label ?ol .
-  ?s os:source ?ss .
+  ?s ao:source ?ss .
   BIND(IF(?ss = "structured", ?ol, ?sl) AS ?concept)
   BIND(IF(?ss = "structured", ?sl, ?ol) AS ?term)
 }
@@ -112,22 +110,22 @@ ORDER BY DESC(?confidence)""",
         "description": "Relations extracted from documents with the quote, document and page",
         "query": """SELECT ?relation ?label ?quote ?document ?page WHERE {
   ?relation a owl:ObjectProperty ;
-            os:source "document" ;
+            ao:source "document" ;
             rdfs:label ?label ;
             prov:wasDerivedFrom ?ev .
-  ?ev os:quote ?quote ;
+  ?ev ao:quote ?quote ;
       dcterms:source ?doc .
   ?doc dcterms:title ?document .
-  OPTIONAL { ?ev os:page ?page }
+  OPTIONAL { ?ev ao:page ?page }
 }
 ORDER BY ?label""",
     },
     {
         "id": "business-rules",
         "title": "Business rules",
-        "description": "Business rule (os:BusinessRule) individuals and their description",
+        "description": "Business rule (ao:BusinessRule) individuals and their description",
         "query": """SELECT ?rule ?label ?comment WHERE {
-  ?rule a os:BusinessRule ;
+  ?rule a ao:BusinessRule ;
         rdfs:label ?label .
   OPTIONAL { ?rule rdfs:comment ?comment }
 }
@@ -165,33 +163,16 @@ ORDER BY ?kind ?label""",
         "description": "Document concept classes not linked to any structured Term",
         "query": """SELECT ?concept ?label WHERE {
   ?concept a owl:Class ;
-           os:source "document" ;
+           ao:source "document" ;
            rdfs:label ?label .
   FILTER NOT EXISTS {
     ?concept (rdfs:subClassOf|skos:related|^rdfs:subClassOf|^skos:related) ?term .
-    ?term os:source "structured" .
+    ?term ao:source "structured" .
   }
 }
 ORDER BY ?label""",
     },
 ]
-
-
-def latest_ttl(exports_dir: Path, source: str) -> tuple[str, Path] | None:
-    """(run id, path) of the newest export of *source* that has an ``ontology.ttl``."""
-    folder = Path(exports_dir) / source
-    if not folder.is_dir():
-        return None
-    runs = sorted(
-        (
-            p
-            for p in folder.iterdir()
-            if p.is_dir() and RUN_ID_RE.fullmatch(p.name) and (p / TTL_NAME).is_file()
-        ),
-        key=lambda p: p.name,
-        reverse=True,
-    )
-    return (runs[0].name, runs[0] / TTL_NAME) if runs else None
 
 
 def _walk(node: Any, seen: set[int] | None = None) -> Any:

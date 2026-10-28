@@ -94,18 +94,18 @@ class ElementIndex:
 
 def build_index(
     store: PlaygroundStore,
-    source_id: str,
+    scope: str,
     elements: list[Element],
     *,
     revision: int,
     model: str,
     embed: Embedder,
 ) -> ElementIndex:
-    """Refresh the stored index of *source_id* to *elements* and return it in memory.
+    """Refresh the stored index of *scope* to *elements* and return it in memory.
 
     Vectors are reused for rows with the same element id, text sha and model; only the
     rest are embedded. Raises whatever *embed* raises (nothing is written then)."""
-    stored = store.index_rows(source_id)
+    stored = store.index_rows(scope)
     vectors: list[list[float] | None] = []
     todo: list[int] = []
     for i, e in enumerate(elements):
@@ -123,7 +123,7 @@ def build_index(
         for i, v in zip(batch, got, strict=True):
             vectors[i] = list(v) if v else None
     store.replace_index(
-        source_id,
+        scope,
         [
             IndexRow(e.id, e.type, e.text_sha, v, model)
             for e, v in zip(elements, vectors, strict=True)
@@ -133,7 +133,7 @@ def build_index(
     )
     logger.info(
         "playground index for %s: %d element(s), %d embedded, %d reused (rev %d)",
-        source_id,
+        scope,
         len(elements),
         len(todo),
         len(elements) - len(todo),

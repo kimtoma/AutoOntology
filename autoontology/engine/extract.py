@@ -1,5 +1,5 @@
-"""the documents step of ``autoontology build``: documents -> chunks -> LLM concepts/relations -> consolidated
-ontology in the store, plus ``report.md``.
+"""The documents steps of ``autoontology build``: documents -> chunks -> LLM
+concepts/relations -> consolidated concepts in the store.
 
 Steps ``read -> extract -> consolidate -> report``, persisted like ``build``
 (:func:`autoontology.engine.jobs._execute`). Every chunk extraction also gets its own step
@@ -398,12 +398,23 @@ def _consolidation_incomplete(detail: dict[str, Any]) -> bool:
     )
 
 
+def consolidate_step_name(run: Run, source: Source) -> str | None:
+    """The step of *run* that consolidates *source*: ``consolidate`` in a single-source
+    extract run, ``documents:<name>:consolidate`` in a unified build run."""
+    if run.kind == EXTRACT_KIND and run.source_id == source.id:
+        return "consolidate"
+    if run.kind == "build":
+        return f"documents:{source.name}:consolidate"
+    return None
+
+
 def _last_consolidation(ctx: _ExtractCtx) -> dict[str, Any] | None:
-    for run in ctx.store.list_runs(ctx.source.id, limit=50):
-        if run.kind != EXTRACT_KIND or run.id == ctx.run.id:
+    for run in ctx.store.list_runs(None, limit=100):
+        name = consolidate_step_name(run, ctx.source)
+        if name is None or run.id == ctx.run.id:
             continue
         for step in ctx.store.get_steps(run.id):
-            if step.name == "consolidate" and step.status == "succeeded":
+            if step.name == name and step.status == "succeeded":
                 return step.detail
     return None
 

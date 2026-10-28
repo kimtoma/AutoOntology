@@ -4,12 +4,10 @@ import pytest
 from rdflib import Graph, Literal, Namespace
 from rdflib.namespace import OWL, PROV, RDF, RDFS, SKOS
 
-from autoontology.config import Settings
-from autoontology.engine import export_job
-from autoontology.export import graphml, merged, rdf
+from autoontology.export import graphml, rdf
 from autoontology.export import report as export_report
+from autoontology.ontology import model as merged
 from autoontology.store.alignments import AlignmentRecord
-from autoontology.store.db import Store
 from autoontology.store.documents import ConceptRow, DocumentRow, RelationRow
 from autoontology.structured.semantic import SemanticFK, StructuredSnapshot
 from autoontology.unstructured.align import TermInfo
@@ -232,7 +230,7 @@ def test_turtle_and_jsonld_roundtrip_with_korean_labels(model, tmp_path):
     assert not rdf.roundtrip(paths["ttl"], model, expected_classes=7)["ok"]
     g = Graph().parse(str(paths["ttl"]), format="turtle")
     os_ = Namespace(model.base)
-    assert model.base == "https://autoontology.local/ontology/hanbit-docs#"
+    assert model.base == "http://example.com/autoontology#"  # AUTOONTOLOGY_BASE_IRI default
     contracts = os_["term-t-c"]
     assert (contracts, SKOS.altLabel, Literal("계약", lang="ko")) in g
     assert (contracts, RDFS.label, Literal("Contracts", lang="en")) in g
@@ -251,10 +249,10 @@ def test_turtle_and_jsonld_roundtrip_with_korean_labels(model, tmp_path):
     assert (os_["rel-r4"], RDFS.subPropertyOf, os_["owns"]) in g
     assert (os_["rel-r4"], RDF.type, OWL.ObjectProperty) in g
     text = paths["ttl"].read_text(encoding="utf-8")
-    assert "@prefix os: <https://autoontology.local/ontology/hanbit-docs#>" in text
+    assert "@prefix ao: <http://example.com/autoontology#>" in text
     assert "계약관리규정" in text  # not \u-escaped
     data = json.loads(paths["jsonld"].read_text(encoding="utf-8"))
-    assert data["@context"]["os"] == model.base
+    assert data["@context"]["ao"] == model.base
     assert len(Graph().parse(str(paths["jsonld"]), format="json-ld")) == len(g)
 
 
@@ -311,102 +309,11 @@ def test_report(model):
         files=[{"name": "ontology.ttl", "bytes": 10, "sha256": "f" * 64}],
         upstream=[{"name": "model.yaml", "origin": "copied"}],
     )
-    assert "# Merged ontology report — hanbit-docs" in text
+    assert "# Ontology report — hanbit-docs" in text
     assert "| Classes (owl:Class) | 6 |" in text and "Customers" in text
     assert "| 계약 | entity | Contracts | 0.92 |" in text
     assert "ontology.ttl" in text and "model.yaml: copied" in text
     assert "담당자→Customers (0.50)" in text
-
-
-def test_run_export_end_to_end(isolated_env, tmp_path):
-    from tests.test_align import FakeClient
-
-    settings = Settings.from_env()
-    store = Store.for_home(settings.home)
-    structured = store.add_source(name="hanbit", kind="files", locator="{}")
-    store.set_catalog_database_id(structured.id, "db1")
-    docs_src = store.add_source(name="hanbit-docs", kind="documents", locator="{}")
-    from autoontology.store.alignments import AlignmentStore
-    from autoontology.store.documents import ConceptRecord, DocumentStore, EvidenceRecord
-    from tests.test_documents_store import C
-
-    docs = DocumentStore(store)
-    doc, _ = docs.replace_document(
-        source_id=docs_src.id,
-        path="/x/a.md",
-        title="A",
-        mime="text/markdown",
-        engine="native",
-        sha256="s",
-        size=1,
-        pages=None,
-        chunks=[C(0, "계약은 고객과 맺는다")],
-    )
-    ev = [EvidenceRecord(docs.chunks_for_document(doc.id)[0].id, "계약은 고객과 맺는다", True)]
-    docs.replace_ontology(
-        docs_src.id,
-        [
-            ConceptRecord("계약", "entity", "약정", evidence=ev),
-            ConceptRecord("날씨", "entity", "무관", evidence=ev),
-        ],
-        [],
-    )
-    cid = {c.name: c.id for c in docs.list_concepts(docs_src.id)}
-    AlignmentStore(store).put(
-        AlignmentRecord(
-            docs_src.id,
-            cid["계약"],
-            "계약",
-            "same",
-            "r",
-            "hanbit",
-            "t-contract",
-            "Contracts",
-            0.9,
-            0.9,
-            accepted=True,
-        )
-    )
-    # an earlier build export to copy
-    build = store.create_run(kind="build", source_id=structured.id)
-    folder = settings.exports_dir / "hanbit" / build.id
-    folder.mkdir(parents=True)
-    (folder / "model.yaml").write_text("model: 1\n")
-    (folder / "ossie.zip").write_bytes(b"PK")
-    client = FakeClient()
-    result = export_job.run_export("hanbit-docs", settings=settings, store=store, client=client)
-    assert result.status == "succeeded"
-    out = result.export_dir
-    assert sorted(p.name for p in out.iterdir()) == [
-        "graph.graphml",
-        "model.yaml",
-        "ontology.jsonld",
-        "ontology.ttl",
-        "ossie.zip",
-        "report.md",
-    ]
-    assert (out / "model.yaml").read_text() == "model: 1\n"
-    rt = result.details["serialize"]["roundtrip"]
-    assert rt["ok"] and rt["classes"] == 2 + 1  # 2 Terms + 날씨
-    assert result.details["collect"]["structured"] == ["hanbit"]
-    # explicit --sources and --out; no build export -> exported now through the client
-    calls = []
-    client.export_model = lambda ids, fmt="auto_ontology", include_ontology=False: (
-        calls.append(fmt) or b"x"
-    )
-    store.delete_source(structured.id)
-    structured = store.add_source(name="hanbit", kind="files", locator="{}")
-    result = export_job.run_export(
-        "merged",
-        settings=settings,
-        store=store,
-        client=client,
-        sources=["hanbit", "hanbit-docs"],
-        out=tmp_path / "o",
-    )
-    assert result.export_dir == tmp_path / "o" and calls == ["auto_ontology", "ossie"]
-    with pytest.raises(export_job.JobError, match="unknown source"):
-        export_job.run_export("x", settings=settings, store=store, client=client)
 
 
 def test_report_reconciles_object_properties_with_the_turtle(model, tmp_path):

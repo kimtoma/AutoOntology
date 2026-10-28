@@ -41,9 +41,34 @@ class StructuredSnapshot:
     terms: list[TermInfo] = field(default_factory=list)
     fks: list[SemanticFK] = field(default_factory=list)
     graph_links: int = 0
+    #: term id -> the structured source it was read from (a combined snapshot spans several)
+    term_sources: dict[str, str] = field(default_factory=dict)
 
     def term_map(self) -> dict[str, TermInfo]:
         return {t.id: t for t in self.terms}
+
+    def source_of(self, term_id: str) -> str:
+        return self.term_sources.get(term_id, self.source)
+
+
+def combine(snapshots: list[StructuredSnapshot]) -> StructuredSnapshot:
+    """One snapshot over the Terms of every structured source (the align candidates of
+    ``autoontology build``). A Term upstream links to tables of several databases is listed
+    once, under the first source that has it."""
+    out = StructuredSnapshot(
+        source="+".join(s.source for s in snapshots),
+        database_id=",".join(s.database_id for s in snapshots),
+        database_name=",".join(s.database_name for s in snapshots),
+    )
+    for snap in snapshots:
+        for term in snap.terms:
+            if term.id in out.term_sources:
+                continue
+            out.terms.append(term)
+            out.term_sources[term.id] = snap.source_of(term.id)
+        out.fks += snap.fks
+        out.graph_links += snap.graph_links
+    return out
 
 
 def database_id_for(client: BackendClient, source: Source) -> tuple[str, str]:
@@ -108,6 +133,7 @@ def fetch_snapshot(client: BackendClient, source: Source) -> StructuredSnapshot:
         ]
         for t in tables:
             table_owner[str(t["id"])] = str(detail["id"])
+        snapshot.term_sources[str(detail["id"])] = source.name
         snapshot.terms.append(
             TermInfo(
                 id=str(detail["id"]),

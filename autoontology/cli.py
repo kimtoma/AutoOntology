@@ -403,162 +403,78 @@ def source_rm(
         _fail(str(exc))
 
 
-def _report_extract(store, name: str, result) -> bool:
-    """Print the extract summary of documents source *name*; False when it was partial."""
-    from autoontology.engine import extract as extract_job
-
-    rows = extract_job.summary_rows(store, name)
-    if rows:
-        typer.echo(_table(("DOCUMENT", "ENGINE", "PAGES", "CHUNKS", "EXTRACTED", "CONCEPTS"), rows))
-    report = result.details.get("report", {})
-    if report:
-        typer.echo(
-            f"concepts {report.get('concepts', 0)}, relations {report.get('relations', 0)}"
-            f", evidence {report.get('evidence', 0)} ({report.get('evidence_verified', 0)}"
-            f" verified), chunks failed {report.get('chunks_failed', 0)}, pending "
-            f"{report.get('chunks_pending', 0)}"
-        )
-    report_path = result.export_dir / "report.md" if result.export_dir else None
-    if result.status == "succeeded":
-        typer.echo(f"extract {name} {result.run_id}: {result.status}")
-        if report_path:
-            typer.echo(f"report: {report_path}")
-        return True
-    from autoontology.unstructured.report import display_path as shown_path
-
-    steps = {s.name: s.detail for s in store.get_steps(result.run_id)}
-    failed = steps.get("extract", {}).get("failed_chunks", [])
-    unread = steps.get("read", {}).get("failed", [])
-    typer.echo(
-        f"extract {name} {result.run_id}: partial ({len(failed)} chunk(s) failed, "
-        f"{len(unread)} document(s) failed to read)"
-    )
-    for item in failed[:10]:
-        typer.echo(f"  failed: {item['document']} #{item['index']}: {item['error'][:160]}")
-    for item in unread[:10]:
-        typer.echo(f"  unread: {shown_path(item['path'])} ({item['code']}): {item['error'][:160]}")
-    if steps.get("consolidate", {}).get("partial"):
-        typer.echo(
-            "  consolidation incomplete (embedding/merge judge failures; see "
-            "jobs.log): the next run consolidates again"
-        )
-    if report_path:
-        typer.echo(f"report: {report_path}")
-    return False
-
-
 @app.command()
 def build(
-    source: str = typer.Option(None, "--source", help="Only this source (default: all)."),
-    resume: bool = typer.Option(False, "--resume", help="Skip steps that already succeeded."),
+    source: list[str] = typer.Option(
+        None,
+        "--source",
+        help="Rebuild only this source (repeatable); align/merge/snapshot "
+        "still cover every source.",
+    ),
+    resume: bool = typer.Option(
+        False, "--resume", help="Continue the latest build run, keeping its succeeded steps."
+    ),
 ) -> None:
-    """Build every registered source: structured (load -> ingest -> compile), then documents
-    (read -> chunk -> extract -> consolidate), then align documents to the structured Terms."""
+    """Build every registered source into one ontology snapshot: structured (load ->
+    register -> ingest -> compile), documents (read -> extract -> consolidate), align to
+    the structured Terms, merge, snapshot."""
     import time
 
-    from autoontology.engine import align as align_job
-    from autoontology.engine import extract as extract_job
     from autoontology.engine import jobs
+    from autoontology.engine.build import run_build
     from autoontology.engine.client import BackendError
 
     settings = _settings()
     store = _store(settings)
-    sources = store.list_sources()
-    if source:
-        sources = [s for s in sources if s.name == source]
-        if not sources:
-            _fail(f"unknown source {source!r} (see `autoontology source list`)")
-    if not sources:
-        _fail("no sources: add one with `autoontology source add <path> --name <name>`")
-    structured = [s for s in sources if s.kind in ("files", "database")]
-    documents = [s for s in sources if s.kind == "documents"]
     started = time.monotonic()
     log_path = jobs.jobs_log_path(settings)
-    failed: list[str] = []
     jobs.setup_job_logging(settings, console=True)
-    for src in structured:
-        try:
-            result = jobs.run_build(src.name, resume=resume, settings=settings, store=store)
-        except (jobs.JobError, BackendError) as exc:
-            hint = f" (log: {exc.log_path})" if getattr(exc, "log_path", None) else ""
-            typer.echo(f"build {src.name} failed: {exc}{hint}", err=True)
-            failed.append(src.name)
-            continue
-        except Exception as exc:  # noqa: BLE001 - one clean line; AUTOONTOLOGY_DEBUG=1 re-raises
-            _unexpected(f"build {src.name}", exc, log_path)
-        typer.echo(f"build {src.name} {result.run_id}: {result.status}")
-    for src in documents:
-        target, recursive = extract_job.documents_target(src)
-        try:
-            result = extract_job.run_extract(
-                src.name, target, settings=settings, store=store, recursive=recursive, resume=resume
-            )
-        except jobs.JobError as exc:
-            hint = f" (log: {exc.log_path})" if exc.log_path else ""
-            typer.echo(f"extract {src.name} failed: {exc}{hint}", err=True)
-            failed.append(src.name)
-            continue
-        except Exception as exc:  # noqa: BLE001
-            _unexpected(f"extract {src.name}", exc, log_path)
-        if not _report_extract(store, src.name, result):
-            failed.append(src.name)
-    built = [
-        s
-        for s in (store.get_source(x.name) for x in store.list_sources())
-        if s is not None and s.kind in ("files", "database") and s.catalog_database_id
-    ]
-    if documents and not built:
-        typer.echo("align: skipped (no built structured source to align to)")
-    for doc in documents:
-        if doc.name in failed:
-            continue
-        for target_src in built:
-            try:
-                result = align_job.run_align(
-                    doc.name,
-                    settings=settings,
-                    store=store,
-                    structured_source=target_src.name,
-                    resume=resume,
-                )
-            except jobs.JobError as exc:
-                typer.echo(f"align {doc.name} -> {target_src.name} failed: {exc}", err=True)
-                failed.append(f"{doc.name}->{target_src.name}")
-                continue
-            except Exception as exc:  # noqa: BLE001
-                _unexpected(f"align {doc.name}", exc, log_path)
-            typer.echo(f"align {doc.name} -> {target_src.name} {result.run_id}: {result.status}")
-    elapsed = time.monotonic() - started
-    if failed:
-        _fail(
-            f"build finished with failures in {elapsed:.1f}s: {', '.join(failed)}\n"
-            f"log: {log_path}\nretry: uv run autoontology build --resume"
+    try:
+        result = run_build(store, settings, sources=source or None, resume=resume)
+    except (jobs.JobError, BackendError) as exc:
+        hint = f"\nlog: {exc.log_path}" if getattr(exc, "log_path", None) else ""
+        retry = (
+            "\nretry: uv run autoontology build --resume" if getattr(exc, "run_id", None) else ""
         )
-    typer.echo(f"build: succeeded in {elapsed:.1f}s; next: uv run autoontology export")
+        _fail(f"build failed: {exc}{hint}{retry}")
+    except Exception as exc:  # noqa: BLE001 - one clean line; AUTOONTOLOGY_DEBUG=1 re-raises
+        _unexpected("build", exc, log_path)
+    elapsed = time.monotonic() - started
+    if result.revision is not None:
+        counts = result.counts
+        typer.echo(
+            f"revision {result.revision}: {counts.get('classes', 0)} classes "
+            f"({counts.get('classes_structured', 0)} Term, {counts.get('classes_document', 0)} "
+            f"document), {counts.get('individuals', 0)} individuals, "
+            f"{counts.get('merged_concepts', 0)} concepts folded into Terms"
+        )
+    if result.status != "succeeded":
+        for problem in result.problems:
+            typer.echo(f"  partial: {problem}", err=True)
+        _fail(
+            f"build {result.run_id}: partial in {elapsed:.1f}s (the snapshot holds what "
+            f"succeeded)\nlog: {log_path}\nretry: uv run autoontology build --resume"
+        )
+    typer.echo(
+        f"build {result.run_id}: succeeded in {elapsed:.1f}s; next: uv run autoontology export"
+    )
 
 
 @app.command()
-def runs(
-    source: str = typer.Option(None, "--source", help="Only runs of this source."),
-    limit: int = typer.Option(20, "--limit"),
-) -> None:
+def runs(limit: int = typer.Option(20, "--limit")) -> None:
     """Show recent runs and their steps."""
+    from autoontology.engine.build import is_top_step
+
     settings = _settings()
     store = _store(settings)
-    source_id = None
-    if source:
-        src = store.get_source(source)
-        if src is None:
-            _fail(f"unknown source {source!r}")
-        source_id = src.id
     names = {s.id: s.name for s in store.list_sources()}
     rows = []
-    for run in store.list_runs(source_id, limit=limit):
+    for run in store.list_runs(None, limit=limit):
         all_steps = store.get_steps(run.id)
         steps = " ".join(
             f"{s.name}={s.status}" + (f"({s.detail['seconds']}s)" if "seconds" in s.detail else "")
             for s in all_steps
-            if not s.name.startswith(("chunk:", "concept:"))
+            if is_top_step(s.name)
         )
         for prefix, label in (("chunk:", "chunks"), ("concept:", "concepts")):
             by_status: dict[str, int] = {}
@@ -587,44 +503,77 @@ def runs(
 
 
 @app.command()
+def ontology() -> None:
+    """Show the latest ontology snapshot: revision, sources and counts."""
+    settings = _settings()
+    snap = _store(settings).latest_snapshot(with_model=False)
+    if snap is None:
+        _fail("no ontology snapshot yet: run `uv run autoontology build`")
+    c = snap.counts
+    typer.echo(f"revision {snap.revision}  ({snap.created_at}, run {snap.run_id})")
+    typer.echo(f"workspace {settings.workspace}  base IRI {settings.base_iri}")
+    typer.echo(
+        _table(
+            ("SOURCE", "KIND", "INCLUDED", "COUNTS"),
+            [
+                (
+                    s["name"],
+                    s.get("source_kind") or s["kind"],
+                    "yes" if s.get("included") else "no",
+                    " ".join(f"{k}={v}" for k, v in sorted((s.get("counts") or {}).items())) or "-",
+                )
+                for s in snap.sources
+            ],
+        )
+    )
+    keys = (
+        ("classes", "classes"),
+        ("classes_structured", "Term classes"),
+        ("classes_document", "document classes"),
+        ("individuals", "individuals"),
+        ("object_properties", "object properties"),
+        ("datatype_properties", "datatype properties"),
+        ("merged_concepts", "concepts folded into Terms"),
+        ("documents", "documents"),
+        ("evidence", "evidence"),
+    )
+    typer.echo(_table(("COUNT", "VALUE"), [(label, str(c.get(k, 0))) for k, label in keys]))
+
+
+@app.command()
 def export(
-    out: str = typer.Option(
-        None, "--out", help="Output directory (default: exports/<name>/<run>/)."
-    ),
+    revision: int = typer.Option(None, "--revision", help="Snapshot revision (default: latest)."),
+    out: str = typer.Option(None, "--out", help="Output directory (default: exports/r<rev>/)."),
 ) -> None:
-    """Write the merged ontology of all sources: ontology.ttl, ontology.jsonld,
-    graph.graphml, report.md."""
+    """Write an ontology snapshot (default: the latest) as ontology.ttl, ontology.jsonld,
+    ontology.graphml and report.md, plus the structured sources' upstream exports."""
     import time
     from pathlib import Path
 
     from autoontology.engine import export_job, jobs
+    from autoontology.engine.client import BackendError
 
     settings = _settings()
     started = time.monotonic()
     log_path = jobs.jobs_log_path(settings)
     store = _store(settings)
-    names = [s.name for s in store.list_sources()]
-    if not names:
-        _fail("nothing to export: no sources (see `autoontology source add`)")
     try:
         jobs.setup_job_logging(settings, console=True)
         result = export_job.run_export(
-            export_job.MERGED_EXPORT_NAME,
-            settings=settings,
-            store=store,
-            sources=names,
-            out=Path(out) if out else None,
+            store, settings, revision=revision, out=Path(out) if out else None
         )
-    except jobs.JobError as exc:
-        hint = f"\nlog: {exc.log_path}" if exc.log_path else ""
+    except (jobs.JobError, BackendError) as exc:
+        hint = f"\nlog: {exc.log_path}" if getattr(exc, "log_path", None) else ""
         _fail(f"export failed: {exc}{hint}")
     except Exception as exc:  # noqa: BLE001 - one clean line; AUTOONTOLOGY_DEBUG=1 re-raises
         _unexpected("export", exc, log_path)
-    counts = result.details.get("collect", {}).get("counts", {})
+    collect = result.details.get("collect", {})
+    counts = collect.get("counts", {})
     if counts:
         typer.echo(
             _table(
                 (
+                    "REVISION",
                     "CLASSES",
                     "TERM",
                     "DOCUMENT",
@@ -635,18 +584,21 @@ def export(
                     "MERGED",
                 ),
                 [
-                    tuple(
-                        str(counts.get(k, 0))
-                        for k in (
-                            "classes",
-                            "classes_structured",
-                            "classes_document",
-                            "object_properties",
-                            "datatype_properties",
-                            "individuals",
-                            "documents",
-                            "merged_concepts",
-                        )
+                    (
+                        str(collect.get("revision", "-")),
+                        *(
+                            str(counts.get(k, 0))
+                            for k in (
+                                "classes",
+                                "classes_structured",
+                                "classes_document",
+                                "object_properties",
+                                "datatype_properties",
+                                "individuals",
+                                "documents",
+                                "merged_concepts",
+                            )
+                        ),
                     )
                 ],
             )

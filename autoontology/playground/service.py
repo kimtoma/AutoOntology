@@ -1,8 +1,9 @@
 """Playground orchestration: scope, element index and RAG chat.
 
-One :class:`Playground` per service process (``web/playground_api.py``). Every LLM call of
-a source holds that source's slot, so one runs at a time per source (409
-``playground_busy`` otherwise).
+One :class:`Playground` per service process (``web/playground_api.py``). The scope is the
+workspace's latest ontology snapshot; the element index is keyed by the workspace and
+rebuilt when the snapshot revision changes. Every LLM call holds the workspace's slot, so
+one runs at a time (409 ``playground_busy`` otherwise).
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ from autoontology.playground.elements import Element, elements_from_model
 from autoontology.playground.index import DEFAULT_TOP_K, ElementIndex, Embedder, Hit, build_index
 from autoontology.playground.llm import LLMError, PlaygroundLLM
 from autoontology.playground.store import PlaygroundStore
-from autoontology.store.alignments import AlignmentStore
 from autoontology.store.db import Source, Store
 
 logger = logging.getLogger("autoontology.playground")
@@ -40,8 +40,13 @@ class PlaygroundError(Exception):
 
 @dataclass
 class Scope:
-    source: Source
-    #: every source of the merged model: aligned structured sources first, then documents
+    #: the workspace name (the key of the index, conversations and slot)
+    key: str
+    #: the snapshot revision the scope was taken from
+    revision: int
+    #: the snapshot's model (:class:`~autoontology.ontology.model.MergedOntology`)
+    model: Any
+    #: every source of the model: structured first, then documents
     names: list[str]
     structured: list[Source] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -111,7 +116,7 @@ class Playground:
         self,
         store: Store,
         *,
-        model_for: Callable[[list[str]], tuple[Any, list[str]]],
+        model_for: Callable[[], tuple[int, Any]],
         llm_factory: Callable[[], PlaygroundLLM],
         embedder_factory: Callable[[], tuple[Embedder, str]],
     ) -> None:
@@ -127,50 +132,46 @@ class Playground:
 
     # --- scope / concurrency ------------------------------------------------------------
 
-    def scope(self, name: str) -> Scope:
-        source = self.store.get_source(name)
-        if source is None:
-            raise PlaygroundError(404, "unknown_source", f"unknown source {name!r}")
-        if source.kind in STRUCTURED_KINDS:
-            return Scope(source, [source.name], [source])
-        aligned = sorted(
-            {
-                a.structured_source
-                for a in AlignmentStore(self.store).list(source.id)
-                if a.structured_source and not a.dry_run
-            }
-        )
+    def scope(self) -> Scope:
+        """The latest snapshot (``model_for`` raises when there is none)."""
+        revision, model = self.model_for()
         structured, warnings = [], []
-        for sname in aligned:
-            s = self.store.get_source(sname)
+        for name in model.structured_sources:
+            s = self.store.get_source(name)
             if s is not None and s.kind in STRUCTURED_KINDS and s.catalog_database_id:
                 structured.append(s)
             else:
-                warnings.append(f"aligned structured source {sname!r} not found: left out")
-        return Scope(source, [*(s.name for s in structured), source.name], structured, warnings)
+                warnings.append(f"structured source {name!r} is no longer registered")
+        return Scope(
+            key=model.name,
+            revision=revision,
+            model=model,
+            names=[*model.structured_sources, *model.documents_sources],
+            structured=structured,
+            warnings=warnings,
+        )
 
     @contextlib.contextmanager
-    def slot(self, source: Source) -> Iterator[None]:
+    def slot(self, key: str) -> Iterator[None]:
         with self._busy_lock:
-            if source.id in self._busy:
+            if key in self._busy:
                 raise PlaygroundError(
                     409,
                     "playground_busy",
-                    f"another playground call for {source.name!r} is running;"
-                    " wait for it to finish",
+                    f"another playground call for {key!r} is running; wait for it to finish",
                 )
-            self._busy.add(source.id)
+            self._busy.add(key)
         try:
             yield
         finally:
             with self._busy_lock:
-                self._busy.discard(source.id)
+                self._busy.discard(key)
 
-    def acquire(self, source: Source) -> contextlib.ExitStack:
+    def acquire(self, scope: Scope) -> contextlib.ExitStack:
         """The slot entered now (409 raised here, before a response starts); close the
         returned stack to release it."""
         stack = contextlib.ExitStack()
-        stack.enter_context(self.slot(source))
+        stack.enter_context(self.slot(scope.key))
         return stack
 
     # --- index --------------------------------------------------------------------------
@@ -180,14 +181,12 @@ class Playground:
         return self.embedder_factory()
 
     def elements(self, scope: Scope) -> list[Element]:
-        model, warnings = self.model_for(scope.names)
-        scope.warnings += [w for w in warnings if w not in scope.warnings]
-        return elements_from_model(model)
+        return elements_from_model(scope.model)
 
     def index(self, scope: Scope) -> ElementIndex:
         embed, model_name = self.embedder()
-        revision = self.store.ontology_revision()
-        sid = scope.source.id
+        revision = scope.revision
+        sid = scope.key
         with self._index_lock:
             cached = self._indexes.get(sid)
             if cached and cached.revision == revision and cached.model == model_name:
@@ -208,10 +207,10 @@ class Playground:
         return idx
 
     def index_status(self, scope: Scope) -> dict[str, Any]:
-        meta = self.pg.index_meta(scope.source.id)
-        revision = self.store.ontology_revision()
+        meta = self.pg.index_meta(scope.key)
+        revision = scope.revision
         return {
-            "source": scope.source.name,
+            "workspace": scope.key,
             "scope": scope.names,
             "warnings": scope.warnings,
             "revision": revision,
@@ -239,11 +238,11 @@ class Playground:
     ) -> tuple[str | None, list[dict]]:
         if conversation_id:
             conv = self.pg.get_conversation(conversation_id)
-            if conv is None or conv["source_id"] != scope.source.id:
+            if conv is None or conv["scope"] != scope.key:
                 raise PlaygroundError(
                     404,
                     "unknown_conversation",
-                    f"no conversation {conversation_id!r} for {scope.source.name!r}",
+                    f"no conversation {conversation_id!r} for {scope.key!r}",
                 )
             # an incomplete (truncated) answer is not context for the next turn
             return conversation_id, [
@@ -317,9 +316,7 @@ class Playground:
             if persist:
 
                 def save_partial() -> tuple[str, int]:
-                    cid = conversation_id or self.pg.create_conversation(
-                        scope.source.id, question[:80]
-                    )
+                    cid = conversation_id or self.pg.create_conversation(scope.key, question[:80])
                     self.pg.add_message(cid, "user", question)
                     mid = self.pg.add_message(
                         cid,
@@ -343,7 +340,7 @@ class Playground:
         if persist:
 
             def save() -> tuple[str, int]:
-                cid = conversation_id or self.pg.create_conversation(scope.source.id, question[:80])
+                cid = conversation_id or self.pg.create_conversation(scope.key, question[:80])
                 self.pg.add_message(cid, "user", question)
                 mid = self.pg.add_message(
                     cid,

@@ -51,17 +51,17 @@ class PlaygroundStore:
 
     # --- element index ------------------------------------------------------------------
 
-    def index_meta(self, source_id: str) -> dict[str, Any] | None:
+    def index_meta(self, scope: str) -> dict[str, Any] | None:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT * FROM playground_index_meta WHERE source_id = ?", (source_id,)
+                "SELECT * FROM playground_index_meta WHERE scope = ?", (scope,)
             ).fetchone()
         return dict(row) if row else None
 
-    def index_rows(self, source_id: str) -> dict[str, IndexRow]:
+    def index_rows(self, scope: str) -> dict[str, IndexRow]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM playground_index WHERE source_id = ?", (source_id,)
+                "SELECT * FROM playground_index WHERE scope = ?", (scope,)
             ).fetchall()
         return {
             r["element_id"]: IndexRow(
@@ -74,18 +74,16 @@ class PlaygroundStore:
             for r in rows
         }
 
-    def replace_index(
-        self, source_id: str, rows: list[IndexRow], *, revision: int, model: str
-    ) -> None:
-        """The index of *source_id* becomes exactly *rows* (one transaction)."""
+    def replace_index(self, scope: str, rows: list[IndexRow], *, revision: int, model: str) -> None:
+        """The index of *scope* becomes exactly *rows* (one transaction)."""
         with self._conn() as conn:
-            conn.execute("DELETE FROM playground_index WHERE source_id = ?", (source_id,))
+            conn.execute("DELETE FROM playground_index WHERE scope = ?", (scope,))
             conn.executemany(
-                "INSERT INTO playground_index (source_id, element_id, element_type, text_sha, "
+                "INSERT INTO playground_index (scope, element_id, element_type, text_sha, "
                 "embedding, model) VALUES (?, ?, ?, ?, ?, ?)",
                 [
                     (
-                        source_id,
+                        scope,
                         r.element_id,
                         r.element_type,
                         r.text_sha,
@@ -96,27 +94,27 @@ class PlaygroundStore:
                 ],
             )
             conn.execute(
-                "INSERT OR REPLACE INTO playground_index_meta (source_id, revision, model, "
+                "INSERT OR REPLACE INTO playground_index_meta (scope, revision, model, "
                 "elements, built_at) VALUES (?, ?, ?, ?, ?)",
-                (source_id, revision, model, len(rows), now_iso()),
+                (scope, revision, model, len(rows), now_iso()),
             )
 
     # --- conversations ------------------------------------------------------------------
 
-    def create_conversation(self, source_id: str, title: str) -> str:
+    def create_conversation(self, scope: str, title: str) -> str:
         cid = uuid.uuid4().hex
         stamp = now_iso()
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO playground_conversations (id, source_id, title, created_at, "
+                "INSERT INTO playground_conversations (id, scope, title, created_at, "
                 "updated_at) VALUES (?, ?, ?, ?, ?)",
-                (cid, source_id, title[:200], stamp, stamp),
+                (cid, scope, title[:200], stamp, stamp),
             )
             conn.execute(
-                "DELETE FROM playground_conversations WHERE source_id = ? AND id NOT IN ("
-                "SELECT id FROM playground_conversations WHERE source_id = ? "
+                "DELETE FROM playground_conversations WHERE scope = ? AND id NOT IN ("
+                "SELECT id FROM playground_conversations WHERE scope = ? "
                 "ORDER BY updated_at DESC, rowid DESC LIMIT ?)",
-                (source_id, source_id, MAX_CONVERSATIONS),
+                (scope, scope, MAX_CONVERSATIONS),
             )
         return cid
 
@@ -136,13 +134,13 @@ class PlaygroundStore:
             ).fetchone()
         return dict(row) if row else None
 
-    def list_conversations(self, source_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    def list_conversations(self, scope: str, limit: int = 50) -> list[dict[str, Any]]:
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT c.*, (SELECT count(*) FROM playground_messages m WHERE "
                 "m.conversation_id = c.id) AS messages FROM playground_conversations c "
-                "WHERE c.source_id = ? ORDER BY c.updated_at DESC, c.rowid DESC LIMIT ?",
-                (source_id, limit),
+                "WHERE c.scope = ? ORDER BY c.updated_at DESC, c.rowid DESC LIMIT ?",
+                (scope, limit),
             ).fetchall()
         return [dict(r) for r in rows]
 

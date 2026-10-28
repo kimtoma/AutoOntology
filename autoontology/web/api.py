@@ -32,7 +32,14 @@ from starlette.datastructures import UploadFile
 from autoontology import __version__
 from autoontology.config import Settings
 from autoontology.store.db import ACTIVE_RUN_STATUSES, Run, Source, Store
-from autoontology.web.runs import RUN_ID_RE, TOP_STEPS, RunManager, RunStartError, run_log_path
+from autoontology.web.runs import (
+    RUN_ID_RE,
+    TOP_STEPS,
+    WORKSPACE,
+    RunManager,
+    RunStartError,
+    run_log_path,
+)
 
 PREFIX = "/api"
 #: Host header names the API answers to (DNS-rebinding guard); "testserver" = TestClient.
@@ -69,7 +76,11 @@ _SECRET_KEYS = (
 SSE_POLL_S = 0.5
 #: How often the SSE stream checks that an unmanaged active run's owner is alive.
 SSE_STALE_CHECK_S = 5.0
-GRAPH_CACHE_SIZE = 8
+MODEL_CACHE_SIZE = 4
+EXPORT_DIR_RE = re.compile(r"^r\d{4,}$")
+#: ``/api/ontology/concepts/{id}``: a Term class or a document concept node of the model
+CONCEPT_ID_RE = re.compile(r"^(term|concept)-[a-z0-9_-]{1,100}$")
+ORIGINS: tuple[str, ...] = ("structured", "document", "aligned")
 STATUS_CACHE_S = 15.0
 
 
@@ -107,47 +118,15 @@ class SourceIn(BaseModel):
     recursive: bool = False
 
 
-class BuildOptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    resume: bool = False
-    skip_compile: bool = False
-    skip_export: bool = False
-
-
-class ExtractOptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    resume: bool = False
-    workers: int | None = Field(default=None, ge=1, le=16)
-    max_chunks: int | None = Field(default=None, ge=0)
-
-
-class AlignOptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    structured_source: str | None = None
-    dry_run: bool = False
-    resume: bool = False
-    threshold: float | None = Field(default=None, ge=0, le=1)
-    min_conf: float | None = Field(default=None, ge=0, le=1)
-
-
-class ExportOptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    sources: list[str] | None = None
-
-
-OPTIONS: dict[str, type[BaseModel]] = {
-    "build": BuildOptions,
-    "extract": ExtractOptions,
-    "align": AlignOptions,
-    "export": ExportOptions,
-}
-
-
 class RunIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["build", "extract", "align", "export"]
-    source: str
-    options: dict[str, Any] = Field(default_factory=dict)
+    kind: Literal["build", "export"]
+    #: build: rebuild only these sources (align/merge/snapshot still cover everything)
+    sources: list[str] | None = Field(default=None, max_length=100)
+    #: build: continue the latest build run
+    resume: bool = False
+    #: export: the snapshot revision (default: the latest)
+    revision: int | None = Field(default=None, ge=1)
 
 
 # --- helpers -----------------------------------------------------------------------------
@@ -213,8 +192,8 @@ class Api:
         self.settings = settings
         self.runs = runs or RunManager(settings)
         self._store: Store | None = None
-        self._graph_cache: dict[tuple, Any] = {}
-        self._graph_lock = threading.Lock()
+        self._models: dict[int, Any] = {}
+        self._model_lock = threading.Lock()
         self._status: tuple[float, dict[str, Any]] | None = None
 
     @property
@@ -255,15 +234,18 @@ class Api:
         return out
 
     def step_state(self, run: Run) -> dict[str, Any]:
-        top = TOP_STEPS.get(run.kind, ())
+        from autoontology.engine.build import is_top_step, registration_order, step_names
+
         rows = self.store.get_steps(run.id)
         by_name = {s.name: s for s in rows}
+        top = list(TOP_STEPS.get(run.kind, ()))
+        if run.kind == "build" and run.status in ACTIVE_RUN_STATUSES:
+            top = step_names(registration_order(self.store))  # the plan, before it runs
+        names = list(dict.fromkeys([*(s.name for s in rows if is_top_step(s.name)), *top]))
+        if top:  # plan order first, then rows the plan does not know
+            names = [n for n in top if n in names] + [n for n in names if n not in top]
         steps = []
-        for name in list(top) + [
-            s.name
-            for s in rows
-            if s.name not in top and not s.name.startswith(("chunk:", "concept:"))
-        ]:
+        for name in names:
             s = by_name.get(name)
             steps.append(
                 {
@@ -286,7 +268,9 @@ class Api:
         from autoontology.store.documents import DocumentStore
         from autoontology.structured import pipeline
 
-        last = self.store.latest_run(source.id)
+        last = self.store.latest_run(source.id) or next(
+            (r for r in self.store.list_runs(None, limit=50) if r.kind == "build"), None
+        )
         active = self.runs.active_source(source.name)
         out: dict[str, Any] = {
             "name": source.name,
@@ -325,44 +309,40 @@ class Api:
             return False
         return path == (self.uploads_dir / source.name).resolve()
 
-    # --- graph -------------------------------------------------------------------------
+    # --- ontology snapshot ---------------------------------------------------------------
 
-    def graph_model(self, names: list[str]) -> tuple[Any, list[str]]:
-        from autoontology.engine.client import BackendClient, BackendError
-        from autoontology.engine.export_job import collect_model, documents_inputs
-        from autoontology.export import merged
+    def snapshot(self, revision: int | None = None) -> tuple[Any, Any]:
+        """``(Snapshot without model, MergedOntology)`` of *revision* (default: the latest),
+        parsed once per revision; 404 ``no_snapshot`` before the first build."""
+        from autoontology.ontology.model import MergedOntology
 
-        sources = [self.source(n) for n in names]
-        structured = [s for s in sources if s.kind in STRUCTURED_KINDS]
-        documents = [s for s in sources if s.kind == "documents"]
-        # any run finishing anywhere (e.g. an align of another documents source against a
-        # requested structured source changes its Terms), also an older one finishing after
-        # a newer one, bumps the store's ontology revision and so invalidates the cache
-        fingerprint = (tuple(names), self.store.ontology_revision())
-        with self._graph_lock:
-            cached = self._graph_cache.get(fingerprint)
-        if cached is not None:
-            return cached
-        name = (documents[0].name if documents else structured[0].name) if sources else "graph"
-        warnings: list[str] = []
-        try:
-            with BackendClient(self.settings.backend_url) as client:
-                model, _, _ = collect_model(name, self.store, client, structured, documents)
-        except (BackendError, LookupError, httpx.HTTPError) as exc:
-            if not documents:
+        head = (
+            self.store.latest_snapshot(with_model=False)
+            if revision is None
+            else self.store.get_snapshot(revision, with_model=False)
+        )
+        if head is None:
+            if revision is None:
                 raise ApiError(
-                    503, "backend_unavailable", f"structured graph unavailable: {mask(str(exc))}"
-                ) from exc
-            warnings.append(
-                f"could not load the structured sources (backend): {mask(str(exc))[:200]}"
-            )
-            model = merged.build(name, documents=documents_inputs(self.store, documents))
-            return model, warnings  # not cached: retry once the backend is back
-        with self._graph_lock:
-            if len(self._graph_cache) >= GRAPH_CACHE_SIZE:
-                self._graph_cache.pop(next(iter(self._graph_cache)))
-            self._graph_cache[fingerprint] = (model, warnings)
-        return model, warnings
+                    404, "no_snapshot", "no ontology yet: run a build (`autoontology build`)"
+                )
+            raise ApiError(404, "unknown_revision", f"unknown revision {revision}")
+        with self._model_lock:
+            model = self._models.get(head.revision)
+        if model is None:
+            full = self.store.get_snapshot(head.revision)
+            assert full is not None and full.model is not None
+            model = MergedOntology.from_dict(full.model)
+            with self._model_lock:
+                if len(self._models) >= MODEL_CACHE_SIZE:
+                    self._models.pop(next(iter(self._models)))
+                self._models[head.revision] = model
+        return head, model
+
+    def latest_model(self) -> tuple[int, Any]:
+        """``(revision, model)`` of the latest snapshot (the playground's scope)."""
+        head, model = self.snapshot()
+        return head.revision, model
 
     # --- status ------------------------------------------------------------------------
 
@@ -538,13 +518,11 @@ def build_router(api: Api) -> APIRouter:
     def start_run(body: dict[str, Any]) -> dict[str, Any]:
         try:
             req = RunIn.model_validate(body)
-            options = OPTIONS[req.kind].model_validate(req.options)
         except ValidationError as exc:
             raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
-        source = api.source(req.source)
-        call = _job_call(api, req.kind, source, options)
+        call = _job_call(api, req)
         try:
-            run_id = api.runs.start(req.kind, source.name, call)
+            run_id = api.runs.start(req.kind, WORKSPACE, call)
         except RunStartError as exc:
             code = {409: "run_active", 503: "backend_unavailable"}.get(
                 exc.status, "run_not_started"
@@ -553,12 +531,9 @@ def build_router(api: Api) -> APIRouter:
         return {"run_id": run_id}
 
     @router.get("/runs")
-    def list_runs(
-        source: str | None = None, limit: int = Query(30, ge=1, le=200)
-    ) -> dict[str, Any]:
-        source_id = api.source(source).id if source else None
+    def list_runs(limit: int = Query(30, ge=1, le=200)) -> dict[str, Any]:
         names = {s.id: s.name for s in api.store.list_sources()}
-        runs = api.store.list_runs(source_id, limit=limit)
+        runs = api.store.list_runs(None, limit=limit)
         return {"runs": [api.run_dict(r, names=names) for r in runs]}
 
     def _run(run_id: str) -> Run:
@@ -589,234 +564,140 @@ def build_router(api: Api) -> APIRouter:
         _run(run_id)
         return EventSourceResponse(_events(api, run_id, request), ping=15)
 
-    # concepts / relations -----------------------------------------------------------
+    # ontology (the latest snapshot) -----------------------------------------------------
 
-    @router.get("/concepts")
-    def list_concepts(
-        source: str | None = None,
+    @router.get("/ontology")
+    def ontology(revision: int | None = Query(None, ge=1)) -> dict[str, Any]:
+        head, model = api.snapshot(revision)
+        return {
+            "revision": head.revision,
+            "created_at": head.created_at,
+            "run_id": head.run_id,
+            "workspace": model.name,
+            "base_iri": model.base,
+            "sources": head.sources,
+            "counts": head.counts,
+            "alignment": model.alignment_counts,
+        }
+
+    @router.get("/ontology/graph")
+    def ontology_graph(
+        layer: str = "all", evidence: bool = False, revision: int | None = Query(None, ge=1)
+    ) -> dict[str, Any]:
+        from autoontology.web.graph import LAYERS, max_nodes_from_env, to_view
+
+        if layer not in LAYERS:
+            raise ApiError(400, "invalid_layer", f"layer must be one of {', '.join(LAYERS)}")
+        head, model = api.snapshot(revision)
+        cap = max_nodes_from_env()
+        return {
+            **to_view(model, layer, evidence=evidence, max_nodes=cap),
+            "revision": head.revision,
+            "max_nodes": cap,
+            "warnings": [],
+        }
+
+    @router.get("/ontology/concepts")
+    def ontology_concepts(
         q: str = Query("", max_length=200),
         kind: str = Query("", max_length=40),
+        origin: str = Query("", max_length=20),
+        source: str = Query("", max_length=80),
         page: int = Query(1, ge=1),
         size: int = Query(50, ge=1, le=200),
     ) -> dict[str, Any]:
-        from autoontology.store.alignments import AlignmentStore
-        from autoontology.store.documents import DocumentStore
+        from autoontology.web.concepts import concept_items
 
+        if origin and origin not in ORIGINS:
+            raise ApiError(400, "invalid_origin", f"origin must be one of {', '.join(ORIGINS)}")
+        head, model = api.snapshot()
+        items = concept_items(model)
+        needle = q.strip().casefold()
+        if needle:
+            items = [i for i in items if needle in i["_text"]]
+        if kind:
+            items = [i for i in items if i["kind"] == kind]
+        if origin:
+            items = [i for i in items if i["origin"] == origin]
         if source:
-            sources = [api.source(source)]
-            if sources[0].kind != "documents":
-                raise ApiError(
-                    400,
-                    "not_documents",
-                    f"source {source!r} is a "
-                    f"{sources[0].kind} source; concepts come from documents",
-                )
-        else:
-            sources = [s for s in api.store.list_sources() if s.kind == "documents"]
-        names = {s.id: s.name for s in sources}
-        rows, total = DocumentStore(api.store).search_concepts(
-            list(names), q=q, kind=kind, limit=size, offset=(page - 1) * size
-        )
-        aligns = AlignmentStore(api.store)
-        best: dict[str, Any] = {}
-        for sid in names:
-            for a in aligns.list(sid):
-                if a.relation in ("none", "skipped"):
-                    continue
-                cur = best.get(a.concept_id)
-                if cur is None or (a.confidence or 0) > (cur.confidence or 0):
-                    best[a.concept_id] = a
-        items = []
-        for c in rows:
-            a = best.get(c.id)
-            items.append(
-                {
-                    "id": c.id,
-                    "name": c.name,
-                    "name_en": c.name_en,
-                    "kind": c.kind,
-                    "source": names.get(c.source_id),
-                    "definition": c.definition[:300],
-                    "synonyms": c.synonyms,
-                    "evidence_count": c.evidence_count,
-                    "verified_count": c.verified_count,
-                    "alignment": (
-                        {
-                            "relation": a.relation,
-                            "term": a.term_name,
-                            "accepted": a.accepted,
-                            "dry_run": a.dry_run,
-                        }
-                        if a
-                        else None
-                    ),
-                }
-            )
+            items = [i for i in items if i["source"] == source]
+        total = len(items)
+        chunk = items[(page - 1) * size : page * size]
         return {
-            "items": items,
+            "revision": head.revision,
+            "items": [{k: v for k, v in i.items() if not k.startswith("_")} for i in chunk],
             "total": total,
             "page": page,
             "size": size,
             "pages": max(1, -(-total // size)),
         }
 
-    @router.get("/concepts/{concept_id}")
-    def get_concept(concept_id: str) -> dict[str, Any]:
-        from autoontology.store.alignments import AlignmentStore
-        from autoontology.store.documents import DocumentStore
-        from autoontology.unstructured.report import display_path
+    @router.get("/ontology/concepts/{concept_id}")
+    def ontology_concept(concept_id: str) -> dict[str, Any]:
+        from autoontology.web.concepts import concept_detail
 
-        if not re.fullmatch(r"[0-9a-f]{32}", concept_id):
+        if not CONCEPT_ID_RE.fullmatch(concept_id):
             raise ApiError(400, "invalid_concept_id", f"invalid concept id {concept_id!r}")
-        docs = DocumentStore(api.store)
-        c = docs.get_concept(concept_id)
-        if c is None:
+        head, model = api.snapshot()
+        detail = concept_detail(model, concept_id)
+        if detail is None:
             raise ApiError(404, "unknown_concept", f"unknown concept {concept_id!r}")
-        source = api.store.get_source_by_id(c.source_id)
-        evidence = [
-            {
-                "quote": e["quote"],
-                "verified": bool(e["verified"]),
-                "page": e["page"],
-                "section": e["section_path"],
-                "document": e["title"],
-                "path": display_path(e["path"]),
-            }
-            for e in docs.concept_evidence(c.id)
-        ]
-        alignments = [
-            {
-                "relation": a.relation,
-                "term": a.term_name,
-                "term_id": a.term_id,
-                "structured_source": a.structured_source,
-                "confidence": a.confidence,
-                "similarity": a.similarity,
-                "accepted": a.accepted,
-                "dry_run": a.dry_run,
-                "rationale": a.rationale,
-            }
-            for a in AlignmentStore(api.store).for_concept(c.id)
-        ]
-        return {
-            "id": c.id,
-            "name": c.name,
-            "name_en": c.name_en,
-            "kind": c.kind,
-            "source": source.name if source else None,
-            "definition": c.definition,
-            "synonyms": c.synonyms,
-            "attributes": c.attributes,
-            "merged_from": c.merged_from,
-            "evidence_count": c.evidence_count,
-            "verified_count": c.verified_count,
-            "evidence": evidence,
-            "relations": docs.concept_relations(c.id),
-            "alignments": alignments,
-        }
-
-    @router.get("/relations")
-    def list_relations(source: str) -> dict[str, Any]:
-        from autoontology.store.documents import DocumentStore
-
-        src = api.source(source)
-        rows = DocumentStore(api.store).list_relations(src.id)
-        return {"relations": [r.__dict__ for r in rows]}
-
-    # graph ------------------------------------------------------------------------------
-
-    @router.get("/graph")
-    def graph(
-        sources: str | None = None, layer: str = "all", evidence: bool = False
-    ) -> dict[str, Any]:
-        from autoontology.web.graph import LAYERS, max_nodes_from_env, to_view
-
-        if layer not in LAYERS:
-            raise ApiError(400, "invalid_layer", f"layer must be one of {', '.join(LAYERS)}")
-        if sources:
-            names = list(dict.fromkeys(n.strip() for n in sources.split(",") if n.strip()))
-        else:
-            names = [
-                s.name
-                for s in api.store.list_sources()
-                if (s.kind in STRUCTURED_KINDS and s.catalog_database_id) or s.kind == "documents"
-            ]
-        if not names:
-            return {
-                "nodes": [],
-                "edges": [],
-                "layer": layer,
-                "warnings": [],
-                "counts": {"nodes": 0, "edges": 0},
-                "structured_sources": [],
-                "documents_sources": [],
-            }
-        model, warnings = api.graph_model(names)
-        cap = max_nodes_from_env()
-        return {
-            **to_view(model, layer, evidence=evidence, max_nodes=cap),
-            "max_nodes": cap,
-            "warnings": warnings,
-        }
+        return {"revision": head.revision, **detail}
 
     # exports ----------------------------------------------------------------------------
 
     @router.get("/exports")
-    def list_exports(source: str | None = None) -> dict[str, Any]:
+    def list_exports() -> dict[str, Any]:
         root = Path(api.settings.exports_dir)
         folders = (
-            [root / _any_name(source)]
-            if source
-            else (sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else [])
+            sorted(
+                (p for p in root.iterdir() if p.is_dir() and EXPORT_DIR_RE.fullmatch(p.name)),
+                key=lambda p: int(p.name[1:]),
+                reverse=True,
+            )
+            if root.is_dir()
+            else []
         )
         out = []
         for folder in folders:
-            if not folder.is_dir():
-                continue
-            for run_dir in folder.iterdir():
-                if not (run_dir.is_dir() and RUN_ID_RE.fullmatch(run_dir.name)):
-                    continue
-                run = api.store.get_run(run_dir.name)
-                files = sorted(
-                    (
-                        {"name": f.name, "bytes": f.stat().st_size}
-                        for f in run_dir.iterdir()
-                        if f.is_file() and EXPORT_FILE_RE.fullmatch(f.name)
-                    ),
-                    key=lambda f: f["name"],
-                )
-                out.append(
-                    {
-                        "source": folder.name,
-                        "run_id": run_dir.name,
-                        "kind": run.kind if run else None,
-                        "status": run.status if run else None,
-                        "created_at": (run.finished_at or run.started_at)
-                        if run
-                        else _iso(run_dir.stat().st_mtime),
-                        "files": files,
-                    }
-                )
-        out.sort(key=lambda e: e["run_id"], reverse=True)
+            files = sorted(
+                (
+                    {"name": f.relative_to(folder).as_posix(), "bytes": f.stat().st_size}
+                    for f in folder.rglob("*")
+                    if f.is_file() and _export_path_ok(f.relative_to(folder).as_posix())
+                ),
+                key=lambda f: f["name"],
+            )
+            out.append(
+                {
+                    "revision": int(folder.name[1:]),
+                    "dir": folder.name,
+                    "created_at": _iso(folder.stat().st_mtime),
+                    "files": files,
+                }
+            )
         return {"exports": out}
 
-    @router.get("/exports/{run_id}/{file_name}")
-    def download_export(run_id: str, file_name: str, inline: bool = False) -> Response:
-        if not RUN_ID_RE.fullmatch(run_id) or not EXPORT_FILE_RE.fullmatch(file_name):
+    @router.get("/exports/{rev}/{file_path:path}")
+    def download_export(rev: str, file_path: str, inline: bool = False) -> Response:
+        if rev.isdigit():
+            from autoontology.engine.export_job import revision_dir_name
+
+            rev = revision_dir_name(int(rev))
+        if not EXPORT_DIR_RE.fullmatch(rev) or not _export_path_ok(file_path):
             raise ApiError(400, "invalid_path", "invalid export path")
         root = Path(api.settings.exports_dir).resolve()
-        for folder in sorted(root.iterdir()) if root.is_dir() else []:
-            candidate = (folder / run_id / file_name).resolve()
-            if candidate.is_file() and candidate.is_relative_to(root):
-                if inline:
-                    if candidate.stat().st_size > 5 * 1024 * 1024:
-                        raise ApiError(413, "too_large", "file too large to preview")
-                    return Response(
-                        candidate.read_text(encoding="utf-8", errors="replace"),
-                        media_type="text/plain; charset=utf-8",
-                    )
-                return FileResponse(candidate, filename=file_name)
-        raise ApiError(404, "unknown_export", f"no export file {run_id}/{file_name}")
+        candidate = (root / rev / file_path).resolve()
+        if candidate.is_file() and candidate.is_relative_to(root / rev):
+            if inline:
+                if candidate.stat().st_size > 5 * 1024 * 1024:
+                    raise ApiError(413, "too_large", "file too large to preview")
+                return Response(
+                    candidate.read_text(encoding="utf-8", errors="replace"),
+                    media_type="text/plain; charset=utf-8",
+                )
+            return FileResponse(candidate, filename=candidate.name)
+        raise ApiError(404, "unknown_export", f"no export file {rev}/{file_path}")
 
     # status -----------------------------------------------------------------------------
 
@@ -952,68 +833,24 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
     return {**api.source_dict(source), "files": names}
 
 
-def _job_call(api: Api, kind: str, source: Source, options: BaseModel):
-    """``call(job_fn, store)`` for the run manager, after validating kind vs. source."""
-    from autoontology.engine.extract import documents_target
+def _export_path_ok(path: str) -> bool:
+    """A file path inside an export folder: at most two plain segments (``upstream/...``)."""
+    parts = path.split("/")
+    return 1 <= len(parts) <= 2 and all(EXPORT_FILE_RE.fullmatch(p) for p in parts)
 
+
+def _job_call(api: Api, req: RunIn):
+    """``call(job_fn, store)`` for the run manager, after validating the request."""
     settings = api.settings
-    o = options
-    if kind == "build":
-        if source.kind not in STRUCTURED_KINDS:
-            raise ApiError(
-                400,
-                "wrong_source_kind",
-                f"build needs a files/database source; {source.name!r} is {source.kind}",
-            )
-        return lambda fn, store: fn(
-            source.name,
-            resume=o.resume,
-            settings=settings,
-            store=store,
-            skip_compile=o.skip_compile,
-            skip_export=o.skip_export,
-        )
-    if kind == "extract":
-        if source.kind != "documents":
-            raise ApiError(
-                400,
-                "wrong_source_kind",
-                f"extract needs a documents source; {source.name!r} is {source.kind}",
-            )
-        target, recursive = documents_target(source)
-        return lambda fn, store: fn(
-            source.name,
-            target,
-            settings=settings,
-            store=store,
-            recursive=recursive,
-            resume=o.resume,
-            workers=o.workers,
-            max_chunks=o.max_chunks,
-        )
-    if kind == "align":
-        if source.kind != "documents":
-            raise ApiError(
-                400,
-                "wrong_source_kind",
-                f"align needs a documents source; {source.name!r} is {source.kind}",
-            )
-        if o.structured_source:
-            api.source(o.structured_source)
-        return lambda fn, store: fn(
-            source.name,
-            settings=settings,
-            store=store,
-            structured_source=o.structured_source,
-            dry_run=o.dry_run,
-            resume=o.resume,
-            min_sim=o.threshold,
-            min_conf=o.min_conf,
-        )
-    sources = None
-    if o.sources:
-        sources = [api.source(n).name for n in o.sources]
-    return lambda fn, store: fn(source.name, settings=settings, store=store, sources=sources)
+    if req.kind == "build":
+        sources = [api.source(n).name for n in req.sources] if req.sources else None
+        if not api.store.list_sources():
+            raise ApiError(400, "no_sources", "no sources: add one first")
+        return lambda fn, store: fn(store, settings, sources=sources, resume=req.resume)
+    if req.sources or req.resume:
+        raise ApiError(400, "invalid_request", "export takes only `revision`")
+    api.snapshot(req.revision)  # 404 before a thread starts
+    return lambda fn, store: fn(store, settings, revision=req.revision)
 
 
 async def _events(api: Api, run_id: str, request: Request):

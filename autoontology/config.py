@@ -231,6 +231,29 @@ def _float_env(name: str, default: float) -> float:
     return value
 
 
+DEFAULT_WORKSPACE = "default"
+DEFAULT_BASE_IRI = "http://example.com/autoontology#"
+WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
+
+
+def _workspace(raw: str) -> str:
+    value = raw.strip() or DEFAULT_WORKSPACE
+    if not WORKSPACE_RE.fullmatch(value):
+        raise ValueError(
+            f"AUTOONTOLOGY_WORKSPACE must be letters, digits, _, . and - (max 63), got {raw!r}"
+        )
+    return value
+
+
+def _base_iri(raw: str) -> str:
+    value = raw.strip() or DEFAULT_BASE_IRI
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9+.-]*:[^\s<>\"{}|^`\\]+", value):
+        raise ValueError(f"AUTOONTOLOGY_BASE_IRI must be an absolute IRI, got {raw!r}")
+    if not value.endswith(("#", "/")):
+        value += "#"
+    return value
+
+
 def _bool_env(name: str, default: bool) -> bool:
     raw = os.environ.get(name, "").strip().lower()
     if not raw:
@@ -275,6 +298,11 @@ class Settings:
     openai_timeout_s: float = DEFAULT_OPENAI_TIMEOUT_S
     #: LLM_* limits the user set explicitly (shell or .env); the provider never overrides them.
     llm_limits: dict[str, str] = field(default_factory=dict)
+    #: The workspace = the one ontology this home builds (AUTOONTOLOGY_WORKSPACE); its name
+    #: is the ontology's name.
+    workspace: str = DEFAULT_WORKSPACE
+    #: Namespace of every IRI the ontology mints (AUTOONTOLOGY_BASE_IRI).
+    base_iri: str = DEFAULT_BASE_IRI
 
     def __post_init__(self) -> None:
         validate_pg_database_name(self.postgres_database)
@@ -314,6 +342,8 @@ class Settings:
             openai_embed_model=env.get("AUTOONTOLOGY_OPENAI_EMBED_MODEL", "").strip(),
             openai_timeout_s=_float_env("AUTOONTOLOGY_OPENAI_TIMEOUT_S", DEFAULT_OPENAI_TIMEOUT_S),
             llm_limits={k: env[k] for k in OLLAMA_LLM_LIMITS if env.get(k, "").strip()},
+            workspace=_workspace(env.get("AUTOONTOLOGY_WORKSPACE", "")),
+            base_iri=_base_iri(env.get("AUTOONTOLOGY_BASE_IRI", "")),
         )
 
     @property

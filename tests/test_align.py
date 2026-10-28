@@ -602,7 +602,7 @@ def test_summary_is_scoped_to_the_structured_source(env):
 
 def _export_model(store):
     from autoontology.engine.export_job import documents_inputs
-    from autoontology.export import merged
+    from autoontology.ontology import model as merged
 
     docs = store.get_source("hanbit-docs")
     return merged.build("x", documents=documents_inputs(store, [docs]))
@@ -634,7 +634,7 @@ def test_dry_run_after_a_real_run_keeps_committed_verdicts(env):
 
 def test_dry_run_verdicts_never_reach_the_export(env):
     from autoontology.engine.export_job import documents_inputs
-    from autoontology.export import merged
+    from autoontology.ontology import model as merged
     from autoontology.store.alignments import AlignmentRecord
     from autoontology.structured.semantic import fetch_snapshot
 
@@ -702,10 +702,10 @@ def test_resume_with_another_threshold_starts_a_new_run(env):
     assert again.run_id != first.run_id and again.status == "succeeded"
 
 
-def test_align_and_export_reread_sources_under_the_lease(env, monkeypatch):
-    """Fix wave 2 #7: a structured source replaced while align/export waited for the lease
-    is refused, not used through the stale object."""
-    from autoontology.engine import export_job
+def test_align_and_build_reread_sources_under_the_lease(env, monkeypatch):
+    """Fix wave 2 #7: a source replaced while align/build waited for the lease is refused,
+    not used through the stale object."""
+    from autoontology.engine import build
     from tests.test_jobs import _replace_on_lease
 
     settings, store = env
@@ -715,13 +715,7 @@ def test_align_and_export_reread_sources_under_the_lease(env, monkeypatch):
         _align(settings, store, client, FakeJudge(), [])
     _replace_on_lease(store, "hanbit-docs", monkeypatch)
     with pytest.raises(JobError, match="removed or replaced"):
-        export_job.run_export(
-            "hanbit-docs",
-            settings=settings,
-            store=store,
-            sources=["hanbit-docs", "hanbit"],
-            client=client,
-        )
+        build.run_build(store, settings, client=client, check_service=False)
 
 
 # --- identity policy (review #4) ---------------------------------------------------------

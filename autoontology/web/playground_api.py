@@ -1,13 +1,15 @@
 """REST + SSE routes of the Playground page, under ``/api/playground/``.
 
-* ``POST /chat`` (SSE): RAG over the source's merged ontology (``playground.service``).
+* ``POST /chat`` (SSE): RAG over the latest ontology snapshot (``playground.service``).
 * ``POST /sql`` (SSE): upstream's NL->SQL agent (``POST /api/chat/completions`` on the
   backend), events relayed verbatim (masked).
-* ``POST /sparql``, ``GET /sparql/examples``: the SPARQL console over the latest export.
+* ``POST /sparql``, ``GET /sparql/examples``: the SPARQL console over the latest snapshot
+  (its export's ``ontology.ttl``, else a Turtle file written on demand to
+  ``<home>/cache/ontology-r<rev>.ttl``).
 
 SSE streams are POST responses read with ``fetch`` (not ``EventSource``); every event's
-data is JSON. The source's playground slot (409 ``playground_busy``) is taken before the
-response starts and released when the stream ends or the client goes away.
+data is JSON. The workspace's playground slot (409 ``playground_busy``) is taken before
+the response starts and released when the stream ends or the client goes away.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import ExitStack
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -41,7 +44,6 @@ from autoontology.playground.sparql import (
     MAX_QUERY_CHARS,
     SparqlError,
     SparqlRunner,
-    latest_ttl,
 )
 from autoontology.web.api import PREFIX, Api, ApiError, mask
 
@@ -64,7 +66,6 @@ class Turn(_In):
 
 
 class ChatIn(_In):
-    source: str = Field(min_length=1, max_length=80)
     question: str = Field(min_length=1, max_length=2000)
     history: list[Turn] = Field(default_factory=list, max_length=40)
     top_k: int = Field(DEFAULT_TOP_K, ge=1, le=40)
@@ -72,19 +73,15 @@ class ChatIn(_In):
 
 
 class SqlIn(_In):
+    #: the structured source whose database the query targets (default: upstream picks)
     source: str | None = Field(None, max_length=80)
     question: str = Field(min_length=1, max_length=2000)
     conversation_id: uuid.UUID | None = None
 
 
 class SparqlIn(_In):
-    source: str = Field(min_length=1, max_length=80)
     query: str = Field(min_length=1, max_length=MAX_QUERY_CHARS)
     limit: int = Field(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT)
-
-
-class SourceIn(_In):
-    source: str = Field(min_length=1, max_length=80)
 
 
 def _event(name: str, data: Any) -> dict[str, str]:
@@ -129,34 +126,34 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         if found is None:
             found = Playground(
                 api.store,
-                model_for=api.graph_model,
+                model_for=api.latest_model,
                 llm_factory=lambda: llm_for(api.settings),
                 embedder_factory=EmbedderCache(lambda: api.settings, api.settings),
             )
             app.state.playground = found
         return found
 
-    def scope(name: str) -> Scope:
+    def scope() -> Scope:
         try:
-            return pg().scope(name)
+            return pg().scope()
         except PlaygroundError as exc:
             raise _api_error(exc) from exc
 
     def hold(s: Scope) -> ExitStack:
         try:
-            return pg().acquire(s.source)
+            return pg().acquire(s)
         except PlaygroundError as exc:
             raise _api_error(exc) from exc
 
     # --- index / chat -------------------------------------------------------------------
 
     @router.get("/index")
-    def index_status(source: str) -> dict[str, Any]:
-        return pg().index_status(scope(source))
+    def index_status() -> dict[str, Any]:
+        return pg().index_status(scope())
 
     @router.post("/index")
-    async def index_build(body: SourceIn) -> dict[str, Any]:
-        s = scope(body.source)
+    async def index_build() -> dict[str, Any]:
+        s = scope()
         with hold(s):
             try:
                 await anyio.to_thread.run_sync(pg().index, s)
@@ -166,14 +163,14 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
 
     @router.post("/chat")
     async def chat(body: ChatIn) -> EventSourceResponse:
-        s = scope(body.source)
+        s = scope()
         if body.conversation_id:
             conv = pg().pg.get_conversation(body.conversation_id)
-            if conv is None or conv["source_id"] != s.source.id:
+            if conv is None or conv["scope"] != s.key:
                 raise ApiError(
                     404,
                     "unknown_conversation",
-                    f"no conversation {body.conversation_id!r} for {s.source.name!r}",
+                    f"no conversation {body.conversation_id!r} for {s.key!r}",
                 )
         try:
             llm = pg().llm_factory()
@@ -199,9 +196,8 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         )
 
     @router.get("/conversations")
-    def conversations(source: str) -> dict[str, Any]:
-        s = scope(source)
-        return {"conversations": pg().pg.list_conversations(s.source.id)}
+    def conversations() -> dict[str, Any]:
+        return {"conversations": pg().pg.list_conversations(scope().key)}
 
     @router.get("/conversations/{conversation_id}")
     def conversation(conversation_id: str) -> dict[str, Any]:
@@ -222,10 +218,16 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     async def sql(body: SqlIn) -> EventSourceResponse:
         target_db = None
         if body.source:
-            s = scope(body.source)
-            target_db = next(
-                (x.catalog_database_id for x in s.structured if x.catalog_database_id), None
-            )
+            src = api.source(body.source)
+            if src.kind not in ("files", "database"):
+                raise ApiError(400, "not_structured", f"source {src.name!r} is a {src.kind} source")
+            target_db = src.catalog_database_id
+        else:  # the snapshot's first built structured source (none: upstream picks)
+            try:
+                structured = scope().structured
+            except ApiError:
+                structured = []
+            target_db = next((x.catalog_database_id for x in structured), None)
         payload: dict[str, Any] = {"question": body.question}
         if target_db:
             payload["target_db"] = target_db
@@ -345,24 +347,15 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
 
     @router.post("/sparql")
     async def run_sparql(body: SparqlIn) -> dict[str, Any]:
-        s = scope(body.source)
-        from autoontology.engine.export_job import MERGED_EXPORT_NAME
-
-        # the source's own export, else the merged export of every source
-        found = latest_ttl(api.settings.exports_dir, s.source.name) or latest_ttl(
-            api.settings.exports_dir, MERGED_EXPORT_NAME
-        )
-        if found is None:
-            raise ApiError(
-                404,
-                "no_export",
-                f"source {s.source.name!r} has no exported "
-                f"ontology.ttl; run `uv run autoontology export` first",
-            )
-        run_id, path = found
+        revision, model = api.latest_model()
 
         def work() -> dict[str, Any]:
-            return {**sparql.run_file(run_id, path, body.query, limit=body.limit), "export": run_id}
+            path = snapshot_ttl(api.settings, revision, model)
+            return {
+                **sparql.run_file(f"r{revision}", path, body.query, limit=body.limit),
+                "revision": revision,
+                "ttl": path.name,
+            }
 
         try:
             return mask(await anyio.to_thread.run_sync(work))
@@ -370,6 +363,27 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             raise _api_error(exc) from exc
 
     return router
+
+
+def snapshot_ttl(settings: Any, revision: int, model: Any) -> Path:
+    """The Turtle file of snapshot *revision*: its export's ``ontology.ttl`` when one
+    exists, else ``<home>/cache/ontology-r<rev>.ttl``, written from the model on demand."""
+    from autoontology.engine.export_job import revision_dir_name
+    from autoontology.export import rdf
+
+    exported = Path(settings.exports_dir) / revision_dir_name(revision) / "ontology.ttl"
+    if exported.is_file():
+        return exported
+    cached = Path(settings.home) / "cache" / f"ontology-r{revision}.ttl"
+    if not cached.is_file():
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cached.with_name(f".{cached.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            rdf.to_graph(model).serialize(destination=str(tmp), format="turtle", encoding="utf-8")
+            tmp.replace(cached)
+        finally:
+            tmp.unlink(missing_ok=True)
+    return cached
 
 
 def install(app: FastAPI, api: Api) -> None:

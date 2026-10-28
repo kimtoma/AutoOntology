@@ -5,26 +5,26 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from autoontology.export.merged import MergedOntology
+from autoontology.ontology.model import MergedOntology
 from autoontology.store.db import now_iso
 
 TYPE_LABELS = {
     "classes": "Classes (owl:Class)",
     "classes_structured": "  └ Structured Terms",
     "classes_document": "  └ Document concepts (unaligned, broader, narrower, related)",
-    "metric_classes": "  └ of which os:Metric",
+    "metric_classes": "  └ of which ao:Metric",
     "object_properties": "Object properties (owl:ObjectProperty)",
     "semantic_fk_properties": "  └ SEMANTIC_FK",
     "relation_properties": "  └ Document relations",
-    "predicate_properties": "Predicate super-properties (owl:ObjectProperty `os:<predicate>`, "
+    "predicate_properties": "Predicate super-properties (owl:ObjectProperty `ao:<predicate>`, "
     "domain/range owl:Thing)",
     "object_properties_total": "owl:ObjectProperty total (Turtle)",
     "datatype_properties": "Datatype properties (owl:DatatypeProperty)",
     "column_properties": "  └ Structured column properties",
     "relation_datatype_properties": "  └ Document has_attribute (object is an attribute)",
     "individuals": "Individuals (rules, processes)",
-    "business_rules": "  └ os:BusinessRule",
-    "processes": "  └ os:Process",
+    "business_rules": "  └ ao:BusinessRule",
+    "processes": "  └ ao:Process",
     "documents": "Documents (prov:Entity)",
     "evidence": "Evidence (prov:Entity)",
     "subclass_axioms": "rdfs:subClassOf axioms",
@@ -43,11 +43,13 @@ def render(
     run_id: str,
     files: list[dict[str, Any]],
     upstream: list[dict[str, Any]],
+    revision: int | None = None,
 ) -> str:
     counts = model.counts()
     lines = [
-        f"# Merged ontology report — {model.name}",
+        f"# Ontology report — {model.name}",
         "",
+        *([f"- Revision: {revision}"] if revision is not None else []),
         f"- Run ID: `{run_id}`",
         f"- Generated at: {now_iso()}",
         f"- Base IRI: `{model.base}`",

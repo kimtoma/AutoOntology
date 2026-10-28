@@ -20,7 +20,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from autoontology.export.merged import THING, MergedOntology
+from autoontology.ontology.model import THING, MergedOntology
 
 GRAPHML_NS = "http://graphml.graphdrawing.org/xmlns"
 _SCHEMA_LOCATION = (
@@ -52,8 +52,8 @@ class Graph:
 
 
 VOCAB_NODES = {
-    "BusinessRule": "os:BusinessRule",
-    "Process": "os:Process",
+    "BusinessRule": "ao:BusinessRule",
+    "Process": "ao:Process",
     "Concept": "skos:Concept",
     THING: "owl:Thing",
 }
@@ -198,7 +198,7 @@ def to_xml(g: Graph) -> ET.ElementTree:
 
 
 def write(model: MergedOntology, out_dir: Path) -> Path:
-    path = out_dir / "graph.graphml"
+    path = out_dir / "ontology.graphml"
     to_xml(to_graph(model)).write(path, encoding="utf-8", xml_declaration=True)
     return path
 

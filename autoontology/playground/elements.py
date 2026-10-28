@@ -1,5 +1,5 @@
 """The playground's retrieval units: one :class:`Element` per element of the merged
-ontology (``export.merged.MergedOntology``), with the text that gets embedded, a UI link and
+ontology (``ontology.model.MergedOntology``), with the text that gets embedded, a UI link and
 its 1-hop neighbours.
 
 Element ids are the model's node/property locals (``term-…``, ``concept-…``, ``rel-…``,
@@ -14,7 +14,7 @@ import hashlib
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
-from autoontology.export.merged import LITERAL, THING, MergedOntology
+from autoontology.ontology.model import LITERAL, THING, MergedOntology
 
 ELEMENT_TYPES: tuple[str, ...] = (
     "term",

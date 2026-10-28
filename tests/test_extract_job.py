@@ -75,6 +75,20 @@ def _backends(settings, llm=None, embed=None):
     )
 
 
+def _cli_build_with(monkeypatch, backends):
+    """`autoontology build` with fake extraction backends (no service check)."""
+    from autoontology.engine import build
+
+    real = build.run_build
+    monkeypatch.setattr(
+        build,
+        "run_build",
+        lambda store, settings, **kw: real(
+            store, settings, extract_backends=backends, check_service=False, **kw
+        ),
+    )
+
+
 def _run(settings, store, target, backends, **kw):
     return ex.run_extract(
         "hanbit_docs",
@@ -241,30 +255,18 @@ def test_source_kind_and_service_checks(env, monkeypatch):
         ex.run_extract("other", docs_dir, settings=ollama, store=store)
 
 
-def test_cli_extract_runs_listing_and_rm(env, monkeypatch):
+def test_cli_documents_source_list_and_rm(env):
     from typer.testing import CliRunner
 
     from autoontology.cli import app
 
     settings, store, docs_dir = env
-    real = ex.run_extract
-
-    def fake(name, target, **kw):
-        kw.update(backends=_backends(settings), check_service=False)
-        return real(name, target, **kw)
-
-    monkeypatch.setattr(ex, "run_extract", fake)
     runner = CliRunner()
     res = runner.invoke(
         app, ["source", "add", str(docs_dir), "--name", "hanbit_docs", "--kind", "documents"]
     )
     assert res.exit_code == 0, res.output
-    res = runner.invoke(app, ["build"])
-    assert res.exit_code == 0, res.output
-    assert "DOCUMENT" in res.output and "계약.md" in res.output and "report: " in res.output
-    assert "concepts 4, relations 2" in res.output
-    res = runner.invoke(app, ["runs", "--source", "hanbit_docs"])
-    assert "chunks[succeeded=" in res.output and "chunk:" not in res.output
+    assert _run(settings, store, docs_dir, _backends(settings)).status == "succeeded"
     assert "documents" in runner.invoke(app, ["source", "list"]).output
     res = runner.invoke(app, ["source", "rm", "hanbit_docs"])
     assert res.exit_code == 0 and "removed documents source" in res.output
@@ -327,14 +329,7 @@ def test_cli_partial_exits_1(env, monkeypatch):
                 raise ConnectionRefusedError("refused")
             return super().structured(system, human, schema)
 
-    real = ex.run_extract
-    monkeypatch.setattr(
-        ex,
-        "run_extract",
-        lambda name, target, **kw: real(
-            name, target, **{**kw, "backends": _backends(settings, Flaky()), "check_service": False}
-        ),
-    )
+    _cli_build_with(monkeypatch, _backends(settings, Flaky()))
     runner = CliRunner()
     assert (
         runner.invoke(
@@ -344,8 +339,8 @@ def test_cli_partial_exits_1(env, monkeypatch):
     )
     res = runner.invoke(app, ["build"])
     assert res.exit_code == 1
-    assert "partial (1 chunk(s) failed" in res.output and "--resume" in res.output
-    assert "failed: 청구규정 #0" in res.output
+    assert "partial: documents:hanbit_docs:extract: 1 of" in res.output
+    assert "chunk(s) failed" in res.output and "--resume" in res.output
 
 
 def test_report_flags_chunks_over_the_llm_timeout(monkeypatch):
@@ -457,14 +452,7 @@ def test_cli_extract_lists_read_failures(env, monkeypatch):
         return real(path, **kw)
 
     monkeypatch.setattr(readers, "read_document", flaky)
-    real_run = ex.run_extract
-    monkeypatch.setattr(
-        ex,
-        "run_extract",
-        lambda name, target, **kw: real_run(
-            name, target, **{**kw, "backends": _backends(settings), "check_service": False}
-        ),
-    )
+    _cli_build_with(monkeypatch, _backends(settings))
     runner = CliRunner()
     assert (
         runner.invoke(
@@ -474,7 +462,7 @@ def test_cli_extract_lists_read_failures(env, monkeypatch):
     )
     res = runner.invoke(app, ["build"])
     assert res.exit_code == 1
-    assert "1 document(s) failed to read" in res.output and "청구.md" in res.output
+    assert "documents:hanbit_docs:read: 1 document(s) failed to read" in res.output
 
 
 def test_document_changed_to_a_duplicate_drops_its_old_content(env):

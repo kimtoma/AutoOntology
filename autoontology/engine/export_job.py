@@ -1,11 +1,14 @@
-"""``autoontology export``: the merged ontology (structured Terms + document concepts joined
-through the ``align`` verdicts) as Turtle, JSON-LD and GraphML, plus ``report.md`` and the
-structured sources' upstream exports (``model.yaml``, ``ossie.zip``).
+"""``autoontology export``: the latest (or a given) ontology snapshot as Turtle, JSON-LD
+and GraphML, plus ``report.md`` and the structured sources' upstream exports.
 
 Steps ``collect -> serialize -> upstream -> report`` (:func:`autoontology.engine.jobs._execute`).
-The model is built once in ``collect`` (:func:`autoontology.export.merged.build`) and every
-format writer serialises that same object; ``serialize`` re-parses the Turtle file and
-fails the run if the export invariants do not hold.
+``collect`` loads the snapshot written by ``autoontology build`` -- the export never
+rebuilds the model -- and every format writer serialises that same object; ``serialize``
+re-parses the Turtle file and fails the run if the export invariants do not hold. The
+files go to ``exports/r<revision:04d>/`` (``--out`` overrides): ``ontology.ttl``,
+``ontology.jsonld``, ``ontology.graphml``, ``report.md`` and, per structured source,
+``upstream/<source>.model.yaml`` and ``upstream/<source>.ossie.zip`` fetched from the
+backend. Exporting a revision again replaces its folder.
 """
 
 from __future__ import annotations
@@ -22,27 +25,35 @@ from typing import Any
 from autoontology.config import Settings
 from autoontology.engine.client import BackendClient
 from autoontology.engine.jobs import (
-    BUILD_KIND,
     JobError,
     RunResult,
     _execute,
     hold_sources,
     setup_job_logging,
-    verify_sources,
 )
-from autoontology.export import graphml, merged, rdf
+from autoontology.export import graphml, rdf
 from autoontology.export import report as export_report
+from autoontology.ontology import model as merged
 from autoontology.store.alignments import AlignmentStore
-from autoontology.store.db import Run, Source, Store
+from autoontology.store.db import Run, Snapshot, Source, Store
 from autoontology.store.documents import DocumentStore
-from autoontology.structured.semantic import StructuredSnapshot, database_id_for, fetch_snapshot
+from autoontology.structured.semantic import database_id_for
 from autoontology.unstructured.report import display_path
 
 logger = logging.getLogger("autoontology.jobs")
 
 EXPORT_KIND = "export"
 EXPORT_STEPS: tuple[str, ...] = ("collect", "serialize", "upstream", "report")
-UPSTREAM_FILES: tuple[str, ...] = ("model.yaml", "ossie.zip")
+UPSTREAM_DIR = "upstream"
+#: per structured source: (file suffix, upstream export format)
+UPSTREAM_FILES: tuple[tuple[str, str], ...] = (
+    ("model.yaml", "auto_ontology"),
+    ("ossie.zip", "ossie"),
+)
+
+
+def revision_dir_name(revision: int) -> str:
+    return f"r{int(revision):04d}"
 
 
 @dataclass
@@ -50,21 +61,22 @@ class _ExportCtx:
     settings: Settings
     store: Store
     run: Run
-    name: str
+    snapshot: Snapshot
     structured: list[Source]
-    documents: list[Source]
     client: BackendClient
     out_dir: Path
     model: merged.MergedOntology | None = None
-    snapshots: list[StructuredSnapshot] = field(default_factory=list)
     files: list[Path] = field(default_factory=list)
     upstream: list[dict[str, Any]] = field(default_factory=list)
-    expected_classes: int | None = None
 
 
-def _file_entry(path: Path) -> dict[str, Any]:
+def _file_entry(path: Path, root: Path) -> dict[str, Any]:
     data = path.read_bytes()
-    return {"name": path.name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    return {
+        "name": path.relative_to(root).as_posix(),
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
 
 
 def documents_inputs(store: Store, documents: list[Source]) -> list[merged.DocumentsInput]:
@@ -88,33 +100,19 @@ def documents_inputs(store: Store, documents: list[Source]) -> list[merged.Docum
     return inputs
 
 
-def collect_model(
-    name: str,
-    store: Store,
-    client: BackendClient,
-    structured: list[Source],
-    documents: list[Source],
-) -> tuple[merged.MergedOntology, list[StructuredSnapshot], list[merged.DocumentsInput]]:
-    """Build the merged model exactly as ``export`` does (the web graph uses this too)."""
-    snapshots = [fetch_snapshot(client, s) for s in structured]
-    inputs = documents_inputs(store, documents)
-    return merged.build(name, structured=snapshots, documents=inputs), snapshots, inputs
-
-
 def _step_collect(ctx: _ExportCtx) -> dict[str, Any]:
-    ctx.model, ctx.snapshots, inputs = collect_model(
-        ctx.name, ctx.store, ctx.client, ctx.structured, ctx.documents
-    )
-    ctx.expected_classes = merged.expected_class_count(ctx.snapshots, inputs)
+    assert ctx.snapshot.model is not None
+    ctx.model = merged.MergedOntology.from_dict(ctx.snapshot.model)
     for name in ctx.model.without_evidence:
         logger.warning(
             "  concept %s has no evidence row: exported without prov:wasDerivedFrom", name
         )
     counts = ctx.model.counts()
     logger.info(
-        "  %d class(es) (%d Term, %d document), %d object / %d datatype propert(ies), "
-        "%d individual(s), %d document(s), %d evidence node(s); %d concept(s) folded "
-        "into Terms",
+        "  revision %d: %d class(es) (%d Term, %d document), %d object / %d datatype "
+        "propert(ies), %d individual(s), %d document(s), %d evidence node(s); %d concept(s) "
+        "folded into Terms",
+        ctx.snapshot.revision,
         counts["classes"],
         counts["classes_structured"],
         counts["classes_document"],
@@ -126,10 +124,12 @@ def _step_collect(ctx: _ExportCtx) -> dict[str, Any]:
         counts["merged_concepts"],
     )
     return {
+        "revision": ctx.snapshot.revision,
+        "snapshot_run": ctx.snapshot.run_id,
         "counts": counts,
         "alignment": ctx.model.alignment_counts,
-        "structured": [s.name for s in ctx.structured],
-        "documents": [s.name for s in ctx.documents],
+        "structured": ctx.model.structured_sources,
+        "documents": ctx.model.documents_sources,
     }
 
 
@@ -138,7 +138,7 @@ def _step_serialize(ctx: _ExportCtx) -> dict[str, Any]:
     ctx.out_dir.mkdir(parents=True, exist_ok=True)
     paths = rdf.write(ctx.model, ctx.out_dir)
     ctx.files = [paths["ttl"], paths["jsonld"], graphml.write(ctx.model, ctx.out_dir)]
-    check = rdf.roundtrip(paths["ttl"], ctx.model, expected_classes=ctx.expected_classes)
+    check = rdf.roundtrip(paths["ttl"], ctx.model, expected_classes=ctx.model.expected_classes)
     logger.info(
         "  Turtle round-trip: %s triples, %s classes (expected %s), %s properties; %s",
         check["triples"],
@@ -152,47 +152,43 @@ def _step_serialize(ctx: _ExportCtx) -> dict[str, Any]:
     return {"files": [p.name for p in ctx.files], "roundtrip": check}
 
 
-def _latest_upstream_export(ctx: _ExportCtx, source: Source) -> Path | None:
-    for run in ctx.store.list_runs(source.id, limit=50):
-        if run.kind != BUILD_KIND:
-            continue
-        folder = ctx.settings.exports_dir / source.name / run.id
-        if all((folder / f).is_file() for f in UPSTREAM_FILES):
-            return folder
-    return None
-
-
 def _step_upstream(ctx: _ExportCtx) -> dict[str, Any]:
-    single = len(ctx.structured) == 1
+    folder = ctx.out_dir / UPSTREAM_DIR
     for source in ctx.structured:
-        folder = _latest_upstream_export(ctx, source)
-        for name in UPSTREAM_FILES:
-            target = ctx.out_dir / (name if single else f"{source.name}-{name}")
-            if folder is not None:
-                shutil.copyfile(folder / name, target)
-                origin = f"copied from {display_path(str(folder / name))}"
-            else:
-                db_id, _ = database_id_for(ctx.client, source)
-                data = (
-                    ctx.client.export_model([db_id], "auto_ontology")
-                    if name == "model.yaml"
-                    else ctx.client.export_model([db_id], "ossie", include_ontology=True)
-                )
-                target.write_bytes(data)
-                origin = "exported now (no earlier build export)"
+        db_id, _ = database_id_for(ctx.client, source)
+        for suffix, fmt in UPSTREAM_FILES:
+            data = (
+                ctx.client.export_model([db_id], fmt, include_ontology=True)
+                if fmt == "ossie"
+                else ctx.client.export_model([db_id], fmt)
+            )
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / f"{source.name}.{suffix}"
+            target.write_bytes(data)
             ctx.files.append(target)
-            ctx.upstream.append({"name": target.name, "origin": origin, "source": source.name})
-            logger.info("  %s: %s", target.name, origin)
+            ctx.upstream.append(
+                {
+                    "name": target.relative_to(ctx.out_dir).as_posix(),
+                    "origin": f"upstream {fmt} export of {source.name}",
+                    "source": source.name,
+                }
+            )
+            logger.info("  %s: %d bytes", target.relative_to(ctx.out_dir).as_posix(), len(data))
     return {"upstream": ctx.upstream}
 
 
 def _step_report(ctx: _ExportCtx) -> dict[str, Any]:
     assert ctx.model is not None
-    entries = [_file_entry(p) for p in ctx.files]
+    entries = [_file_entry(p, ctx.out_dir) for p in ctx.files]
     path = export_report.write(
-        ctx.model, ctx.out_dir, run_id=ctx.run.id, files=entries, upstream=ctx.upstream
+        ctx.model,
+        ctx.out_dir,
+        run_id=ctx.run.id,
+        files=entries,
+        upstream=ctx.upstream,
+        revision=ctx.snapshot.revision,
     )
-    return {"report": str(path), "files": entries}
+    return {"report": str(path), "files": [*entries, _file_entry(path, ctx.out_dir)]}
 
 
 EXPORT_STEP_FUNCS: dict[str, Callable[[Any], dict[str, Any]]] = {
@@ -203,118 +199,98 @@ EXPORT_STEP_FUNCS: dict[str, Callable[[Any], dict[str, Any]]] = {
 }
 
 
-#: Name of the merged export of every source (``exports/<name>/<run>/``, ``autoontology
-#: export``).
-MERGED_EXPORT_NAME = "autoontology"
-
-
-def resolve_sources(
-    store: Store, name: str, sources: list[str] | None
-) -> tuple[list[Source], list[Source]]:
-    """``--sources`` (default: *name*). A documents source also brings the structured
-    sources its alignments point at, unless ``--sources`` already names structured ones."""
-    names = [s.strip() for s in (sources or [name]) if s.strip()]
-    found: list[Source] = []
-    for n in dict.fromkeys(names):
-        source = store.get_source(n)
-        if source is None:
-            raise JobError(f"unknown source {n!r} (see `autoontology source list`)")
-        found.append(source)
-    documents = [s for s in found if s.kind == "documents"]
-    structured = [s for s in found if s.kind in ("files", "database")]
-    if not structured:
-        aligns = AlignmentStore(store)
-        linked = sorted(
-            {
-                a.structured_source
-                for d in documents
-                for a in aligns.list(d.id)
-                if a.structured_source
-            }
-        )
-        for n in linked:
-            source = store.get_source(n)
-            if source is not None:
-                structured.append(source)
-    return structured, documents
-
-
 def run_export(
-    name: str,
-    *,
-    settings: Settings,
     store: Store,
-    sources: list[str] | None = None,
+    settings: Settings,
+    *,
+    revision: int | None = None,
     out: Path | None = None,
     client: BackendClient | None = None,
 ) -> RunResult:
+    """Export snapshot *revision* (default: the latest) to ``exports/r<rev>/`` or *out*."""
+    from autoontology.engine.build import WORKSPACE_LEASE, refuse_if_active
+
     log_path = setup_job_logging(settings)
-    if not merged.slug(name) == name.lower():
-        raise JobError(f"invalid export name {name!r}: use letters, digits, _ and -")
-    structured, documents = resolve_sources(store, name, sources)
-    if not structured and not documents:
-        raise JobError("nothing to export")
-    # an export reads every included source: none may be mid-build/extract/align/removal
+    head = (
+        store.latest_snapshot(with_model=False)
+        if revision is None
+        else store.get_snapshot(revision, with_model=False)
+    )
+    if head is None:
+        raise JobError(
+            "no ontology snapshot yet: run `uv run autoontology build` first"
+            if revision is None
+            else f"unknown revision {revision} (see `uv run autoontology ontology`)",
+            log_path=log_path,
+        )
+    names = [s["name"] for s in head.sources if s.get("kind") == "structured" and s.get("included")]
+    structured = [s for s in (store.get_source(n) for n in names) if s is not None]
+    gone = sorted(set(names) - {s.name for s in structured})
     with hold_sources(
-        store, [s.name for s in structured + documents], EXPORT_KIND, log_path=log_path
+        store, [WORKSPACE_LEASE, *(s.name for s in structured)], EXPORT_KIND, log_path=log_path
     ):
+        refuse_if_active(store, log_path=log_path)
+        snapshot = store.get_snapshot(head.revision)
+        assert snapshot is not None
         return _run_export_held(
-            name,
             settings=settings,
             store=store,
+            snapshot=snapshot,
             structured=structured,
-            documents=documents,
+            gone=gone,
             out=out,
             client=client,
         )
 
 
 def _run_export_held(
-    name: str,
     *,
     settings: Settings,
     store: Store,
+    snapshot: Snapshot,
     structured: list[Source],
-    documents: list[Source],
+    gone: list[str],
     out: Path | None,
     client: BackendClient | None,
 ) -> RunResult:
-    structured = verify_sources(store, structured)
-    documents = verify_sources(store, documents)
     client = client or BackendClient(settings.backend_url)
     if structured:
         client.health()  # BackendUnavailable -> "run autoontology up"
-    owner = store.get_source(name)
     run = store.create_run(
         kind=EXPORT_KIND,
-        source_id=owner.id if owner else None,
+        source_id=None,
         params={
-            "name": name,
-            "structured": [s.name for s in structured],
-            "documents": [s.name for s in documents],
+            "revision": snapshot.revision,
             "out": str(out) if out else None,
             "pid": os.getpid(),
         },
     )
-    out_dir = Path(out) if out else settings.exports_dir / name / run.id
-    logger.info(
-        "export run %s: %s (structured: %s; documents: %s) -> %s",
-        run.id,
-        name,
-        ", ".join(s.name for s in structured) or "-",
-        ", ".join(s.name for s in documents) or "-",
-        out_dir,
-    )
+    final = Path(out) if out else settings.exports_dir / revision_dir_name(snapshot.revision)
+    # write next to the final folder, then swap: a failed export never leaves half a folder
+    work = final.parent / f".{final.name}.{run.id}.tmp"
+    shutil.rmtree(work, ignore_errors=True)
+    logger.info("export run %s: revision %d -> %s", run.id, snapshot.revision, final)
+    for name in gone:
+        logger.warning(
+            "  structured source %s was removed since the build: no upstream files", name
+        )
     ctx = _ExportCtx(
         settings=settings,
         store=store,
         run=run,
-        name=name,
+        snapshot=snapshot,
         structured=structured,
-        documents=documents,
         client=client,
-        out_dir=out_dir,
+        out_dir=work,
     )
-    result = _execute(ctx, list(EXPORT_STEPS), skip={}, already=set(), steps=EXPORT_STEP_FUNCS)
-    result.export_dir = out_dir
+    try:
+        result = _execute(ctx, list(EXPORT_STEPS), skip={}, already=set(), steps=EXPORT_STEP_FUNCS)
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+    if final.exists():
+        shutil.rmtree(final)
+    final.parent.mkdir(parents=True, exist_ok=True)
+    work.rename(final)
+    result.export_dir = final
     return result

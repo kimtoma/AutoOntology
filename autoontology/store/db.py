@@ -36,7 +36,7 @@ MIGRATIONS: list[tuple[int, str]] = [
         # policy refused, for review). source_leases: cross-process reservation of a source
         # name. file_manifests: the input -> table manifest of the last load.
         # ontology_revision: bumped whenever a run finishes or a source is removed (cache
-        # key of derived views). semantic_baselines: the catalog schema the semantic layer
+        # key of derived views; replaced by snapshots in v2). semantic_baselines: the catalog schema the semantic layer
         # was compiled from plus a pending invalidation. playground_*: the element index,
         # conversations and messages (incomplete = the stream ended without [DONE]).
         # term_alias_additions: synonyms AutoOntology wrote to upstream Terms;
@@ -274,6 +274,69 @@ MIGRATIONS: list[tuple[int, str]] = [
         )
         """,
     ),
+    (
+        2,
+        # Schema v2: the unified ontology. ontology_snapshots: one row per `build` (its
+        # `snapshot` step): the merged model as JSON plus its sources and counts; the
+        # revision is the cache key of every derived view (graph, playground index, SPARQL
+        # graph), replacing ontology_revision. The playground tables are keyed by the
+        # workspace scope instead of a source (the playground reads the latest snapshot).
+        """
+        CREATE TABLE IF NOT EXISTS ontology_snapshots (
+            revision INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            run_id TEXT NOT NULL DEFAULT '',
+            sources_json TEXT NOT NULL DEFAULT '[]',
+            counts_json TEXT NOT NULL DEFAULT '{}',
+            model_json TEXT NOT NULL
+        );
+        DROP TABLE IF EXISTS ontology_revision;
+        DROP TABLE IF EXISTS playground_messages;
+        DROP TABLE IF EXISTS playground_conversations;
+        DROP TABLE IF EXISTS playground_index_meta;
+        DROP TABLE IF EXISTS playground_index;
+        CREATE TABLE playground_index (
+            scope TEXT NOT NULL,
+            element_id TEXT NOT NULL,
+            element_type TEXT NOT NULL,
+            text_sha TEXT NOT NULL,
+            embedding BLOB,
+            model TEXT NOT NULL,
+            PRIMARY KEY (scope, element_id)
+        );
+        CREATE TABLE playground_index_meta (
+            scope TEXT PRIMARY KEY,
+            revision INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            elements INTEGER NOT NULL,
+            built_at TEXT NOT NULL
+        );
+        CREATE TABLE playground_conversations (
+            id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX playground_conversations_scope
+            ON playground_conversations (scope, updated_at);
+        CREATE TABLE playground_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL
+                REFERENCES playground_conversations (id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            retrieved_json TEXT NOT NULL DEFAULT '[]',
+            citations_json TEXT NOT NULL DEFAULT '{}',
+            provider TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            incomplete INTEGER NOT NULL DEFAULT 0 CHECK (incomplete IN (0, 1))
+        );
+        CREATE INDEX playground_messages_conversation
+            ON playground_messages (conversation_id, id)
+        """,
+    ),
 ]
 
 #: Seconds a lease stays valid without a heartbeat (the holder refreshes it every third).
@@ -370,6 +433,30 @@ class Step:
     started_at: str | None
     finished_at: str | None
     detail: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """One persisted ontology (``ontology_snapshots`` row); ``model`` is the JSON of
+    :meth:`autoontology.ontology.model.MergedOntology.to_dict` (None when not loaded)."""
+
+    revision: int
+    created_at: str
+    run_id: str
+    sources: list[dict[str, Any]]
+    counts: dict[str, Any]
+    model: dict[str, Any] | None = None
+
+
+def _snapshot(row: sqlite3.Row, model: dict[str, Any] | None) -> Snapshot:
+    return Snapshot(
+        revision=int(row["revision"]),
+        created_at=row["created_at"],
+        run_id=row["run_id"],
+        sources=json.loads(row["sources_json"] or "[]"),
+        counts=json.loads(row["counts_json"] or "{}"),
+        model=model,
+    )
 
 
 def _source(row: sqlite3.Row) -> Source:
@@ -617,7 +704,6 @@ class Store:
             )
             conn.execute("DELETE FROM runs WHERE source_id = ?", (source_id,))
             conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
-            self._bump_revision(conn)
 
     def get_file_manifest(self, source_id: str) -> dict[str, Any] | None:
         with self._conn() as conn:
@@ -715,24 +801,67 @@ class Store:
                     "UPDATE runs SET params_json = ? WHERE id = ?",
                     (json.dumps(params, ensure_ascii=False, default=str), run_id),
                 )
-            if finished is not None:  # a run finished: what it wrote is now visible
-                self._bump_revision(conn)
 
-    @staticmethod
-    def _bump_revision(conn: sqlite3.Connection) -> None:
-        conn.execute("UPDATE ontology_revision SET value = value + 1 WHERE id = 1")
+    # --- ontology snapshots --------------------------------------------------------
 
-    def bump_ontology_revision(self) -> None:
-        """Derived views (web graph, playground index) are stale: e.g. after ``align
-        repair`` changed Term synonyms outside a run."""
+    def save_snapshot(
+        self, run_id: str, model: Any, *, sources: list[dict[str, Any]] | None = None
+    ) -> int:
+        """Persist *model* (a :class:`~autoontology.ontology.model.MergedOntology`) as the
+        next revision and return it. *sources* defaults to the model's source names."""
+        data = model.to_dict()
+        counts = model.counts()
+        if sources is None:
+            sources = [
+                *({"name": n, "kind": "structured"} for n in model.structured_sources),
+                *({"name": n, "kind": "documents"} for n in model.documents_sources),
+            ]
         with self._conn() as conn:
-            self._bump_revision(conn)
+            cur = conn.execute(
+                "INSERT INTO ontology_snapshots (created_at, run_id, sources_json, "
+                "counts_json, model_json) VALUES (?, ?, ?, ?, ?)",
+                (
+                    now_iso(),
+                    run_id,
+                    json.dumps(sources, ensure_ascii=False, default=str),
+                    json.dumps(counts, ensure_ascii=False, default=str),
+                    json.dumps(data, ensure_ascii=False, default=str),
+                ),
+            )
+        return int(cur.lastrowid)
 
-    def ontology_revision(self) -> int:
-        """Counter bumped by every finished run and every source removal."""
+    def latest_snapshot(self, *, with_model: bool = True) -> Snapshot | None:
+        return self._snapshot(None, with_model)
+
+    def get_snapshot(self, revision: int, *, with_model: bool = True) -> Snapshot | None:
+        return self._snapshot(int(revision), with_model)
+
+    def latest_revision(self) -> int | None:
+        """Revision of the newest snapshot (the cache key of derived views)."""
         with self._conn() as conn:
-            row = conn.execute("SELECT value FROM ontology_revision WHERE id = 1").fetchone()
-        return int(row[0]) if row else 0
+            row = conn.execute("SELECT max(revision) FROM ontology_snapshots").fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    def list_snapshots(self, limit: int = 50) -> list[Snapshot]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT revision, created_at, run_id, sources_json, counts_json "
+                "FROM ontology_snapshots ORDER BY revision DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [_snapshot(r, None) for r in rows]
+
+    def _snapshot(self, revision: int | None, with_model: bool) -> Snapshot | None:
+        cols = "revision, created_at, run_id, sources_json, counts_json" + (
+            ", model_json" if with_model else ""
+        )
+        sql = f"SELECT {cols} FROM ontology_snapshots "
+        sql += "WHERE revision = ?" if revision is not None else "ORDER BY revision DESC LIMIT 1"
+        with self._conn() as conn:
+            row = conn.execute(sql, (revision,) if revision is not None else ()).fetchone()
+        if row is None:
+            return None
+        return _snapshot(row, json.loads(row["model_json"]) if with_model else None)
 
     def latest_run(self, source_id: str, kind: str | None = None) -> Run | None:
         sql = "SELECT * FROM runs WHERE source_id = ?"

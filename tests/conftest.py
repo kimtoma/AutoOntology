@@ -45,12 +45,14 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(autouse=True)
 def _isolated_home(request, tmp_path_factory, monkeypatch):
-    """Unit tests never read the repo's real ``data/`` (store, run dir):
+    """Unit tests never read the repo's real ``data/`` (store, run dir) or ``.env``:
     every non-integration test gets its own AUTOONTOLOGY_HOME/EXPORTS_DIR (``isolated_env``
     still overrides them with its own tmp paths)."""
     if request.node.get_closest_marker("integration") is not None:
         return
     base = tmp_path_factory.mktemp("home")
+    # nor the repo's .env (it may point at a live service, e.g. the integration ports)
+    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(base / "absent.env"))
     monkeypatch.setenv("AUTOONTOLOGY_HOME", str(base / "home"))
     monkeypatch.setenv("AUTOONTOLOGY_EXPORTS_DIR", str(base / "exports"))
 

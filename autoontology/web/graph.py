@@ -1,6 +1,6 @@
-"""The UI graph view of the merged ontology (``GET /api/graph``).
+"""The UI graph view of the unified ontology (``GET /api/ontology/graph``).
 
-Built from the same :class:`~autoontology.export.merged.MergedOntology` the exporters write,
+Built from the same :class:`~autoontology.ontology.model.MergedOntology` the exporters write,
 so the page and the files never disagree. Compared with the GraphML writer the view is
 condensed for reading: object properties become direct domain -> range edges (no property
 nodes), datatype properties stay on their class (``attributes``), documents and evidence
@@ -18,6 +18,10 @@ it and only ground nodes that survived it): one ``document`` node per document t
 shown node and one ``evidence`` edge node -> document (``count`` = evidence rows). Every node
 carries ``evidence_count``; alignment edges carry ``relation`` (same / broader / narrower /
 related). ``AUTOONTOLOGY_GRAPH_MAX_NODES`` overrides the node cap.
+
+Node ``origin``: ``structured`` (a Term), ``document`` (a document concept, folded or
+not), ``aligned`` (a Term joined to documents: a folded ``same`` concept or an alignment
+axiom).
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from autoontology.export.merged import MergedOntology
+from autoontology.ontology.model import MergedOntology
 
 LAYERS: tuple[str, ...] = ("all", "structured", "documents", "aligned")
 #: Largest node count sent to the browser (Cytoscape's cose layout gets slow beyond this).
@@ -62,6 +66,7 @@ def to_view(
         raise ValueError(f"layer must be one of {', '.join(LAYERS)}")
     nodes: dict[str, dict[str, Any]] = {}
     attrs: dict[str, list[str]] = {}
+    aligned = model.aligned_terms()
     for p in model.properties.values():
         if p.kind == "datatype" and p.source != "vocabulary":
             attrs.setdefault(p.domain, []).append(p.label)
@@ -72,7 +77,7 @@ def to_view(
             "class",
             c.structured_source or c.documents_source,
             c.kind or ("term" if c.source == "structured" else ""),
-            "structured" if c.source == "structured" else "document",
+            model.origin(c.local, aligned),
             metric="Metric" in c.extra_types,
             synonyms=c.alt_labels[:12],
             definition=(c.definitions[0] if c.definitions else c.comment)[:400],
@@ -174,7 +179,7 @@ def to_view(
     def node_layer(n: dict[str, Any]) -> str:
         if n["type"] == "concept":
             return "aligned"
-        return "structured" if n["origin"] == "structured" else "documents"
+        return "documents" if n["origin"] == "document" else "structured"
 
     if layer == "all":
         keep_edges = [dict(e) for e in edges]
@@ -241,6 +246,10 @@ def to_view(
         seen[e["id"]] = n + 1
         if n:
             e["id"] = f"{e['id']}~{n}"
+    origins: dict[str, int] = {}
+    for n in out_nodes:
+        if n["layer"] != "evidence":
+            origins[n["origin"]] = origins.get(n["origin"], 0) + 1
     return {
         "name": model.name,
         "layer": layer,
@@ -248,6 +257,11 @@ def to_view(
         "documents_sources": model.documents_sources,
         "nodes": out_nodes,
         "edges": out_edges,
-        "counts": {"nodes": len(out_nodes), "edges": len(out_edges), "total_nodes": total_nodes},
+        "counts": {
+            "nodes": len(out_nodes),
+            "edges": len(out_edges),
+            "total_nodes": total_nodes,
+            "origins": dict(sorted(origins.items())),
+        },
         "truncated": truncated,
     }

@@ -122,7 +122,7 @@ def env(isolated_env, monkeypatch, tmp_path):
 def build(env, **kw):
     settings, store, client, _ = env
     kw.setdefault("resume", False)
-    return jobs.run_build("demo", settings=settings, store=store, client=client, **kw)
+    return jobs.run_structured("demo", settings=settings, store=store, client=client, **kw)
 
 
 def test_full_build_sequence_and_exports(env):
@@ -239,7 +239,7 @@ def test_active_run_blocks_and_stale_run_is_reaped(env):
 def test_unknown_source(env):
     settings, store, client, _ = env
     with pytest.raises(jobs.JobError, match="unknown source"):
-        jobs.run_build("nope", resume=False, settings=settings, store=store, client=client)
+        jobs.run_structured("nope", resume=False, settings=settings, store=store, client=client)
 
 
 def test_ingest_job_for_source_and_skip_when_build_active(env):
@@ -371,11 +371,13 @@ def test_build_requires_service_when_chat_goes_through_proxy(env, monkeypatch):
     assert jobs.uses_llm_proxy(settings)
     monkeypatch.setattr(jobs, "service_alive", lambda s: False)
     with pytest.raises(jobs.JobError, match="autoontology up"):
-        jobs.run_build("demo", resume=False, settings=settings, store=store, client=client)
+        jobs.run_structured("demo", resume=False, settings=settings, store=store, client=client)
     assert calls == []  # nothing ran
     monkeypatch.setattr(jobs, "service_alive", lambda s: True)
     assert (
-        jobs.run_build("demo", resume=False, settings=settings, store=store, client=client).status
+        jobs.run_structured(
+            "demo", resume=False, settings=settings, store=store, client=client
+        ).status
         == "succeeded"
     )
 
@@ -809,7 +811,9 @@ def _db_source_env(isolated_env, monkeypatch):
     monkeypatch.setattr(pipeline, "catalog_database_name", lambda source: "crm")
 
     def run():
-        return jobs.run_build("crm", resume=False, settings=settings, store=store, client=client)
+        return jobs.run_structured(
+            "crm", resume=False, settings=settings, store=store, client=client
+        )
 
     return store, state, resets, run
 
