@@ -396,6 +396,27 @@ def test_step_names_and_partial_runs(env):
     assert env["store"].get_run(result.run_id).error.startswith("partial:")
 
 
+def test_resume_after_a_source_was_removed_merges_and_snapshots_again(env):
+    """build --resume used to keep merge/snapshot when a source was removed and the
+    remaining inputs were unchanged: the snapshot still held the removed source."""
+    add_structured(env)
+    add_documents(env)
+    store = env["store"]
+    first = run(env)
+    assert first.status == "succeeded" and first.revision == 1
+    store.delete_source(store.get_source("hanbit-docs").id)
+    again = run(env, resume=True)
+    assert again.run_id == first.run_id and again.status == "succeeded"
+    assert "merge" in again.details and "snapshot" in again.details  # ran, not kept
+    assert again.revision == 2
+    snap = store.latest_snapshot()
+    assert [s["name"] for s in snap.sources] == ["hanbit"]
+    assert MergedOntology.from_dict(snap.model).documents_sources == []
+    # the same set again: nothing global runs
+    kept = run(env, resume=True)
+    assert "merge" not in kept.details and kept.revision == 2
+
+
 def test_documents_that_need_kordoc_are_skipped_not_failed(env, monkeypatch):
     """Without kordoc the canonical quickstart must still exit 0: the HWP/PDF files are
     skipped with a warning naming them and the install command, and once kordoc is

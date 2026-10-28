@@ -146,6 +146,17 @@ def input_fingerprint(source: Source, home: Path | None = None) -> str:
     return digest.hexdigest()
 
 
+def source_set(sources: list[Source]) -> list[dict[str, str]]:
+    """Every registered source of a build (id, name, kind and a hash of its
+    configuration), recorded in the run params: when a resumed build sees another set
+    (a source was removed, added or re-pointed), align/merge/snapshot run again."""
+    out = []
+    for s in sorted(sources, key=lambda x: x.id):
+        config = hashlib.sha256(f"{s.locator}\0{s.pg_database or ''}".encode()).hexdigest()
+        out.append({"id": s.id, "name": s.name, "kind": s.kind, "config": config[:16]})
+    return out
+
+
 def registration_order(store: Store) -> list[Source]:
     return sorted(store.list_sources(), key=lambda s: (s.created_at, s.name))
 
@@ -553,6 +564,7 @@ def _run_held(
         "sources": only or None,
         "resume": resume,
         "pid": os.getpid(),
+        "source_set": source_set(registered),
         **_align_params(),
     }
     previous = _previous_build(store) if resume else None
@@ -566,6 +578,15 @@ def _run_held(
             )
             already = {n for n in already if not n.startswith("align:")}
             reuse_concepts = False
+        if previous.params.get("source_set") != params["source_set"]:
+            logger.info(
+                "--resume: the registered sources changed since run %s: aligning, merging "
+                "and snapshotting again",
+                previous.id,
+            )
+            already = {
+                n for n in already if not n.startswith("align:") and n not in ("merge", "snapshot")
+            }
         store.update_run(
             previous.id,
             status="running",
