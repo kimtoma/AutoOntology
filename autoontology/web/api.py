@@ -538,7 +538,9 @@ class Api:
         finally:
             self._provider_test_lock.release()
         self._status = None  # the next /api/status shows the new last_test
-        return mask(result)
+        # error/answer strings are scrubbed by the probe; mask() would also blank the
+        # usage counters (their keys contain "token")
+        return result
 
 
 def _short_detail(detail: dict[str, Any]) -> dict[str, Any]:

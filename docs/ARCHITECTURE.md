@@ -13,7 +13,7 @@ overview is in the [README](../README.md).
 | CLI | `autoontology/cli.py` (typer) | none | Runs `build` and `export` in-process; `up`/`down` supervise the two servers. |
 | Postgres 17 + pgvector | `docker compose` or your own server | `5432` | The engine's catalog and vectors (`autoontology`) and one database per file source (`autoontology_src_<name>`). |
 | SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: sources, runs, documents, concepts, alignments, snapshots, playground. |
-| Model providers | Ollama (`:11434`) or an OpenAI-compatible URL | none | Chat (extraction, judges, playground, engine compile) and embeddings. |
+| Model providers | Ollama (`:11434`), an OpenAI-compatible URL, or the user's `claude` / `codex` CLI (chat only) | none | Chat (extraction, judges, playground, engine compile) and embeddings. |
 | kordoc (optional) | `<AUTOONTOLOGY_HOME>/kordoc` (npm, Node 20 or newer) | none | Reads HWP/HWPX/PDF/DOCX/PPTX into Markdown, run as a subprocess with an argv list. |
 
 `autoontology up` starts both servers as background processes (`engine/supervisor.py`),
@@ -187,7 +187,29 @@ engine / AutoOntology LLM call
      openai provider: strips one openai/ prefix, sets Authorization: Bearer
                       <AUTOONTOLOGY_OPENAI_API_KEY>, forwards to
                       AUTOONTOLOGY_OPENAI_BASE_URL
+     claude provider: model openai/claude:<m> -> `claude -p ... --json-schema`
+     codex provider:  model openai/chatgpt:<m> -> `codex exec ... --output-schema`
 ```
+
+The `claude` and `codex` providers (`web/providers/claude_cli.py`, `codex_cli.py`, shared
+machinery in `base.py`'s `CLIProvider`) run the user's logged-in CLI once per request:
+argv without a shell, the prompt on stdin, tools/MCP/settings/`@file` mentions off, an
+empty temporary working directory, API keys stripped from the child env (so the
+subscription login is used), and for codex a private `CODEX_HOME` holding only a symlink
+to the user's `auth.json` (a refreshed token is copied back atomically under a lock).
+`split_model` routes by the prefix after `openai/`: `claude:`, and `chatgpt:` for codex
+(the engine is given `chatgpt:` because LangChain sends model names containing "codex" to
+`/v1/responses`; the router also accepts `codex:`); a prefix for a provider the service
+does not run is refused with 400 `provider_not_active`. Each request has one
+deadline (`AUTOONTOLOGY_PROVIDER_TIMEOUT_S`) covering the wait for one of
+`AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT` slots, the call and at most one re-ask when the
+answer fails its JSON schema (422 after that); the schema is checked before any call and
+the answer is validated in a killable worker process (`schema_worker.py`). A client
+disconnect kills the CLI's process group (499). CLI failures map to OpenAI-style errors:
+401 `not_logged_in`, 400 `model_not_found`, 429 `usage_limit`, 502 `provider_error` /
+`tool_use_refused`, 503 `cli_not_found`, 504 `upstream_timeout`, 413 for a schema too
+large for the command line. `expand_model_profile` also raises the engine's
+`LLM_INVOKE_TIMEOUT_S` above the router deadline so the router always answers first.
 
 Embeddings (`EMBED_*`) go directly to Ollama or to the OpenAI-compatible base URL. The
 router redacts upstream error bodies (keys, bearer tokens) and caps their size.
@@ -202,5 +224,5 @@ router redacts upstream error bodies (keys, bearer tokens) and caps their size.
 | Extraction behaviour | `unstructured/prompts.py`, `unstructured/schemas.py`, `unstructured/extractor.py`. |
 | Alignment policy | `unstructured/align.py` (`apply_identity_policy`, `IDENTITY_POLICY_VERSION`). Bump the version so stored verdicts are re-judged. |
 | An export format | A module in `export/`, a step in `engine/export_job.py` (`EXPORT_STEPS`, `EXPORT_ENTRIES`, `FORMAT_ENTRIES`), and `web/runs.py` `TOP_STEPS`. |
-| A model provider | `web/providers/` (a `PassthroughProvider`), `config.py` (`CHAT_PROVIDERS`, `expand_model_profile`). |
+| A model provider | `web/providers/` (a `PassthroughProvider`, or a `CLIProvider` for a CLI login), `router.py` (`Registry`, `split_model`), `config.py` (`CHAT_PROVIDERS`, `expand_model_profile`). |
 | A UI page | `ui/src/pages`, then `uv run autoontology tools build-ui` and commit `autoontology/web/static/dist`. |

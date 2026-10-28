@@ -233,7 +233,7 @@ def test_claude_json_schema_call(fakes, monkeypatch):
     }
     assert "--disable-slash-commands" in argv
     assert body["choices"][0]["finish_reason"] == "stop"
-    # an empty temp dir outside the repo and the OntoSpace home, removed after the call
+    # an empty temp dir outside the repo and the AutoOntology home, removed after the call
     assert os.path.basename(call["cwd"]).startswith("autoontology-provider-claude-")
     assert not os.path.realpath(call["cwd"]).startswith(os.path.realpath(os.getcwd()))
     assert not os.path.exists(call["cwd"])

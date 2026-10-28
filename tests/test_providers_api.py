@@ -77,6 +77,7 @@ def test_provider_test_endpoint_pongs_and_is_remembered(fakes, offline):  # noqa
     body = res.json()
     assert body["ok"] is True and body["answer"] == "pong" and body["via"] == "service"
     assert body["provider"] == "claude" and body["model"] == "openai/claude:claude-sonnet-5-5"
+    assert body["usage"]["prompt_tokens"] == 18  # counters, not masked
     (call,) = fakes()
     assert "--json-schema" in call["argv"]
     saved = json.loads((Settings.from_env().run_dir / probe.LAST_TEST_FILE).read_text())

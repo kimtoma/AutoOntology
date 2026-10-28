@@ -147,6 +147,51 @@ model ids as the endpoint knows them; AutoOntology adds the `openai/` prefix the
 needs and strips it again in the router. The embedding dimension is fixed once the first
 source has been ingested (see Troubleshooting).
 
+### Using your Claude or ChatGPT subscription
+
+AutoOntology can send its chat calls through the `claude` (Claude Code) or `codex`
+(Codex CLI) command-line tool you are already logged in to, so a Claude or ChatGPT
+subscription is used instead of an API key. AutoOntology never reads the login tokens
+itself; it runs the CLI as a subprocess for every call.
+
+1. Install the CLI and log in once, as the user that runs AutoOntology:
+   - Claude: `claude auth login` (or start `claude` and type `/login`). `claude auth
+     status` should report `loggedIn: true`.
+   - ChatGPT: `codex login` (choose the ChatGPT account). `codex login status` should say
+     `Logged in using ChatGPT`.
+2. Select it in `.env` and restart (`uv run autoontology down && uv run autoontology up`):
+
+   ```
+   AUTOONTOLOGY_CHAT_PROVIDER=claude          # or codex
+   # AUTOONTOLOGY_CLAUDE_MODEL=claude-sonnet-5-5
+   # AUTOONTOLOGY_CODEX_MODEL=gpt-6-astra
+   # If `claude` / `codex` on PATH is a wrapper or shim, name the real binary:
+   # AUTOONTOLOGY_CLAUDE_BIN=/path/to/claude
+   # AUTOONTOLOGY_CODEX_BIN=/path/to/codex
+   ```
+3. Check it: `uv run autoontology doctor` shows a `chat provider` row (FAIL with the login
+   command when the CLI is missing or logged out) and a `chat endpoint` row (one test
+   call). With the service up, `curl -X POST http://127.0.0.1:7800/api/providers/test`
+   runs the same test through the service.
+
+What to know:
+
+- **Your data leaves the machine.** Prompts contain your table and column names, sample
+  values and document text; they go to Anthropic (claude) or OpenAI (codex) under your
+  account's terms. Use Ollama when the data must stay local.
+- **Usage limits apply.** Every call counts against your plan's limits. When a limit is
+  reached the router answers 429 `usage_limit`; wait for the reset or switch provider.
+  A build of the small sample makes about ten calls; large document sets make hundreds.
+- **Embeddings still need Ollama or an OpenAI-compatible endpoint**
+  (`AUTOONTOLOGY_EMBED_PROVIDER=ollama` with `bge-m3`, the default, or `openai`). `setup`
+  then pulls only the embedding model.
+- **No streaming.** A `stream: true` request gets the whole answer as one chunk.
+- Each call runs with tools, MCP servers, settings files, `@file` mentions and the user's
+  personal instructions switched off, in an empty temporary directory; codex runs with a
+  private `CODEX_HOME` that only links your `auth.json`. At most
+  `AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT` (2) calls run at once, each within
+  `AUTOONTOLOGY_PROVIDER_TIMEOUT_S` (120 s).
+
 ## CLI reference
 
 | Command | What it does |
@@ -215,7 +260,8 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, `ocr_ready`, `vision_model`, `formats` (every supported extension by source kind, with its engine) and a provider summary (never the key). |
+| `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, `ocr_ready`, `vision_model`, `formats` (every supported extension by source kind, with its engine) and a provider summary (never the key): `providers.chat` (`name`, `model`, `available`, `logged_in`, `detail`, `remedy`, `last_test`) and `providers.embed`. |
+| `POST /api/providers/test` | One test call (`{"answer": "pong"}`) through the active chat provider; 409 while another test runs. The result is kept as `last_test`. |
 | `GET /api/sources` | Lists the sources. |
 | `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
 | `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion or the alias cleanup fails or does not finish, like `source rm --force`). A documents source's alias additions are removed from the upstream Terms first, as with `source rm`. |
@@ -358,7 +404,7 @@ then `.env`, then the built-in default.
 | `POSTGRES_HOST` / `POSTGRES_PORT` | `localhost` / `5432` | Postgres server. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` | `autoontology` / `autoontology` | Postgres credentials; this user needs permission to create databases. |
 | `POSTGRES_DATABASE` | `autoontology` | Catalog database. Source databases are `autoontology_src_<source>`; AutoOntology refuses any other name. The catalog name may not start with `autoontology_src_` (reserved for source databases); such a value is refused when settings load. |
-| `AUTOONTOLOGY_CHAT_PROVIDER` | `ollama` | `ollama` or `openai` (any OpenAI-compatible endpoint). |
+| `AUTOONTOLOGY_CHAT_PROVIDER` | `ollama` | `ollama`, `openai` (any OpenAI-compatible endpoint), `claude` or `codex` (your logged-in CLI, see above). |
 | `AUTOONTOLOGY_EMBED_PROVIDER` | `ollama` | `ollama` or `openai`. |
 | `AUTOONTOLOGY_OLLAMA_ENDPOINT` | `http://localhost:11434/v1` | Ollama's OpenAI-compatible endpoint. |
 | `AUTOONTOLOGY_OLLAMA_CHAT_MODEL` | `openai/qwen3:8b` | Chat model: an alias of `qwen3:8b` with `num_ctx` 16384 and thinking off, built by `setup`. The `openai/` prefix is part of the alias name. |
@@ -369,7 +415,14 @@ then `.env`, then the built-in default.
 | `AUTOONTOLOGY_OPENAI_CHAT_MODEL` | unset | Chat model id as the endpoint knows it. |
 | `AUTOONTOLOGY_OPENAI_EMBED_MODEL` | unset | Embedding model id (with `AUTOONTOLOGY_EMBED_PROVIDER=openai`). |
 | `AUTOONTOLOGY_OPENAI_TIMEOUT_S` | `180` | Whole-request timeout of the router's openai passthrough. |
-| `LLM_INVOKE_TIMEOUT_S` / `LLM_MAX_INFLIGHT` / `SEMANTIC_LLM_MAX_INFLIGHT` | `180` / `2` / `1` | Engine LLM limits, applied with the ollama chat provider unless you set them. |
+| `AUTOONTOLOGY_CLAUDE_BIN` / `AUTOONTOLOGY_CODEX_BIN` | `claude` / `codex` on PATH | The CLI the claude / codex provider runs. |
+| `AUTOONTOLOGY_CLAUDE_MODEL` | `claude-sonnet-5-5` | Also `claude-opus-5-5`, `claude-fable-5-1`, `claude-haiku-5-5`, `sonnet`, `opus`, `fable`, `haiku`. |
+| `AUTOONTOLOGY_CODEX_MODEL` | `gpt-6-astra` | Also `gpt-5.5`. |
+| `AUTOONTOLOGY_CODEX_REASONING_EFFORT` | unset | Passed to codex as `model_reasoning_effort` when set. |
+| `AUTOONTOLOGY_PROVIDER_TIMEOUT_S` | `120` | One claude/codex request's deadline (waiting for a slot, the call and one schema re-ask). |
+| `AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT` | `2` | Concurrent claude/codex calls in the service. |
+| `AUTOONTOLOGY_SCHEMA_VALIDATION_TIMEOUT_S` | `2` | Budget for validating one answer against its JSON schema (in a separate process). |
+| `LLM_INVOKE_TIMEOUT_S` / `LLM_MAX_INFLIGHT` / `SEMANTIC_LLM_MAX_INFLIGHT` | `180` / `2` / `1` | Engine LLM limits, applied with the ollama chat provider unless you set them (claude/codex: `2 x AUTOONTOLOGY_PROVIDER_TIMEOUT_S + 30` / `2` / `2`). |
 | `KORDOC_CLI` | unset | Use another kordoc install (path to `dist/cli.js`). |
 | `KORDOC_NODE` | `node` on PATH | Node binary for kordoc. |
 | `AUTOONTOLOGY_KORDOC_TIMEOUT` | `300` | Seconds per document (kordoc always runs offline). |
@@ -466,6 +519,8 @@ See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 | `build` warns "N document(s) need kordoc and were skipped" | The run succeeded without those documents. Install kordoc (`uv run autoontology tools install-kordoc`, Node 20 or newer), then `build` or `build --resume` to read them. |
 | `build` warns "N image(s) need the OCR models and were skipped" | Run `uv run autoontology tools install-kordoc` (it downloads the models, about 18 MB), then `build` or `build --resume`. `doctor` shows the `ocr models` row. |
 | `/ui/` returns 503 `ui_not_built` | The committed UI is missing (for example in a source archive). Run `uv run autoontology tools build-ui` (needs Node and pnpm). |
+| `doctor` FAIL "chat provider": claude/codex not logged in | Log in as the user that runs AutoOntology (`claude auth login`, or `codex login`), then `down` / `up`. If the CLI on PATH is a shim, set `AUTOONTOLOGY_CLAUDE_BIN` / `AUTOONTOLOGY_CODEX_BIN`. |
+| Build calls fail with 429 `usage_limit` | Your Claude or ChatGPT plan limit is reached. Wait for the reset and run `build --resume`, or switch `AUTOONTOLOGY_CHAT_PROVIDER`. |
 | A build seems stuck | Run `uv run autoontology runs` and read `data/logs/`. Each chunk takes one to two minutes with `qwen3:8b`. |
 
 ## Development
