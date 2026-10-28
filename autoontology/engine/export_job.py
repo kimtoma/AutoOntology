@@ -167,9 +167,28 @@ def _unlisted(folder: Path, listed: set[str]) -> list[str]:
     return sorted(extra)
 
 
+def _changed(folder: Path, listed: set[str], hashes: Any) -> list[str]:
+    """The *listed* files whose content no longer matches the sha256 the marker recorded
+    (or that have no recorded hash): reused or edited by the user, so not the exporter's.
+    A marker without ``file_sha256`` (an exporter before hashes) is trusted by path."""
+    if hashes is None:
+        return []
+    if not isinstance(hashes, dict):
+        return sorted(listed - {EXPORT_MARKER})
+    out = []
+    for name in sorted(listed - {EXPORT_MARKER}):
+        path = folder / name
+        if not path.is_file() or path.is_symlink():
+            continue  # gone already (or reported as unlisted)
+        if hashes.get(name) != hashlib.sha256(path.read_bytes()).hexdigest():
+            out.append(name)
+    return out
+
+
 def check_replaceable(settings: Settings, final: Path) -> set[str] | None:
     """Refuse to replace *final* unless every file under it, at any depth, is one its
-    :data:`EXPORT_MARKER` lists as written by this exporter (inside ``upstream/``,
+    :data:`EXPORT_MARKER` lists as written by this exporter, with the content it recorded
+    (``file_sha256``) (inside ``upstream/``,
     ``ossie/`` and ``okf/`` too, and under the exports root as well as under ``--out``).
     Returns that list (None when *final* does not exist or is an empty folder)."""
     if not final.exists() and not final.is_symlink():
@@ -184,13 +203,14 @@ def check_replaceable(settings: Settings, final: Path) -> set[str] | None:
             f"refusing to replace {final}: it has no {EXPORT_MARKER}, so it was not written "
             "by autoontology export"
         )
-    listed = _listed_files(read_export_metadata(final))
+    meta = read_export_metadata(final)
+    listed = _listed_files(meta)
     if listed is None:
         raise JobError(
             f"refusing to replace {final}: its {EXPORT_MARKER} does not list the files it "
             "wrote (an older or edited export); move or delete the folder, then export again"
         )
-    foreign = _unlisted(final, listed)
+    foreign = _unlisted(final, listed) + _changed(final, listed, (meta or {}).get("file_sha256"))
     if foreign:
         raise JobError(
             f"refusing to replace {final}: it holds files this exporter did not write "
@@ -569,6 +589,12 @@ def _step_report(ctx: _ExportCtx) -> dict[str, Any]:
         }
         | {EXPORT_MARKER}
     )
+    # ... and what each held: a listed path whose content changed is the user's
+    meta["file_sha256"] = {
+        name: hashlib.sha256((ctx.out_dir / name).read_bytes()).hexdigest()
+        for name in meta["files"]
+        if name != EXPORT_MARKER
+    }
     marker.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     return {
         "report": str(path),

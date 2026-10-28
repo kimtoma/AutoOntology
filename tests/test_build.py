@@ -929,8 +929,10 @@ def test_export_format_keeps_the_other_formats_of_the_revision(env, tmp_path):
         export_job.read_export_metadata(folder)["upstream_fetched_at"]
         == (marker["upstream_fetched_at"])
     )
-    # a folder of another revision's export is not carried over
-    (folder / "export.json").write_text(json.dumps({**marker, "revision": 9}), encoding="utf-8")
+    # a folder of another revision's export is not carried over (the current marker: an
+    # older one records the hashes of files rewritten since)
+    current = export_job.read_export_metadata(folder)
+    (folder / "export.json").write_text(json.dumps({**current, "revision": 9}), encoding="utf-8")
     export_job.run_export(store, settings, format="okf", client=client)
     assert sorted(p.name for p in folder.iterdir()) == ["export.json", "okf", "report.md"]
 
@@ -1097,3 +1099,39 @@ def test_export_restores_a_backup_left_between_the_two_renames(env):
     ok = export_job.run_export(store, settings, client=env["client"])
     assert ok.status == "succeeded" and (folder / "ontology.ttl").is_file()
     assert not [p for p in folder.parent.iterdir() if ".prev-" in p.name]
+
+
+def test_export_refuses_a_listed_file_whose_content_changed(env, tmp_path):
+    """Recheck #10: export.json records a sha256 per file it wrote; a listed path whose
+    content no longer matches (the user reused or edited it), or a listed path with no
+    recorded hash (an edited list), is a user file: the re-export refuses, naming it."""
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    out = tmp_path / "desk"
+    folder = export_job.run_export(store, settings, out=out, client=env["client"]).export_dir
+    marker = export_job.read_export_metadata(folder)
+    hashes = marker["file_sha256"]
+    assert set(hashes) == set(marker["files"]) - {"export.json"}
+    index = folder / "okf" / "index.md"
+    original = index.read_bytes()
+    index.write_text("my own notes now")
+    with pytest.raises(JobError, match="refusing to replace .*okf/index.md"):
+        export_job.run_export(store, settings, out=out, client=env["client"])
+    assert index.read_text() == "my own notes now"
+    index.write_bytes(original)
+    notes = folder / "okf" / "personal-notes.md"
+    notes.write_text("mine")
+    (folder / "export.json").write_text(
+        json.dumps({**marker, "files": sorted([*marker["files"], "okf/personal-notes.md"])}),
+        encoding="utf-8",
+    )
+    with pytest.raises(JobError, match="refusing to replace .*okf/personal-notes.md"):
+        export_job.run_export(store, settings, out=out, client=env["client"])
+    assert notes.read_text() == "mine"
+    notes.unlink()
+    (folder / "export.json").write_text(json.dumps(marker), encoding="utf-8")
+    assert export_job.run_export(store, settings, out=out, client=env["client"]).status == (
+        "succeeded"
+    )
