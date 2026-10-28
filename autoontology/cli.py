@@ -543,7 +543,9 @@ def ontology() -> None:
 @app.command()
 def export(
     revision: int = typer.Option(None, "--revision", help="Snapshot revision (default: latest)."),
-    out: str = typer.Option(None, "--out", help="Output directory (default: exports/r<rev>/)."),
+    out: str = typer.Option(
+        None, "--out", help="Parent directory: writes <DIR>/r<rev>/ (default: exports/r<rev>/)."
+    ),
 ) -> None:
     """Write an ontology snapshot (default: the latest) as ontology.ttl, ontology.jsonld,
     ontology.graphml and report.md, plus the structured sources' upstream exports."""

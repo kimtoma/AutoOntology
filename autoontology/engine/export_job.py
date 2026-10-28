@@ -5,24 +5,29 @@ Steps ``collect -> serialize -> upstream -> report`` (:func:`autoontology.engine
 ``collect`` loads the snapshot written by ``autoontology build`` -- the export never
 rebuilds the model -- and every format writer serialises that same object; ``serialize``
 re-parses the Turtle file and fails the run if the export invariants do not hold. The
-files go to ``exports/r<revision:04d>/`` (``--out`` overrides): ``ontology.ttl``,
-``ontology.jsonld``, ``ontology.graphml``, ``report.md`` and, per structured source,
-``upstream/<source>.model.yaml`` and ``upstream/<source>.ossie.zip`` fetched from the
-backend. Exporting a revision again replaces its folder.
+files go to ``exports/r<revision:04d>/`` (``--out DIR`` writes ``DIR/r<revision:04d>/``):
+``ontology.ttl``, ``ontology.jsonld``, ``ontology.graphml``, ``report.md``, the
+``export.json`` marker (workspace, revision, snapshot run and time) and, per structured
+source, ``upstream/<source>.model.yaml`` and ``upstream/<source>.ossie.zip`` fetched from
+the backend. Exporting a revision again replaces its folder -- but only a folder that holds
+nothing except what this exporter writes (:data:`EXPORT_ENTRIES`): a directory with any
+other file is refused, never deleted.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from autoontology.config import Settings
+from autoontology.config import REPO_ROOT, Settings
 from autoontology.engine.client import BackendClient
 from autoontology.engine.jobs import (
     JobError,
@@ -52,8 +57,82 @@ UPSTREAM_FILES: tuple[tuple[str, str], ...] = (
 )
 
 
+#: the metadata file every export writes; also marks a folder as written by this exporter
+EXPORT_MARKER = "export.json"
+#: every top-level name an export folder may hold (``ossie/`` and ``okf/`` are reserved
+#: for the Ossie / OKF exporters); replacing a folder removes these and nothing else
+EXPORT_ENTRIES = frozenset(
+    {
+        "ontology.ttl",
+        "ontology.jsonld",
+        "ontology.graphml",
+        "report.md",
+        EXPORT_MARKER,
+        UPSTREAM_DIR,
+        "ossie",
+        "okf",
+    }
+)
+REVISION_DIR = re.compile(r"r\d{4,}")
+
+
 def revision_dir_name(revision: int) -> str:
     return f"r{int(revision):04d}"
+
+
+def export_target(settings: Settings, revision: int, out: Path | None) -> Path:
+    """The folder an export of *revision* goes to: ``exports/r<rev>/`` or ``<out>/r<rev>/``.
+
+    ``--out`` names a parent directory, never the folder that gets replaced, and may not
+    be the filesystem root, the home directory or the repository itself.
+    """
+    if out is None:
+        return settings.exports_dir / revision_dir_name(revision)
+    parent = Path(out).expanduser().resolve()
+    if parent in {Path(parent.anchor), Path.home().resolve(), REPO_ROOT.resolve()}:
+        raise JobError(f"refusing to export into {parent}: pick a dedicated directory")
+    if parent.exists() and not parent.is_dir():
+        raise JobError(f"--out {parent} is not a directory")
+    return parent / revision_dir_name(revision)
+
+
+def _owned(settings: Settings, final: Path) -> bool:
+    """A ``r<NNNN>`` folder directly under the configured exports root belongs to us."""
+    return bool(REVISION_DIR.fullmatch(final.name)) and (
+        final.parent.resolve() == settings.exports_dir.resolve()
+    )
+
+
+def check_replaceable(settings: Settings, final: Path) -> None:
+    """Refuse to replace *final* unless it is a revision folder under the exports root or
+    holds only files this exporter writes."""
+    if not final.exists() and not final.is_symlink():
+        return
+    if final.is_symlink() or not final.is_dir():
+        raise JobError(f"refusing to replace {final}: not an export folder")
+    if _owned(settings, final):
+        return
+    foreign = sorted(p.name for p in final.iterdir() if p.name not in EXPORT_ENTRIES)
+    if foreign:
+        raise JobError(
+            f"refusing to replace {final}: it holds files this exporter did not write "
+            f"({', '.join(foreign[:5])}{', ...' if len(foreign) > 5 else ''})"
+        )
+
+
+def _clear_export(settings: Settings, final: Path) -> None:
+    """Remove *final*: all of it under the exports root, elsewhere only the exporter's own
+    entries and then the (by then empty) folder."""
+    if _owned(settings, final):
+        shutil.rmtree(final)
+        return
+    for name in EXPORT_ENTRIES:
+        path = final / name
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        elif path.exists() or path.is_symlink():
+            path.unlink()
+    final.rmdir()
 
 
 @dataclass
@@ -177,6 +256,26 @@ def _step_upstream(ctx: _ExportCtx) -> dict[str, Any]:
     return {"upstream": ctx.upstream}
 
 
+def export_metadata(ctx: _ExportCtx) -> dict[str, Any]:
+    """What :data:`EXPORT_MARKER` records: which snapshot of which workspace this is."""
+    return {
+        "workspace": ctx.settings.workspace,
+        "revision": ctx.snapshot.revision,
+        "snapshot_run": ctx.snapshot.run_id,
+        "snapshot_created_at": ctx.snapshot.created_at,
+        "export_run": ctx.run.id,
+    }
+
+
+def read_export_metadata(folder: Path) -> dict[str, Any] | None:
+    """The :data:`EXPORT_MARKER` of an export folder (None when missing or unreadable)."""
+    try:
+        data = json.loads((folder / EXPORT_MARKER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _step_report(ctx: _ExportCtx) -> dict[str, Any]:
     assert ctx.model is not None
     entries = [_file_entry(p, ctx.out_dir) for p in ctx.files]
@@ -188,7 +287,12 @@ def _step_report(ctx: _ExportCtx) -> dict[str, Any]:
         upstream=ctx.upstream,
         revision=ctx.snapshot.revision,
     )
-    return {"report": str(path), "files": [*entries, _file_entry(path, ctx.out_dir)]}
+    marker = ctx.out_dir / EXPORT_MARKER
+    marker.write_text(json.dumps(export_metadata(ctx), indent=2) + "\n", encoding="utf-8")
+    return {
+        "report": str(path),
+        "files": [*entries, _file_entry(path, ctx.out_dir), _file_entry(marker, ctx.out_dir)],
+    }
 
 
 EXPORT_STEP_FUNCS: dict[str, Callable[[Any], dict[str, Any]]] = {
@@ -253,6 +357,8 @@ def _run_export_held(
     out: Path | None,
     client: BackendClient | None,
 ) -> RunResult:
+    final = export_target(settings, snapshot.revision, out)
+    check_replaceable(settings, final)
     client = client or BackendClient(settings.backend_url)
     if structured:
         client.health()  # BackendUnavailable -> "run autoontology up"
@@ -265,7 +371,6 @@ def _run_export_held(
             "pid": os.getpid(),
         },
     )
-    final = Path(out) if out else settings.exports_dir / revision_dir_name(snapshot.revision)
     # write next to the final folder, then swap: a failed export never leaves half a folder
     work = final.parent / f".{final.name}.{run.id}.tmp"
     shutil.rmtree(work, ignore_errors=True)
@@ -288,8 +393,14 @@ def _run_export_held(
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
         raise
-    if final.exists():
-        shutil.rmtree(final)
+    try:
+        check_replaceable(settings, final)  # again: it may have changed meanwhile
+        if final.exists():
+            _clear_export(settings, final)
+    except BaseException as exc:
+        shutil.rmtree(work, ignore_errors=True)
+        store.update_run(run.id, status="failed", error=str(exc))
+        raise
     final.parent.mkdir(parents=True, exist_ok=True)
     work.rename(final)
     result.export_dir = final

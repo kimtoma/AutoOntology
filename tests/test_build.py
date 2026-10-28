@@ -3,10 +3,11 @@ snapshot, with fake upstream/LLM backends."""
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
-from autoontology.config import Settings
+from autoontology.config import REPO_ROOT, Settings
 from autoontology.engine import build as bj
 from autoontology.engine import export_job, jobs
 from autoontology.engine import extract as ex
@@ -335,6 +336,7 @@ def test_export_reads_the_snapshot_and_overwrites_its_folder(env):
     assert result.export_dir == folder
     names = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
     assert names == [
+        "export.json",
         "ontology.graphml",
         "ontology.jsonld",
         "ontology.ttl",
@@ -342,6 +344,8 @@ def test_export_reads_the_snapshot_and_overwrites_its_folder(env):
         "upstream/hanbit.model.yaml",
         "upstream/hanbit.ossie.zip",
     ]
+    marker = export_job.read_export_metadata(folder)
+    assert marker["revision"] == 1 and marker["workspace"] == settings.workspace
     assert (folder / "upstream/hanbit.ossie.zip").read_bytes() == b"ossie:db1:True"
     ttl = (folder / "ontology.ttl").read_text(encoding="utf-8")
     assert "@prefix ao: <http://example.com/autoontology#>" in ttl
@@ -356,14 +360,44 @@ def test_export_reads_the_snapshot_and_overwrites_its_folder(env):
         export_job.run_export(store, settings, client=env["client"])
     store.update_run(busy.id, status="failed")
     out = settings.home / "elsewhere"
-    assert export_job.run_export(store, settings, out=out, client=env["client"]).export_dir == out
-    assert (out / "ontology.ttl").is_file()
+    target = out / "r0001"  # --out names the parent of the revision folder
+    assert (
+        export_job.run_export(store, settings, out=out, client=env["client"]).export_dir == target
+    )
+    assert (target / "ontology.ttl").is_file()
     runs = [r for r in store.list_runs(None) if r.kind == "export"]
     assert len(runs) == 3 and {r.params["revision"] for r in runs} == {1}
     assert env["client"].exports[:2] == [
         (("db1",), "auto_ontology", False),
         (("db1",), "ossie", True),
     ]
+
+
+def test_export_out_never_deletes_foreign_files(env, tmp_path):
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    out = tmp_path / "desk"
+    out.mkdir()
+    (out / "sentinel.txt").write_text("keep me")  # beside the revision folder: untouched
+    first = export_job.run_export(store, settings, out=out, client=env["client"])
+    assert first.export_dir == out / "r0001" and (out / "sentinel.txt").read_text() == "keep me"
+    # a revision folder holding only exporter files is replaced
+    again = export_job.run_export(store, settings, out=out, client=env["client"])
+    assert again.status == "succeeded" and (out / "r0001" / "ontology.ttl").is_file()
+    # ... but one with a foreign file is refused, and nothing is removed
+    (out / "r0001" / "notes.txt").write_text("mine")
+    before = sorted(p.name for p in (out / "r0001").iterdir())
+    with pytest.raises(JobError, match="refusing to replace .*notes.txt"):
+        export_job.run_export(store, settings, out=out, client=env["client"])
+    assert sorted(p.name for p in (out / "r0001").iterdir()) == before
+    assert (out / "r0001" / "notes.txt").read_text() == "mine"
+    assert not [p for p in out.iterdir() if p.name.startswith(".")]  # no temp folder left
+    for bad in (Path.home(), REPO_ROOT, Path("/")):
+        with pytest.raises(JobError, match="refusing to export into"):
+            export_job.run_export(store, settings, out=bad, client=env["client"])
+    assert (out / "sentinel.txt").read_text() == "keep me"
 
 
 # --- CLI ----------------------------------------------------------------------------------
