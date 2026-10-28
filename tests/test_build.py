@@ -5,6 +5,7 @@ snapshot, with fake upstream/LLM backends."""
 import io
 import json
 import os
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -726,6 +727,29 @@ def test_export_out_refuses_user_files_inside_exporter_folders(env, tmp_path):
     assert export_job.run_export(store, settings, out=out, client=env["client"]).status == (
         "succeeded"
     )
+
+
+def test_export_refuses_a_pre_manifest_folder_in_the_exports_root(env):
+    """A revision folder under the exports root written before export.json listed its
+    files cannot be replaced; the error names the folder and says to move or delete it."""
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    folder = export_job.run_export(store, settings, client=env["client"]).export_dir
+    assert folder.parent == settings.exports_dir
+    marker = export_job.read_export_metadata(folder)
+    old = {k: v for k, v in marker.items() if k != "files"}  # what an older exporter wrote
+    (folder / "export.json").write_text(json.dumps(old), encoding="utf-8")
+    before = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*"))
+    with pytest.raises(JobError) as err:
+        export_job.run_export(store, settings, client=env["client"])
+    message = str(err.value)
+    assert str(folder) in message
+    assert "move or delete the folder" in message
+    assert sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*")) == before
+    shutil.rmtree(folder)  # once moved/deleted, the export goes through
+    assert export_job.run_export(store, settings, client=env["client"]).status == "succeeded"
 
 
 def test_export_swap_failure_restores_the_previous_folder(env, monkeypatch):
