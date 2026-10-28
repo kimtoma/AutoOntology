@@ -17,7 +17,8 @@ This repository also contains, unmodified and under their own licenses:
   `autoontology/export/schemas/ossie/`, with their `LICENSE` and `NOTICE` files;
 - a sample HWP file from rhwp (MIT) in `samples/unstructured/` and `tests/fixtures/hwp/`,
   with its license text;
-- shadcn/ui component sources (MIT) in `ui/src/components/ui/`;
+- shadcn/ui component sources (MIT, Copyright (c) 2023 shadcn), adapted, in
+  `ui/src/components/ui/`, with the licence text in `ui/src/components/ui/LICENSE.md`;
 - a minified build of the web UI in `autoontology/web/static/dist/`, which bundles npm
   packages listed with their license texts in `docs/licenses/ui-bundle.md`.
 

@@ -6,6 +6,11 @@ depend on, as listed by `pnpm list --prod` and `pnpm licenses list --prod` (buil
 tools such as tailwindcss are left out). The licence text of each package follows the
 table. Regenerate this file whenever `ui/pnpm-lock.yaml` changes.
 
+The bundle also contains AutoOntology's adapted copies of shadcn/ui component sources
+(`ui/src/components/ui/`, MIT, Copyright (c) 2023 shadcn). They are not an npm package, so
+they are not in the table; their licence text is in
+[`ui/src/components/ui/LICENSE.md`](../../ui/src/components/ui/LICENSE.md).
+
 | Package | Version | Licence |
 |---|---|---|
 | 3d-force-graph | 1.80.1 | MIT |
