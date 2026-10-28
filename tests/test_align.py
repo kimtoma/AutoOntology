@@ -946,7 +946,7 @@ def test_stale_auto_aliases_plan():
     prov = {
         "t": [
             {"alias": a, "source_id": "A", "concepts": ["승인권자"]}
-            for a in ("계약", "계약서", "승인권자", "승인 자")
+            for a in ("계약", "계약서", "승인권자", "승인자")
         ]
         + [
             {"alias": "수기 별칭", "source_id": None, "concepts": []},
@@ -956,7 +956,7 @@ def test_stale_auto_aliases_plan():
     protected = {"t": {al.norm_alias(x) for x in ("계약", "계약서")}}
     stale, kept = al.stale_auto_aliases({"t": term}, prov, protected, "A")
     # only aliases recorded as added by source A and accounted for by no accepted alignment
-    # of any source; 약정 (upstream's own) is never touched; whole normalized aliases
+    # of any source; 약정 (upstream's own) is never touched; whole aliases
     assert [x.alias for x in stale] == ["승인권자", "승인자"]
     assert {(k["alias"], k["reason"]) for k in kept} == {
         ("수기 별칭", "unknown provenance"),
@@ -964,6 +964,15 @@ def test_stale_auto_aliases_plan():
     }
     every = {"t": {al.norm_alias(x) for x in ("계약", "계약서", "승인권자", "승인자")}}
     assert al.stale_auto_aliases({"t": term}, prov, every, "A")[0] == []
+
+
+def test_stale_auto_aliases_never_claims_a_manual_spacing_variant():
+    """Recheck #1: ownership uses the addition's key; manual ``계약 서`` is not ``계약서``."""
+    term = al.TermInfo("t", "Contract", "", ["계약 서", "계약서"], tables=[])
+    prov = {"t": [{"alias": "계약서", "source_id": "A", "concepts": ["계약서"]}]}
+    stale, kept = al.stale_auto_aliases({"t": term}, prov, {}, "A")
+    assert [x.alias for x in stale] == ["계약서"]
+    assert kept == []
 
 
 @pytest.mark.parametrize(

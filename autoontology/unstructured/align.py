@@ -291,6 +291,14 @@ IDENTITY_POLICY_VERSION = "identity-v2.1"
 IDENTITY_MIN_CONF = 0.90
 
 
+def alias_key(text: str) -> str:
+    """Synonym *ownership* key, shared by the addition dedupe (:func:`merge_synonyms`),
+    the provenance match and the removal (``remove_term_synonyms``): case-folded,
+    whitespace runs collapsed, no NFKC and no space stripping, so a manual ``계약 서``
+    and an automatic ``계약서`` stay two synonyms and removing one never takes the other."""
+    return " ".join(str(text).split()).casefold()
+
+
 def norm_alias(text: str) -> str:
     """Alias comparison key: Unicode NFKC, case-folded, every whitespace removed."""
     import unicodedata
@@ -479,12 +487,12 @@ def stale_auto_aliases(
             continue  # a Term of another structured source (or rebuilt away)
         by_alias: dict[str, list[dict[str, Any]]] = {}
         for rec in records:
-            by_alias.setdefault(norm_alias(rec["alias"]), []).append(rec)
+            by_alias.setdefault(alias_key(rec["alias"]), []).append(rec)
         own = {norm_alias(n) for n in [term.name, *(t.get("name") or "" for t in term.tables)]}
         safe = protected.get(term_id, set())
         for synonym in term.synonyms:
             n = norm_alias(synonym)
-            recs = by_alias.get(n)
+            recs = by_alias.get(alias_key(synonym))
             if not recs or n in own or n in safe:
                 continue
             sources = {r.get("source_id") for r in recs}
@@ -528,14 +536,14 @@ def merge_synonyms(
     existing: Sequence[str], additions: Sequence[str], term_name: str = ""
 ) -> list[str]:
     """Existing synonyms in order, then new ones; case-insensitive dedupe, never removes
-    an existing entry, never adds the Term's own name or blanks."""
+    an existing entry, never adds the Term's own name or blanks (:func:`alias_key`)."""
     out = list(existing)
-    seen = {s.strip().casefold() for s in existing} | {term_name.strip().casefold()}
+    seen = {alias_key(s) for s in existing} | {alias_key(term_name)}
     for value in additions:
         clean = " ".join(str(value).split())
-        if clean and clean.casefold() not in seen:
+        if clean and alias_key(clean) not in seen:
             out.append(clean)
-            seen.add(clean.casefold())
+            seen.add(alias_key(clean))
     return out
 
 

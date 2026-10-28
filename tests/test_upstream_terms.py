@@ -300,7 +300,7 @@ def test_upstream_gives_fk_columns_no_attribute():
 
 def test_remove_synonyms_is_a_reviewed_repair_with_refresh(upstream_env, monkeypatch):
     """Review #4, case 6: a rejected, previously accepted alignment's aliases come off the
-    Term (whole normalized aliases only, under the row lock) and its embeddings refresh."""
+    Term (whole aliases only, under the row lock) and its embeddings refresh."""
     from contextlib import contextmanager
 
     from autoontology.engine import upstream_terms as ut
@@ -327,7 +327,9 @@ def test_remove_synonyms_is_a_reviewed_repair_with_refresh(upstream_env, monkeyp
             ),
         },
     )
-    out = ut.remove_term_synonyms(upstream_env, "t1", ["승인권자", "승인자", "승인담당자"])
+    # whole aliases by the addition's key (case/whitespace runs): "승인담당자" is not
+    # "승인 담당자", so the reviewed removal names the spelling on the Term
+    out = ut.remove_term_synonyms(upstream_env, "t1", ["승인권자", "승인자", "승인 담당자"])
     # "승인자 목록" contains 승인자 but is a different alias: kept (no substring removal)
     assert out == {
         "synonyms": ["계약서", "승인자 목록"],
@@ -341,3 +343,36 @@ def test_remove_synonyms_is_a_reviewed_repair_with_refresh(upstream_env, monkeyp
     fake.current = ["계약서"]
     assert ut.remove_term_synonyms(upstream_env, "t1", ["승인권자"])["removed"] == []
     assert [e for e in log if isinstance(e, tuple)] == [("select", True)]
+
+
+def test_remove_synonyms_keeps_a_manual_spacing_variant(upstream_env, monkeypatch):
+    """Recheck #1: addition keeps ``계약 서`` (manual) and ``계약서`` (automatic) apart, so
+    the rollback of ``계약서`` must not take the manual spelling with it."""
+    from contextlib import contextmanager
+
+    from autoontology.engine import upstream_terms as ut
+    from autoontology.unstructured.align import merge_synonyms
+
+    assert merge_synonyms(["계약 서"], ["계약서"]) == ["계약 서", "계약서"]
+    real = ut.require_internals()
+    log: list = []
+    fake = _FakeStore(log, ["계약 서", "계약서", "CONTRACT DOC"])
+
+    @contextmanager
+    def tx():
+        yield
+
+    monkeypatch.setattr(
+        ut,
+        "require_internals",
+        lambda: {
+            **real,
+            "store": lambda: fake,
+            "write_transaction": tx,
+            "refresh_term_embeddings": lambda term_id, refresh_dependent_attrs: None,
+        },
+    )
+    out = ut.remove_term_synonyms(upstream_env, "t1", ["계약서", "contract  doc"])
+    # the same key as the addition's dedupe: case-folded, whitespace runs collapsed
+    assert out["synonyms"] == ["계약 서"]
+    assert out["removed"] == ["계약서", "CONTRACT DOC"]

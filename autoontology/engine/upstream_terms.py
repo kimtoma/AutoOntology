@@ -147,8 +147,9 @@ def set_term_synonyms(settings: Settings, term_id: str, synonyms: Sequence[str])
 def remove_term_synonyms(
     settings: Settings, term_id: str, removals: Sequence[str]
 ) -> dict[str, Any]:
-    """Reviewed repair of a wrong alignment: take *removals* (compared NFKC/case/space
-    normalized, whole aliases only) off ``term.synonyms`` inside one write transaction
+    """Reviewed repair of a wrong alignment: take *removals* (compared by the addition's
+    key, :func:`~autoontology.unstructured.align.alias_key`: case-folded, whitespace runs
+    collapsed, whole aliases only; ``계약 서`` is not ``계약서``) off ``term.synonyms`` inside one write transaction
     (``SELECT ... FOR UPDATE``, so a concurrent edit is kept), then refresh the Term's
     embeddings. ``align`` itself never removes synonyms.
 
@@ -156,13 +157,13 @@ def remove_term_synonyms(
     when none of *removals* is there)."""
     from autoontology.engine.client import USER_ID
     from autoontology.engine.jobs import prepare_upstream_env
-    from autoontology.unstructured.align import norm_alias
+    from autoontology.unstructured.align import alias_key
 
     prepare_upstream_env(settings)
     up = require_internals()
     from sqlalchemy import func, select, update
 
-    drop = {norm_alias(r) for r in removals if norm_alias(r)}
+    drop = {alias_key(r) for r in removals if alias_key(r)}
     s = up["s"]
     with up["write_transaction"]():
         rows = up["store"]().query_write(
@@ -171,8 +172,8 @@ def remove_term_synonyms(
         if not rows:
             raise LookupError(f"upstream Term {term_id} not found")
         current = list(rows[0]["synonyms"] or [])
-        kept = [x for x in current if norm_alias(x) not in drop]
-        removed = [x for x in current if norm_alias(x) in drop]
+        kept = [x for x in current if alias_key(x) not in drop]
+        removed = [x for x in current if alias_key(x) in drop]
         if removed:
             up["store"]().query_write(
                 update(s.term)
