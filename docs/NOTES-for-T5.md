@@ -25,9 +25,11 @@ later cleanup:
 Items from T3 (Ossie and OKF exporters):
 
 - **`export --format all|rdf|ossie|okf`** (default `all`; `POST /api/runs` takes `format`).
-  The revision folder is replaced as a whole, so a `--format okf` export leaves only `okf/`,
-  `report.md` and `export.json` in it. `okf` needs no backend; `ossie` and `rdf` fetch the
-  upstream files.
+  A `--format` export rewrites only its own entries and carries the other formats' files
+  over from the previous export of the same revision (same workspace and revision in
+  `export.json`); `export.json` `formats` records which export run wrote each of `rdf`,
+  `ossie` and `okf`. `okf` needs no backend; `ossie` and `rdf` fetch the upstream files
+  (`rdf` = ttl, jsonld, graphml and `upstream/`).
 - **Ossie alignment semantics follow the model, not the T3 brief's wording.** `broader`
   means the Term is broader (concept `extends` Term) and `narrower` means the Term is
   narrower (Term `extends` concept), as in `ontology.ttl` and `unstructured/schemas.py`;

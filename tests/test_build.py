@@ -487,6 +487,43 @@ def test_export_out_never_deletes_foreign_files(env, tmp_path):
     assert (out / "sentinel.txt").read_text() == "keep me"
 
 
+def test_export_format_keeps_the_other_formats_of_the_revision(env, tmp_path):
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    client = env["client"]
+    full = export_job.run_export(store, settings, client=client)
+    folder = full.export_dir
+    ttl = (folder / "ontology.ttl").read_bytes()
+    okf_index = (folder / "okf/index.md").read_bytes()
+    first = export_job.read_export_metadata(folder)
+    assert sorted(first["formats"]) == ["okf", "ossie", "rdf"]
+    again = export_job.run_export(store, settings, format="ossie", client=client)
+    assert again.export_dir == folder
+    assert sorted(p.name for p in folder.iterdir()) == sorted(export_job.EXPORT_ENTRIES)
+    assert (folder / "ontology.ttl").read_bytes() == ttl
+    assert (folder / "okf/index.md").read_bytes() == okf_index
+    marker = export_job.read_export_metadata(folder)
+    assert marker["format"] == "ossie"
+    assert marker["formats"]["ossie"]["export_run"] == again.run_id
+    assert marker["formats"]["rdf"] == marker["formats"]["okf"] == first["formats"]["rdf"]
+    report = (folder / "report.md").read_text(encoding="utf-8")
+    assert "ontology.ttl" in report and "okf/index.md" in report
+    # okf alone keeps the backend files too, and their fetch time
+    export_job.run_export(store, settings, format="okf", client=client)
+    assert (folder / "upstream/hanbit.ossie.zip").is_file()
+    assert (folder / "ontology.ttl").read_bytes() == ttl
+    assert (
+        export_job.read_export_metadata(folder)["upstream_fetched_at"]
+        == (marker["upstream_fetched_at"])
+    )
+    # a folder of another revision's export is not carried over
+    (folder / "export.json").write_text(json.dumps({**marker, "revision": 9}), encoding="utf-8")
+    export_job.run_export(store, settings, format="okf", client=client)
+    assert sorted(p.name for p in folder.iterdir()) == ["export.json", "okf", "report.md"]
+
+
 # --- CLI ----------------------------------------------------------------------------------
 
 
@@ -540,6 +577,7 @@ def test_cli_build_ontology_export_and_runs(env, monkeypatch):
     assert "okf: ok (" in res.output and "okf/concepts/" not in res.output  # one summary line
     res = runner.invoke(app, ["export", "--format", "rdf"])
     assert res.exit_code == 0 and "ossie/" not in res.output and "ontology.ttl" in res.output
+    assert "kept from the previous export of this revision: okf" in res.output
     res = runner.invoke(app, ["runs"])
     assert "align:hanbit-docs=succeeded" in res.output and "chunks[succeeded=" in res.output
     assert "chunk:" not in res.output
@@ -566,9 +604,11 @@ def test_export_format_writes_only_the_chosen_formats(env):
     result = export_job.run_export(store, settings, format="ossie", client=client)
     assert sorted(p.name for p in folder.iterdir()) == [
         "export.json",
+        "okf",  # kept from the okf export of this revision
         "ossie",
         "report.md",
         "upstream",
     ]
+    assert sorted(export_job.read_export_metadata(folder)["formats"]) == ["okf", "ossie"]
     with pytest.raises(JobError, match="unknown export format 'pdf'"):
         export_job.run_export(store, settings, format="pdf", client=client)

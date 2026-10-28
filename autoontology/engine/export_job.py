@@ -17,7 +17,8 @@ ontology, mapping, ``validation.json``: :mod:`autoontology.export.ossie`, built 
 upstream zips) and ``okf/`` (:mod:`autoontology.export.okf`). Exporting a revision again
 replaces its folder; outside the exports root only a folder that holds nothing but what
 this exporter writes (:data:`EXPORT_ENTRIES`) -- one with any other file is refused, never
-deleted.
+deleted. A ``--format`` export keeps the other formats' files of the previous export of
+the same revision.
 """
 
 from __future__ import annotations
@@ -87,6 +88,20 @@ EXPORT_ENTRIES = frozenset(
     }
 )
 REVISION_DIR = re.compile(r"r\d{4,}")
+#: the concrete formats behind each ``--format`` value
+CONCRETE_FORMATS: dict[str, tuple[str, ...]] = {
+    "all": ("rdf", "ossie", "okf"),
+    "rdf": ("rdf",),
+    "ossie": ("ossie",),
+    "okf": ("okf",),
+}
+#: the top-level entries each concrete format writes (``report.md`` and the marker are
+#: always rewritten)
+FORMAT_ENTRIES: dict[str, frozenset[str]] = {
+    "rdf": frozenset({"ontology.ttl", "ontology.jsonld", "ontology.graphml", UPSTREAM_DIR}),
+    "ossie": frozenset({UPSTREAM_DIR, ossie.OSSIE_DIR}),
+    "okf": frozenset({okf.OKF_DIR}),
+}
 
 
 def revision_dir_name(revision: int) -> str:
@@ -166,6 +181,10 @@ class _ExportCtx:
     ossie_zips: list[tuple[str, Path]] = field(default_factory=list)
     validation: dict[str, Any] = field(default_factory=dict)
     format: str = "all"
+    #: files carried over from the previous export of this revision (formats not chosen)
+    kept: list[Path] = field(default_factory=list)
+    #: ``export.json`` ``formats`` of the carried-over formats
+    kept_formats: dict[str, Any] = field(default_factory=dict)
 
 
 def _file_entry(path: Path, root: Path) -> dict[str, Any]:
@@ -329,7 +348,10 @@ def _short(value: Any) -> str:
 
 
 def export_metadata(ctx: _ExportCtx) -> dict[str, Any]:
-    """What :data:`EXPORT_MARKER` records: which snapshot of which workspace this is."""
+    """What :data:`EXPORT_MARKER` records: which snapshot of which workspace this is, and
+    per concrete format (``rdf``, ``ossie``, ``okf``) which export run wrote it and when."""
+    written = {"export_run": ctx.run.id, "exported_at": ctx.run.started_at}
+    formats = {**ctx.kept_formats, **dict.fromkeys(CONCRETE_FORMATS[ctx.format], written)}
     return {
         "workspace": ctx.settings.workspace,
         "revision": ctx.snapshot.revision,
@@ -337,8 +359,73 @@ def export_metadata(ctx: _ExportCtx) -> dict[str, Any]:
         "snapshot_created_at": ctx.snapshot.created_at,
         "export_run": ctx.run.id,
         "format": ctx.format,
+        "formats": {k: formats[k] for k in sorted(formats)},
         "upstream_fetched_at": ctx.upstream_fetched_at,
     }
+
+
+def _previous_formats(marker: dict[str, Any]) -> dict[str, Any]:
+    """The ``formats`` record of an older marker (one written before ``formats`` existed
+    names only its ``format``)."""
+    formats = marker.get("formats")
+    if isinstance(formats, dict):
+        return {k: v for k, v in formats.items() if k in FORMAT_ENTRIES}
+    previous = {"export_run": marker.get("export_run"), "exported_at": None}
+    return dict.fromkeys(CONCRETE_FORMATS.get(str(marker.get("format", "all")), ()), previous)
+
+
+def _upstream_source(name: str) -> str:
+    """``hanbit.ossie.zip`` -> ``hanbit``."""
+    for suffix, _ in UPSTREAM_FILES:
+        if name.endswith(f".{suffix}"):
+            return name[: -len(suffix) - 1]
+    return name
+
+
+def _carry_over(ctx: _ExportCtx, final: Path) -> None:
+    """Copy into the work folder the entries of the formats this export does not write,
+    from the previous export of the same revision, so ``--format ossie`` after a full
+    export keeps the Turtle files and ``okf/``. Only entries of this exporter
+    (:data:`EXPORT_ENTRIES`) are copied, never symlinks, and only when the previous
+    marker names this workspace and revision."""
+    if ctx.format == "all" or not final.is_dir() or final.is_symlink():
+        return
+    marker = read_export_metadata(final)
+    if (
+        marker is None
+        or marker.get("workspace") != ctx.settings.workspace
+        or marker.get("revision") != ctx.snapshot.revision
+    ):
+        return
+    written = set().union(*(FORMAT_ENTRIES[f] for f in CONCRETE_FORMATS[ctx.format]))
+    previous = _previous_formats(marker)
+    kept_formats = {f: v for f, v in previous.items() if f not in CONCRETE_FORMATS[ctx.format]}
+    carried = set().union(*(FORMAT_ENTRIES[f] for f in kept_formats), set()) - written
+    for name in sorted(carried):
+        source = final / name
+        if source.is_symlink() or not source.exists():
+            continue
+        target = ctx.out_dir / name
+        ctx.out_dir.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, target, symlinks=True)
+            files = sorted(p for p in target.rglob("*") if p.is_file() and not p.is_symlink())
+        else:
+            shutil.copy2(source, target)
+            files = [target]
+        ctx.kept += files
+        if name == UPSTREAM_DIR:
+            ctx.upstream_fetched_at = marker.get("upstream_fetched_at")
+            ctx.upstream += [
+                {
+                    "name": p.relative_to(ctx.out_dir).as_posix(),
+                    "origin": f"kept from export run {marker.get('export_run')}",
+                    "source": _upstream_source(p.name),
+                }
+                for p in files
+            ]
+        logger.info("  kept %s from the previous export of this revision", name)
+    ctx.kept_formats = kept_formats
 
 
 def read_export_metadata(folder: Path) -> dict[str, Any] | None:
@@ -353,11 +440,12 @@ def read_export_metadata(folder: Path) -> dict[str, Any] | None:
 def _step_report(ctx: _ExportCtx) -> dict[str, Any]:
     assert ctx.model is not None
     entries = [_file_entry(p, ctx.out_dir) for p in ctx.files]
+    kept = [_file_entry(p, ctx.out_dir) for p in ctx.kept]
     path = export_report.write(
         ctx.model,
         ctx.out_dir,
         run_id=ctx.run.id,
-        files=entries,
+        files=[*entries, *kept],
         upstream=ctx.upstream,
         revision=ctx.snapshot.revision,
         upstream_fetched_at=ctx.upstream_fetched_at,
@@ -367,6 +455,8 @@ def _step_report(ctx: _ExportCtx) -> dict[str, Any]:
     return {
         "report": str(path),
         "files": [*entries, _file_entry(path, ctx.out_dir), _file_entry(marker, ctx.out_dir)],
+        #: top-level entries carried over from the previous export of this revision
+        "kept": sorted({e["name"].split("/", 1)[0] for e in kept}),
     }
 
 
@@ -391,7 +481,9 @@ def run_export(
 ) -> RunResult:
     """Export snapshot *revision* (default: the latest) to ``exports/r<rev>/`` or *out*;
     *format* (``all`` | ``rdf`` | ``ossie`` | ``okf``) picks the formats written. The
-    revision folder is replaced as a whole, so it then holds only those formats."""
+    revision folder is replaced, but the files of the formats not chosen are carried over
+    from its previous export of the same revision (``export.json`` ``formats`` says which
+    run wrote each format)."""
     from autoontology.engine.build import WORKSPACE_LEASE, refuse_if_active
 
     log_path = setup_job_logging(settings)
@@ -484,6 +576,7 @@ def _run_export_held(
         format=format,
     )
     try:
+        _carry_over(ctx, final)
         result = _execute(
             ctx, list(EXPORT_STEPS), skip=skip, already=set(), steps=EXPORT_STEP_FUNCS
         )

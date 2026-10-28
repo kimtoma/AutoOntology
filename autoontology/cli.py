@@ -549,8 +549,8 @@ def export(
     format: str = typer.Option(
         "all",
         "--format",
-        help="all | rdf (ttl, jsonld, graphml) | ossie | okf. The revision folder is "
-        "replaced, so it then holds only the chosen formats.",
+        help="all | rdf (ttl, jsonld, graphml, upstream/) | ossie (ossie/, upstream/) | okf. "
+        "The other formats' files of the previous export of the revision are kept.",
     ),
 ) -> None:
     """Write an ontology snapshot (default: the latest) as ontology.ttl, ontology.jsonld,
@@ -619,6 +619,9 @@ def export(
     bundle = [e for e in entries if e["name"].startswith("okf/")]
     if bundle:
         typer.echo(f"  okf/  {len(bundle)} files, {sum(e['bytes'] for e in bundle)} bytes")
+    kept = result.details.get("report", {}).get("kept", [])
+    if kept:
+        typer.echo(f"  kept from the previous export of this revision: {', '.join(kept)}")
     checks = result.details.get("ossie", {}).get("validation")
     if checks:
         typer.echo(
