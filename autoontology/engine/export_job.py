@@ -7,11 +7,12 @@ rebuilds the model -- and every format writer serialises that same object; ``ser
 re-parses the Turtle file and fails the run if the export invariants do not hold. The
 files go to ``exports/r<revision:04d>/`` (``--out DIR`` writes ``DIR/r<revision:04d>/``):
 ``ontology.ttl``, ``ontology.jsonld``, ``ontology.graphml``, ``report.md``, the
-``export.json`` marker (workspace, revision, snapshot run and time, upstream fetch time) and, per structured
-source, ``upstream/<source>.model.yaml`` and ``upstream/<source>.ossie.zip`` fetched from
-the backend. Exporting a revision again replaces its folder -- but only a folder that holds
-nothing except what this exporter writes (:data:`EXPORT_ENTRIES`): a directory with any
-other file is refused, never deleted.
+``export.json`` marker (workspace, revision, snapshot run and time, upstream fetch time)
+and, per structured source, ``upstream/<source>.model.yaml`` and
+``upstream/<source>.ossie.zip`` fetched from the backend. Exporting a revision again
+replaces its folder; outside the exports root only a folder that holds nothing but what
+this exporter writes (:data:`EXPORT_ENTRIES`) -- one with any other file is refused, never
+deleted.
 """
 
 from __future__ import annotations
