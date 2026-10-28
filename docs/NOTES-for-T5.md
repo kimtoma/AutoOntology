@@ -16,7 +16,8 @@ later cleanup:
   false-positive pairs (`goods`, `customs`, `news`, `arms`, `glasses`, `means`), also as the last word of a
   longer alias (`Trade Goods` is not `Trade Good`). README and plan should describe it.
 - **`export --out DIR` writes `DIR/r<rev>/`** and refuses to replace a folder that holds
-  files the exporter did not write; every export has an `export.json` marker.
+  files the exporter did not write; every export has an `export.json` marker. Outside the
+  exports root a non-empty folder without that marker is refused too.
 - **`build --resume` sees changed input files** (content hashes) but not a schema change
   inside an external database source; a plain `build` picks that up.
 - **Upstream files in an export are fetched at export time**, not build time

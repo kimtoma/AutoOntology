@@ -481,6 +481,17 @@ def test_export_out_never_deletes_foreign_files(env, tmp_path):
     assert sorted(p.name for p in (out / "r0001").iterdir()) == before
     assert (out / "r0001" / "notes.txt").read_text() == "mine"
     assert not [p for p in out.iterdir() if p.name.startswith(".")]  # no temp folder left
+    # exporter names alone are not enough: without export.json the folder is not ours
+    own = tmp_path / "work"
+    (own / "r0001" / "okf").mkdir(parents=True)
+    (own / "r0001" / "okf" / "sentinel.md").write_text("my notes")
+    (own / "r0001" / "report.md").write_text("my report")
+    with pytest.raises(JobError, match="has no export.json"):
+        export_job.run_export(store, settings, out=own, client=env["client"])
+    assert (own / "r0001" / "okf" / "sentinel.md").read_text() == "my notes"
+    assert (own / "r0001" / "report.md").read_text() == "my report"
+    (own / "empty" / "r0001").mkdir(parents=True)  # an empty folder is fine
+    assert export_job.run_export(store, settings, out=own / "empty", client=env["client"]).status
     for bad in (Path.home(), REPO_ROOT, Path("/")):
         with pytest.raises(JobError, match="refusing to export into"):
             export_job.run_export(store, settings, out=bad, client=env["client"])

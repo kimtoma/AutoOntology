@@ -135,7 +135,9 @@ def _owned(settings: Settings, final: Path) -> bool:
 
 def check_replaceable(settings: Settings, final: Path) -> None:
     """Refuse to replace *final* unless it is a revision folder under the exports root or
-    holds only files this exporter writes."""
+    holds only files this exporter writes, next to the :data:`EXPORT_MARKER` it wrote
+    (``upstream/``, ``ossie/`` and ``okf/`` are removed with their contents, so a folder
+    that merely uses those names is not enough)."""
     if not final.exists() and not final.is_symlink():
         return
     if final.is_symlink() or not final.is_dir():
@@ -147,6 +149,12 @@ def check_replaceable(settings: Settings, final: Path) -> None:
         raise JobError(
             f"refusing to replace {final}: it holds files this exporter did not write "
             f"({', '.join(foreign[:5])}{', ...' if len(foreign) > 5 else ''})"
+        )
+    marker = final / EXPORT_MARKER
+    if any(final.iterdir()) and (marker.is_symlink() or not marker.is_file()):
+        raise JobError(
+            f"refusing to replace {final}: it has no {EXPORT_MARKER}, so it was not written "
+            "by autoontology export"
         )
 
 
