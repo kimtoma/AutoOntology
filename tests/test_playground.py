@@ -4,6 +4,7 @@
 import hashlib
 import json
 import math
+import os
 import time
 
 import httpx
@@ -436,44 +437,6 @@ def test_sparql_ask_construct_limit_and_refusals(ttl):
     assert g_run("SELECT * WHERE { ?s ?p ?o }", limit=10_000)["total"] <= 500  # row cap
 
 
-def test_sparql_deadline_abandons_the_evaluation_and_bounds_concurrency(ttl, monkeypatch):
-    import threading
-
-    from autoontology.playground import sparql
-
-    release = threading.Event()
-    real = sparql.execute
-
-    def slow(graph, query, limit):
-        release.wait(5)
-        return real(graph, query, limit)
-
-    runner = SparqlRunner(timeout_s=0.3)
-    runner.graph("r", ttl)  # parse first: the deadline covers evaluation only
-    monkeypatch.setattr(sparql, "execute", slow)
-    start = time.monotonic()
-    with pytest.raises(SparqlError) as err:
-        runner.run_file("r", ttl, "ASK { ?s ?p ?o }")
-    assert err.value.status == 408 and err.value.code == "sparql_timeout"
-    assert time.monotonic() - start < 2
-    with pytest.raises(SparqlError):  # second slot: also abandoned
-        runner.run_file("r", ttl, "ASK { ?s ?p ?o }")
-    with pytest.raises(SparqlError) as busy:  # both abandoned threads still hold a slot
-        runner.run_file("r", ttl, "ASK { ?s ?p ?o }")
-    assert busy.value.status == 429 and busy.value.code == "sparql_busy"
-    release.set()  # the abandoned evaluations end and give their slots back
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        try:
-            assert runner.run_file("r", ttl, "ASK { ?s ?p ?o }")["boolean"] is True
-            break
-        except SparqlError as exc:
-            assert exc.code == "sparql_busy"
-            time.sleep(0.05)
-    else:
-        raise AssertionError("slots were never released")
-
-
 def test_sparql_bad_export_is_422(tmp_path):
     bad = tmp_path / "ontology.ttl"
     bad.write_text("this is not turtle <<<", encoding="utf-8")
@@ -502,36 +465,85 @@ def test_sparql_cartesian_product_with_limit_is_bounded(ttl):
     assert time.monotonic() - start < 5
 
 
-def test_sparql_timed_out_evaluation_aborts_and_frees_its_slot(ttl):
-    """Review I-2: a query past its deadline stops at the next triple it pulls, so
-    repeated timeouts never exhaust the worker slots (no 429) and the GIL is released."""
-    runner = SparqlRunner(timeout_s=0.3)
-    graph = runner.graph("r", ttl)
-    store = graph.store
-    real = store.triples
-    pulled = {"n": 0}
-
-    def slow(*args, **kwargs):
-        for t in real(*args, **kwargs):
-            pulled["n"] += 1
-            time.sleep(0.02)
-            yield t
-
-    store.triples = slow  # every triple rdflib evaluation pulls now costs 20 ms
+def _dead(pid):
     try:
-        for _ in range(sparql.MAX_CONCURRENT + 2):  # old code: 429 from the third on
-            start = time.monotonic()
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+_SIXTY = " ".join(str(i) for i in range(60))
+#: 60^4 = 13M solutions computed without reading a single triple (Codex #5): only
+#: killing the worker process stops it
+VALUES_AGGREGATE = (
+    "SELECT (COUNT(*) AS ?n) WHERE { "
+    + " ".join(f"VALUES ?{v} {{ {_SIXTY} }}" for v in "abcd")
+    + " }"
+)
+
+
+def test_sparql_values_aggregate_is_killed_at_the_deadline_and_frees_its_slot(ttl):
+    runner = SparqlRunner(timeout_s=1.0)
+    try:
+        assert runner.run_file("r", ttl, "ASK { ?s ?p ?o }")["boolean"] is True  # warm
+        warm = runner.started_pids[-1]
+        start = time.monotonic()
+        with pytest.raises(SparqlError) as err:
+            runner.run_file("r", ttl, VALUES_AGGREGATE)
+        assert err.value.status == 408 and err.value.code == "sparql_timeout"
+        assert time.monotonic() - start < 2.0
+        assert _dead(warm)  # the evaluation really stopped
+        # the slot is free at once, and a new worker answers normal queries
+        out = runner.run_file("r", ttl, "SELECT ?c WHERE { ?c a owl:Class }", limit=2)
+        assert len(out["rows"]) == 2 and out["truncated"]
+        assert runner.started_pids[-1] != warm and len(runner.started_pids) == 2
+    finally:
+        runner.close()
+
+
+def test_sparql_bounds_concurrency_and_never_leaks_slots(ttl):
+    import threading
+
+    runner = SparqlRunner(timeout_s=1.0)
+    try:
+        runner.graph("r", ttl)
+        errors = []
+
+        def slow():
+            try:
+                runner.run_file("r", ttl, VALUES_AGGREGATE)
+            except SparqlError as exc:
+                errors.append(exc.code)
+
+        threads = [threading.Thread(target=slow) for _ in range(sparql.MAX_CONCURRENT)]
+        for t in threads:
+            t.start()
+        time.sleep(0.2)
+        with pytest.raises(SparqlError) as busy:  # both slots are evaluating
+            runner.run_file("r", ttl, "ASK { ?s ?p ?o }")
+        assert busy.value.status == 429 and busy.value.code == "sparql_busy"
+        for t in threads:
+            t.join(10)
+        assert errors == ["sparql_timeout"] * sparql.MAX_CONCURRENT
+        for _ in range(sparql.MAX_CONCURRENT + 1):  # repeated timeouts never exhaust slots
             with pytest.raises(SparqlError) as err:
                 runner.run_file("r", ttl, CARTESIAN + " ORDER BY ?a")
-            assert err.value.status == 408 and err.value.code == "sparql_timeout"
-            assert time.monotonic() - start < 1.0
-            time.sleep(0.1)  # > one pulled triple: the abandoned thread has given up
-        settled = pulled["n"]
-        time.sleep(0.2)
-        assert pulled["n"] == settled  # nothing keeps evaluating in the background
+            assert err.value.code == "sparql_timeout"
+        assert all(_dead(pid) for pid in runner.started_pids)
+        assert runner.run_file("r", ttl, "ASK { ?s ?p ?o }")["boolean"] is True
     finally:
-        del store.triples
-    assert runner.run_file("r", ttl, "ASK { ?s ?p ?o }")["boolean"] is True
+        runner.close()
+
+
+def test_sparql_worker_memory_cap(ttl):
+    runner = SparqlRunner(timeout_s=5, max_rss_mb=1)  # below any Python process
+    try:
+        with pytest.raises(SparqlError) as err:
+            runner.run_file("r", ttl, "ASK { ?s ?p ?o }")
+        assert err.value.status == 413 and err.value.code == "sparql_memory_limit"
+    finally:
+        runner.close()
 
 
 @pytest.mark.parametrize(
