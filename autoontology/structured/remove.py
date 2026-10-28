@@ -188,16 +188,15 @@ def _remove_held(
     say(f"removed source {name}")
 
 
-def alias_removal_plan(store: Store, src: Source) -> dict[str, list[str]]:
-    """term id -> the live synonyms that documents source *src*'s alignments wrote to the
-    Term (recorded provenance), minus those an accepted ``same`` alignment of another
-    documents source also accounts for. Manual aliases and other sources' are never in it."""
+def _other_support(store: Store, src: Source) -> dict[str, dict[str, list[str]]]:
+    """term id -> normalized alias -> ids of the *other* documents sources whose accepted
+    ``same`` alignment still accounts for that alias on the Term (sorted)."""
     from autoontology.store.alignments import AlignmentStore
     from autoontology.store.documents import DocumentStore
     from autoontology.unstructured import align as al
 
     aligns, docs = AlignmentStore(store), DocumentStore(store)
-    protected: dict[str, set[str]] = {}
+    support: dict[str, dict[str, set[str]]] = {}
     for other in store.list_sources():
         if other.kind != "documents" or other.id == src.id:
             continue
@@ -209,18 +208,43 @@ def alias_removal_plan(store: Store, src: Source) -> dict[str, list[str]]:
             info = al.ConceptInfo(
                 id=c.id, name=c.name, kind=c.kind, name_en=c.name_en, synonyms=c.synonyms
             )
-            protected.setdefault(a.term_id, set()).update(al.accepted_aliases(info))
+            per_term = support.setdefault(a.term_id, {})
+            for alias in al.accepted_aliases(info):
+                per_term.setdefault(alias, set()).add(other.id)
+    return {t: {k: sorted(v) for k, v in m.items()} for t, m in support.items()}
+
+
+def _split_plan(
+    store: Store, src: Source
+) -> tuple[dict[str, list[str]], list[tuple[str, str, str]]]:
+    """(removal plan, handover): *src*'s live recorded synonyms that no other documents
+    source supports go; the supported ones stay and are handed over to a supporting
+    source ``(term id, alias, new source id)``, so removing the last supporter takes them
+    off too."""
+    from autoontology.store.alignments import AlignmentStore
+    from autoontology.unstructured import align as al
+
+    support = _other_support(store, src)
     plan: dict[str, list[str]] = {}
-    for term_id, records in aligns.alias_provenance(live=True).items():
-        safe = protected.get(term_id, set())
-        mine = [
-            r["alias"]
-            for r in records
-            if r["source_id"] == src.id and al.norm_alias(r["alias"]) not in safe
-        ]
-        if mine:
-            plan[term_id] = mine
-    return plan
+    handover: list[tuple[str, str, str]] = []
+    for term_id, records in AlignmentStore(store).alias_provenance(live=True).items():
+        safe = support.get(term_id, {})
+        for r in records:
+            if r["source_id"] != src.id:
+                continue
+            others = safe.get(al.norm_alias(r["alias"]))
+            if others:
+                handover.append((term_id, r["alias"], others[0]))
+            else:
+                plan.setdefault(term_id, []).append(r["alias"])
+    return plan, handover
+
+
+def alias_removal_plan(store: Store, src: Source) -> dict[str, list[str]]:
+    """term id -> the live synonyms that documents source *src*'s alignments wrote to the
+    Term (recorded provenance), minus those an accepted ``same`` alignment of another
+    documents source also accounts for. Manual aliases and other sources' are never in it."""
+    return _split_plan(store, src)[0]
 
 
 def remove_added_aliases(
@@ -237,12 +261,14 @@ def remove_added_aliases(
     unless *force*, which only warns."""
     from autoontology.store.alignments import AlignmentStore
 
-    plan = alias_removal_plan(store, src)
+    plan, handover = _split_plan(store, src)
+    aligns = AlignmentStore(store)
+    for term_id, alias, new_owner in handover:  # still supported: the supporter owns it now
+        aligns.reassign_alias_source(term_id, alias, new_owner)
     if not plan:
         return
     if remover is None:
         from autoontology.engine.upstream_terms import remove_term_synonyms as remover
-    aligns = AlignmentStore(store)
     for term_id, aliases in sorted(plan.items()):
         try:
             result = remover(settings, term_id, aliases)

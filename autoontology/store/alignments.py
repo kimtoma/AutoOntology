@@ -229,6 +229,15 @@ class AlignmentStore:
                     (now_iso(), term_id, alias),
                 )
 
+    def reassign_alias_source(self, term_id: str, alias: str, source_id: str) -> None:
+        """``source rm``: a live alias the removed source added that *source_id* still
+        supports becomes that source's, so its own removal later takes the alias off."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE term_alias_additions SET source_id = ? WHERE term_id = ? AND alias = ?",
+                (source_id, term_id, alias),
+            )
+
     def alias_additions(self, term_id: str | None = None) -> dict[str, list[str]]:
         """term id -> aliases AutoOntology added (removed ones included)."""
         sql = "SELECT term_id, alias FROM term_alias_additions"

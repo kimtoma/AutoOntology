@@ -186,3 +186,38 @@ def test_source_rm_removes_only_the_aliases_that_source_added(stores, tmp_path, 
     assert store.get_source("docs") is not None
     remove.remove_source(settings, store, a, force=True)
     assert store.get_source("docs") is None
+
+
+def test_removing_the_last_supporting_source_removes_a_shared_alias(stores, tmp_path):
+    """Recheck #4: A added 약정서, B also accepts it. Removing A keeps it (B supports it);
+    removing B afterwards -- the last supporter -- must take it off the Term."""
+    from autoontology.config import Settings
+    from autoontology.structured import remove
+
+    store, docs, aligns, a = stores
+    b = store.add_source(name="other", kind="documents", locator="{}")
+    run = store.create_run(kind="build", source_id=None, params={})
+    aligns.record_alias_additions("t1", ["약정서"], run_id=run.id, source_id=a.id)
+    doc, _ = _add(docs, b)
+    chunk = docs.chunks_for_document(doc.id)[0]
+    ev = [EvidenceRecord(chunk.id, "약정서", True)]
+    docs.replace_ontology(b.id, [ConceptRecord("약정서", "entity", "d", evidence=ev)], [])
+    [concept] = docs.list_concepts(b.id)
+    aligns.put(
+        AlignmentRecord(b.id, concept.id, "약정서", "same", run.id, term_id="t1", accepted=True)
+    )
+    calls = []
+
+    def remover(settings, term_id, aliases):
+        calls.append((term_id, list(aliases)))
+        return {"removed": list(aliases)}
+
+    settings = Settings(home=tmp_path / "home")
+    quiet = lambda m, w=False: None  # noqa: E731
+    remove.remove_added_aliases(settings, store, a, force=False, say=quiet, remover=remover)
+    store.delete_source(a.id)
+    assert calls == []  # B still supports it
+    assert remove.alias_removal_plan(store, b) == {"t1": ["약정서"]}
+    remove.remove_added_aliases(settings, store, b, force=False, say=quiet, remover=remover)
+    assert calls == [("t1", ["약정서"])]
+    assert aligns.alias_provenance(live=True) == {}
