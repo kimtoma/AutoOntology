@@ -287,6 +287,15 @@ class _DeadlineGraph(Graph):
             yield t
 
 
+def memory_guard_available() -> bool:
+    """The worker memory cap reads ``resource`` (Unix only)."""
+    try:
+        import resource  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def _peak_rss_mb() -> float:
     import resource
 
@@ -477,6 +486,13 @@ class SparqlRunner:
                 400, "sparql_too_long", f"query longer than {MAX_QUERY_CHARS} characters"
             )
         limit = max(1, min(int(limit), MAX_LIMIT))
+        if not memory_guard_available():  # never evaluate without the memory cap
+            raise SparqlError(
+                501,
+                "sparql_unsupported",
+                "SPARQL queries need a Unix host: the worker memory cap uses the "
+                "`resource` module, which this platform lacks",
+            )
         graph = self.graph(run_id, path)
         check_query(query, prefixes(graph))  # fast: refuse before any worker
         if not self._slots.acquire(blocking=False):

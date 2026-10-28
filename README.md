@@ -228,7 +228,7 @@ wrote each format, and a `files` list of every file the exporter wrote.
 | `okf/` | [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) | A Markdown bundle with YAML frontmatter: `index.md`, `log.md`, `concepts/*.md` (type `Business Concept`), `tables/<source>.<table>.md` (type `Table`) and `documents/*.md` (type `Document`), with relationships as bundle links and evidence as footnotes. `validation.json` holds the conformance report. |
 | `report.md` | Markdown | A human-readable summary: counts, sources, merged concepts and every file with its sha256. |
 | `upstream/<source>.model.yaml`, `upstream/<source>.ossie.zip` | Engine native | The engine's own exports per structured source, fetched at export time. |
-| `export.json` | JSON | The marker: workspace, revision, the export run that wrote each format, and `files`, the list of every file the exporter wrote. |
+| `export.json` | JSON | The marker: workspace, revision, the export run that wrote each format, `files`, the list of every file the exporter wrote, and `file_sha256`, each file's hash. |
 
 Options:
 
@@ -239,11 +239,13 @@ Options:
 
 Re-exporting a revision replaces its folder only when every file in it, at any depth
 (inside `okf/`, `ossie/` and `upstream/` too), is on the `files` list of its
-`export.json`. This holds under `exports/` as well as under `--out`. A folder with any other
+`export.json` with the content it recorded (`file_sha256`). This holds under `exports/` as well as under `--out`. A folder with any other
 file, without `export.json`, or whose `export.json` has no `files` list (an export from
 before this list existed) is refused, and nothing in it is removed. During the swap the
 previous folder is renamed to `r<NNNN>.prev-<timestamp>-<run>` and deleted once the new
-one is in place; the export run is `succeeded` only after that.
+one is in place; the export run is `succeeded` only after that (a backup that cannot be
+deleted is left with a warning). An export interrupted between the two renames is restored
+from its `.prev-*` backup by the next export.
 
 ## How the unified ontology is built
 
@@ -383,6 +385,7 @@ are overridden.
 - **A stray file inside an export folder blocks re-export** (by design). Anything you put
   in `exports/rNNNN/` that the exporter did not write makes the next export of that
   revision refuse, instead of deleting your file. Keep notes outside the revision folder.
+- **SPARQL needs a Unix host.** The worker memory cap uses Python's `resource` module; where it is missing (Windows), queries answer 501 `sparql_unsupported`.
 - **SPARQL costs memory and a cold start.** The service and the worker each parse the
   graph, so memory is about twice the parsed graph. The first query after a timeout pays one
   process start plus one Turtle parse.

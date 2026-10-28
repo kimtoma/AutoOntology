@@ -1239,3 +1239,27 @@ def test_app_shutdown_closes_the_sparql_runner(client):
         runner = app.state.sparql
         assert not runner._closed
     assert runner._closed
+
+
+def test_sparql_refuses_queries_without_the_memory_guard(ttl, monkeypatch):
+    """Recheck #9: without `resource` (non-Unix) the worker's memory cap cannot run, so a
+    query is refused with a clear 501 instead of being evaluated unguarded."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_resource(name, *args, **kwargs):
+        if name == "resource":
+            raise ImportError("No module named 'resource'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_resource)
+    runner = SparqlRunner(timeout_s=5)
+    try:
+        with pytest.raises(SparqlError) as err:
+            runner.run_file("r", ttl, "ASK { ?s ?p ?o }")
+        assert err.value.status == 501 and err.value.code == "sparql_unsupported"
+        assert "Unix" in err.value.message
+        assert runner.started_pids == []  # no unguarded worker was started
+    finally:
+        runner.close()

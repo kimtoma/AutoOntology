@@ -219,7 +219,7 @@ kordoc이 설치되지 않아 건너뛴 문서는 실패가 아니라 경고입�
 | `okf/` | [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) | YAML frontmatter가 붙은 마크다운 번들: `index.md`, `log.md`, `concepts/*.md`(type `Business Concept`), `tables/<source>.<table>.md`(type `Table`), `documents/*.md`(type `Document`). 관계는 번들 링크로, 근거는 각주로 표현합니다. `validation.json`에 적합성 보고서가 담깁니다. |
 | `report.md` | Markdown | 사람이 읽는 요약: 개수, 소스, 병합된 개념, 그리고 sha256이 붙은 모든 파일. |
 | `upstream/<source>.model.yaml`, `upstream/<source>.ossie.zip` | 엔진 고유 형식 | 정형 소스별 엔진 자체 내보내기. 내보내기 시점에 받아 옵니다. |
-| `export.json` | JSON | 마커: 워크스페이스, 리비전, 각 형식을 쓴 내보내기 run, 그리고 내보내기가 쓴 모든 파일의 목록 `files`. |
+| `export.json` | JSON | 마커: 워크스페이스, 리비전, 각 형식을 쓴 내보내기 run, 내보내기가 쓴 모든 파일의 목록 `files`, 그리고 파일별 해시 `file_sha256`. |
 
 옵션:
 
@@ -228,11 +228,12 @@ kordoc이 설치되지 않아 건너뛴 문서는 실패가 아니라 경고입�
 - `--out DIR`은 `DIR/r<rev>/`에 씁니다.
 
 리비전을 다시 내보낼 때는 그 폴더의 모든 파일이(`okf/`, `ossie/`, `upstream/` 안까지) `export.json`의
-`files` 목록에 있을 때만 폴더를 교체합니다. `--out`뿐 아니라 `exports/` 아래에서도 같습니다.
+`files` 목록에 있고 기록된 내용(`file_sha256`)과 같을 때만 폴더를 교체합니다. `--out`뿐 아니라 `exports/` 아래에서도 같습니다.
 다른 파일이 있거나, `export.json`이 없거나, `export.json`에 `files` 목록이 없는(목록이 생기기
 전의 내보내기) 폴더는 거부하며 아무것도 지우지 않습니다. 교체하는 동안 이전 폴더는
 `r<NNNN>.prev-<timestamp>-<run>`으로 이름이 바뀌고 새 폴더가 자리 잡은 뒤 삭제됩니다. 내보내기
-run은 그다음에야 `succeeded`가 됩니다.
+run은 그다음에야 `succeeded`가 됩니다(지우지 못한 백업은 경고와 함께 남습니다). 두 이름 변경 사이에서
+중단된 내보내기는 다음 내보내기가 `.prev-*` 백업에서 복원합니다.
 
 ## 통합 온톨로지가 만들어지는 방식
 
@@ -361,6 +362,7 @@ run은 그다음에야 `succeeded`가 됩니다.
 - **내보내기 폴더 안의 다른 파일은 다시 내보내기를 막습니다**(의도된 동작). 내보내기가 쓰지 않은
   파일을 `exports/rNNNN/`에 두면 그 리비전의 다음 내보내기는 파일을 지우는 대신 거부합니다. 메모는
   리비전 폴더 밖에 두세요.
+- **SPARQL은 Unix 호스트가 필요합니다.** 워커 메모리 제한이 Python `resource` 모듈을 쓰므로, 이 모듈이 없는 곳(Windows)에서는 쿼리가 501 `sparql_unsupported`로 응답합니다.
 - **SPARQL은 메모리와 콜드 스타트 비용이 있습니다.** 서비스와 워커가 각각 그래프를 파싱하므로
   메모리는 파싱된 그래프의 약 두 배입니다. 타임아웃 뒤 첫 쿼리는 프로세스 시작 한 번과 Turtle 파싱
   한 번의 비용을 치릅니다.
