@@ -109,10 +109,14 @@ def ossie_zip() -> bytes:
         ],
     }
     buf = io.BytesIO()
+    stamp = (2026, 1, 1, 0, 0, 0)  # fixed: writestr(name) would stamp the current time
     with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("semantic_model.yaml", yaml.safe_dump(model, allow_unicode=True))
-        zf.writestr("ontology.yaml", "version: 0.2.0.dev0\n")
-        zf.writestr("mapping.yaml", "version: 0.2.0.dev0\n")
+        for name, text in (
+            ("semantic_model.yaml", yaml.safe_dump(model, allow_unicode=True)),
+            ("ontology.yaml", "version: 0.2.0.dev0\n"),
+            ("mapping.yaml", "version: 0.2.0.dev0\n"),
+        ):
+            zf.writestr(zipfile.ZipInfo(name, stamp), text)
     return buf.getvalue()
 
 
