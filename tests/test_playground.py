@@ -536,6 +536,39 @@ def test_sparql_bounds_concurrency_and_never_leaks_slots(ttl):
         runner.close()
 
 
+def test_sparql_close_stops_running_workers_and_refuses_new_queries(ttl):
+    """Recheck #8: close() kills the worker evaluating a query too (not only the idle
+    ones), that worker never returns to the pool, and later queries are refused."""
+    import threading
+
+    runner = SparqlRunner(timeout_s=30)
+    runner.run_file("r", ttl, "ASK { ?s ?p ?o }")  # one idle, warm worker
+    errors = []
+
+    def slow():
+        try:
+            runner.run_file("r", ttl, VALUES_AGGREGATE)
+        except SparqlError as exc:
+            errors.append(exc.code)
+
+    busy = runner.started_pids[-1]  # the warm worker takes the slow query
+    thread = threading.Thread(target=slow)
+    thread.start()
+    time.sleep(0.5)
+    runner.close()
+    thread.join(5)
+    try:
+        assert not thread.is_alive() and errors  # the query stopped, long before 30 s
+        assert _dead(busy) and len(runner.started_pids) == 1
+    finally:
+        if thread.is_alive():  # old behaviour: do not leave the evaluation running
+            os.kill(busy, 9)
+            thread.join(5)
+    with pytest.raises(SparqlError) as err:
+        runner.run_file("r", ttl, "ASK { ?s ?p ?o }")
+    assert err.value.status == 503 and err.value.code == "sparql_closed"
+
+
 def test_sparql_worker_memory_cap(ttl):
     runner = SparqlRunner(timeout_s=5, max_rss_mb=1)  # below any Python process
     try:
@@ -1197,3 +1230,12 @@ def test_truncated_chat_is_saved_incomplete_and_never_done(client):
         },
     )
     assert "계약은 고객과" not in [m["content"] for m in llm.messages[-1]]
+
+
+def test_app_shutdown_closes_the_sparql_runner(client):
+    """Recheck #8: the app's lifespan closes the SPARQL runner (its workers) on shutdown."""
+    c, _settings, app, _llm, _embed = client
+    with c:
+        runner = app.state.sparql
+        assert not runner._closed
+    assert runner._closed

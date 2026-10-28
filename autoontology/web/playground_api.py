@@ -123,6 +123,7 @@ async def _guarded(
 def build_router(api: Api, app: FastAPI) -> APIRouter:
     router = APIRouter(prefix=f"{PREFIX}/playground")
     sparql = SparqlRunner()
+    app.state.sparql = sparql  # closed by the app's lifespan (web.app.create_app)
 
     def pg() -> Playground:
         found = getattr(app.state, "playground", None)

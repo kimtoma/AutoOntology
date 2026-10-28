@@ -399,6 +399,9 @@ class SparqlRunner:
         self._graphs_lock = threading.Lock()
         self._slots = threading.BoundedSemaphore(MAX_CONCURRENT)
         self._idle: list[_Worker] = []
+        #: workers checked out by a running query (close() kills them too)
+        self._active: set[_Worker] = set()
+        self._closed = False
         self._idle_lock = threading.Lock()
         #: pids of every worker started (tests: a killed worker is replaced)
         self.started_pids: list[int] = []
@@ -424,26 +427,46 @@ class SparqlRunner:
     def _checkout(self, run_id: str) -> _Worker:
         """An idle worker (one that already parsed *run_id* first), else a new one."""
         with self._idle_lock:
+            if self._closed:
+                raise SparqlError(503, "sparql_closed", "the SPARQL runner is shutting down")
             self._idle = [w for w in self._idle if w.alive() or w.kill()]
-            for worker in self._idle:
-                if worker.loaded == run_id:
-                    self._idle.remove(worker)
-                    return worker
-            if self._idle:
-                return self._idle.pop(0)
-        worker = _Worker(self.max_rss_mb)
-        self.started_pids.append(worker.process.pid or 0)
-        return worker
+            found = next((w for w in self._idle if w.loaded == run_id), None)
+            if found is None and self._idle:
+                found = self._idle[0]
+            if found is not None:
+                self._idle.remove(found)
+                self._active.add(found)
+                return found
+            worker = _Worker(self.max_rss_mb)
+            self.started_pids.append(worker.process.pid or 0)
+            self._active.add(worker)
+            return worker
 
     def _checkin(self, worker: _Worker) -> None:
         with self._idle_lock:
-            self._idle.append(worker)
+            self._active.discard(worker)
+            if not self._closed:
+                self._idle.append(worker)
+                return
+        worker.kill()  # never back into a closed pool
+
+    def _discard(self, worker: _Worker) -> None:
+        with self._idle_lock:
+            self._active.discard(worker)
+        worker.kill()
 
     def close(self) -> None:
+        """Stop every worker, the idle ones and those running a query (that query fails),
+        and refuse new queries."""
         with self._idle_lock:
-            workers, self._idle = self._idle, []
-        for worker in workers:
+            self._closed = True
+            idle, self._idle = self._idle, []
+            active = list(self._active)
+        for worker in idle:
             worker.kill()
+        for worker in active:  # its query's thread sees the pipe close and cleans up
+            if worker.process.is_alive():
+                worker.process.kill()
 
     def run_file(
         self, run_id: str, path: Path, query: str, *, limit: int = DEFAULT_LIMIT
@@ -488,7 +511,7 @@ class SparqlRunner:
                 if healthy and worker.alive():
                     self._checkin(worker)
                 else:
-                    worker.kill()  # the slot is free right away; respawned lazily
+                    self._discard(worker)  # the slot is free right away; respawned lazily
             self._slots.release()
 
 

@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -135,7 +137,14 @@ def create_app(
     _provider_logging()
     from autoontology import __version__
 
-    app = FastAPI(title="AutoOntology", version=__version__)
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        sparql = getattr(app.state, "sparql", None)
+        if sparql is not None:  # stop its worker processes, running queries included
+            sparql.close()
+
+    app = FastAPI(title="AutoOntology", version=__version__, lifespan=lifespan)
     app.state.settings = settings
     # /v1/*: OpenAI-compatible chat router (Ollama or OpenAI-compatible passthrough).
     registry = providers or Registry(settings, llm_transport)
