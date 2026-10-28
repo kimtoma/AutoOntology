@@ -151,9 +151,11 @@ What to expect:
 
 </details>
 
-The sample data is a fictitious Korean trading company ("한빛상사"): three related CSV files
-(customers, contracts, invoices) and its contract and billing rules as documents. See
-[samples/README.md](samples/README.md).
+The sample data is a fictitious Korean trading company ("한빛상사"). `samples/quickstart`
+holds three related CSV files (customers, contracts, invoices) and its contract and billing
+rules as documents. `samples/hanbit` is the full set: nine files of related tables in seven formats (11 tables),
+fifteen documents in twelve formats and six images for OCR. See
+[samples/README.en.md](samples/README.en.md) ([한국어](samples/README.md)).
 
 ### Using an OpenAI-compatible API instead of Ollama
 

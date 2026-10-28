@@ -142,9 +142,10 @@ uv run autoontology ui
 
 </details>
 
-샘플 데이터는 가상의 한국 무역회사("한빛상사")입니다. 서로 연결된 CSV 파일 세 개(고객, 계약,
-청구)와, 계약·청구 규정 문서로 이루어져 있습니다. [samples/README.md](samples/README.md)를
-보세요.
+샘플 데이터는 가상의 한국 무역회사("한빛상사")입니다. `samples/quickstart`는 서로 연결된 CSV
+파일 세 개(고객, 계약, 청구)와 계약·청구 규정 문서로 이루어져 있습니다. `samples/hanbit`은 전체
+세트로, 7가지 형식의 연결된 정형 파일 9개(테이블 11개), 12가지 형식의 문서 15개, OCR용 이미지 6개가 들어
+있습니다. [samples/README.md](samples/README.md)를 보세요.
 
 ### Ollama 대신 OpenAI 호환 API 쓰기
 
