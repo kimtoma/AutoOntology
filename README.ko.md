@@ -4,7 +4,7 @@
 
 AutoOntology는 정형 데이터(CSV, TSV, XLSX, JSON, Parquet, SQLite, 또는 Postgres/MySQL/Snowflake
 데이터베이스)와 비정형 문서(Markdown, 텍스트, HTML, 그리고 선택 구성요소인 kordoc 엔진을 쓰면
-HWP/HWPX/PDF/DOCX/PPTX)를 **하나의 온톨로지**로 만듭니다. 테이블을 비즈니스 Term으로 컴파일하는
+HWP/HWPX/HWPML, PDF, DOCX, PPTX, XLS/XLSX, PNG/JPEG/WebP 이미지)를 **하나의 온톨로지**로 만듭니다. 테이블을 비즈니스 Term으로 컴파일하는
 [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology) 위에 만들어졌습니다.
 AutoOntology는 여기에 문서 개념 추출을 더하고, 문서 개념을 그 Term들에 정렬(align)한 뒤, 둘을
 버전이 매겨진 스냅샷 하나로 병합합니다. 스냅샷은 RDF/OWL(Turtle, JSON-LD), GraphML,
@@ -28,7 +28,8 @@ AutoOntology는 여기에 문서 개념 추출을 더하고, 문서 개념을 �
   동일성 정책(`identity-v2.1`)을 따릅니다. `same`으로 수용된 개념은 해당 Term으로 접힙니다(fold).
 - 모든 스냅샷을 `exports/r<rev>/`로 **내보내기**: `ontology.ttl`, `ontology.jsonld`,
   `ontology.graphml`, `ossie/`(Ossie JSON 스키마로 검증하고 엔진의 변환기로 라운드트립),
-  `okf/`(OKF v0.2 적합성 검증), `report.md`.
+  `okf/`(OKF v0.2 적합성 검증), `report.md`, `upstream/`의 소스별 엔진 자체 내보내기,
+  그리고 `export.json` 마커.
 - `/ui/`의 **웹 UI**: Sources, Build(실시간 로그), Ontology(origin 배지가 붙은 검색 가능한 개념
   목록), Graph(3D, 2D 대체 화면), Playground, Exports(미리보기와 다운로드), Status.
 - **플레이그라운드**: 온톨로지와 대화(인용이 붙은 검색 기반 답변), 정형 소스에 대한 자연어→SQL,
@@ -166,7 +167,7 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
 | `GET /api/status` | 버전, 백엔드와 Postgres 상태, Ollama 모델, `kordoc_available`, 제공자 요약(키는 절대 포함하지 않음). |
 | `GET /api/sources` | 소스 목록. |
 | `POST /api/sources` | 소스 추가: JSON `{name, kind: files\|database\|documents, locator, recursive?}` 또는 multipart 업로드. |
-| `DELETE /api/sources/{name}` | 소스 제거(`?drop_db=true`는 데이터베이스도 삭제). |
+| `DELETE /api/sources/{name}` | 소스 제거(`?drop_db=true`는 데이터베이스도 삭제, `&force=true`는 `source rm --force`처럼 엔진의 그래프 삭제가 실패하거나 끝나지 않아도 로컬에서 제거). |
 | `POST /api/runs` | run 시작: `{kind: "build", sources?, resume?}` 또는 `{kind: "export", revision?, format?}`. |
 | `GET /api/runs`, `GET /api/runs/{id}` | run 목록, 그리고 단계가 포함된 run 하나. |
 | `GET /api/runs/{id}/events` | 서버 전송 이벤트(SSE): run의 실시간 로그와 단계 갱신. |
@@ -184,6 +185,7 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
 | `GET /api/playground/sparql/examples` | 예시 쿼리. |
 | `POST /api/playground/sparql` | `{query, limit?}`로 스냅샷에 읽기 전용 SPARQL 쿼리를 실행합니다. |
 | `POST /v1/chat/completions`, `GET /v1/models` | 엔진이 쓰는 모델 라우터. 클라이언트용이 아닙니다. |
+| `POST /ingest`, `POST /ingest/delete?database_name=` | 내부용: 연결이 등록되거나 삭제될 때 엔진이 호출하는 콜백. ingest나 그래프 삭제를 큐에 넣습니다. 클라이언트용이 아닙니다. |
 | `GET /health/live`, `GET /health` | 생존 확인과 준비 상태 확인. |
 
 ## 내보내기 형식
@@ -201,6 +203,7 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
 | `okf/` | [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) | YAML frontmatter가 붙은 마크다운 번들: `index.md`, `log.md`, `concepts/*.md`(type `Business Concept`), `tables/<source>.<table>.md`(type `Table`), `documents/*.md`(type `Document`). 관계는 번들 링크로, 근거는 각주로 표현합니다. `validation.json`에 적합성 보고서가 담깁니다. |
 | `report.md` | Markdown | 사람이 읽는 요약: 개수, 소스, 병합된 개념, 그리고 sha256이 붙은 모든 파일. |
 | `upstream/<source>.model.yaml`, `upstream/<source>.ossie.zip` | 엔진 고유 형식 | 정형 소스별 엔진 자체 내보내기. 내보내기 시점에 받아 옵니다. |
+| `export.json` | JSON | 마커: 워크스페이스, 리비전, 각 형식을 쓴 내보내기 run. |
 
 옵션:
 

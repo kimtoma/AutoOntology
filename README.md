@@ -4,7 +4,8 @@
 
 AutoOntology turns structured data (CSV, TSV, XLSX, JSON, Parquet, SQLite, or a
 Postgres/MySQL/Snowflake database) and unstructured documents (Markdown, text, HTML, and
-with the optional kordoc engine HWP/HWPX/PDF/DOCX/PPTX) into **one ontology**. It is built
+with the optional kordoc engine HWP/HWPX/HWPML, PDF, DOCX, PPTX, XLS/XLSX and PNG/JPEG/WebP
+images) into **one ontology**. It is built
 on [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology), which compiles tables
 into business Terms. AutoOntology adds document concept extraction, aligns the document
 concepts to those Terms, and merges both into a single versioned snapshot. It exports the
@@ -31,8 +32,9 @@ OpenAI-compatible endpoint.
   `same` concepts fold into their Term.
 - **Exports** of every snapshot to `exports/r<rev>/`: `ontology.ttl`, `ontology.jsonld`,
   `ontology.graphml`, `ossie/` (validated against the Ossie JSON Schemas and round-tripped
-  through the engine's converter), `okf/` (validated for OKF v0.2 conformance) and
-  `report.md`.
+  through the engine's converter), `okf/` (validated for OKF v0.2 conformance),
+  `report.md`, the engine's own per-source exports in `upstream/`, and the `export.json`
+  marker.
 - **Web UI** at `/ui/`: Sources, Build (live log), Ontology (searchable concept list with
   origin badges), Graph (3D with a 2D fallback), Playground, Exports (preview and
   download) and Status.
@@ -171,7 +173,7 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 | `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, and a provider summary (never the key). |
 | `GET /api/sources` | Lists the sources. |
 | `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
-| `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database). |
+| `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion fails or does not finish, like `source rm --force`). |
 | `POST /api/runs` | Starts a run: `{kind: "build", sources?, resume?}` or `{kind: "export", revision?, format?}`. |
 | `GET /api/runs`, `GET /api/runs/{id}` | Lists runs; shows one run with its steps. |
 | `GET /api/runs/{id}/events` | Server-sent events: the live log and step updates of a run. |
@@ -189,6 +191,7 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 | `GET /api/playground/sparql/examples` | Example queries. |
 | `POST /api/playground/sparql` | `{query, limit?}` runs a read-only SPARQL query against the snapshot. |
 | `POST /v1/chat/completions`, `GET /v1/models` | The model router used by the engine; not meant for clients. |
+| `POST /ingest`, `POST /ingest/delete?database_name=` | Internal: callbacks from the engine when a connection is registered or deleted. They queue an ingest or a graph deletion; not meant for clients. |
 | `GET /health/live`, `GET /health` | Liveness and readiness. |
 
 ## Export formats
@@ -206,6 +209,7 @@ wrote each format.
 | `okf/` | [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) | A Markdown bundle with YAML frontmatter: `index.md`, `log.md`, `concepts/*.md` (type `Business Concept`), `tables/<source>.<table>.md` (type `Table`) and `documents/*.md` (type `Document`), with relationships as bundle links and evidence as footnotes. `validation.json` holds the conformance report. |
 | `report.md` | Markdown | A human-readable summary: counts, sources, merged concepts and every file with its sha256. |
 | `upstream/<source>.model.yaml`, `upstream/<source>.ossie.zip` | Engine native | The engine's own exports per structured source, fetched at export time. |
+| `export.json` | JSON | The marker: workspace, revision and the export run that wrote each format. |
 
 Options:
 
