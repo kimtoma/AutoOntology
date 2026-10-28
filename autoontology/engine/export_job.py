@@ -256,6 +256,36 @@ def recover_interrupted_install(final: Path) -> Path | None:
     return backup
 
 
+def recover_interrupted_exports(settings: Settings, store: Store) -> list[Path]:
+    """Service start: :func:`recover_interrupted_install` for every revision folder of
+    the exports root that has a ``.prev-*`` backup beside it, under the workspace lease
+    (an export running in another process is left alone). Returns the restored folders;
+    each restore is logged. (``--out`` targets are recovered by their next export.)"""
+    from autoontology.engine.build import WORKSPACE_LEASE
+
+    root = settings.exports_dir
+    if not root.is_dir() or root.is_symlink():
+        return []
+    finals = sorted({p.name.split(".prev-", 1)[0] for p in root.glob("*.prev-*")})
+    if not finals:
+        return []
+    restored: list[Path] = []
+    try:
+        with hold_sources(store, [WORKSPACE_LEASE], EXPORT_KIND):
+            for name in finals:
+                if name and recover_interrupted_install(root / name) is not None:
+                    restored.append(root / name)
+    except JobError as exc:
+        logger.warning("startup export recovery skipped: %s", exc)
+    if restored:
+        logger.info(
+            "startup: restored %d interrupted export(s): %s",
+            len(restored),
+            ", ".join(str(p) for p in restored),
+        )
+    return restored
+
+
 def _remove_listed(folder: Path, listed: set[str]) -> bool:
     """Remove the *listed* files of *folder*, then the directories they leave empty, then
     *folder* itself. Anything else is kept (then *folder* stays and False is returned)."""

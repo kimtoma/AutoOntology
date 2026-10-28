@@ -123,6 +123,16 @@ def _sweep_stale_runs(store: Any) -> None:
         logger.info("startup sweep: reaped %d stale run(s): %s", len(reaped), ", ".join(reaped))
 
 
+def _recover_exports(settings: Settings, store: Any) -> None:
+    """Restore an export a crash left only in its ``.prev-*`` backup (logged per folder)."""
+    from autoontology.engine.export_job import recover_interrupted_exports
+
+    try:
+        recover_interrupted_exports(settings, store)
+    except Exception:  # noqa: BLE001 - a recovery must never keep the service from starting
+        logger.exception("startup export recovery failed")
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -139,6 +149,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        _recover_exports(settings, state.store)  # (state: api.install below)
         yield
         sparql = getattr(app.state, "sparql", None)
         if sparql is not None:  # stop its worker processes, running queries included

@@ -1283,3 +1283,21 @@ def test_status_cache_misses_share_one_probe_round(isolated_env, monkeypatch):
     for t in threads:
         t.join()
     assert len(calls) == 1 and results == [{"status": "ok"}] * 5
+
+
+def test_app_startup_restores_an_export_interrupted_between_the_renames(isolated_env, caplog):
+    """Round 3 #5: a crash between `final -> .prev-*` and `work -> final` left the export
+    only in the backup; the service start (lifespan) restores it and logs what it did,
+    without waiting for the next export."""
+    settings = Settings.from_env()
+    final = settings.exports_dir / "r0001"
+    backup = final.with_name("r0001.prev-20260101T000000-crashed")
+    backup.mkdir(parents=True)
+    (backup / export_job.EXPORT_MARKER).write_text("{}", encoding="utf-8")
+    (backup / "ontology.ttl").write_text("# kept", encoding="utf-8")
+    final.mkdir()  # an empty final folder
+    app = web.create_app(settings, runs=RunManager(settings, jobs={}))
+    with caplog.at_level(logging.INFO), TestClient(app):
+        assert (final / "ontology.ttl").read_text(encoding="utf-8") == "# kept"
+        assert not backup.exists()
+    assert str(backup) in caplog.text
