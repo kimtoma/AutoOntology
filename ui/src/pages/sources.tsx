@@ -227,7 +227,7 @@ export function NewSourceDialog({ open, onOpenChange }: {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset() }}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-lg">
         <form onSubmit={submit} className="grid min-w-0 gap-4" id="form-source">
           <DialogHeader>
             <DialogTitle>Add source</DialogTitle>

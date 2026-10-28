@@ -54,7 +54,7 @@ function SetCard({ set, provider, pending, onLoad }: {
       <div>
         <Button size="sm" onClick={onLoad} disabled={pending} data-load-set={set.set}>
           {pending ? <Loader2 className="animate-spin" aria-hidden /> : <PackageOpen aria-hidden />}
-          {set.registered ? "Load again" : "Load"} {set.set}
+          {set.registered ? `Load ${set.set} again` : `Load ${set.set}`}
         </Button>
       </div>
     </li>

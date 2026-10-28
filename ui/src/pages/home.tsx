@@ -203,7 +203,7 @@ export default function HomePage() {
               </p>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button variant={states.sources === "done" ? "outline" : "default"} id="btn-load-samples"
+              <Button variant={states.sources === "active" ? "default" : "outline"} id="btn-load-samples"
                       onClick={() => setSamplesOpen(true)}>
                 <PackageOpen aria-hidden /> Load sample data
               </Button>

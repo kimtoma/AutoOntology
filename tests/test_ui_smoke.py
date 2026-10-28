@@ -5,7 +5,7 @@ built and exported once).
 
 Run with: AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_ui_smoke.py
 (browsers: ``uv run playwright install chromium``). With ``AUTOONTOLOGY_SCREENSHOTS=1`` the
-last test also rewrites ``docs/screenshots/{ontology,graph,exports}.png`` at 1280 px.
+last test also rewrites ``docs/screenshots/{home,ontology,graph,exports}.png`` at 1280 px.
 """
 
 import os
@@ -23,6 +23,9 @@ pytestmark = pytest.mark.integration
 GL_ARGS = ["--use-angle=swiftshader", "--use-gl=angle", "--enable-unsafe-swiftshader"]
 VIEWPORTS = {"mobile": (375, 812), "tablet": (768, 1024), "desktop": (1280, 800)}
 ROUTES = ("sources", "build", "ontology", "graph", "playground", "exports", "status")
+#: sidebar entries (data-nav): the Home page ("Get started", /ui/) comes first
+NAV_IDS = ("home", *ROUTES)
+STEPS = ["models", "sources", "build", "explore", "export"]
 NO_HSCROLL = "document.documentElement.scrollWidth <= window.innerWidth"
 #: Elements inside <main> that overflow horizontally. An element may be wider than its box only
 #: when it scrolls or clips on purpose (overflow-x auto/scroll/hidden/clip: tables, truncated
@@ -99,7 +102,9 @@ def test_shell_sources_and_status(live, browser, name):
     url, sources, _ = live
     page = new_page(browser, VIEWPORTS[name])
     page.goto(f"{url}/")
-    page.wait_for_url("**/ui/sources")  # / -> /ui/ (server) -> /ui/sources (client)
+    page.wait_for_url("**/ui/")  # / -> /ui/ (server): the Get started page
+    page.locator("#checklist > li[data-step]").first.wait_for()
+    page.goto(f"{url}/ui/sources")
     rows = page.locator("#sources-table tbody tr[data-source]")
     rows.first.wait_for()
     assert sorted(rows.evaluate_all("rs => rs.map(r => r.dataset.source)")) == sorted(
@@ -140,14 +145,126 @@ def test_shell_sources_and_status(live, browser, name):
     assert "HWP" in page.locator("#source-kind-hint").inner_text()
     page.keyboard.press("Escape")
 
-    for route in ROUTES:
+    for route in ("", *ROUTES):
         page.goto(f"{url}/ui/{route}")
         page.locator("main h1").first.wait_for()
         page.wait_for_timeout(400)
         assert_fits(page, f"{route} at {name}")
     nav = page.locator("a[data-nav]").evaluate_all("as => as.map(a => a.dataset.nav)")
     if name != "mobile":
-        assert nav == list(ROUTES), nav
+        assert nav == list(NAV_IDS), nav
+    assert page.errors == []
+    page.close()
+
+
+def models_ready(status):
+    """The Home page's rule for step 1 (ui/src/lib/checklist.ts::modelsReady)."""
+    checks = status["checks"]
+    chat = status["providers"].get("chat") or {"available": True, "logged_in": True}
+    return (
+        checks.get("backend", {}).get("status") == "ok"
+        and checks.get("postgres", {}).get("status") == "ok"
+        and chat["available"]
+        and chat["logged_in"]
+        and checks.get("ollama", {"status": "ok"})["status"] == "ok"
+    )
+
+
+@pytest.mark.parametrize("name", list(VIEWPORTS))
+def test_home_checklist_reflects_the_api(live, browser, name):
+    url, sources, summary = live
+    status = httpx.get(f"{url}/api/status").json()
+    page = new_page(browser, VIEWPORTS[name])
+    page.goto(f"{url}/ui/")
+    cards = page.locator("#checklist > li[data-step]")
+    cards.first.wait_for()
+    assert cards.evaluate_all("cs => cs.map(c => c.dataset.step)") == STEPS
+    models = page.locator("[data-step=models]")
+    want = "done" if models_ready(status) else "active"
+    page.locator(f"[data-step=models][data-state={want}]").wait_for(timeout=15000)
+    chat = status["providers"]["chat"]
+    assert models.locator("#provider-chat").inner_text() == f"{chat['name']} · {chat['model']}"
+    assert (
+        models.locator("[data-service=backend]").get_attribute("data-status")
+        == (status["checks"]["backend"]["status"])
+    )
+    if want == "active":  # not ready: the fix is shown as code
+        assert "uv run autoontology down && uv run autoontology up" in models.inner_text()
+    # sources and a snapshot exist (the live fixture): steps 2-4 are done
+    for step in ("sources", "build", "explore"):
+        page.locator(f"[data-step={step}][data-state=done]").wait_for(timeout=15000)
+    counts = page.locator("#explore-counts").inner_text()
+    assert (
+        f"{summary['counts']['classes_structured']} business concepts found in your tables"
+        in counts
+    )
+    page.locator("[data-help=build]").click()
+    page.locator("[data-help-content=build]").wait_for()
+    page.keyboard.press("Escape")
+    assert page.get_attribute("#guide-link", "href").endswith("/docs/GUIDE.md")
+    assert_fits(page, f"home at {name}")
+    assert page.errors == []
+    page.close()
+
+
+def test_home_sample_dialog_lists_the_sets(live, browser):
+    url, _, _ = live
+    sets = httpx.get(f"{url}/api/samples").json()
+    if not sets:
+        pytest.skip("no sample sets next to the service")
+    page = new_page(browser, VIEWPORTS["mobile"])
+    page.goto(f"{url}/ui/")
+    page.click("#btn-load-samples")
+    page.locator("#sample-sets [data-sample-set]").first.wait_for()
+    shown = page.locator("#sample-sets [data-sample-set]").evaluate_all(
+        "ls => ls.map(l => l.dataset.sampleSet)"
+    )
+    assert shown == [s["set"] for s in sets], shown
+    for s in sets:
+        card = page.locator(f"[data-sample-set={s['set']}]")
+        for src in s["sources"]:
+            text = card.locator(f"[data-sample-source='{src['name']}']").inner_text()
+            assert str(src["files"]) in text and all(ext in text for ext in src["formats"]), text
+        assert "Expected build time" in card.locator("[data-expected-time]").inner_text()
+    loaded = next((s for s in sets if s["registered"]), None)
+    if loaded:  # loading a registered set again keeps its sources (idempotent, like demo)
+        page.click(f"[data-load-set={loaded['set']}]")
+        page.locator("#samples-result").wait_for(timeout=30000)
+        for src in loaded["sources"]:
+            assert (
+                page.locator(f"[data-loaded-source='{src['name']}']").inner_text().endswith("kept")
+            )
+    assert page.evaluate(NO_HSCROLL)
+    assert page.errors == []
+    page.close()
+
+
+def test_sources_preview_classifies_files(live, browser, tmp_path):
+    url, _, _ = live
+    (tmp_path / "manual.doc").write_bytes(b"x")
+    (tmp_path / "data.xyz").write_bytes(b"x")
+    page = new_page(browser, VIEWPORTS["desktop"])
+    page.goto(f"{url}/ui/sources")
+    page.click("#btn-new-source")
+    page.click("#source-kind [data-family=documents]")
+    accept = page.get_attribute("#source-files", "accept")
+    formats = httpx.get(f"{url}/api/status").json()["formats"]
+    assert accept == ",".join(sorted(formats["documents"])), accept
+    page.set_input_files(
+        "#source-files", [str(tmp_path / "manual.doc"), str(tmp_path / "data.xyz")]
+    )
+    doc = page.locator("[data-file='manual.doc']")
+    doc.wait_for()
+    assert doc.get_attribute("data-state") == "supported"
+    assert doc.get_attribute("data-engine") == "native"
+    xyz = page.locator("[data-file='data.xyz']")
+    assert xyz.get_attribute("data-state") == "unsupported"
+    assert "cannot be read" in xyz.inner_text()
+    page.fill("#source-name", "preview-only")
+    assert page.locator("#form-source button[type=submit]").is_disabled()  # never sent
+    page.click("#source-kind [data-family=structured]")
+    hint = page.locator("#source-kind-hint").inner_text()
+    assert "XLS" in hint and "SQLite database URL" not in hint, hint
     assert page.errors == []
     page.close()
 
@@ -225,6 +342,18 @@ def test_build_page_lists_runs_and_streams_the_log(live, browser):
     assert any(g.startswith("structured:") for g in groups), groups
     assert any(g.startswith("documents:") for g in groups), groups
     assert {"align", "merge", "snapshot"} <= set(groups), groups
+    steps = page.locator("#live-steps").inner_text()
+    for label in (
+        "Load tables",
+        "Compile business concepts (LLM)",
+        "Extract concepts (LLM)",
+        "Match document concepts to table concepts",
+        "Build the unified ontology",
+        "Save revision",
+    ):
+        assert label in steps, (label, steps)
+    assert "structured:" not in steps and ":compile" not in steps, steps
+    assert page.locator("#live-total").inner_text().startswith("Started")
     assert page.locator("#live-log[role=log]").inner_text().strip()
     assert page.errors == []
     page.close()
@@ -359,6 +488,7 @@ def test_screenshots(live, browser):
     page = new_page(browser, VIEWPORTS["desktop"])
     page.emulate_media(color_scheme="light")
     shots = {
+        "home": ("/ui/", "[data-step=export]:not([data-state=checking])"),
         "ontology": ("/ui/ontology", "#concept-list [data-concept]"),
         "graph": ("/ui/graph", "#graph-canvas canvas"),
         "exports": ("/ui/exports", "[data-validation=okf][data-ok=true]"),
