@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 import json
+import xml.etree.ElementTree as ET
 
 import pytest
 from rdflib import Graph, Literal, Namespace
@@ -301,6 +302,18 @@ def test_graphml_parallel_edges_get_distinct_ids(tmp_path):
     assert set(nodes) == {"a", "b"} and nodes["b"] == {}
     assert [d["label"] for *_, d in edges] == ["r1", "r2"]
     assert path.read_text(encoding="utf-8").count('<edge source="a" target="b" id="') == 2
+
+
+def test_graphml_edge_ids_are_unique_across_the_graph(tmp_path):
+    g = graphml.Graph(name="x")
+    g.add_edge("a", "b", type="related", label="r1")
+    g.add_edge("a", "c", type="related", label="r2")
+    g.add_edge("a", "b", type="related", label="r3")
+    path = tmp_path / "g.graphml"
+    graphml.to_xml(g).write(path, encoding="utf-8", xml_declaration=True)
+    root = ET.parse(path).getroot()
+    ids = [e.get("id") for e in root.iter(f"{{{graphml.GRAPHML_NS}}}edge")]
+    assert ids == ["e0", "e1", "e2"]
 
 
 def test_report(model):

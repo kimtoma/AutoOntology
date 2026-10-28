@@ -195,12 +195,13 @@ def to_xml(g: Graph) -> ET.ElementTree:
     data(graph, "graph", graph_attrs)
     for node, attrs in g.nodes.items():
         data(ET.SubElement(graph, "node", {"id": xml_safe(node)}), "node", attrs)
-    for u, v, key, attrs in g.edges:
+    # Edge ids must be unique across the whole document (GraphML ``id`` is an XML ID).
+    for index, (u, v, _key, attrs) in enumerate(g.edges):
         data(
             ET.SubElement(
                 graph,
                 "edge",
-                {"source": xml_safe(u), "target": xml_safe(v), "id": str(key)},
+                {"source": xml_safe(u), "target": xml_safe(v), "id": f"e{index}"},
             ),
             "edge",
             attrs,
