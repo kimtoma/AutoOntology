@@ -66,11 +66,11 @@ describe("run sheet", () => {
     expect(await screen.findByText(/Could not load the run: boom/)).toBeInTheDocument()
     fail = false
     await user.click(screen.getByRole("button", { name: "Try again" }))
-    expect(await screen.findByText("Load · Succeeded · 2.0 s")).toBeInTheDocument()
+    expect(await screen.findByText("Load tables · Succeeded · 2.0 s")).toBeInTheDocument()
     // grouped as the build runs them; a step still pending in a finished run did not run
     expect(screen.getByText("Structured · hanbit")).toBeInTheDocument()
     expect(screen.getByText("Documents · hanbit-docs")).toBeInTheDocument()
-    expect(screen.getByText("Extract · not run")).toBeInTheDocument()
+    expect(screen.getByText("Extract concepts (LLM) · not run")).toBeInTheDocument()
     expect(screen.getByText("hanbit-docs · Succeeded")).toBeInTheDocument()
     expect(screen.getByText(/all sources/)).toBeInTheDocument()
     expect(screen.queryByRole("alert")).toBeNull()
@@ -88,14 +88,14 @@ describe("run sheet", () => {
 
   it("shows the steps of a pending run as pending, not as not run", async () => {
     await openStream({ ...RUN, status: "pending" })
-    expect(await screen.findByText("Extract · Pending")).toBeInTheDocument()
+    expect(await screen.findByText("Extract concepts (LLM) · Pending")).toBeInTheDocument()
     expect(screen.queryByText(/not run/)).toBeNull()
   })
 
   it("toasts the error of a run that fails while the sheet is open, logging it once", async () => {
     const failed = vi.spyOn(toast, "error")
     const es = await openStream({ ...RUN, status: "running" })
-    await screen.findByText("Load · Succeeded · 2.0 s")
+    await screen.findByText("Load tables · Succeeded · 2.0 s")
     act(() => {
       es.emit("log", "step 1", "10")
       es.emit("step", "{not json")  // a malformed frame is dropped, the stream goes on

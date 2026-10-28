@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import BuildPage from "@/pages/build"
 import ExportsPage from "@/pages/exports"
+import HomePage from "@/pages/home"
 import OntologyPage from "@/pages/ontology"
 import SourcesPage from "@/pages/sources"
 import StatusPage from "@/pages/status"
@@ -45,7 +46,7 @@ export default function App() {
       <CommandMenu />
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<Navigate to="/sources" replace />} />
+          <Route index element={<HomePage />} />
           <Route path="sources" element={<SourcesPage />} />
           <Route path="build" element={<BuildPage />} />
           <Route path="ontology" element={<OntologyPage />} />

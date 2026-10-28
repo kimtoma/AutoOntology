@@ -10,7 +10,7 @@ import {
   SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail,
   SidebarTrigger, useSidebar,
 } from "@/components/ui/sidebar"
-import { NAV } from "@/components/nav"
+import { isCurrent, NAV } from "@/components/nav"
 import { useStatus } from "@/hooks/queries"
 import { cn } from "@/lib/utils"
 
@@ -54,7 +54,7 @@ function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild tooltip="AutoOntology">
-              <Link to="/sources" onClick={() => isMobile && setOpenMobile(false)}>
+              <Link to="/" onClick={() => isMobile && setOpenMobile(false)}>
                 <span className="flex aspect-square size-8 items-center justify-center rounded-md
                                  bg-sidebar-primary text-sidebar-primary-foreground" aria-hidden>
                   ◇
@@ -77,8 +77,8 @@ function AppSidebar() {
               {NAV.map((item) => (
                 <SidebarMenuItem key={item.path}>
                   <SidebarMenuButton asChild tooltip={item.label}
-                                     isActive={pathname.startsWith(item.path)}>
-                    <NavLink to={item.path} data-nav={item.path.slice(1)}
+                                     isActive={isCurrent(item, pathname)}>
+                    <NavLink to={item.path} data-nav={item.id} end={item.path === "/"}
                              onClick={() => isMobile && setOpenMobile(false)}>
                       <item.icon aria-hidden />
                       <span>{item.label}</span>
@@ -100,12 +100,12 @@ function AppSidebar() {
 
 function Crumbs() {
   const { pathname } = useLocation()
-  const item = NAV.find((n) => pathname.startsWith(n.path))
+  const item = NAV.find((n) => isCurrent(n, pathname))
   return (
     <Breadcrumb>
       <BreadcrumbList>
         <BreadcrumbItem className="hidden sm:inline-flex">
-          <Link to="/sources" className="hover:text-foreground">AutoOntology</Link>
+          <Link to="/" className="hover:text-foreground">AutoOntology</Link>
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden sm:inline-flex" />
         <BreadcrumbItem>

@@ -2,6 +2,8 @@
    `{error, detail}` with a matching HTTP status; they surface as ApiError. The payloads
    mirror autoontology/web/api.py, web/concepts.py, web/graph.py and web/playground_api.py. */
 
+import type { Formats } from "@/lib/formats"
+
 export const API = "/api"
 
 export class ApiError extends Error {
@@ -247,6 +249,32 @@ export interface ExportEntry {
 
 export type CheckStatus = "ok" | "warn" | "error"
 export interface StatusCheck { status: CheckStatus; detail?: string; remedy?: string }
+
+/** `POST /api/providers/test` (web/providers/probe.py): one structured "pong" call. */
+export interface ProviderTest {
+  at?: string
+  provider?: string
+  model?: string
+  via?: string
+  ok: boolean
+  seconds?: number
+  status?: number
+  answer?: string
+  error?: string
+  remedy?: string
+}
+
+/** `/api/status.providers.chat`: the active chat provider (CLI login, endpoint). */
+export interface ChatProviderStatus {
+  name: string
+  model: string
+  available: boolean
+  logged_in: boolean
+  detail: string
+  remedy: string
+  last_test: ProviderTest | null
+}
+
 export interface ServiceStatus {
   status: CheckStatus
   version: string
@@ -256,13 +284,46 @@ export interface ServiceStatus {
     embed_provider: string
     embed_model: string
     openai_base_url: string
+    chat?: ChatProviderStatus
+    embed?: { name: string; model: string }
   }
   kordoc_available: boolean
+  /** kordoc's OCR models are downloaded (images and scanned PDFs can be read) */
+  ocr_ready?: boolean
+  /** AUTOONTOLOGY_VISION_MODEL (image captions), null when unset */
+  vision_model?: string | null
+  /** every readable extension, by source family (autoontology/formats.py::describe) */
+  formats?: Formats
   service_url: string
   checks: Record<string, StatusCheck>
   doctor: string
   /** AUTOONTOLOGY_UPLOAD_MAX_MB: cap per upload request (all files together). */
   upload_max_mb?: number
+}
+
+/* --- sample sets (GET /api/samples, POST /api/samples/load) -------------------------------- */
+
+export interface SampleSource {
+  name: string
+  /** structured | documents */
+  kind: string
+  path: string
+  files: number
+  bytes: number
+  formats?: string[]
+}
+export interface SampleSet {
+  set: string
+  path: string
+  sources: SampleSource[]
+  registered: boolean
+  /** expected build time per chat provider (`demo` prints the same table) */
+  durations?: Record<string, { text: string; measured: boolean }>
+}
+export interface SampleLoad {
+  set: string
+  sources: (Source & { action: "created" | "kept" | "replaced" | string })[]
+  messages: string[]
 }
 
 /* --- playground --------------------------------------------------------------------------- */
@@ -421,6 +482,9 @@ export interface ConceptQuery {
 
 export const api = {
   status: () => request<ServiceStatus>("/status"),
+  testProvider: () => request<ProviderTest>("/providers/test", { method: "POST" }),
+  samples: () => request<SampleSet[]>("/samples"),
+  loadSamples: (set: string) => request<SampleLoad>("/samples/load", json("POST", { set })),
   sources: () => request<{ sources: Source[] }>("/sources").then((r) => r.sources),
   addSourceUpload: (name: string, kind: "files" | "documents", files: File[]) => {
     const fd = new FormData()

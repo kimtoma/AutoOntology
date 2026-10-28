@@ -29,15 +29,15 @@ import { keys, useSources, useStatus } from "@/hooks/queries"
 import { api, errorMessage, type Source, type SourceKind } from "@/lib/api"
 import { familyOf, FAMILY_LABEL, fmtBytes, fmtTime, KIND_LABEL, RUN_LABEL, sourceState } from "@/lib/labels"
 import { cn } from "@/lib/utils"
+import { FilePreview, FolderCheck, type PickedName } from "@/components/file-preview"
+import { Code } from "@/components/provider-card"
+import {
+  acceptList, classifyFile, extensionOf, extensionsByEngine, extLabel, isIgnoredName, KORDOC_INSTALL,
+  type Family, type Formats,
+} from "@/lib/formats"
 
 /** Server default of AUTOONTOLOGY_UPLOAD_MAX_MB when /status has not answered yet. */
 const DEFAULT_UPLOAD_MAX_MB = 200
-
-/** File types the upload accepts (structured/loaders.py SUPPORTED_SUFFIXES, unstructured/readers.py). */
-const ACCEPT = {
-  files: ".csv,.tsv,.xlsx,.xlsm,.parquet,.pq,.json,.jsonl,.ndjson,.sqlite,.sqlite3,.db",
-  documents: ".md,.markdown,.txt,.html,.htm,.hwp,.hwpx,.hml,.hwpml,.pdf,.docx,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.webp",
-}
 
 export function KindBadge({ kind }: { kind: string }) {
   const family = familyOf(kind)
@@ -77,8 +77,8 @@ export default function SourcesPage() {
     <>
       <PageHeader
         title="Sources"
-        description={<>Register <b>structured</b> data (CSV, XLSX, SQLite, Parquet, a database) and
-          {" "}<b>documents</b> (Markdown, text, HTML, and HWP/PDF/DOCX/PPTX with kordoc). One
+        description={<>Register <b>structured</b> data (tables in files or a database) and
+          {" "}<b>documents</b> (policies, manuals, reports, scans). One
           {" "}<Link to="/build" className="underline underline-offset-4">build</Link> turns all of
           them into a single ontology.</>}
         actions={<Button onClick={() => setAdding(true)} id="btn-new-source">
@@ -151,7 +151,6 @@ export default function SourcesPage() {
   )
 }
 
-type Family = "structured" | "documents"
 type Mode = "upload" | "path" | "database"
 
 /** What the add dialog sends: an upload (files/documents) or a locator (path or DB URL). */
@@ -178,12 +177,22 @@ export function NewSourceDialog({ open, onOpenChange }: {
 
   const reset = () => {
     setName(""); setFamily("structured"); setMode("upload"); setFiles([]); setLocator("")
-    setRecursive(false); setError("")
+    setRecursive(false); setError(""); setChecked([])
   }
 
   const status = useStatus()
   const limitMb = status.data?.upload_max_mb ?? DEFAULT_UPLOAD_MAX_MB
   const kordoc = status.data?.kordoc_available
+  const ocr = status.data?.ocr_ready
+  const formats = status.data?.formats
+  const [checked, setChecked] = useState<PickedName[]>([])
+  const engines = { kordoc: !!kordoc, ocr: !!ocr }
+  const fileChecks = files.map((f) => classifyFile(f.name, f.size, family, formats, engines))
+  const locatorName = locator.trim()
+  const pathChecks = (checked.length ? checked.filter((n) => !isIgnoredName(n.name))
+    : effectiveMode === "path" && extensionOf(locatorName) ? [{ name: locatorName.split(/[\\/]/).pop()!, size: null }]
+    : []).map((n) => classifyFile(n.name, n.size, family, formats, engines))
+  const unsupported = fileChecks.filter((c) => c.state === "unsupported")
   const totalBytes = files.reduce((sum, f) => sum + f.size, 0)
   const tooLarge = totalBytes > limitMb * 1024 * 1024
 
@@ -191,6 +200,9 @@ export function NewSourceDialog({ open, onOpenChange }: {
     mutationFn: () => {
       if (upload) {
         if (!files.length) throw new Error("Choose at least one file")
+        if (unsupported.length) {
+          throw new Error(`Remove the unsupported file${unsupported.length === 1 ? "" : "s"} first: ${unsupported.map((c) => c.name).join(", ")}`)
+        }
         if (tooLarge) {
           throw new Error(`The files total ${fmtBytes(totalBytes)}, over the ${limitMb} MB limit (AUTOONTOLOGY_UPLOAD_MAX_MB)`)
         }
@@ -223,20 +235,13 @@ export function NewSourceDialog({ open, onOpenChange }: {
           </DialogHeader>
           <div className="grid gap-2">
             <Label>Kind</Label>
-            <Tabs value={family} onValueChange={(v) => setFamily(v as Family)}>
+            <Tabs value={family} onValueChange={(v) => { setFamily(v as Family); setChecked([]) }}>
               <TabsList className="w-full" id="source-kind">
                 <TabsTrigger value="structured" data-family="structured"><Database aria-hidden /> Structured</TabsTrigger>
                 <TabsTrigger value="documents" data-family="documents"><FileText aria-hidden /> Documents</TabsTrigger>
               </TabsList>
             </Tabs>
-            <p className="text-xs text-muted-foreground" id="source-kind-hint">
-              {family === "structured"
-                ? "CSV, TSV, XLSX, SQLite, Parquet or JSON files (one table per file), or a PostgreSQL / SQLite database URL."
-                : kordoc
-                  ? "Markdown, text and HTML are read natively; HWP, HWPX, PDF, DOCX and PPTX through kordoc (installed)."
-                  : <>Markdown, text and HTML are read natively. HWP, HWPX, PDF, DOCX and PPTX need kordoc:
-                    {" "}<code className="rounded bg-muted px-1">uv run autoontology setup --docs</code>.</>}
-            </p>
+            <FormatHint family={family} formats={formats} kordoc={!!kordoc} ocr={!!ocr} />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="source-name">Name</Label>
@@ -257,13 +262,23 @@ export function NewSourceDialog({ open, onOpenChange }: {
           {upload ? (
             <div className="grid gap-2">
               <Label htmlFor="source-files">Files</Label>
-              <Input id="source-files" type="file" multiple accept={ACCEPT[kind as "files" | "documents"]}
+              <Input id="source-files" type="file" multiple accept={acceptList(formats, family) || undefined}
                      onChange={(e) => setFiles([...(e.target.files ?? [])])} />
               <p className={tooLarge ? "text-xs text-destructive" : "text-xs text-muted-foreground"}
                  id="upload-limit">
                 {files.length > 0 && `${files.length} selected · ${fmtBytes(totalBytes)} total · `}
                 up to {limitMb} MB per upload
               </p>
+              <FilePreview checks={fileChecks} />
+              {unsupported.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-destructive" role="alert" id="unsupported-files">
+                  <span className="min-w-0 flex-1">The service refuses an upload with unsupported files.</span>
+                  <Button type="button" size="sm" variant="outline"
+                          onClick={() => setFiles(files.filter((f) => classifyFile(f.name, f.size, family, formats, engines).state !== "unsupported"))}>
+                    Remove {unsupported.length} unsupported
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -274,19 +289,26 @@ export function NewSourceDialog({ open, onOpenChange }: {
                        className="font-mono text-xs"
                        placeholder={effectiveMode === "database" ? "postgresql://user:pass@host:5432/db"
                          : "/absolute/path/to/folder"} />
+                {effectiveMode === "path" && (
+                  <p className="text-xs text-muted-foreground">A folder (or one file) on the machine that runs the service.</p>
+                )}
               </div>
               {effectiveMode === "path" && (
-                <div className="flex items-center gap-2">
-                  <Switch id="source-recursive" checked={recursive} onCheckedChange={setRecursive} />
-                  <Label htmlFor="source-recursive">Include subfolders</Label>
-                </div>
+                <>
+                  <div className="flex items-center gap-2">
+                    <Switch id="source-recursive" checked={recursive} onCheckedChange={setRecursive} />
+                    <Label htmlFor="source-recursive">Include subfolders</Label>
+                  </div>
+                  <FolderCheck recursive={recursive} onNames={setChecked} />
+                  <FilePreview checks={pathChecks} />
+                </>
               )}
             </>
           )}
           {error && <p role="alert" className="text-sm break-words text-destructive">{error}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => { onOpenChange(false); reset() }}>Cancel</Button>
-            <Button type="submit" disabled={add.isPending || (upload && tooLarge)}>
+            <Button type="submit" disabled={add.isPending || (upload && (tooLarge || unsupported.length > 0))}>
               {add.isPending && <Loader2 className="animate-spin" aria-hidden />}
               {add.isPending ? "Adding…" : "Add"}
             </Button>
@@ -294,6 +316,39 @@ export function NewSourceDialog({ open, onOpenChange }: {
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** What a *family* source reads, from `/api/status.formats`, with the install command for
+    the engines that are missing. */
+function FormatHint({ family, formats, kordoc, ocr }: {
+  family: Family
+  formats: Formats | undefined
+  kordoc: boolean
+  ocr: boolean
+}) {
+  const by = extensionsByEngine(formats, family)
+  if (!formats) return <p className="text-xs text-muted-foreground" id="source-kind-hint">Checking the supported formats…</p>
+  if (family === "structured") {
+    return (
+      <p className="text-xs text-muted-foreground" id="source-kind-hint">
+        Tables: {extLabel(by.native)} (one table per file, per sheet or per SQLite table; the first row
+        is the header), or a PostgreSQL database URL.
+      </p>
+    )
+  }
+  return (
+    <div className="grid gap-1 text-xs text-muted-foreground" id="source-kind-hint">
+      <p>Read directly: {extLabel(by.native)}.</p>
+      <p>
+        With kordoc{kordoc ? " (installed)" : ""}: {extLabel(by.kordoc)}.
+        {!kordoc && <> These need kordoc: <Code>{KORDOC_INSTALL}</Code></>}
+      </p>
+      <p>
+        Images, read by OCR{kordoc && ocr ? " (models ready)" : ""}: {extLabel(by["kordoc-ocr"])}.
+        {kordoc && !ocr && <> The OCR models are missing: <Code>{KORDOC_INSTALL}</Code></>}
+      </p>
+    </div>
   )
 }
 

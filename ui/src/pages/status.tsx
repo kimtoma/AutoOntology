@@ -11,17 +11,32 @@ import {
 } from "@/components/ui/table"
 import { useStatus } from "@/hooks/queries"
 import type { ServiceStatus, StatusCheck } from "@/lib/api"
+import { extensionsByEngine, extLabel, KORDOC_INSTALL } from "@/lib/formats"
 import { CHECK_LABEL, CHECK_NAME } from "@/lib/labels"
+import { ProviderCard } from "@/components/provider-card"
+import { CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
-/** The checks of `/api/status` plus kordoc (an optional component, never an error). */
+/** The checks of `/api/status` plus kordoc and its OCR models (optional components, never an
+    error). The extension lists come from `/api/status.formats`. */
 function rows(data: ServiceStatus): [string, StatusCheck][] {
+  const by = extensionsByEngine(data.formats, "documents")
+  const kordocExts = by.kordoc.length ? extLabel(by.kordoc) : "HWP, HWPX, PDF, DOCX and PPTX"
+  const nativeExts = by.native.length ? extLabel(by.native) : "Markdown, text and HTML"
+  const images = by["kordoc-ocr"].length ? extLabel(by["kordoc-ocr"]) : "image"
   return [
     ...Object.entries(data.checks),
     ["kordoc", data.kordoc_available
-      ? { status: "ok", detail: "HWP, HWPX, PDF, DOCX and PPTX documents can be read" }
-      : { status: "warn", detail: "optional: only Markdown, text and HTML documents can be read",
-          remedy: "uv run autoontology setup --docs" }],
+      ? { status: "ok", detail: `${kordocExts} documents can be read` }
+      : { status: "warn", detail: `optional: only ${nativeExts} documents can be read`,
+          remedy: KORDOC_INSTALL }],
+    ["ocr", !data.kordoc_available
+      ? { status: "warn", detail: `optional: ${images} files and scanned PDFs need kordoc and its OCR models`,
+          remedy: KORDOC_INSTALL }
+      : data.ocr_ready
+        ? { status: "ok", detail: `${images} files and scanned PDF pages are read by OCR (PP-OCRv5 korean)` }
+        : { status: "warn", detail: `optional: ${images} files and scanned PDFs are skipped until the OCR models are downloaded`,
+            remedy: KORDOC_INSTALL }],
   ]
 }
 
@@ -43,6 +58,7 @@ export default function StatusPage() {
                 ["Chat", `${data.providers.chat_provider} · ${data.providers.chat_model || "-"}`],
                 ["Embeddings", `${data.providers.embed_provider} · ${data.providers.embed_model || "-"}`],
                 ...(data.providers.openai_base_url ? [["OpenAI-compatible endpoint", data.providers.openai_base_url]] : []),
+                ["Image captions", data.vision_model ? `on · ${data.vision_model}` : "off (OCR text only)"],
                 ["Service", data.service_url],
                 ["Upload limit", `${data.upload_max_mb ?? 200} MB`]].map(([k, v]) => (
                 <div key={k} className="min-w-0">
@@ -51,6 +67,10 @@ export default function StatusPage() {
                 </div>
               ))}
             </dl>
+            <Card className="gap-3" id="status-providers">
+              <CardHeader><CardTitle className="text-base">Models</CardTitle></CardHeader>
+              <CardContent><ProviderCard status={data} /></CardContent>
+            </Card>
             <Card className="py-0">
               <CardContent className="px-0">
                 <Table id="status-table" className="table-fixed">

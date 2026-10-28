@@ -11,7 +11,13 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { keys } from "@/hooks/queries"
 import { api, errorMessage, type Progress, type Run, type RunStatus, type Step } from "@/lib/api"
-import { fmtDuration, fmtTime, groupSteps, progressText, RUN_LABEL, STATUS_LABEL, stepLabel } from "@/lib/labels"
+import { Code } from "@/components/provider-card"
+import { useSamples, useSources, useStatus } from "@/hooks/queries"
+import { expectedTime, sampleSetFor } from "@/lib/checklist"
+import {
+  fmtSeconds, fmtTime, groupSteps, humanStep, progressText, RUN_LABEL, runSeconds, STATUS_LABEL,
+  stepFailure, stepLabel, stepSeconds,
+} from "@/lib/labels"
 
 /** Append *text* to the log, keeping it scrolled to the bottom when it already was. */
 function appendLog(el: HTMLPreElement, text: string) {
@@ -167,9 +173,22 @@ function runScope(run: Run): string {
   return `${sources}${p.resume ? " · resume" : ""}`
 }
 
+/** Re-render every *ms* while *on* (elapsed time of a running step). */
+function useNow(on: boolean, ms = 1000): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!on) return
+    const t = setInterval(() => setNow(Date.now()), ms)
+    return () => clearInterval(t)
+  }, [on, ms])
+  return now
+}
+
 /** The run's steps grouped as the build runs them: `structured:<name>`, `documents:<name>`,
-    `align`, `merge`, `snapshot`. A step still pending in a finished run did not run. */
+    `align`, `merge`, `snapshot`, in plain words, with the time each took. A step still
+    pending in a finished run did not run; a failed one shows its error and remedy. */
 export function StepList({ steps, ended }: { steps: Step[]; ended: boolean }) {
+  const now = useNow(!ended && steps.some((s) => s.status === "running"))
   return (
     <ol id="live-steps" aria-label="Steps" className="grid gap-2">
       {groupSteps(steps).map((g) => (
@@ -178,16 +197,49 @@ export function StepList({ steps, ended }: { steps: Step[]; ended: boolean }) {
           <div className="flex flex-wrap gap-1.5">
             {g.steps.map((s) => {
               const notRun = ended && s.status === "pending"
-              const took = fmtDuration(s.started_at, s.finished_at)
+              const took = notRun ? "" : fmtSeconds(stepSeconds(s, now))
+              const label = [stepLabel(s.short, g.key), notRun ? "not run" : STATUS_LABEL[s.status] ?? s.status, took]
+                .filter(Boolean).join(" · ")
               return (
-                <StatusChip key={s.name} status={notRun ? "skipped" : s.status}
-                            label={`${stepLabel(s.short)} · ${notRun ? "not run" : STATUS_LABEL[s.status] ?? s.status}${took ? ` · ${took}` : ""}`} />
+                <span key={s.name} data-step={s.name} title={humanStep(s.name)} className="max-w-full">
+                  <StatusChip status={notRun ? "skipped" : s.status} label={label}
+                              className="max-w-full whitespace-normal" />
+                </span>
               )
             })}
           </div>
+          {g.steps.map((s) => {
+            const f = stepFailure(s)
+            return f && (
+              <div key={`${s.name}-error`} className="grid gap-1 text-xs" data-step-error={s.name}>
+                {f.error && <p className="break-words text-destructive">{humanStep(s.name)}: {f.error}</p>}
+                {f.remedies.map((r) => <p key={r}>Fix: <Code>{r}</Code></p>)}
+              </div>
+            )
+          })}
         </li>
       ))}
     </ol>
+  )
+}
+
+/** "Expected: ~5 min with claude (estimate), quickstart sample set" when the run covers only
+    the sources of one sample set. */
+function EtaNote({ run }: { run: Run }) {
+  const samples = useSamples()
+  const sources = useSources()
+  const status = useStatus()
+  if (run.kind !== "build" || !samples.data || !sources.data) return null
+  const picked = Array.isArray(run.params.sources) && run.params.sources.length
+    ? (run.params.sources as string[]) : sources.data.map((s) => s.name)
+  const set = sampleSetFor(picked, samples.data)
+  const provider = status.data?.providers.chat_provider
+  const time = expectedTime(set, provider)
+  if (!set || !time) return null
+  return (
+    <p className="text-xs text-muted-foreground" id="live-eta">
+      Expected for the {set.set} sample set with {provider}: {time}
+    </p>
   )
 }
 
@@ -199,6 +251,18 @@ export function RunSheet({ runId, onClose }: { runId: string | null; onClose: ()
         {runId && <RunSheetBody key={runId} runId={runId} />}
       </SheetContent>
     </Sheet>
+  )
+}
+
+function RunTimes({ live }: { live: Live }) {
+  const running = !live.ended && ["pending", "running"].includes(live.status)
+  const now = useNow(running)
+  const total = runSeconds(live.run, live.steps, running ? now : undefined)
+  return (
+    <p className="text-xs text-muted-foreground" id="live-total">
+      Started {fmtTime(live.run.started_at)}
+      {total != null && ` · ${running ? "running for" : "took"} ${fmtSeconds(total)}`}
+    </p>
   )
 }
 
@@ -240,7 +304,8 @@ function RunSheetBody({ runId }: { runId: string }) {
         <SheetDescription id="live-desc" className="break-all">
           {live ? `${live.run.id}${runScope(live.run)}` : runId}
         </SheetDescription>
-        {live && <p className="text-xs text-muted-foreground">Started {fmtTime(live.run.started_at)}</p>}
+        {live && <RunTimes live={live} />}
+        {live && <EtaNote run={live.run} />}
       </SheetHeader>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         {(error || streamError) && (

@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/table"
 import { keys, useOntology, useSources } from "@/hooks/queries"
 import { api, errorMessage, isNoSnapshot, type RunRequest, type Source } from "@/lib/api"
-import { fmtTime, groupSteps, progressText, RUN_LABEL, sourceState } from "@/lib/labels"
+import { fmtSeconds, fmtTime, groupSteps, progressText, RUN_LABEL, runSeconds, sourceState } from "@/lib/labels"
 import { KindBadge } from "@/pages/sources"
 
 function useStartRun(onStarted: (runId: string) => void) {
@@ -118,9 +118,10 @@ function Pipeline({ sources, onStarted, busy }: {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base"><Hammer className="size-4" aria-hidden /> Build ontology</CardTitle>
           <CardDescription>
-            {structured} structured and {documents} document source{documents === 1 ? "" : "s"}:
-            {" "}load → ingest → compile, read → extract → consolidate, then align, merge and snapshot
-            into one ontology.
+            {structured} structured and {documents} document source{documents === 1 ? "" : "s"}.
+            {" "}Tables: load, ingest rows, compile business concepts. Documents: read, extract concepts,
+            merge duplicates. Then match document concepts to table concepts, build the unified
+            ontology and save a revision.
           </CardDescription>
         </CardHeader>
         <CardFooter className="flex flex-wrap gap-2">
@@ -222,7 +223,14 @@ export default function BuildPage() {
                           <div className="font-medium">{RUN_LABEL[r.kind] ?? r.kind}</div>
                           <code className="block truncate text-xs text-muted-foreground" title={r.id}>{r.id}</code>
                         </TableCell>
-                        <TableCell><StatusChip status={r.status} /></TableCell>
+                        <TableCell className="whitespace-normal">
+                          <StatusChip status={r.status} />
+                          {runSeconds(r, r.steps) != null && (
+                            <span className="mt-1 block text-xs text-muted-foreground" data-took>
+                              {fmtSeconds(runSeconds(r, r.steps))}
+                            </span>
+                          )}
+                        </TableCell>
                         <TableCell className="hidden text-xs whitespace-normal sm:table-cell">{fmtTime(r.started_at)}</TableCell>
                         <TableCell className="hidden pr-4 whitespace-normal md:table-cell">
                           <div className="flex flex-wrap gap-1">

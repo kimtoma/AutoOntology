@@ -1,0 +1,176 @@
+{
+  "structured": {
+    ".csv": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per file; first row is the header"
+    },
+    ".db": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per SQLite table"
+    },
+    ".json": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per file (array of objects or JSON lines)"
+    },
+    ".jsonl": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per file (array of objects or JSON lines)"
+    },
+    ".ndjson": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per file (array of objects or JSON lines)"
+    },
+    ".parquet": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per file"
+    },
+    ".pq": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per file"
+    },
+    ".sqlite": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per SQLite table"
+    },
+    ".sqlite3": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per SQLite table"
+    },
+    ".tsv": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per file; first row is the header"
+    },
+    ".xls": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "Excel 97-2003; one table per sheet; first row is the header"
+    },
+    ".xlsm": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per sheet; first row is the header"
+    },
+    ".xlsx": {
+      "kind": "structured",
+      "engine": "native",
+      "note": "one table per sheet; first row is the header"
+    }
+  },
+  "documents": {
+    ".csv": {
+      "kind": "document",
+      "engine": "native",
+      "note": "one table section (first row is the header, capped rows)"
+    },
+    ".doc": {
+      "kind": "document",
+      "engine": "native",
+      "note": "Word 97-2003 text and tables (no images); encrypted files are refused"
+    },
+    ".docx": {
+      "kind": "document",
+      "engine": "kordoc",
+      "note": "Word"
+    },
+    ".hml": {
+      "kind": "document",
+      "engine": "kordoc",
+      "note": "Hancom HWPML"
+    },
+    ".htm": {
+      "kind": "document",
+      "engine": "native",
+      "note": "heading tree; scripts and navigation dropped"
+    },
+    ".html": {
+      "kind": "document",
+      "engine": "native",
+      "note": "heading tree; scripts and navigation dropped"
+    },
+    ".hwp": {
+      "kind": "document",
+      "engine": "kordoc",
+      "note": "Hancom HWP 5.x"
+    },
+    ".hwpml": {
+      "kind": "document",
+      "engine": "kordoc",
+      "note": "Hancom HWPML"
+    },
+    ".hwpx": {
+      "kind": "document",
+      "engine": "kordoc",
+      "note": "Hancom HWPX"
+    },
+    ".jpeg": {
+      "kind": "document",
+      "engine": "kordoc-ocr",
+      "note": "OCR (needs the OCR models); optional vision caption"
+    },
+    ".jpg": {
+      "kind": "document",
+      "engine": "kordoc-ocr",
+      "note": "OCR (needs the OCR models); optional vision caption"
+    },
+    ".markdown": {
+      "kind": "document",
+      "engine": "native",
+      "note": "heading tree"
+    },
+    ".md": {
+      "kind": "document",
+      "engine": "native",
+      "note": "heading tree"
+    },
+    ".pdf": {
+      "kind": "document",
+      "engine": "kordoc",
+      "note": "text layer; scanned pages are OCR'd when the OCR models are installed"
+    },
+    ".png": {
+      "kind": "document",
+      "engine": "kordoc-ocr",
+      "note": "OCR (needs the OCR models); optional vision caption"
+    },
+    ".pptx": {
+      "kind": "document",
+      "engine": "kordoc",
+      "note": "PowerPoint"
+    },
+    ".tsv": {
+      "kind": "document",
+      "engine": "native",
+      "note": "one table section (first row is the header, capped rows)"
+    },
+    ".txt": {
+      "kind": "document",
+      "engine": "native",
+      "note": "plain text (UTF-8 or CP949)"
+    },
+    ".webp": {
+      "kind": "document",
+      "engine": "kordoc-ocr",
+      "note": "OCR (needs the OCR models); optional vision caption"
+    },
+    ".xls": {
+      "kind": "document",
+      "engine": "kordoc",
+      "note": "Excel 97-2003 sheets as tables"
+    },
+    ".xlsx": {
+      "kind": "document",
+      "engine": "kordoc",
+      "note": "Excel sheets as tables"
+    }
+  }
+}

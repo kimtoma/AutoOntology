@@ -7,6 +7,7 @@ import ExportsPage from "@/pages/exports"
 import OntologyPage from "@/pages/ontology"
 import SourcesPage from "@/pages/sources"
 import StatusPage from "@/pages/status"
+import FORMATS from "@/test/fixtures/formats.json"
 import { mockFetch, renderPage, renderRouted } from "@/test/utils"
 
 const SOURCES = {
@@ -27,7 +28,8 @@ const STATUS = {
                embed_model: "bge-m3", openai_base_url: "" },
   checks: { backend: { status: "ok", detail: "http://127.0.0.1:3111" },
             postgres: { status: "error", detail: "OperationalError", remedy: "docker compose up -d" } },
-  doctor: "uv run autoontology doctor", upload_max_mb: 1,
+  doctor: "uv run autoontology doctor", upload_max_mb: 1, formats: FORMATS, ocr_ready: false,
+  vision_model: null,
 }
 
 const ONTOLOGY = {
@@ -343,7 +345,10 @@ describe("Status page", () => {
     expect(table.querySelector("[data-check=postgres][data-status=error]")).not.toBeNull()
     expect(within(table).getByText("docker compose up -d")).toBeInTheDocument()
     expect(table.querySelector("[data-check=kordoc][data-status=warn]")).not.toBeNull()
-    expect(screen.getByText("ollama · openai/qwen3:8b")).toBeInTheDocument()
+    expect(within(document.getElementById("status-meta")!).getByText("ollama · openai/qwen3:8b")).toBeInTheDocument()
+    expect(table.querySelector("[data-check=ocr][data-status=warn]")).not.toBeNull()
+    expect(screen.getByText("off (OCR text only)")).toBeInTheDocument()
+    expect(document.getElementById("provider-card")).not.toBeNull()
     expect(screen.queryByRole("combobox")).toBeNull()
   })
 })
