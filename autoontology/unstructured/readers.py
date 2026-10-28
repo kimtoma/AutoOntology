@@ -1,24 +1,31 @@
 # SPDX-License-Identifier: MIT
 """Document readers: ``path -> Document(sections)``.
 
-Markdown, plain text and HTML are read natively (markdown-it-py heading tree, bs4).
-Everything else (HWP/HWPX/HWPML, PDF, DOCX, PPTX, XLS/XLSX, images) goes to kordoc
+Markdown, plain text, HTML, CSV/TSV (one GFM table section) and legacy Word ``.doc``
+(:mod:`autoontology.unstructured.doc_word97`) are read natively (markdown-it-py heading
+tree, bs4). Everything else (HWP/HWPX/HWPML, PDF, DOCX, PPTX, XLS/XLSX, images) goes to kordoc
 (:mod:`autoontology.unstructured.kordoc`), whose structure-aware chunks become sections
 (``breadcrumb`` -> section path, ``page`` -> page). Document text is untrusted data.
 """
 
 from __future__ import annotations
 
+import csv
+import io
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from autoontology import formats
 from autoontology.config import REPO_ROOT
 from autoontology.unstructured import kordoc
 
-NATIVE_EXTENSIONS: frozenset[str] = frozenset({".md", ".markdown", ".txt", ".html", ".htm"})
-SUPPORTED_EXTENSIONS: frozenset[str] = NATIVE_EXTENSIONS | kordoc.EXTENSIONS
+NATIVE_EXTENSIONS: frozenset[str] = formats.DOCUMENT_NATIVE_SUFFIXES
+SUPPORTED_EXTENSIONS: frozenset[str] = formats.DOCUMENT_SUFFIXES
 PATH_SEP = " > "
+#: Rows a CSV/TSV document keeps (``AUTOONTOLOGY_DOC_TABLE_MAX_ROWS``).
+DEFAULT_TABLE_MAX_ROWS = 200
 
 MIME_TYPES: dict[str, str] = {
     ".md": "text/markdown",
@@ -26,6 +33,9 @@ MIME_TYPES: dict[str, str] = {
     ".txt": "text/plain",
     ".html": "text/html",
     ".htm": "text/html",
+    ".csv": "text/csv",
+    ".tsv": "text/tab-separated-values",
+    ".doc": "application/msword",
     ".pdf": "application/pdf",
     ".hwp": "application/x-hwp",
     ".hwpx": "application/hwp+zip",
@@ -45,9 +55,10 @@ MIME_TYPES: dict[str, str] = {
 class ReadError(ValueError):
     """A document could not be read (the run records it and moves on)."""
 
-    def __init__(self, message: str, *, code: str = "READ_FAILED") -> None:
+    def __init__(self, message: str, *, code: str = "READ_FAILED", remedy: str = "") -> None:
         super().__init__(message)
         self.code = code
+        self.remedy = remedy
 
 
 @dataclass(frozen=True)
@@ -56,7 +67,7 @@ class Section:
     page: int | None
     text: str
     char_start: int
-    kind: str = "text"  # "text" | "table"
+    kind: str = "text"  # "text" | "table" | "caption"
 
 
 @dataclass(frozen=True)
@@ -97,12 +108,34 @@ def discover_documents(target: Path, *, recursive: bool = False) -> list[Path]:
     return sorted(files)
 
 
+def table_max_rows() -> int:
+    """``AUTOONTOLOGY_DOC_TABLE_MAX_ROWS`` (default 200, at least 1)."""
+    raw = os.environ.get("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", "").strip()
+    try:
+        value = int(raw) if raw else DEFAULT_TABLE_MAX_ROWS
+    except ValueError as exc:
+        raise ValueError(
+            f"AUTOONTOLOGY_DOC_TABLE_MAX_ROWS must be an integer, got {raw!r}"
+        ) from exc
+    return max(1, value)
+
+
 def read_document(
-    path: Path, *, home: Path | None = None, engine: kordoc.KordocEngine | None = None
+    path: Path,
+    *,
+    home: Path | None = None,
+    engine: kordoc.KordocEngine | None = None,
+    max_table_rows: int | None = None,
 ) -> Document:
     path = Path(path)
     ext = path.suffix.lower()
     mime = MIME_TYPES.get(ext, "application/octet-stream")
+    if ext in (".csv", ".tsv"):
+        return read_delimited(path, max_rows=max_table_rows or table_max_rows())
+    if ext == ".doc":
+        from autoontology.unstructured import doc_word97
+
+        return doc_word97.read_doc(path)
     if ext in (".md", ".markdown"):
         return read_markdown(path)
     if ext == ".txt":
@@ -131,6 +164,50 @@ def _read_text(path: Path) -> str:
         except UnicodeDecodeError:
             continue
     raise ReadError(f"{path.name}: not UTF-8 or CP949 text", code="BAD_ENCODING")
+
+
+# --- CSV / TSV --------------------------------------------------------------------------
+
+
+def _cell(value: str) -> str:
+    return " ".join(value.replace("|", "\\|").split())
+
+
+def gfm_table(rows: list[list[str]], *, max_rows: int) -> str:
+    """*rows* (first = header) as a GFM table, keeping *max_rows* body rows and a closing
+    "… N more rows (M total)" line when it cut some."""
+    header, body = rows[0], rows[1:]
+    lines = [
+        "| " + " | ".join(_cell(c) for c in header) + " |",
+        "| " + " | ".join("---" for _ in header) + " |",
+    ]
+    width = len(header)
+    for row in body[:max_rows]:
+        cells = [_cell(c) for c in row] + [""] * (width - len(row))
+        lines.append("| " + " | ".join(cells) + " |")
+    if len(body) > max_rows:
+        lines.append(f"… {len(body) - max_rows} more rows ({len(body)} total)")
+    return "\n".join(lines)
+
+
+def read_delimited(path: Path, *, max_rows: int = DEFAULT_TABLE_MAX_ROWS) -> Document:
+    """A CSV/TSV file as one ``table`` section (UTF-8 with or without BOM, else CP949;
+    the delimiter follows the extension; the first row is the header)."""
+    ext = path.suffix.lower()
+    text = _read_text(path)
+    delimiter = "\t" if ext == ".tsv" else ","
+    try:
+        rows = [
+            r
+            for r in csv.reader(io.StringIO(text), delimiter=delimiter)
+            if any(c.strip() for c in r)
+        ]
+    except csv.Error as exc:
+        raise ReadError(
+            f"{path.name}: not a valid {ext[1:].upper()} file ({exc})", code="BAD_TABLE"
+        ) from exc
+    sections = [Section("", None, gfm_table(rows, max_rows=max_rows), 0, "table")] if rows else []
+    return Document(path.stem, path, MIME_TYPES[ext], sections)
 
 
 # --- Markdown ---------------------------------------------------------------------------

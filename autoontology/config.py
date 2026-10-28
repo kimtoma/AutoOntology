@@ -337,6 +337,11 @@ class Settings:
     workspace: str = DEFAULT_WORKSPACE
     #: Namespace of every IRI the ontology mints (AUTOONTOLOGY_BASE_IRI).
     base_iri: str = DEFAULT_BASE_IRI
+    #: Body rows a CSV/TSV *document* keeps (AUTOONTOLOGY_DOC_TABLE_MAX_ROWS).
+    doc_table_max_rows: int = 200
+    #: Optional Ollama vision model that captions image documents (AUTOONTOLOGY_VISION_MODEL;
+    #: empty = OCR text only).
+    vision_model: str = ""
 
     def __post_init__(self) -> None:
         validate_catalog_database_name(self.postgres_database)
@@ -378,6 +383,8 @@ class Settings:
             llm_limits={k: env[k] for k in OLLAMA_LLM_LIMITS if env.get(k, "").strip()},
             workspace=_workspace(env.get("AUTOONTOLOGY_WORKSPACE", "")),
             base_iri=_base_iri(env.get("AUTOONTOLOGY_BASE_IRI", "")),
+            doc_table_max_rows=max(1, _int_env("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", 200)),
+            vision_model=env.get("AUTOONTOLOGY_VISION_MODEL", "").strip(),
         )
 
     @property

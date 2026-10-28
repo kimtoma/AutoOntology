@@ -26,16 +26,16 @@ from typing import Any
 
 import duckdb
 
+from autoontology import formats
 from autoontology.config import PG_MAINTENANCE_DB, Settings, assert_source_database
 
-CSV_SUFFIXES = {".csv", ".tsv"}
-PARQUET_SUFFIXES = {".parquet", ".pq"}
-JSON_SUFFIXES = {".json", ".jsonl", ".ndjson"}
-XLSX_SUFFIXES = {".xlsx", ".xlsm"}
-SQLITE_SUFFIXES = {".sqlite", ".sqlite3", ".db"}
-SUPPORTED_SUFFIXES = (
-    CSV_SUFFIXES | PARQUET_SUFFIXES | JSON_SUFFIXES | XLSX_SUFFIXES | SQLITE_SUFFIXES
-)
+CSV_SUFFIXES = formats.CSV_SUFFIXES
+PARQUET_SUFFIXES = formats.PARQUET_SUFFIXES
+JSON_SUFFIXES = formats.JSON_SUFFIXES
+XLSX_SUFFIXES = formats.XLSX_SUFFIXES
+XLS_SUFFIXES = formats.XLS_SUFFIXES
+SQLITE_SUFFIXES = formats.SQLITE_SUFFIXES
+SUPPORTED_SUFFIXES = formats.STRUCTURED_SUFFIXES
 
 #: Postgres truncates identifiers to NAMEDATALEN-1 = 63 *bytes* (Hangul is 3 bytes each).
 PG_IDENTIFIER_MAX_BYTES = 63

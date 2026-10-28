@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from autoontology import formats
+
 logger = logging.getLogger("autoontology.kordoc")
 
 DEFAULT_VERSION = "4.24.13"
@@ -37,24 +39,8 @@ MIN_NODE_MAJOR = 20
 DEFAULT_TIMEOUT_S = 300.0
 INSTALL_COMMAND = "uv run autoontology tools install-kordoc"
 VERSION_FILE = "kordoc.version"
-#: File types kordoc parses (``kordoc --help``; HWPML is ``.hml``).
-EXTENSIONS: frozenset[str] = frozenset(
-    {
-        ".hwp",
-        ".hwpx",
-        ".hml",
-        ".hwpml",
-        ".pdf",
-        ".docx",
-        ".pptx",
-        ".xls",
-        ".xlsx",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".webp",
-    }
-)
+#: File types kordoc parses (``kordoc --help``; HWPML is ``.hml``): documents and images.
+EXTENSIONS: frozenset[str] = formats.DOCUMENT_KORDOC_SUFFIXES | formats.IMAGE_SUFFIXES
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$")
 
 

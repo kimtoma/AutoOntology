@@ -183,7 +183,12 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
         try:
             if path.suffix.lower() in readers.kordoc.EXTENSIONS and engine is None:
                 engine = readers.kordoc.resolve_engine(ctx.settings.home)
-            doc = readers.read_document(path, home=ctx.settings.home, engine=engine)
+            doc = readers.read_document(
+                path,
+                home=ctx.settings.home,
+                engine=engine,
+                max_table_rows=ctx.settings.doc_table_max_rows,
+            )
             chunks = chunker.chunk(
                 doc, max_tokens=max_tokens, overlap_tokens=overlap, pack_tokens=pack
             )

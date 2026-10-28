@@ -75,17 +75,19 @@ def test_discover_documents(tmp_path):
     (tmp_path / "a.md").write_text("# a")
     (tmp_path / "b.hwp").write_bytes(b"x")
     (tmp_path / "c.csv").write_text("x")
+    (tmp_path / "e.zip").write_text("x")
     (tmp_path / ".hidden.md").write_text("x")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "d.pdf").write_bytes(b"x")
-    assert [p.name for p in readers.discover_documents(tmp_path)] == ["a.md", "b.hwp"]
+    assert [p.name for p in readers.discover_documents(tmp_path)] == ["a.md", "b.hwp", "c.csv"]
     assert [p.name for p in readers.discover_documents(tmp_path, recursive=True)] == [
         "a.md",
         "b.hwp",
+        "c.csv",
         "d.pdf",
     ]
     with pytest.raises(readers.ReadError, match="unsupported"):
-        readers.discover_documents(tmp_path / "c.csv")
+        readers.discover_documents(tmp_path / "e.zip")
 
 
 def test_kordoc_formats_need_the_engine(tmp_path, monkeypatch):
@@ -174,3 +176,49 @@ def test_hard_split_keeps_korean_text_intact():
     assert all(chunker.count_tokens(p) <= 1200 for p in pieces) and len(pieces) > 1
     mixed = "계약 contract 金額 🚀 " * 500
     assert "".join(chunker._hard_split(mixed, 97)) == mixed
+
+
+# --- CSV/TSV documents ------------------------------------------------------------------
+
+
+def test_csv_document_is_one_gfm_table(tmp_path):
+    path = tmp_path / "담당자연락망.csv"
+    path.write_text(
+        "이름,부서,내선\n김하나,영업|1팀,1201\n이두리,재무팀,1302\n", encoding="utf-8-sig"
+    )
+    assert readers.discover_documents(path) == [path]
+    doc = readers.read_document(path)
+    assert doc.title == "담당자연락망" and doc.mime == "text/csv" and doc.engine == "native"
+    assert len(doc.sections) == 1
+    (section,) = doc.sections
+    assert section.kind == "table" and section.path == ""
+    assert section.text.split("\n") == [
+        "| 이름 | 부서 | 내선 |",
+        "| --- | --- | --- |",
+        "| 김하나 | 영업\\|1팀 | 1201 |",
+        "| 이두리 | 재무팀 | 1302 |",
+    ]
+
+
+def test_tsv_cp949_and_row_cap(tmp_path, monkeypatch):
+    path = tmp_path / "단가.tsv"
+    rows = ["코드\t품명\t단가"] + [f"P{i:03d}\t품목, {i}\t{i * 100}" for i in range(1, 8)]
+    path.write_bytes(("\r\n".join(rows) + "\r\n").encode("cp949"))
+    doc = readers.read_document(path, max_table_rows=5)
+    lines = doc.sections[0].text.split("\n")
+    assert lines[0] == "| 코드 | 품명 | 단가 |"
+    assert lines[2] == "| P001 | 품목, 1 | 100 |"
+    assert len(lines) == 2 + 5 + 1
+    assert lines[-1] == "… 2 more rows (7 total)"
+    monkeypatch.setenv("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", "3")
+    assert readers.read_document(path).sections[0].text.endswith("… 4 more rows (7 total)")
+
+
+def test_csv_ragged_rows_and_empty(tmp_path):
+    path = tmp_path / "a.csv"
+    path.write_text("a,b\n1\n2,3,4\n", encoding="utf-8")
+    lines = readers.read_document(path).sections[0].text.split("\n")
+    assert lines == ["| a | b |", "| --- | --- |", "| 1 |  |", "| 2 | 3 | 4 |"]
+    empty = tmp_path / "empty.csv"
+    empty.write_text("", encoding="utf-8")
+    assert readers.read_document(empty).sections == []
