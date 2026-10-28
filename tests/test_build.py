@@ -182,7 +182,7 @@ def add_documents(env):
     ex.ensure_documents_source(env["store"], "hanbit-docs", env["docs"])
 
 
-def run(env, llm=None, **kw):
+def run(env, llm=None, judge=None, **kw):
     llm = llm or FakeLLM()
     return bj.run_build(
         env["store"],
@@ -192,7 +192,10 @@ def run(env, llm=None, **kw):
             env["settings"], llm=llm, judge_llm=llm, embedder=lambda t: [[1.0, 0.0]] * len(t)
         ),
         align_backends=AlignBackends(
-            env["settings"], judge_llm=FakeJudge(), embedder=align_embed, model="fake-embed"
+            env["settings"],
+            judge_llm=judge or FakeJudge(),
+            embedder=align_embed,
+            model="fake-embed",
         ),
         writer=ClientWriter(env["client"]),
         **kw,
@@ -415,6 +418,44 @@ def test_resume_after_a_source_was_removed_merges_and_snapshots_again(env):
     # the same set again: nothing global runs
     kept = run(env, resume=True)
     assert "merge" not in kept.details and kept.revision == 2
+
+
+def test_resumed_align_rejudges_when_the_candidate_term_changed(env):
+    """Codex #7: the structured source changes and its Term old -> new id; the resumed
+    align must judge the concept against the new candidate (judged=1), not keep the
+    verdict for the Term that no longer exists."""
+    add_structured(env)
+    add_documents(env)
+    store, client = env["store"], env["client"]
+    first = run(env)
+    assert first.status == "succeeded"
+    docs_id = store.get_source("hanbit-docs").id
+    from autoontology.store.alignments import AlignmentStore
+
+    def accepted():
+        return {
+            a.concept_name: a.term_id for a in AlignmentStore(store).list(docs_id) if a.accepted
+        }
+
+    assert accepted()["계약"] == "t-contract"
+    term = client.terms.pop("t-contract")
+    client.terms["t-contract-new"] = {**term, "id": "t-contract-new"}
+    client.attrs["t-contract-new"] = client.attrs.pop("t-contract")
+    (env["data"] / "contracts.csv").write_text("x\n1\n2\n")  # the structured input changed
+
+    class Renamed(FakeJudge):
+        def structured(self, system, human, schema):
+            verdict = super().structured(system, human, schema)
+            if verdict.term_id == "t-contract":
+                verdict.term_id = "t-contract-new"
+            return verdict
+
+    again = run(env, resume=True, judge=Renamed())
+    assert again.run_id == first.run_id and again.status == "succeeded", again.problems
+    judge = again.details["align:hanbit-docs"]
+    assert judge["judged"] == 1 and judge["resumed"] >= 1
+    assert accepted()["계약"] == "t-contract-new"
+    assert "t-contract" not in accepted().values()
 
 
 def test_documents_that_need_kordoc_are_skipped_not_failed(env, monkeypatch):

@@ -329,6 +329,26 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
 
     for index, concept in enumerate(concepts, start=1):
         name = CONCEPT_STEP_PREFIX + concept.id
+        # the judge's input now: concept content, candidate Term ids + content, model and
+        # prompt version (judge_key); none for a concept that is not judged
+        alignable = concept.kind in al.ALIGNABLE_KINDS
+        found = (
+            [(tid, sim) for tid, sim in candidates.get(concept.id, []) if tid in terms]
+            if alignable
+            else []
+        )
+        cand_terms = [terms[tid] for tid, _ in found]
+        sims = dict(found)
+        cand_json = [
+            {"term_id": t.id, "term_name": t.name, "similarity": sims[t.id]} for t in cand_terms
+        ]
+        key = (
+            al.judge_key(
+                al.concept_payload(concept), [al.candidate_payload(t) for t in cand_terms], model
+            )
+            if found
+            else None
+        )
         prior = steps.get(name)
         if prior is not None and prior.status == "succeeded":
             # the verdict this run already wrote -- in either table: the resumed run may
@@ -341,7 +361,12 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
                     ctx.aligns.get(concept.id, preview=ctx.dry_run),
                     ctx.aligns.get(concept.id, preview=not ctx.dry_run),
                 )
-                if r is not None and r.run_id == ctx.run.id
+                if r is not None
+                and r.run_id == ctx.run.id
+                # only while the judge's input is unchanged (the candidates may have moved
+                # since: a re-aligned structured source) and its Term still exists
+                and (r.judge_key or None) == key
+                and (not r.term_id or r.term_id in terms)
             ]
             if mine:
                 existing = mine[0]
@@ -378,7 +403,7 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
                 continue
         ctx.store.start_step(ctx.run.id, name)
         started = time.monotonic()
-        if concept.kind not in al.ALIGNABLE_KINDS:
+        if not alignable:
             ctx.aligns.put(
                 _record(ctx, concept, "skipped", rationale=f"kind {concept.kind} is not aligned")
             )
@@ -390,7 +415,6 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
                 detail={"relation": "skipped", "kind": concept.kind},
             )
             continue
-        found = [(tid, sim) for tid, sim in candidates.get(concept.id, []) if tid in terms]
         if not found:
             ctx.aligns.put(
                 _record(
@@ -405,14 +429,6 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
                 ctx.run.id, name, status="succeeded", detail={"relation": "none", "candidates": 0}
             )
             continue
-        cand_terms = [terms[tid] for tid, _ in found]
-        sims = dict(found)
-        cand_json = [
-            {"term_id": t.id, "term_name": t.name, "similarity": sims[t.id]} for t in cand_terms
-        ]
-        key = al.judge_key(
-            al.concept_payload(concept), [al.candidate_payload(t) for t in cand_terms], model
-        )
         # committed verdict (for `applied`); the judge cache also reuses a preview's verdict
         existing = ctx.aligns.get(concept.id)
         hit = next(
