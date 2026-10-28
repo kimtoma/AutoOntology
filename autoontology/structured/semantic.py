@@ -1,7 +1,7 @@
 """Read-only snapshot of a structured source's upstream semantic layer: its Terms (with
 synonyms, REPRESENTS tables and column attributes) and SEMANTIC_FK references.
 
-Used by ``autoontology align`` (candidate Terms) and ``autoontology export`` (owl classes and
+Used by the align step of ``autoontology build`` (candidate Terms) and ``autoontology export`` (owl classes and
 properties). Terms are scoped to the source's catalog database through
 ``GET /api/exploration/semantic-graph?database_id=`` (``GET /api/terms`` has no database
 filter), then each is read with ``GET /api/terms/{id}`` and its column attributes.
@@ -52,7 +52,7 @@ def database_id_for(client: BackendClient, source: Source) -> tuple[str, str]:
     if not db_id:
         raise LookupError(
             f"structured source {source.name!r} ({name}) is not in the upstream "
-            f"catalog; run `uv run autoontology build {source.name}` first"
+            f"catalog; run `uv run autoontology build --source {source.name}` first"
         )
     return db_id, name
 

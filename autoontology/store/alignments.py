@@ -1,4 +1,4 @@
-"""Alignment tables (``autoontology align``): cached Term embeddings and one verdict row per
+"""Alignment tables (the align step of ``autoontology build``): cached Term embeddings and one verdict row per
 document concept. Shares :class:`autoontology.store.db.Store`'s connection helper.
 
 Committed verdicts (``alignments``, what export folds) and ``align --dry-run`` previews

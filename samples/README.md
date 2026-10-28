@@ -22,7 +22,7 @@
 ```bash
 uv run autoontology up
 uv run autoontology source add samples/structured --name hanbit
-uv run autoontology build hanbit
+uv run autoontology build --source hanbit
 ```
 
 적재 시 컬럼명은 소문자·`_` 정규화만 되고 한글은 그대로 유지됩니다(예: `고객ID` → `고객id`). 데이터는 Postgres DB `autoontology_src_hanbit`에 테이블 `customers`·`contracts`·`invoices`로 들어갑니다.

@@ -1,4 +1,4 @@
-"""``autoontology extract``: documents -> chunks -> LLM concepts/relations -> consolidated
+"""the documents step of ``autoontology build``: documents -> chunks -> LLM concepts/relations -> consolidated
 ontology in the store, plus ``report.md``.
 
 Steps ``read -> extract -> consolidate -> report``, persisted like ``build``

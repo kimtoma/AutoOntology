@@ -1,4 +1,4 @@
-"""``autoontology align``: link a documents source's concepts to a structured source's
+"""the align step of ``autoontology build``: link a documents source's concepts to a structured source's
 upstream Terms and enrich the Terms.
 
 Steps ``terms -> candidates -> judge -> apply -> report``, persisted like ``build`` and
@@ -190,7 +190,7 @@ def _step_terms(ctx: _AlignCtx) -> dict[str, Any]:
         raise RuntimeError(
             f"structured source {ctx.structured.name!r} has no Terms in the "
             f"upstream semantic layer; run `uv run autoontology build "
-            f"{ctx.structured.name}` first"
+            f"--source {ctx.structured.name}` first"
         )
     for t in snap.terms:
         logger.info(
@@ -708,13 +708,13 @@ def run_align(
     if source.kind != "documents":
         raise JobError(
             f"source {source_name!r} is a {source.kind} source; `align` needs a "
-            "documents source (from `autoontology extract`)"
+            "documents source (`autoontology source add <path> --kind documents`)"
         )
     docs = DocumentStore(store)
     if not docs.list_concepts(source.id):
         raise JobError(
-            f"source {source_name!r} has no concepts; run `autoontology extract "
-            f"{source_name} <path>` first"
+            f"source {source_name!r} has no concepts; run `uv run autoontology build "
+            f"--source {source_name}` first"
         )
     structured = _structured_source(store, structured_source)
     try:

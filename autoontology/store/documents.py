@@ -1,4 +1,4 @@
-"""Documents-pipeline tables (``autoontology extract``): documents, chunks, concepts,
+"""Documents-pipeline tables (the documents step of ``autoontology build``): documents, chunks, concepts,
 relations, evidence. Shares :class:`autoontology.store.db.Store`'s connection helper.
 
 A document is keyed by ``(source_id, sha256)``: re-running ``extract`` on unchanged

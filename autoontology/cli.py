@@ -55,10 +55,6 @@ def version() -> None:
     typer.echo(__version__)
 
 
-#: Name of the merged export of all sources (exports/<EXPORT_NAME>/<run>/).
-EXPORT_NAME = "autoontology"
-
-
 @app.command()
 def doctor(
     skip_models: bool = typer.Option(False, "--skip-models", help="Skip chat/embedding calls."),
@@ -613,7 +609,7 @@ def export(
     try:
         jobs.setup_job_logging(settings, console=True)
         result = export_job.run_export(
-            EXPORT_NAME,
+            export_job.MERGED_EXPORT_NAME,
             settings=settings,
             store=store,
             sources=names,

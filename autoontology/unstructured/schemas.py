@@ -308,7 +308,7 @@ def parse_json_object(text: str) -> Any:
         return json.loads(body[start : end + 1])
 
 
-# --- alignment (``autoontology align``) --------------------------------------------------
+# --- alignment (the align step of ``autoontology build``) --------------------------------------------------
 
 AlignRelation = Literal["same", "broader", "narrower", "related", "none"]
 

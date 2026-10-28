@@ -346,13 +346,18 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     @router.post("/sparql")
     async def run_sparql(body: SparqlIn) -> dict[str, Any]:
         s = scope(body.source)
-        found = latest_ttl(api.settings.exports_dir, s.source.name)
+        from autoontology.engine.export_job import MERGED_EXPORT_NAME
+
+        # the source's own export, else the merged export of every source
+        found = latest_ttl(api.settings.exports_dir, s.source.name) or latest_ttl(
+            api.settings.exports_dir, MERGED_EXPORT_NAME
+        )
         if found is None:
             raise ApiError(
                 404,
                 "no_export",
                 f"source {s.source.name!r} has no exported "
-                f"ontology.ttl; run `uv run autoontology export {s.source.name}` first",
+                f"ontology.ttl; run `uv run autoontology export` first",
             )
         run_id, path = found
 

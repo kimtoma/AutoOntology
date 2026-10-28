@@ -1,4 +1,4 @@
-"""Alignment of document concepts to upstream Terms (``autoontology align``).
+"""Alignment of document concepts to upstream Terms (the align step of ``autoontology build``).
 
 1. Candidate retrieval: every entity/metric/attribute concept is embedded as a query
    (``"{name} ({name_en}): {definition}"``), every Term as a passage

@@ -203,6 +203,11 @@ EXPORT_STEP_FUNCS: dict[str, Callable[[Any], dict[str, Any]]] = {
 }
 
 
+#: Name of the merged export of every source (``exports/<name>/<run>/``, ``autoontology
+#: export``).
+MERGED_EXPORT_NAME = "autoontology"
+
+
 def resolve_sources(
     store: Store, name: str, sources: list[str] | None
 ) -> tuple[list[Source], list[Source]]:

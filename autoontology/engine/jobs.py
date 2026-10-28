@@ -693,7 +693,7 @@ def check_compile_quality(
             f"LLM calls failed: all {len(nodes)} Term(s) are upstream fallbacks "
             f"({', '.join(fallback) or 'none'}). Recover: fix the model setup (`uv run "
             f"autoontology doctor`), then `uv run autoontology source rm {source_name} --drop-db` -> "
-            f"`source add <path> --name {source_name}` -> `build {source_name}`; a re-run "
+            f"`source add <path> --name {source_name}` -> `build --source {source_name}`; a re-run "
             "cannot recompile tables that already have Terms. Details: jobs.log"
         )
     if fallback:
@@ -789,7 +789,7 @@ def _step_compile(ctx: _Ctx) -> dict[str, Any]:
         raise CompileQualityError(
             f"{len(failing)} table(s) have a Term but no column attributes (they were not "
             f"recompiled): {', '.join(failing[:10])}. Recover: `uv run autoontology source rm "
-            f"{ctx.source.name} --drop-db` -> `source add` -> `build {ctx.source.name}`"
+            f"{ctx.source.name} --drop-db` -> `source add` -> `build --source {ctx.source.name}`"
         )
     if uncovered:
         logger.warning(

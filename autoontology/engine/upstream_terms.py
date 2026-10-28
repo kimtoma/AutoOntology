@@ -4,7 +4,7 @@
 accepts name, description, certification flags and owner only: there is **no synonyms
 field**, and pydantic silently drops one (a synonyms-only body answers 422 "No Term fields
 to update"). Upstream writes ``term.synonyms`` only during compilation
-(``dal/terms.py`` ``upsert_table_term``). So ``autoontology align`` writes synonyms in-process
+(``dal/terms.py`` ``upsert_table_term``). So the align step of ``autoontology build`` writes synonyms in-process
 through upstream's own DAL -- ``dal.schema.term``, ``dal.session.write_transaction`` /
 ``store`` -- and then refreshes the Term's semantic embeddings with
 ``server.terms.service.refresh_term_embeddings``, as the PATCH route does after a

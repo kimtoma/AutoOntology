@@ -454,7 +454,7 @@ def test_gate_still_fails_on_resume_with_nothing_compiled(env, monkeypatch):
     monkeypatch.setattr(jobs, "upstream_compile", lambda db, s: {"tables_compiled": 0})
     with pytest.raises(jobs.JobError, match="source rm demo --drop-db") as err:
         build(env, resume=True)
-    assert "build demo" in str(err.value)
+    assert "build --source demo" in str(err.value)
     run = store.latest_run(store.get_source("demo").id)
     assert run.status == "failed"
 

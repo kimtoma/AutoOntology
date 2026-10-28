@@ -1,4 +1,4 @@
-"""``align-report.md`` for ``autoontology align`` (English, like the other reports)."""
+"""``align-report.md`` for the align step of ``autoontology build`` (English, like the other reports)."""
 
 from __future__ import annotations
 
