@@ -102,22 +102,50 @@ def parse_database_url(url: str) -> dict[str, Any]:
     )
 
 
-#: Seconds to wait for an external database while fingerprinting its schema.
+#: Seconds to wait for an external database while fingerprinting its schema: the connect
+#: and (as ``statement_timeout``) every metadata query.
 SCHEMA_CONNECT_TIMEOUT_S = 5
 
+_PG_USER_SCHEMAS = "NOT IN ('pg_catalog', 'information_schema')"
+#: What upstream's Postgres connector ingests and the semantic step consumes
+#: (``connectors/postgres.py`` ``get_columns`` / ``get_pks`` / ``get_fks``), one row kind
+#: each, so a column, primary-key or foreign-key change all change the fingerprint.
+_PG_SCHEMA_QUERIES: dict[str, tuple[str, str]] = {
+    "column": (
+        "SELECT table_schema, table_name, column_name, data_type "
+        "FROM information_schema.columns WHERE table_schema " + _PG_USER_SCHEMAS,
+        "table_schema",
+    ),
+    "pk": (
+        "SELECT kcu.table_schema, kcu.table_name, kcu.column_name, kcu.ordinal_position "
+        "FROM information_schema.table_constraints tc "
+        "JOIN information_schema.key_column_usage kcu "
+        "ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema "
+        "WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema " + _PG_USER_SCHEMAS,
+        "tc.table_schema",
+    ),
+    "fk": (
+        "SELECT tc.constraint_schema, tc.constraint_name, kcu.table_schema, kcu.table_name, "
+        "kcu.column_name, ccu.table_schema, ccu.table_name, ccu.column_name "
+        "FROM information_schema.table_constraints tc "
+        "JOIN information_schema.key_column_usage kcu "
+        "ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema "
+        "JOIN information_schema.constraint_column_usage ccu "
+        "ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema "
+        "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema " + _PG_USER_SCHEMAS,
+        "tc.table_schema",
+    ),
+}
 
-def _postgres_columns(conn: dict[str, Any]) -> list[tuple[str, ...]]:
-    """``(schema, table, column, type)`` of every user column of a Postgres database."""
+
+def _postgres_schema(conn: dict[str, Any]) -> list[tuple[str, ...]]:
+    """Rows ``(kind, ...)`` of a Postgres database's user schema: ``column`` (schema,
+    table, column, type), ``pk`` (schema, table, column, position) and ``fk`` (constraint
+    schema/name, schema, table, column, referenced schema/table/column)."""
     import psycopg
 
-    sql = (
-        "SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns "
-        "WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"
-    )
-    args: list[Any] = []
-    if conn.get("schemas"):
-        sql += " AND table_schema = ANY(%s)"
-        args.append(list(conn["schemas"]))
+    timeout_ms = int(SCHEMA_CONNECT_TIMEOUT_S * 1000)
+    rows: list[tuple[str, ...]] = []
     with psycopg.connect(
         host=conn["host"],
         port=int(conn.get("port") or 5432),
@@ -125,19 +153,29 @@ def _postgres_columns(conn: dict[str, Any]) -> list[tuple[str, ...]]:
         password=conn.get("password") or None,
         dbname=conn["database"],
         connect_timeout=SCHEMA_CONNECT_TIMEOUT_S,
+        options=f"-c statement_timeout={timeout_ms}",
     ) as pg_conn:
-        return [tuple(str(v) for v in row) for row in pg_conn.execute(sql, args).fetchall()]
+        for kind, (sql, schema_col) in _PG_SCHEMA_QUERIES.items():
+            args: list[Any] = []
+            if conn.get("schemas"):
+                sql += f" AND {schema_col} = ANY(%s)"
+                args.append(list(conn["schemas"]))
+            rows += [
+                (kind, *(str(v) for v in row)) for row in pg_conn.execute(sql, args).fetchall()
+            ]
+    return rows
 
 
 #: Schema introspection per connection ``type``; a type without one (mysql, snowflake: no
 #: driver is bundled) has no fingerprint, so ``build --resume`` never reuses its steps.
 SCHEMA_INTROSPECTORS: dict[str, Callable[[dict[str, Any]], list[tuple[str, ...]]]] = {
-    "postgres": _postgres_columns,
+    "postgres": _postgres_schema,
 }
 
 
 def schema_fingerprint(source: Source) -> str:
-    """A hash of the sorted table/column names and types of a database source, or ""
+    """A hash of the sorted schema rows (columns and types, primary and foreign keys) of a
+    database source, or ""
     when it cannot be read (unreachable, or no introspector for its type)."""
     try:
         conn = parse_database_url(source.locator)

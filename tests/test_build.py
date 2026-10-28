@@ -601,6 +601,100 @@ def test_database_source_fingerprint_follows_the_live_schema(env, monkeypatch, t
     assert bj.input_fingerprint(mysql) == ""  # no introspector: not reused either
 
 
+def test_database_fingerprint_follows_foreign_keys(env, monkeypatch, tmp_path):
+    """Recheck #3: the semantic step reads declared FKs (and PKs), so adding a foreign key
+    changes the fingerprint; the sqlite introspector stands in for the external DB."""
+    import sqlite3
+
+    db = tmp_path / "ext.sqlite"
+    sqlite3.connect(db).executescript(
+        "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT);"
+        "CREATE TABLE orders (id INTEGER, customer_id INTEGER);"
+    )
+
+    def sqlite_schema(conn):
+        with sqlite3.connect(db) as c:
+            tables = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+            rows = []
+            for t in tables:
+                for col in c.execute(f"PRAGMA table_info({t})"):
+                    rows.append(("column", "main", t, col[1], col[2]))
+                    if col[5]:
+                        rows.append(("pk", "main", t, col[1], str(col[5])))
+                for fk in c.execute(f"PRAGMA foreign_key_list({t})"):
+                    rows.append(("fk", f"fk{fk[0]}", "main", t, fk[3], "main", fk[2], fk[4]))
+            return rows
+
+    monkeypatch.setitem(pipeline.SCHEMA_INTROSPECTORS, "postgres", sqlite_schema)
+    src = pipeline.add_source(env["store"], "postgres://u:p@db.example/crm", name="crm")
+    first = bj.input_fingerprint(src)
+    assert first
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "DROP TABLE orders; CREATE TABLE orders (id INTEGER, customer_id INTEGER "
+            "REFERENCES customers(id));"
+        )
+    assert bj.input_fingerprint(src) not in ("", first)
+
+
+def test_postgres_introspector_reads_keys_under_a_statement_timeout(monkeypatch):
+    """Recheck #3: the real Postgres introspector reads PKs and FKs (constraint name,
+    columns, referenced table/columns) besides columns, and bounds every metadata query
+    with a statement timeout, not only the connect."""
+    import sys
+    import types
+
+    seen: dict = {"sql": []}
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, args=()):
+            seen["sql"].append(sql)
+            if "FOREIGN KEY" in sql:
+                return Result(
+                    [
+                        (
+                            "public",
+                            "fk_orders_customer",
+                            "public",
+                            "orders",
+                            "customer_id",
+                            "public",
+                            "customers",
+                            "id",
+                        )
+                    ]
+                )
+            if "PRIMARY KEY" in sql:
+                return Result([("public", "customers", "id", 1)])
+            return Result([("public", "orders", "customer_id", "integer")])
+
+    def connect(**kwargs):
+        seen["kwargs"] = kwargs
+        return Conn()
+
+    monkeypatch.setitem(sys.modules, "psycopg", types.SimpleNamespace(connect=connect))
+    rows = pipeline.SCHEMA_INTROSPECTORS["postgres"]({"host": "db", "user": "u", "database": "crm"})
+    assert "statement_timeout" in seen["kwargs"].get("options", "")
+    assert seen["kwargs"]["connect_timeout"] == pipeline.SCHEMA_CONNECT_TIMEOUT_S
+    kinds = {r[0] for r in rows}
+    assert kinds == {"column", "pk", "fk"}
+    fk = next(r for r in rows if r[0] == "fk")
+    assert "fk_orders_customer" in fk and "customers" in fk and "id" in fk
+
+
 # --- export from a snapshot ---------------------------------------------------------------
 
 
