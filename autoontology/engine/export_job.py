@@ -199,6 +199,37 @@ def check_replaceable(settings: Settings, final: Path) -> set[str] | None:
     return listed
 
 
+def recover_interrupted_install(final: Path) -> Path | None:
+    """Undo a crash between the two renames of :func:`_install`: when *final* is missing
+    or an empty folder and a ``<final>.prev-*`` backup holding an :data:`EXPORT_MARKER`
+    is left beside it, the newest such backup becomes *final* again. Returns the restored
+    backup's old path (None when there was nothing to restore)."""
+    if final.is_symlink() or (final.exists() and (not final.is_dir() or any(final.iterdir()))):
+        return None
+    if not final.parent.is_dir():
+        return None
+    backups = sorted(
+        (
+            p
+            for p in final.parent.glob(f"{final.name}.prev-*")
+            if p.is_dir() and not p.is_symlink() and (p / EXPORT_MARKER).is_file()
+        ),
+        key=lambda p: p.name,
+    )
+    if not backups:
+        return None
+    backup = backups[-1]
+    if final.exists():
+        final.rmdir()
+    backup.rename(final)
+    logger.warning(
+        "  restored the previous export from %s (an earlier export was interrupted "
+        "while swapping folders)",
+        backup,
+    )
+    return backup
+
+
 def _remove_listed(folder: Path, listed: set[str]) -> bool:
     """Remove the *listed* files of *folder*, then the directories they leave empty, then
     *folder* itself. Anything else is kept (then *folder* stays and False is returned)."""
@@ -624,6 +655,7 @@ def _run_export_held(
     format: str = "all",
 ) -> RunResult:
     final = export_target(settings, snapshot.revision, out)
+    recover_interrupted_install(final)
     check_replaceable(settings, final)
     wanted = EXPORT_FORMATS[format]
     skip = {
@@ -712,5 +744,17 @@ def _install(store: Store, run: Run, work: Path, settings: Settings, final: Path
         raise JobError(
             f"could not install the export at {final}: {exc}{restored}", run_id=run.id
         ) from exc
-    if backup is not None and not _remove_listed(backup, listed or set()):
+    if backup is None:
+        return
+    # the new folder is in place: the run succeeded whatever the cleanup does
+    try:
+        removed = _remove_listed(backup, listed or set())
+    except OSError as exc:
+        logger.warning(
+            "  could not remove the previous export: %s is left (%s); delete it by hand",
+            backup,
+            exc,
+        )
+        return
+    if not removed:
         logger.warning("  could not fully remove the previous export: %s is left", backup)

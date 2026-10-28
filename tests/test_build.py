@@ -1045,3 +1045,55 @@ def test_export_format_writes_only_the_chosen_formats(env):
     assert sorted(export_job.read_export_metadata(folder)["formats"]) == ["okf", "ossie"]
     with pytest.raises(JobError, match="unknown export format 'pdf'"):
         export_job.run_export(store, settings, format="pdf", client=client)
+
+
+def test_export_backup_cleanup_failure_still_succeeds(env, monkeypatch, caplog):
+    """Recheck #5: the new folder is installed; failing to delete the `.prev-*` backup is a
+    warning naming the backup, and the run is still finalized as succeeded."""
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    export_job.run_export(store, settings, client=env["client"])
+    real_unlink = Path.unlink
+
+    def failing_unlink(self, *a, **k):
+        if ".prev-" in str(self):
+            raise PermissionError("injected unlink failure")
+        return real_unlink(self, *a, **k)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+    with caplog.at_level("WARNING", logger="autoontology.jobs"):
+        result = export_job.run_export(store, settings, client=env["client"])
+    assert result.status == "succeeded"
+    assert store.get_run(result.run_id).status == "succeeded"
+    assert (result.export_dir / "ontology.ttl").is_file()
+    [backup] = [p for p in result.export_dir.parent.iterdir() if ".prev-" in p.name]
+    assert str(backup) in caplog.text
+
+
+def test_export_restores_a_backup_left_between_the_two_renames(env):
+    """Recheck #5: a crash after `final -> .prev-*` but before `work -> final` leaves the
+    previous export only in the backup; the next export restores it before replacing it."""
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    folder = export_job.run_export(store, settings, client=env["client"]).export_dir
+    backup = folder.with_name(f"{folder.name}.prev-20260101T000000-crashed")
+    folder.rename(backup)
+    folder.mkdir()  # an empty (or missing) final folder
+    (folder / "user.txt").write_text("mine")
+    with pytest.raises(JobError, match="refusing to replace"):  # a user's folder: kept
+        export_job.run_export(store, settings, client=env["client"])
+    assert backup.is_dir()
+    (folder / "user.txt").unlink()
+    export_job.recover_interrupted_install(folder)
+    assert (folder / "export.json").is_file() and not backup.exists()
+    shutil.rmtree(folder)  # the final folder missing altogether: restored by the export
+    export_job.run_export(store, settings, client=env["client"])
+    backup2 = folder.with_name(f"{folder.name}.prev-20260102T000000-crashed")
+    folder.rename(backup2)
+    ok = export_job.run_export(store, settings, client=env["client"])
+    assert ok.status == "succeeded" and (folder / "ontology.ttl").is_file()
+    assert not [p for p in folder.parent.iterdir() if ".prev-" in p.name]
