@@ -827,11 +827,28 @@ def test_sparql_endpoint(client, model):
     c, settings, _, _, _ = client
     # no export of the latest snapshot yet: its Turtle is written to the cache on demand
     first = c.post(f"{API}/sparql", json={"query": "ASK { ?s a owl:Class }"}).json()
-    assert first["revision"] == 1 and first["ttl"] == "ontology-r1.ttl"
-    assert (settings.home / "cache" / "ontology-r1.ttl").is_file()
+    head = Store.for_home(settings.home).latest_snapshot(with_model=False)
+    key = playground_api.snapshot_key(settings, head)
+    assert first["revision"] == 1 and first["ttl"] == f"ontology-{key}.ttl"
+    assert key.startswith("r1-") and (settings.home / "cache" / first["ttl"]).is_file()
+    # a recreated store restarts at revision 1: another snapshot, another key
+    other = type(head)(**{**head.__dict__, "run_id": "fresh-db"})
+    assert playground_api.snapshot_key(settings, other) != key
     out = settings.exports_dir / "r0001"
     out.mkdir(parents=True)
     rdf.write(model, out)
+    # an r0001 export without a marker (or another snapshot's) is not this snapshot
+    again = c.post(f"{API}/sparql", json={"query": "ASK { ?s a owl:Class }"}).json()
+    assert again["ttl"] == f"ontology-{key}.ttl"
+    marker = {
+        "workspace": settings.workspace,
+        "revision": 1,
+        "snapshot_run": "another-home",
+        "snapshot_created_at": head.created_at,
+    }
+    (out / "export.json").write_text(json.dumps(marker))
+    assert c.post(f"{API}/sparql", json={"query": "ASK {}"}).json()["ttl"] != "ontology.ttl"
+    (out / "export.json").write_text(json.dumps({**marker, "snapshot_run": head.run_id}))
     examples = c.get(f"{API}/sparql/examples").json()["examples"]
     for ex in examples:
         r = c.post(f"{API}/sparql", json={"query": ex["query"]})

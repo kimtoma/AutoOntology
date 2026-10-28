@@ -192,7 +192,8 @@ class Api:
         self.settings = settings
         self.runs = runs or RunManager(settings)
         self._store: Store | None = None
-        self._models: dict[int, Any] = {}
+        #: parsed models by (revision, snapshot run): a recreated store reuses revisions
+        self._models: dict[tuple[int, str], Any] = {}
         self._model_lock = threading.Lock()
         self._status: tuple[float, dict[str, Any]] | None = None
         #: One probe round at a time: concurrent cache misses wait for it and share it.
@@ -329,8 +330,9 @@ class Api:
                     404, "no_snapshot", "no ontology yet: run a build (`autoontology build`)"
                 )
             raise ApiError(404, "unknown_revision", f"unknown revision {revision}")
+        key = (head.revision, head.run_id)
         with self._model_lock:
-            model = self._models.get(head.revision)
+            model = self._models.get(key)
         if model is None:
             full = self.store.get_snapshot(head.revision)
             assert full is not None and full.model is not None
@@ -338,7 +340,7 @@ class Api:
             with self._model_lock:
                 if len(self._models) >= MODEL_CACHE_SIZE:
                     self._models.pop(next(iter(self._models)))
-                self._models[head.revision] = model
+                self._models[key] = model
         return head, model
 
     def latest_model(self) -> tuple[int, Any]:

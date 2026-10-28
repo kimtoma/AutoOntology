@@ -4,8 +4,9 @@
 * ``POST /sql`` (SSE): upstream's NL->SQL agent (``POST /api/chat/completions`` on the
   backend), events relayed verbatim (masked).
 * ``POST /sparql``, ``GET /sparql/examples``: the SPARQL console over the latest snapshot
-  (its export's ``ontology.ttl``, else a Turtle file written on demand to
-  ``<home>/cache/ontology-r<rev>.ttl``).
+  (its export's ``ontology.ttl`` when that export's ``export.json`` names this very
+  snapshot, else a Turtle file written on demand to
+  ``<home>/cache/ontology-r<rev>-<key>.ttl``; see :func:`snapshot_ttl`).
 
 SSE streams are POST responses read with ``fetch`` (not ``EventSource``); every event's
 data is JSON. The workspace's playground slot (409 ``playground_busy``) is taken before
@@ -14,6 +15,7 @@ the response starts and released when the stream ends or the client goes away.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import uuid
@@ -347,13 +349,14 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
 
     @router.post("/sparql")
     async def run_sparql(body: SparqlIn) -> dict[str, Any]:
-        revision, model = api.latest_model()
+        head, model = api.snapshot()
 
         def work() -> dict[str, Any]:
-            path = snapshot_ttl(api.settings, revision, model)
+            path = snapshot_ttl(api.settings, head, model)
+            key = snapshot_key(api.settings, head)
             return {
-                **sparql.run_file(f"r{revision}", path, body.query, limit=body.limit),
-                "revision": revision,
+                **sparql.run_file(key, path, body.query, limit=body.limit),
+                "revision": head.revision,
                 "ttl": path.name,
             }
 
@@ -365,16 +368,41 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     return router
 
 
-def snapshot_ttl(settings: Any, revision: int, model: Any) -> Path:
-    """The Turtle file of snapshot *revision*: its export's ``ontology.ttl`` when one
-    exists, else ``<home>/cache/ontology-r<rev>.ttl``, written from the model on demand."""
+def snapshot_key(settings: Any, head: Any) -> str:
+    """Identity of snapshot *head* beyond its revision number -- revisions restart in a
+    recreated store and ``exports/`` may be shared by several homes: workspace, revision
+    and a hash of the snapshot's run id and creation time."""
+    digest = hashlib.sha256(
+        f"{settings.workspace}\0{head.run_id}\0{head.created_at}".encode()
+    ).hexdigest()[:12]
+    return f"r{head.revision}-{digest}"
+
+
+def export_matches(settings: Any, head: Any, folder: Path) -> bool:
+    """Whether the export in *folder* was written from snapshot *head* (its marker)."""
+    from autoontology.engine.export_job import read_export_metadata
+
+    meta = read_export_metadata(folder) or {}
+    return (
+        meta.get("workspace") == settings.workspace
+        and meta.get("revision") == head.revision
+        and meta.get("snapshot_run") == head.run_id
+        and meta.get("snapshot_created_at") == head.created_at
+    )
+
+
+def snapshot_ttl(settings: Any, head: Any, model: Any) -> Path:
+    """The Turtle file of snapshot *head*: its export's ``ontology.ttl`` when that export
+    was written from this very snapshot (:func:`export_matches`), else
+    ``<home>/cache/ontology-<snapshot_key>.ttl``, written from the model on demand."""
     from autoontology.engine.export_job import revision_dir_name
     from autoontology.export import rdf
 
-    exported = Path(settings.exports_dir) / revision_dir_name(revision) / "ontology.ttl"
-    if exported.is_file():
+    folder = Path(settings.exports_dir) / revision_dir_name(head.revision)
+    exported = folder / "ontology.ttl"
+    if exported.is_file() and export_matches(settings, head, folder):
         return exported
-    cached = Path(settings.home) / "cache" / f"ontology-r{revision}.ttl"
+    cached = Path(settings.home) / "cache" / f"ontology-{snapshot_key(settings, head)}.ttl"
     if not cached.is_file():
         cached.parent.mkdir(parents=True, exist_ok=True)
         tmp = cached.with_name(f".{cached.name}.{uuid.uuid4().hex}.tmp")
