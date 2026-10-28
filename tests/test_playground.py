@@ -13,7 +13,7 @@ from autoontology.config import Settings
 from autoontology.engine import export_job
 from autoontology.export import rdf
 from autoontology.ontology import model as merged
-from autoontology.playground import prompts
+from autoontology.playground import prompts, sparql
 from autoontology.playground.elements import elements_from_model
 from autoontology.playground.index import ElementIndex, build_index
 from autoontology.playground.llm import LLMError, RouterLLM, llm_for
@@ -496,6 +496,38 @@ def test_sparql_cartesian_product_with_limit_is_bounded(ttl):
     )
     assert con["truncated"] and con["total"] == 20
     assert time.monotonic() - start < 5
+
+
+def test_sparql_timed_out_evaluation_aborts_and_frees_its_slot(ttl):
+    """Review I-2: a query past its deadline stops at the next triple it pulls, so
+    repeated timeouts never exhaust the worker slots (no 429) and the GIL is released."""
+    runner = SparqlRunner(timeout_s=0.3)
+    graph = runner.graph("r", ttl)
+    store = graph.store
+    real = store.triples
+    pulled = {"n": 0}
+
+    def slow(*args, **kwargs):
+        for t in real(*args, **kwargs):
+            pulled["n"] += 1
+            time.sleep(0.02)
+            yield t
+
+    store.triples = slow  # every triple rdflib evaluation pulls now costs 20 ms
+    try:
+        for _ in range(sparql.MAX_CONCURRENT + 2):  # old code: 429 from the third on
+            start = time.monotonic()
+            with pytest.raises(SparqlError) as err:
+                runner.run_file("r", ttl, CARTESIAN + " ORDER BY ?a")
+            assert err.value.status == 408 and err.value.code == "sparql_timeout"
+            assert time.monotonic() - start < 1.0
+            time.sleep(0.1)  # > one pulled triple: the abandoned thread has given up
+        settled = pulled["n"]
+        time.sleep(0.2)
+        assert pulled["n"] == settled  # nothing keeps evaluating in the background
+    finally:
+        del store.triples
+    assert runner.run_file("r", ttl, "ASK { ?s ?p ?o }")["boolean"] is True
 
 
 # --- store --------------------------------------------------------------------------------

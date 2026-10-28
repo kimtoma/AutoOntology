@@ -7,8 +7,10 @@
   refused before parsing and rdflib's remote graph loading is off, so a query never
   reaches the network.
 * Evaluation runs in a worker thread with a deadline (default 10 s): past it the request
-  answers 408 and the thread is abandoned (it keeps its slot until it really ends, so at
-  most ``MAX_CONCURRENT`` evaluations ever run; 429 otherwise).
+  answers 408. The evaluation reads the graph through a deadline-checking view, so the
+  thread aborts itself at the next triple it pulls and frees its slot (at most
+  ``MAX_CONCURRENT`` evaluations ever run; 429 otherwise). Only an in-memory sort of the
+  solutions already produced (ORDER BY/GROUP BY) can overrun the deadline.
 * Results are bounded while evaluating: SELECT stops at ``limit + 1`` solutions (at most
   ``MAX_LIMIT`` = 500 rows, ``truncated`` without an exact total), CONSTRUCT/DESCRIBE stop
   at ``limit * 10`` triples.
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -227,6 +230,40 @@ def check_query(query: str, init_ns: dict[str, Any] | None = None) -> Any:
     return prepared
 
 
+class _Cancelled(SparqlError):
+    def __init__(self, timeout_s: float) -> None:
+        super().__init__(408, "sparql_timeout", f"query did not finish within {timeout_s:.0f}s")
+
+
+class _DeadlineGraph(Graph):
+    """A view of *base* (same store, identifier and prefixes) whose triple access raises
+    :class:`_Cancelled` once the deadline passed: rdflib's evaluation pulls every solution
+    through ``triples``, so a runaway query aborts itself and frees its worker slot."""
+
+    def __init__(self, base: Graph, deadline: float, timeout_s: float) -> None:
+        super().__init__(
+            store=base.store, identifier=base.identifier, namespace_manager=base.namespace_manager
+        )
+        self._deadline = deadline
+        self._timeout_s = timeout_s
+
+    def _check(self) -> None:
+        if time.monotonic() > self._deadline:
+            raise _Cancelled(self._timeout_s)
+
+    def triples(self, triple, *args, **kwargs):  # type: ignore[override]
+        self._check()
+        for t in super().triples(triple, *args, **kwargs):
+            self._check()
+            yield t
+
+    def triples_choices(self, triple, *args, **kwargs):  # type: ignore[override]
+        self._check()
+        for t in super().triples_choices(triple, *args, **kwargs):
+            self._check()
+            yield t
+
+
 class SparqlRunner:
     """Runs queries in-process: the graph is parsed once per export (cached), each query
     is evaluated in a daemon thread under a deadline."""
@@ -272,10 +309,11 @@ class SparqlRunner:
             )
         done = threading.Event()
         box: dict[str, Any] = {}
+        view = _DeadlineGraph(graph, time.monotonic() + self.timeout_s, self.timeout_s)
 
         def work() -> None:
             try:
-                box["result"] = execute(graph, prepared, limit)
+                box["result"] = execute(view, prepared, limit)
             except BaseException as exc:  # noqa: BLE001 - handed to the caller
                 box["error"] = exc
             finally:
@@ -288,9 +326,7 @@ class SparqlRunner:
             self._slots.release()
             raise
         if not done.wait(self.timeout_s):
-            raise SparqlError(
-                408, "sparql_timeout", f"query did not finish within {self.timeout_s:.0f}s"
-            )
+            raise _Cancelled(self.timeout_s)
         if "error" in box:
             raise box["error"]
         return {**box["result"], "triples": len(graph)}
