@@ -1,0 +1,186 @@
+# Architecture
+
+This document describes how AutoOntology is put together: its processes, its data flow,
+where state lives, how model calls are routed, and where to extend it. The user-facing
+overview is in the [README](../README.md).
+
+## Components and ports
+
+| Component | Where | Port | Role |
+|---|---|---|---|
+| AutoOntology service | `autoontology/web` (FastAPI, uvicorn) | `127.0.0.1:7800` (`AUTOONTOLOGY_PORT`) | REST API under `/api`, SSE run logs, the playground, the web UI under `/ui`, the `/v1` model router, and the `/ingest` shims the engine calls back. |
+| Engine backend | `vendor/auto-ontology` (NVIDIA Auto Ontology, git submodule) | `127.0.0.1:3101` (`BACKEND_PORT`) | Connections, catalog, semantic model, exports and NL-to-SQL, over HTTP `/api/...`. |
+| CLI | `autoontology/cli.py` (typer) | none | Runs `build` and `export` in-process; `up`/`down` supervise the two servers. |
+| Postgres 17 + pgvector | `docker compose` or your own server | `5432` | The engine's catalog and vectors (`autoontology`) and one database per file source (`autoontology_src_<name>`). |
+| SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: sources, runs, documents, concepts, alignments, snapshots, playground. |
+| Model providers | Ollama (`:11434`) or an OpenAI-compatible URL | none | Chat (extraction, judges, playground, engine compile) and embeddings. |
+| kordoc (optional) | `<AUTOONTOLOGY_HOME>/kordoc` (npm, Node 20 or newer) | none | Reads HWP/HWPX/PDF/DOCX/PPTX into Markdown, run as a subprocess with an argv list. |
+
+`autoontology up` starts both servers as background processes (`engine/supervisor.py`),
+binds them to 127.0.0.1, writes PID files under `<home>/run/` and logs under
+`<home>/logs/`, and waits for their health endpoints. The service rejects requests whose
+`Host` is not local or whose `Origin` is cross-site.
+
+## How the engine is embedded
+
+The engine is pinned as an **unmodified** git submodule (`vendor/auto-ontology`, commit
+`eb8dd06`) and installed as an editable path dependency (`auto-ontology-server`).
+AutoOntology uses it in two ways:
+
+- **Over HTTP** (`engine/client.py`): it creates and updates connections, reads the
+  catalog and Terms, fetches the model export (`model.yaml`, the Ossie zip), and relays
+  playground NL-to-SQL (`/api/chat/completions`). Every request carries the user header
+  `x-auto-ontology-user-id: autoontology`.
+- **In-process** (`engine/jobs.py`, `engine/upstream_semantic.py`): it runs ingest, the
+  PII/rule replay and semantic compilation by importing `auto_ontology` directly, and it
+  creates the pgvector tables at the embedder's dimension. The engine hard-codes 2048
+  dimensions; AutoOntology creates the tables first through the engine's own DDL.
+
+The engine reads its environment at import time, so AutoOntology prepares `os.environ`
+(Postgres settings, the expanded model triplets and `INGESTION_SERVICE_URL`) before the
+first import. Engine internals that AutoOntology depends on are pinned by tests
+(`tests/test_upstream_terms.py` and others), so a submodule bump that changes them fails
+loudly.
+
+## Data flow
+
+### Build (`engine/build.py`)
+
+One run of kind `build` covers every registered source, in registration order:
+
+```
+structured:<name>:load -> register -> ingest -> compile        (each structured source)
+documents:<name>:read  -> extract  -> consolidate              (each documents source)
+align:<documents source>                                       (against all built Terms)
+merge -> snapshot
+```
+
+- **Structured path.**
+  - `load` reads the files with DuckDB (CSV/TSV, Parquet, JSON, XLSX, SQLite), normalizes
+    column names and writes the tables into `autoontology_src_<name>`. A database URL
+    source skips this step and is registered as is.
+  - `register` creates or updates the engine connection.
+  - `ingest` runs the engine's catalog ingest and embeds the catalog.
+  - `compile` runs the engine's semantic compilation, which produces Terms, column
+    attributes and semantic foreign keys.
+- **Documents path.**
+  - `read` uses the native readers (`.md`, `.txt`, `.html`) or kordoc and produces
+    section-aware chunks (tiktoken).
+  - `extract` makes one LLM call per chunk and returns concepts, relations and verbatim
+    evidence. The output is schema-validated, and evidence quotes are checked against the
+    chunk text.
+  - `consolidate` merges duplicates across chunks and documents with embedding similarity
+    plus an LLM merge judge.
+- **Align.** Each documents source is aligned against the union of all structured
+  sources' Terms: embedding retrieval, then an LLM judge, then the identity policy
+  (`identity-v2.1`, `unstructured/align.py`). Accepted `same` verdicts add the concept's
+  names to the Term's synonyms.
+- **Merge** (`ontology/model.py`). `MergedOntology` combines Terms, document concepts,
+  alignment axioms, relations and evidence into one model under `AUTOONTOLOGY_BASE_IRI`,
+  and gives every node an origin (`structured`, `document` or `aligned`).
+- **Snapshot.** The model is saved as JSON in `ontology_snapshots` with a new revision.
+
+`--source N` records the other sources' steps as skipped, but align, merge and snapshot
+still cover everything. `--resume` reuses the latest build run. Each per-source step
+stores an `inputs_sha` (the locator plus the path and sha256 of every input file), and
+`--resume` keeps a step only when that hash is unchanged. A re-run step invalidates the
+later steps of its own source and every global step. Failed chunks or documents make the
+run `failed` with a `partial` note, but the snapshot is still saved.
+
+Concurrency: a build holds a store lease on the workspace and on every source, reaps runs
+left by dead processes, and refuses to start while another build or export is active.
+
+### Export (`engine/export_job.py`)
+
+```
+collect -> serialize -> upstream -> ossie -> okf -> report
+```
+
+The export loads a snapshot; it never rebuilds the model. It writes into a temporary
+folder and swaps it into `exports/r<rev:04d>/`:
+
+- `serialize` writes `ontology.ttl`, `ontology.jsonld` and `ontology.graphml`. The Turtle
+  is checked by a parse round-trip.
+- `upstream` fetches each structured source's `model.yaml` and Ossie zip from the backend.
+- `ossie` (`export/ossie.py`) merges the upstream semantic models, writes the unified
+  ontology and the mapping, validates them against the vendored JSON Schemas
+  (`third_party/ossie`, offline `$ref` resolution) and round-trips the semantic model
+  through the engine's Ossie converter.
+- `okf` (`export/okf.py`) writes the OKF v0.2 bundle and validates it.
+- `report` writes `report.md` and `export.json`.
+
+`--format` runs only the steps that format needs and carries the other formats' entries
+over from the previous export of the same revision. A validation failure writes
+`validation.json`, keeps the previous folder untouched and fails the run.
+
+### Playground (`autoontology/playground`)
+
+The scope is always the latest snapshot. The retrieval index (`elements.py`, `index.py`)
+embeds one text per Term, concept, rule, process, relation, axiom and evidence node. It is
+rebuilt when the snapshot changes. Chat (`service.py`) retrieves the top-k elements,
+quotes them inside a delimited context block and streams the answer with citations. SQL
+is relayed to the engine. SPARQL (`sparql.py`) evaluates against the snapshot's Turtle
+in-process with rdflib, using a deadline-checking graph wrapper, a semaphore of 2 and a
+row cap, plus a keyword pre-filter and an algebra-level guard against `SERVICE`, `FROM`
+and `LOAD`.
+
+## Store tables (SQLite, `store/db.py`)
+
+| Table | Holds |
+|---|---|
+| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground). |
+| `sources` | Registered sources: name, kind (`files`, `database`, `documents`), locator, catalog database id. |
+| `source_leases` | Leases that keep builds, exports and deletes from overlapping. |
+| `runs`, `steps` | Build and export runs and their steps, with details, timings and `inputs_sha`. |
+| `file_manifests`, `semantic_baselines` | Input manifests and the catalog schema a semantic layer was compiled from. |
+| `documents`, `chunks` | Read documents (sha256, reader) and their chunks. |
+| `concepts`, `relations`, `evidence` | Extracted and consolidated document knowledge. |
+| `term_embeddings` | Cached Term passage embeddings, by text hash and model. |
+| `alignments`, `alignment_previews` | Judge verdicts with the identity policy version, and dry-run proposals. |
+| `term_alias_additions`, `term_refresh_pending` | Synonyms AutoOntology added to Terms, and Terms awaiting a refresh. |
+| `ontology_snapshots` | One row per revision: the run, sources, counts and the full model JSON. |
+| `playground_index`, `playground_index_meta` | The element vectors and the snapshot they were built from. |
+| `playground_conversations`, `playground_messages` | Stored chats, keyed by workspace. |
+
+The engine keeps its own state in Postgres: the catalog and semantic model tables in the
+`autoontology` database, the `vdb.*` vector tables, and each file source's data in
+`autoontology_src_<name>`. `config.validate_pg_database_name` refuses every other
+database name.
+
+## Provider routing
+
+The engine picks its LLM client by model name: only names starting with `openai/` use
+`ChatOpenAI`. AutoOntology therefore expands the provider settings
+(`config.expand_model_profile`) into the engine's model triplets (`DEFAULT_MODELS_*`,
+`REASONING_*`, `NON_REASONING_*`, `RERANK_*`). Every chat triplet points at the service's
+own `/v1` router:
+
+```
+engine / AutoOntology LLM call
+   model = "openai/qwen3:8b" or "openai/<model>"
+          |
+          v
+  service /v1/chat/completions  (web/providers/router.py)
+     ollama provider: forwards to AUTOONTOLOGY_OLLAMA_ENDPOINT unchanged
+                      (openai/qwen3:8b is the Ollama alias name) and adds
+                      reasoning_effort: none so JSON schemas are enforced
+     openai provider: strips one openai/ prefix, sets Authorization: Bearer
+                      <AUTOONTOLOGY_OPENAI_API_KEY>, forwards to
+                      AUTOONTOLOGY_OPENAI_BASE_URL
+```
+
+Embeddings (`EMBED_*`) go directly to Ollama or to the OpenAI-compatible base URL. The
+router redacts upstream error bodies (keys, bearer tokens) and caps their size.
+
+## Extension points
+
+| To add | Start here |
+|---|---|
+| A structured file format | `structured/loaders.py` (`SUPPORTED_SUFFIXES`, the DuckDB readers). |
+| A database type | `structured/pipeline.py` (`connection_for`, `_URL_SCHEMES`); the engine must have a connector for it. |
+| A document format | `unstructured/readers.py` (`NATIVE_EXTENSIONS`) or `unstructured/kordoc.py`. |
+| Extraction behaviour | `unstructured/prompts.py`, `unstructured/schemas.py`, `unstructured/extractor.py`. |
+| Alignment policy | `unstructured/align.py` (`apply_identity_policy`, `IDENTITY_POLICY_VERSION`). Bump the version so stored verdicts are re-judged. |
+| An export format | A module in `export/`, a step in `engine/export_job.py` (`EXPORT_STEPS`, `EXPORT_ENTRIES`, `FORMAT_ENTRIES`), and `web/runs.py` `TOP_STEPS`. |
+| A model provider | `web/providers/` (a `PassthroughProvider`), `config.py` (`CHAT_PROVIDERS`, `expand_model_profile`). |
+| A UI page | `ui/src/pages`, then `uv run autoontology tools build-ui` and commit `autoontology/web/static/dist`. |
