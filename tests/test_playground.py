@@ -1038,8 +1038,11 @@ def test_graph_links_are_encoded_and_only_for_graph_nodes():
     # chips link the Ontology page (not the removed /concepts route) and label the
     # owl:Thing / rdfs:Literal endpoints in English
     assert els["term-a b"].link == "/ontology?concept=term-a%20b"
-    assert "Literal" in els["rel-2"].text and "Thing" in els["rel-1"].text
-    assert not any("모든 것" in e.text or "값" in e.text for e in els.values())
+    # the endpoint slots of each relation text are the English labels, nothing else
+    # (structure: "관계 <subject> <predicate> <object>: <description>")
+    head = {k: els[k].text.split(":", 1)[0].split() for k in ("rel-1", "rel-2")}
+    assert head["rel-1"][1] == "Thing" and head["rel-1"][-1] == "A"
+    assert head["rel-2"][1] == "Literal" and head["rel-2"][-1] == "Literal"
     assert not any("/concepts" in e.link for e in els.values())
 
 
