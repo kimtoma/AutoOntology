@@ -13,6 +13,10 @@
         "react/set-state-in-effect": "off",
         "react/purity": "off"
       }
+    },
+    {
+      "files": ["src/i18n/index.tsx"],
+      "rules": { "react/only-export-components": "off" }
     }
   ]
 }

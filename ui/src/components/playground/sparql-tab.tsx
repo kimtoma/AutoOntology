@@ -11,6 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { fmtNumber, tx, useT } from "@/i18n"
 import { api, errorMessage } from "@/lib/api"
 
 const DEFAULT = `SELECT ?class ?label WHERE {
@@ -19,6 +20,7 @@ const DEFAULT = `SELECT ?class ?label WHERE {
 LIMIT 20`
 
 export function SparqlTab() {
+  const t = useT()
   const examples = useQuery({ queryKey: ["sparql-examples"], queryFn: api.playground.sparqlExamples,
                               staleTime: Infinity })
   const [query, setQuery] = useState(DEFAULT)
@@ -34,8 +36,8 @@ export function SparqlTab() {
           const ex = examples.data?.find((e) => e.id === id)
           if (ex) { setQuery(ex.query); run.mutate(ex.query) }
         }}>
-          <SelectTrigger className="w-full sm:w-64" aria-label="Example query" id="sparql-example">
-            <SelectValue placeholder="Pick an example query" />
+          <SelectTrigger className="w-full sm:w-64" aria-label={t("playground.sparql.example")} id="sparql-example">
+            <SelectValue placeholder={t("playground.sparql.pick")} />
           </SelectTrigger>
           <SelectContent>
             {(examples.data ?? []).map((e) => (
@@ -49,7 +51,7 @@ export function SparqlTab() {
       </div>
       <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); run.mutate(query) }}>
         <Textarea id="sparql-query" value={query} onChange={(e) => setQuery(e.target.value)} rows={10}
-                  spellCheck={false} aria-label="SPARQL query"
+                  spellCheck={false} aria-label={t("playground.sparql.label")}
                   className="font-mono text-xs leading-relaxed"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -58,11 +60,9 @@ export function SparqlTab() {
                     }
                   }} />
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
-            Prefixes owl, rdfs, rdf, skos, prov, dcterms, xsd and ao are declared. SELECT, ASK, CONSTRUCT and DESCRIBE only, 10 s limit. ⌘/Ctrl+Enter runs.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("playground.sparql.hint")}</p>
           <Button type="submit" id="sparql-run" disabled={run.isPending || !query.trim()}>
-            {run.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />} Run
+            {run.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />} {t("playground.sparql.run")}
           </Button>
         </div>
       </form>
@@ -75,14 +75,17 @@ export function SparqlTab() {
       {res && (
         <div className="grid gap-2" id="sparql-result" data-type={res.type}>
           <p className="text-xs text-muted-foreground">
-            Revision {res.revision} · <code className="break-all">{res.ttl}</code> · {res.triples.toLocaleString()} triples · {res.total.toLocaleString()}{res.truncated && "+"} results
-            {res.truncated && " (truncated)"}
+            {tx("playground.sparql.result", {
+              rev: res.revision, ttl: <code key="ttl" className="break-all">{res.ttl}</code>,
+              triples: fmtNumber(res.triples), total: `${fmtNumber(res.total)}${res.truncated ? "+" : ""}`,
+            })}
+            {res.truncated && ` ${t("playground.sparql.truncated")}`}
           </p>
           {res.type === "ASK" ? (
             <Badge variant="outline" className="w-fit">{res.boolean ? "true" : "false"}</Badge>
           ) : res.turtle !== undefined ? (
             <div className="grid gap-2">
-              <div className="flex justify-end"><CopyButton text={res.turtle} label="Copy Turtle" /></div>
+              <div className="flex justify-end"><CopyButton text={res.turtle} label={t("playground.sparql.copyTurtle")} /></div>
               <pre className="max-h-[28rem] overflow-auto rounded-md border bg-muted p-3 text-xs">{res.turtle}</pre>
             </div>
           ) : (

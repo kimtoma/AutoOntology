@@ -12,6 +12,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { conceptIdOfChip, type ElementChip } from "@/lib/api"
+import { t, tn } from "@/i18n"
 import { cell, ELEMENT_LABEL, toCsv } from "@/lib/playground"
 import { cn } from "@/lib/utils"
 
@@ -39,7 +40,7 @@ export function ChipLink({ chip, refName, className }: {
               title={title} className={CHIP_CLASS}>{body}</Link>
       )}
       {chip.graph_link && (
-        <Link to={chip.graph_link} aria-label={`Show ${chip.label} in the graph`} title="Show in graph"
+        <Link to={chip.graph_link} aria-label={t("playground.showInGraphOf", { label: chip.label })} title={t("concept.showInGraph")}
               className="rounded p-0.5 text-muted-foreground hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none">
           <Network className="size-3" aria-hidden />
         </Link>
@@ -72,7 +73,7 @@ export function CitedText({ text, citations }: {
   return <div className="whitespace-pre-wrap break-words leading-relaxed">{parts}</div>
 }
 
-export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+export function CopyButton({ text, label = t("playground.copy") }: { text: string; label?: string }) {
   const [done, setDone] = useState(false)
   return (
     <Button type="button" size="sm" variant="ghost" aria-label={label}
@@ -82,7 +83,7 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
                 window.setTimeout(() => setDone(false), 1500)
               }).catch(() => {})
             }}>
-      {done ? <Check aria-hidden /> : <Copy aria-hidden />} {done ? "Copied" : label}
+      {done ? <Check aria-hidden /> : <Copy aria-hidden />} {done ? t("playground.copied") : label}
     </Button>
   )
 }
@@ -104,7 +105,7 @@ export function ResultTable({ columns, rows, max = 200, csvName, id }: {
     <div className="grid gap-2" id={id}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span data-rows={rows.length}>
-          {rows.length.toLocaleString()} row{rows.length === 1 ? "" : "s"}{rows.length > max && ` (first ${max} shown)`}
+          {tn("playground.rows", rows.length)}{rows.length > max && ` ${t("playground.firstShown", { n: max })}`}
         </span>
         {csvName && rows.length > 0 && (
           <Button type="button" size="sm" variant="outline"

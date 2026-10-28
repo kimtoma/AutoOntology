@@ -7,6 +7,7 @@ import { BrowserRouter } from "react-router"
 import App from "@/App"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { LangProvider } from "@/i18n"
 import "@/index.css"
 
 const queryClient = new QueryClient({
@@ -21,12 +22,14 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter basename="/ui">
-          <TooltipProvider delayDuration={300}>
-            <App />
-            <Toaster richColors closeButton position="top-right" />
-          </TooltipProvider>
-        </BrowserRouter>
+        <LangProvider>
+          <BrowserRouter basename="/ui">
+            <TooltipProvider delayDuration={300}>
+              <App />
+              <Toaster richColors closeButton position="top-right" />
+            </TooltipProvider>
+          </BrowserRouter>
+        </LangProvider>
       </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>,

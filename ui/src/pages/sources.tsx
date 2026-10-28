@@ -29,6 +29,7 @@ import { keys, useSources, useStatus } from "@/hooks/queries"
 import { api, errorMessage, type Source, type SourceKind } from "@/lib/api"
 import { familyOf, FAMILY_LABEL, fmtBytes, fmtTime, KIND_LABEL, RUN_LABEL, sourceState } from "@/lib/labels"
 import { cn } from "@/lib/utils"
+import { t, tn, tx, useT } from "@/i18n"
 import { FilePreview, FolderCheck, type PickedName } from "@/components/file-preview"
 import { Code } from "@/components/provider-card"
 import {
@@ -54,7 +55,7 @@ export function KindBadge({ kind }: { kind: string }) {
 
 function LastRun({ s }: { s: Source }) {
   if (s.active_run) {
-    return <StatusChip status="running" label={`${RUN_LABEL[s.active_run.kind] ?? s.active_run.kind} running`} />
+    return <StatusChip status="running" label={t("sources.runRunning", { kind: RUN_LABEL[s.active_run.kind] ?? s.active_run.kind })} />
   }
   if (!s.last_run) return <span className="text-muted-foreground">-</span>
   return (
@@ -69,6 +70,7 @@ function LastRun({ s }: { s: Source }) {
 }
 
 export default function SourcesPage() {
+  const t = useT()
   const { data: sources, isPending, error, refetch } = useSources()
   const [adding, setAdding] = useState(false)
   const [removing, setRemoving] = useState<Source | null>(null)
@@ -76,20 +78,21 @@ export default function SourcesPage() {
   return (
     <>
       <PageHeader
-        title="Sources"
-        description={<>Register <b>structured</b> data (tables in files or a database) and
-          {" "}<b>documents</b> (policies, manuals, reports, scans). One
-          {" "}<Link to="/build" className="underline underline-offset-4">build</Link> turns all of
-          them into a single ontology.</>}
+        title={t("sources.title")}
+        description={tx("sources.description", {
+          structured: <b key="s">{t("sources.description.structured")}</b>,
+          documents: <b key="d">{t("sources.description.documents")}</b>,
+          build: <Link key="b" to="/build" className="underline underline-offset-4">{t("sources.description.build")}</Link>,
+        })}
         actions={<Button onClick={() => setAdding(true)} id="btn-new-source">
-          <Plus aria-hidden /> Add source</Button>}
+          <Plus aria-hidden /> {t("sources.add")}</Button>}
       />
       {error ? <ErrorState error={error} onRetry={() => refetch()} />
         : isPending ? <Skeleton className="h-48 w-full" />
         : !sources.length ? (
-          <EmptyState icon={Database} title="No sources yet"
-                      hint="Add a folder of CSV files, a database URL or a folder of documents."
-                      action={<Button onClick={() => setAdding(true)}><Plus aria-hidden /> Add source</Button>} />
+          <EmptyState icon={Database} title={t("sources.empty")}
+                      hint={t("sources.empty.hint")}
+                      action={<Button onClick={() => setAdding(true)}><Plus aria-hidden /> {t("sources.add")}</Button>} />
         ) : (
           <>
             <Card className="py-0">
@@ -97,12 +100,12 @@ export default function SourcesPage() {
                 <Table id="sources-table">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-4">Name</TableHead>
-                      <TableHead>Kind</TableHead>
-                      <TableHead className="hidden lg:table-cell">Location</TableHead>
-                      <TableHead className="hidden md:table-cell">State</TableHead>
-                      <TableHead className="hidden sm:table-cell">Last run</TableHead>
-                      <TableHead className="w-12 pr-4"><span className="sr-only">Actions</span></TableHead>
+                      <TableHead className="pl-4">{t("sources.col.name")}</TableHead>
+                      <TableHead>{t("sources.col.kind")}</TableHead>
+                      <TableHead className="hidden lg:table-cell">{t("sources.col.location")}</TableHead>
+                      <TableHead className="hidden md:table-cell">{t("sources.col.state")}</TableHead>
+                      <TableHead className="hidden sm:table-cell">{t("sources.col.lastRun")}</TableHead>
+                      <TableHead className="w-12 pr-4"><span className="sr-only">{t("sources.col.actions")}</span></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -117,7 +120,7 @@ export default function SourcesPage() {
                           <div className="flex flex-col items-start gap-1">
                             <KindBadge kind={s.kind} />
                             <span className="text-xs text-muted-foreground">
-                              {KIND_LABEL[s.kind]}{s.uploaded ? " · uploaded" : ""}
+                              {KIND_LABEL[s.kind]}{s.uploaded ? t("sources.uploaded") : ""}
                             </span>
                           </div>
                         </TableCell>
@@ -127,7 +130,7 @@ export default function SourcesPage() {
                         <TableCell className="hidden md:table-cell">{sourceState(s)}</TableCell>
                         <TableCell className="hidden sm:table-cell"><LastRun s={s} /></TableCell>
                         <TableCell className="pr-4 text-right">
-                          <Button variant="ghost" size="icon" aria-label={`Delete ${s.name}`}
+                          <Button variant="ghost" size="icon" aria-label={t("sources.delete.aria", { name: s.name })}
                                   data-delete={s.name} disabled={!!s.active_run}
                                   onClick={() => setRemoving(s)}>
                             <Trash2 aria-hidden />
@@ -140,8 +143,12 @@ export default function SourcesPage() {
               </CardContent>
             </Card>
             <p className="mt-4 text-sm text-muted-foreground">
-              Next: <Link to="/build" className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4">
-                <Hammer className="size-3.5" aria-hidden /> build the ontology</Link> from every source.
+              {tx("sources.next", {
+                link: (
+                  <Link key="build" to="/build" className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4">
+                    <Hammer className="size-3.5" aria-hidden /> {t("sources.next.link")}</Link>
+                ),
+              })}
             </p>
           </>
         )}
@@ -164,6 +171,7 @@ export function NewSourceDialog({ open, onOpenChange }: {
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const t = useT()
   const qc = useQueryClient()
   const [name, setName] = useState("")
   const [family, setFamily] = useState<Family>("structured")
@@ -199,19 +207,19 @@ export function NewSourceDialog({ open, onOpenChange }: {
   const add = useMutation({
     mutationFn: () => {
       if (upload) {
-        if (!files.length) throw new Error("Choose at least one file")
+        if (!files.length) throw new Error(t("sources.err.noFiles"))
         if (unsupported.length) {
-          throw new Error(`Remove the unsupported file${unsupported.length === 1 ? "" : "s"} first: ${unsupported.map((c) => c.name).join(", ")}`)
+          throw new Error(tn("sources.err.unsupported", unsupported.length, { names: unsupported.map((c) => c.name).join(", ") }))
         }
         if (tooLarge) {
-          throw new Error(`The files total ${fmtBytes(totalBytes)}, over the ${limitMb} MB limit (AUTOONTOLOGY_UPLOAD_MAX_MB)`)
+          throw new Error(t("sources.err.tooLarge", { size: fmtBytes(totalBytes), mb: limitMb }))
         }
         return api.addSourceUpload(name.trim(), kind as "files" | "documents", files)
       }
       return api.addSourceLocator({ name: name.trim(), kind, locator: locator.trim(), recursive })
     },
     onSuccess: (s) => {
-      toast.success(`Added source “${s.name}”`, { description: "Build the ontology to include it." })
+      toast.success(t("sources.added", { name: s.name }), { description: t("sources.added.next") })
       qc.invalidateQueries({ queryKey: keys.sources })
       onOpenChange(false)
       reset()
@@ -230,52 +238,52 @@ export function NewSourceDialog({ open, onOpenChange }: {
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-lg">
         <form onSubmit={submit} className="grid min-w-0 gap-4" id="form-source">
           <DialogHeader>
-            <DialogTitle>Add source</DialogTitle>
-            <DialogDescription>Upload files, point at a folder, or give a database URL.</DialogDescription>
+            <DialogTitle>{t("sources.dialog.title")}</DialogTitle>
+            <DialogDescription>{t("sources.dialog.description")}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label>Kind</Label>
+            <Label>{t("sources.dialog.kind")}</Label>
             <Tabs value={family} onValueChange={(v) => { setFamily(v as Family); setChecked([]) }}>
               <TabsList className="w-full" id="source-kind">
-                <TabsTrigger value="structured" data-family="structured"><Database aria-hidden /> Structured</TabsTrigger>
-                <TabsTrigger value="documents" data-family="documents"><FileText aria-hidden /> Documents</TabsTrigger>
+                <TabsTrigger value="structured" data-family="structured"><Database aria-hidden /> {t("family.structured")}</TabsTrigger>
+                <TabsTrigger value="documents" data-family="documents"><FileText aria-hidden /> {t("family.documents")}</TabsTrigger>
               </TabsList>
             </Tabs>
             <FormatHint family={family} formats={formats} kordoc={!!kordoc} ocr={!!ocr} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="source-name">Name</Label>
+            <Label htmlFor="source-name">{t("sources.dialog.name")}</Label>
             <Input id="source-name" required value={name} onChange={(e) => setName(e.target.value)}
                    pattern={family === "documents" ? "[a-z0-9][a-z0-9_\\-]*" : "[a-z0-9_]+"} autoComplete="off"
-                   placeholder={family === "documents" ? "e.g. hanbit-docs (a-z, 0-9, _ and -)" : "e.g. hanbit (a-z, 0-9 and _)"} />
+                   placeholder={family === "documents" ? t("sources.dialog.name.docs") : t("sources.dialog.name.structured")} />
           </div>
           <div className="grid gap-2">
-            <Label>From</Label>
+            <Label>{t("sources.dialog.from")}</Label>
             <Tabs value={effectiveMode} onValueChange={(v) => setMode(v as Mode)}>
               <TabsList className="w-full">
-                <TabsTrigger value="upload">Upload</TabsTrigger>
-                <TabsTrigger value="path">Folder</TabsTrigger>
-                {family === "structured" && <TabsTrigger value="database">DB URL</TabsTrigger>}
+                <TabsTrigger value="upload">{t("sources.dialog.upload")}</TabsTrigger>
+                <TabsTrigger value="path">{t("sources.dialog.folder")}</TabsTrigger>
+                {family === "structured" && <TabsTrigger value="database">{t("sources.dialog.db")}</TabsTrigger>}
               </TabsList>
             </Tabs>
           </div>
           {upload ? (
             <div className="grid gap-2">
-              <Label htmlFor="source-files">Files</Label>
+              <Label htmlFor="source-files">{t("sources.dialog.files")}</Label>
               <Input id="source-files" type="file" multiple accept={acceptList(formats, family) || undefined}
                      onChange={(e) => setFiles([...(e.target.files ?? [])])} />
               <p className={tooLarge ? "text-xs text-destructive" : "text-xs text-muted-foreground"}
                  id="upload-limit">
-                {files.length > 0 && `${files.length} selected · ${fmtBytes(totalBytes)} total · `}
-                up to {limitMb} MB per upload
+                {files.length > 0 && t("sources.dialog.selected", { n: files.length, size: fmtBytes(totalBytes) })}
+                {t("sources.dialog.limit", { mb: limitMb })}
               </p>
               <FilePreview checks={fileChecks} />
               {unsupported.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-destructive" role="alert" id="unsupported-files">
-                  <span className="min-w-0 flex-1">The service refuses an upload with unsupported files.</span>
+                  <span className="min-w-0 flex-1">{t("sources.dialog.refuses")}</span>
                   <Button type="button" size="sm" variant="outline"
                           onClick={() => setFiles(files.filter((f) => classifyFile(f.name, f.size, family, formats, engines).state !== "unsupported"))}>
-                    Remove {unsupported.length} unsupported
+                    {t("sources.dialog.removeUnsupported", { n: unsupported.length })}
                   </Button>
                 </div>
               )}
@@ -283,21 +291,21 @@ export function NewSourceDialog({ open, onOpenChange }: {
           ) : (
             <>
               <div className="grid gap-2">
-                <Label htmlFor="source-locator">{effectiveMode === "database" ? "Database URL" : "Folder on the server"}</Label>
+                <Label htmlFor="source-locator">{effectiveMode === "database" ? t("sources.dialog.dbUrl") : t("sources.dialog.serverFolder")}</Label>
                 <Input id="source-locator" required value={locator}
                        onChange={(e) => setLocator(e.target.value)} autoComplete="off"
                        className="font-mono text-xs"
                        placeholder={effectiveMode === "database" ? "postgresql://user:pass@host:5432/db"
                          : "/absolute/path/to/folder"} />
                 {effectiveMode === "path" && (
-                  <p className="text-xs text-muted-foreground">The path of a folder (or one file) on the machine that runs the service. Nothing is uploaded: the service reads it in place.</p>
+                  <p className="text-xs text-muted-foreground">{t("sources.dialog.serverFolder.hint")}</p>
                 )}
               </div>
               {effectiveMode === "path" && (
                 <>
                   <div className="flex items-center gap-2">
                     <Switch id="source-recursive" checked={recursive} onCheckedChange={setRecursive} />
-                    <Label htmlFor="source-recursive">Include subfolders</Label>
+                    <Label htmlFor="source-recursive">{t("sources.dialog.recursive")}</Label>
                   </div>
                   <FolderCheck recursive={recursive} onNames={setChecked} />
                   <FilePreview checks={pathChecks} />
@@ -307,10 +315,10 @@ export function NewSourceDialog({ open, onOpenChange }: {
           )}
           {error && <p role="alert" className="text-sm break-words text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => { onOpenChange(false); reset() }}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => { onOpenChange(false); reset() }}>{t("common.cancel")}</Button>
             <Button type="submit" disabled={add.isPending || (upload && (tooLarge || unsupported.length > 0))}>
               {add.isPending && <Loader2 className="animate-spin" aria-hidden />}
-              {add.isPending ? "Adding…" : "Add"}
+              {add.isPending ? t("sources.dialog.adding") : t("sources.dialog.add")}
             </Button>
           </DialogFooter>
         </form>
@@ -327,74 +335,74 @@ function FormatHint({ family, formats, kordoc, ocr }: {
   kordoc: boolean
   ocr: boolean
 }) {
+  const t = useT()
   const by = extensionsByEngine(formats, family)
-  if (!formats) return <p className="text-xs text-muted-foreground" id="source-kind-hint">Checking the supported formats…</p>
+  if (!formats) return <p className="text-xs text-muted-foreground" id="source-kind-hint">{t("sources.hint.checking")}</p>
   if (family === "structured") {
     return (
       <p className="text-xs text-muted-foreground" id="source-kind-hint">
-        Tables: {extLabel(by.native)} (one table per file, per sheet or per SQLite table; the first row
-        is the header), or a PostgreSQL database URL.
+        {t("sources.hint.tables", { exts: extLabel(by.native) })}
       </p>
     )
   }
   return (
     <div className="grid gap-1 text-xs text-muted-foreground" id="source-kind-hint">
-      <p>Read directly: {extLabel(by.native)}.</p>
+      <p>{t("sources.hint.native", { exts: extLabel(by.native) })}</p>
       <p>
-        With kordoc{kordoc ? " (installed)" : ""}: {extLabel(by.kordoc)}.
-        {!kordoc && <> These need kordoc: <Code>{KORDOC_INSTALL}</Code></>}
+        {t(kordoc ? "sources.hint.kordocInstalled" : "sources.hint.kordoc", { exts: extLabel(by.kordoc) })}
+        {!kordoc && tx("sources.hint.kordocNeeded", { cmd: <Code key="cmd">{KORDOC_INSTALL}</Code> })}
       </p>
       <p>
-        Images, read by OCR{kordoc && ocr ? " (models ready)" : ""}: {extLabel(by["kordoc-ocr"])}.
-        {kordoc && !ocr && <> The OCR models are missing: <Code>{KORDOC_INSTALL}</Code></>}
-        {!kordoc && <> Images need kordoc and its OCR models: <Code>{KORDOC_INSTALL}</Code></>}
+        {t(kordoc && ocr ? "sources.hint.imagesReady" : "sources.hint.images", { exts: extLabel(by["kordoc-ocr"]) })}
+        {kordoc && !ocr && tx("sources.hint.ocrMissing", { cmd: <Code key="cmd">{KORDOC_INSTALL}</Code> })}
+        {!kordoc && tx("sources.hint.imagesNeedKordoc", { cmd: <Code key="cmd">{KORDOC_INSTALL}</Code> })}
       </p>
     </div>
   )
 }
 
 function DeleteSourceDialog({ source, onClose }: { source: Source | null; onClose: () => void }) {
+  const t = useT()
   const qc = useQueryClient()
   const [dropDb, setDropDb] = useState(false)
   const remove = useMutation({
     mutationFn: (s: Source) => api.deleteSource(s.name, s.kind === "files" && dropDb),
     onSuccess: (r) => {
-      toast.success(`Deleted source “${r.removed}”`, {
-        description: r.messages.length ? r.messages.join(" · ") : "Rebuild to drop it from the ontology.",
+      toast.success(t("sources.delete.ok", { name: r.removed }), {
+        description: r.messages.length ? r.messages.join(" · ") : t("sources.delete.rebuild"),
       })
       setDropDb(false)  // a prop-driven close fires no onOpenChange
       onClose()
     },
-    onError: (e) => toast.error("Delete failed", { description: errorMessage(e) }),
+    onError: (e) => toast.error(t("sources.delete.failed"), { description: errorMessage(e) }),
     onSettled: () => qc.invalidateQueries({ queryKey: keys.sources }),
   })
-  const what = source?.kind === "documents" ? "its documents, chunks, concepts, relations and evidence"
-    : "its upstream connection, ingested graph and run history"
+  const what = source?.kind === "documents" ? t("sources.delete.what.docs") : t("sources.delete.what.files")
   return (
     <AlertDialog open={!!source} onOpenChange={(o) => { if (!o && !remove.isPending) { onClose(); setDropDb(false) } }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete source “{source?.name}”?</AlertDialogTitle>
+          <AlertDialogTitle>{t("sources.delete.title", { name: source?.name })}</AlertDialogTitle>
           <AlertDialogDescription>
-            This also deletes {what}. It cannot be undone.
-            {remove.isPending && " Waiting for the graph cleanup can take up to 2 minutes."}
+            {t("sources.delete.body", { what })}
+            {remove.isPending && t("sources.delete.wait")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {source?.kind === "files" && (
           <div className="flex items-start gap-3 rounded-md border p-3">
             <Switch id="drop-db" checked={dropDb} onCheckedChange={setDropDb} />
             <Label htmlFor="drop-db" className="grid gap-1 leading-snug">
-              <span>Also drop the database</span>
+              <span>{t("sources.delete.dropDb")}</span>
               <span className="font-mono text-xs font-normal break-all text-muted-foreground">{source.database}</span>
             </Label>
           </div>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={remove.isPending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={remove.isPending}>{t("common.cancel")}</AlertDialogCancel>
           <Button variant="destructive" disabled={remove.isPending}
                   onClick={() => source && remove.mutate(source)}>
             {remove.isPending && <Loader2 className="animate-spin" aria-hidden />}
-            {remove.isPending ? "Deleting…" : "Delete"}
+            {remove.isPending ? t("sources.delete.deleting") : t("sources.delete.button")}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

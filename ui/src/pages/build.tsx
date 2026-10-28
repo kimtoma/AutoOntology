@@ -23,6 +23,7 @@ import { keys, useOntology, useSources } from "@/hooks/queries"
 import { api, errorMessage, isNoSnapshot, type RunRequest, type Source } from "@/lib/api"
 import { fmtSeconds, fmtTime, groupSteps, progressText, RUN_LABEL, runSeconds, sourceState } from "@/lib/labels"
 import { KindBadge } from "@/pages/sources"
+import { t, tn, tx, useT } from "@/i18n"
 
 function useStartRun(onStarted: (runId: string) => void) {
   const qc = useQueryClient()
@@ -34,7 +35,7 @@ function useStartRun(onStarted: (runId: string) => void) {
       qc.invalidateQueries({ queryKey: keys.runs })
     },
     onError: (e, body) =>
-      toast.error(`${RUN_LABEL[body.kind]} did not start`, { description: errorMessage(e) }),
+      toast.error(t("home.runFailed", { kind: RUN_LABEL[body.kind] }), { description: errorMessage(e) }),
   })
 }
 
@@ -47,6 +48,7 @@ function BuildOptionsDialog({ open, sources, pending, onClose, onStart }: {
   onClose: () => void
   onStart: (body: RunRequest) => void
 }) {
+  const t = useT()
   const [picked, setPicked] = useState<string[]>([])
   const [resume, setResume] = useState(false)
   return (
@@ -58,16 +60,15 @@ function BuildOptionsDialog({ open, sources, pending, onClose, onStart }: {
                 onStart({ kind: "build", sources: picked.length ? picked : null, resume })
               }}>
           <DialogHeader>
-            <DialogTitle>Build options</DialogTitle>
+            <DialogTitle>{t("build.opts.title")}</DialogTitle>
             <DialogDescription>
-              The same options as <code className="rounded bg-muted px-1">uv run autoontology build</code>.
+              {tx("build.opts.description", { cmd: <code key="cmd" className="rounded bg-muted px-1">uv run autoontology build</code> })}
             </DialogDescription>
           </DialogHeader>
           <fieldset className="grid gap-2">
-            <legend className="mb-1 text-sm font-medium">Rebuild only these sources (--source)</legend>
+            <legend className="mb-1 text-sm font-medium">{t("build.opts.only")}</legend>
             <p className="text-xs text-muted-foreground">
-              None picked: every source. The other sources keep their last results; align, merge and
-              snapshot always cover all of them.
+              {t("build.opts.only.hint")}
             </p>
             {sources.map((s) => (
               <div key={s.name} className="flex items-center gap-3">
@@ -83,17 +84,17 @@ function BuildOptionsDialog({ open, sources, pending, onClose, onStart }: {
           <div className="flex items-start gap-3">
             <Switch id="opt-resume" checked={resume} onCheckedChange={setResume} />
             <Label htmlFor="opt-resume" className="grid gap-0.5 leading-snug">
-              <span>Resume (--resume)</span>
+              <span>{t("build.opts.resume")}</span>
               <span className="text-xs font-normal text-muted-foreground">
-                Continue the latest build: steps that succeeded and whose inputs did not change are kept
+                {t("build.opts.resume.hint")}
               </span>
             </Label>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Close</Button>
+            <Button type="button" variant="outline" onClick={onClose}>{t("common.close")}</Button>
             <Button type="submit" disabled={pending}>
               {pending ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />}
-              Build
+              {t("build.opts.build")}
             </Button>
           </DialogFooter>
         </form>
@@ -107,6 +108,7 @@ function Pipeline({ sources, onStarted, busy }: {
   onStarted: (id: string) => void
   busy: boolean
 }) {
+  const t = useT()
   const start = useStartRun(onStarted)
   const [options, setOptions] = useState(false)
   const ontology = useOntology()
@@ -116,42 +118,40 @@ function Pipeline({ sources, onStarted, busy }: {
     <div className="grid gap-4 md:grid-cols-2" id="pipeline">
       <Card className="gap-3">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base"><Hammer className="size-4" aria-hidden /> Build ontology</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base"><Hammer className="size-4" aria-hidden /> {t("build.card.title")}</CardTitle>
           <CardDescription>
-            {structured} structured and {documents} document source{documents === 1 ? "" : "s"}.
-            {" "}Tables: load, ingest rows, compile business concepts. Documents: read, extract concepts,
-            merge duplicates. Then match document concepts to table concepts, build the unified
-            ontology and save a revision.
+            {tn("build.card.counts", documents, { structured })}
+            {" "}{t("build.card.body")}
           </CardDescription>
         </CardHeader>
         <CardFooter className="flex flex-wrap gap-2">
           <Button id="btn-build" disabled={busy || start.isPending}
                   onClick={() => start.mutate({ kind: "build" })}>
             {start.isPending && start.variables?.kind === "build"
-              ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />} Build ontology
+              ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />} {t("build.card.button")}
           </Button>
           <Button variant="outline" id="btn-build-options" disabled={busy} onClick={() => setOptions(true)}>
-            <SlidersHorizontal aria-hidden /> Options
+            <SlidersHorizontal aria-hidden /> {t("build.options")}
           </Button>
         </CardFooter>
       </Card>
       <Card className="gap-3">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base"><Download className="size-4" aria-hidden /> Export</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base"><Download className="size-4" aria-hidden /> {t("build.export.title")}</CardTitle>
           <CardDescription>
             {ontology.data
-              ? <>Writes revision {ontology.data.revision} as Turtle, JSON-LD, GraphML, an Apache Ossie bundle and an OKF bundle.</>
-              : isNoSnapshot(ontology.error) ? "Nothing to export yet: build the ontology first."
-                : "Writes the latest revision as Turtle, JSON-LD, GraphML, Ossie and OKF."}
+              ? t("build.export.revision", { revision: ontology.data.revision })
+              : isNoSnapshot(ontology.error) ? t("build.export.none")
+                : t("build.export.latest")}
           </CardDescription>
         </CardHeader>
         <CardFooter className="flex flex-wrap gap-2">
           <Button variant="secondary" id="btn-export" disabled={busy || start.isPending || !ontology.data}
                   onClick={() => start.mutate({ kind: "export" })}>
             {start.isPending && start.variables?.kind === "export"
-              ? <Loader2 className="animate-spin" aria-hidden /> : <Download aria-hidden />} Export
+              ? <Loader2 className="animate-spin" aria-hidden /> : <Download aria-hidden />} {t("build.export.button")}
           </Button>
-          <Button variant="ghost" asChild><Link to="/exports">Open exports</Link></Button>
+          <Button variant="ghost" asChild><Link to="/exports">{t("build.export.open")}</Link></Button>
         </CardFooter>
       </Card>
       <BuildOptionsDialog key={String(options)} open={options} sources={sources} pending={start.isPending}
@@ -162,6 +162,7 @@ function Pipeline({ sources, onStarted, busy }: {
 }
 
 export default function BuildPage() {
+  const t = useT()
   const [params, setParams] = useSearchParams()
   const runId = params.get("run")
   const open = (id: string | null) => setParams(id ? { run: id } : {}, { replace: !id })
@@ -171,19 +172,18 @@ export default function BuildPage() {
 
   return (
     <>
-      <PageHeader title="Build"
-                  description="One pipeline turns every registered source into the unified ontology; export writes it out." />
+      <PageHeader title={t("build.title")} description={t("build.description")} />
       <section aria-labelledby="h-actions" className="mb-8">
-        <h2 id="h-actions" className="sr-only">Start</h2>
+        <h2 id="h-actions" className="sr-only">{t("build.start")}</h2>
         {sources.error ? <ErrorState error={sources.error} onRetry={() => sources.refetch()} />
           : sources.isPending ? <div className="grid gap-4 md:grid-cols-2"><Skeleton className="h-40" /><Skeleton className="h-40" /></div>
           : !sources.data.length ? (
-            <EmptyState title="Nothing to build yet"
-                        hint={<>Add a <Link to="/sources" className="underline underline-offset-4">source</Link> first.</>} />
+            <EmptyState title={t("build.empty")}
+                        hint={tx("build.empty.hint", { link: <Link key="src" to="/sources" className="underline underline-offset-4">{t("build.empty.link")}</Link> })} />
           ) : (
             <>
               <Pipeline sources={sources.data} onStarted={open} busy={busy} />
-              <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-label="Sources">
+              <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-label={t("build.sources")}>
                 {sources.data.map((s) => (
                   <li key={s.name} className="inline-flex items-center gap-1.5">
                     <span className="font-medium text-foreground">{s.name}</span> {sourceState(s)}
@@ -195,28 +195,28 @@ export default function BuildPage() {
       </section>
 
       <section aria-labelledby="h-history">
-        <h2 id="h-history" className="mb-3 text-lg font-semibold">Runs</h2>
+        <h2 id="h-history" className="mb-3 text-lg font-semibold">{t("build.runs")}</h2>
         {runs.error ? <ErrorState error={runs.error} onRetry={() => runs.refetch()} />
           : runs.isPending ? <Skeleton className="h-64" />
-          : !runs.data.length ? <EmptyState icon={History} title="No runs yet"
-                                            hint="Start a build above." />
+          : !runs.data.length ? <EmptyState icon={History} title={t("build.runs.empty")}
+                                            hint={t("build.runs.empty.hint")} />
           : (
             <Card className="py-0">
               <CardContent className="px-0">
                 <Table id="runs-table" className="table-fixed">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[45%] pl-4 sm:w-[32%]">Run</TableHead>
-                      <TableHead className="w-28">Status</TableHead>
-                      <TableHead className="hidden w-40 sm:table-cell">Started</TableHead>
-                      <TableHead className="hidden pr-4 md:table-cell">Steps</TableHead>
+                      <TableHead className="w-[45%] pl-4 sm:w-[32%]">{t("build.col.run")}</TableHead>
+                      <TableHead className="w-28">{t("build.col.status")}</TableHead>
+                      <TableHead className="hidden w-40 sm:table-cell">{t("build.col.started")}</TableHead>
+                      <TableHead className="hidden pr-4 md:table-cell">{t("build.col.steps")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {runs.data.map((r) => (
                       <TableRow key={r.id} data-run-id={r.id} data-kind={r.kind} tabIndex={0}
                                 className="cursor-pointer"
-                                aria-label={`Open run ${r.id}`}
+                                aria-label={t("build.openRun", { id: r.id })}
                                 onClick={() => open(r.id)}
                                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(r.id) } }}>
                         <TableCell className="pl-4 whitespace-normal">

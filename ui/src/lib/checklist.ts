@@ -1,6 +1,7 @@
 /* The Home page's five steps, computed from the live API answers. Pure: the page feeds it
    the query results, the tests feed it fixtures. */
 
+import { getLang, t } from "@/i18n/core"
 import type { ExportEntry, OntologySummary, Run, SampleSet, ServiceStatus, Source } from "@/lib/api"
 
 export type StepId = "models" | "sources" | "build" | "explore" | "export"
@@ -82,14 +83,14 @@ export const allDone = (states: Record<StepId, StepState>) =>
 export function loginCommand(status: ServiceStatus): { label: string; command: string } | null {
   const chat = status.providers?.chat
   const name = chat?.name ?? status.providers?.chat_provider
-  if (name === "claude") return { label: "Log in", command: "claude auth login" }
-  if (name === "codex") return { label: "Log in", command: "codex login" }
+  if (name === "claude") return { label: t("provider.login.claude"), command: "claude auth login" }
+  if (name === "codex") return { label: t("provider.login.claude"), command: "codex login" }
   if (name === "ollama") {
-    if (chat && !chat.available) return { label: "Start Ollama", command: "ollama serve" }
-    return { label: "Pull the models", command: "uv run autoontology setup" }
+    if (chat && !chat.available) return { label: t("provider.login.ollamaStart"), command: "ollama serve" }
+    return { label: t("provider.login.ollamaPull"), command: "uv run autoontology setup" }
   }
   if (name === "openai") {
-    return { label: "Set the endpoint", command: "uv run autoontology provider use openai" }
+    return { label: t("provider.login.openai"), command: "uv run autoontology provider use openai" }
   }
   return null
 }
@@ -111,7 +112,16 @@ export const LAST_SAMPLE_KEY = "autoontology.sampleSet"
 /** The expected build time of *set* with *provider*, e.g. "~5 min (estimate)". */
 export function expectedTime(set: SampleSet | undefined, provider: string | undefined): string | null {
   const d = provider ? set?.durations?.[provider] : undefined
-  return d ? `${d.text}${d.measured ? "" : " (estimate)"}` : null
+  if (!d) return null
+  const text = localDuration(d.text)
+  return d.measured ? text : t("eta.estimate", { text })
+}
+
+/** The service's duration text ("~8 min", "~20-30 min", "~1 h") in the UI language. */
+export function localDuration(text: string): string {
+  if (getLang() !== "ko") return text
+  return text.replace(/\s*\bmin\b/g, t("unit.min")).replace(/\s*\bh\b/g, t("unit.h"))
+    .replace(/\s*\bs\b/g, t("unit.s"))
 }
 
 const sampleKind = (kind: string) => (kind === "documents" ? "documents" : "files")

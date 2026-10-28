@@ -5,7 +5,8 @@ built and exported once).
 
 Run with: AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_ui_smoke.py
 (browsers: ``uv run playwright install chromium``). With ``AUTOONTOLOGY_SCREENSHOTS=1`` the
-last test also rewrites ``docs/screenshots/{home,ontology,graph,exports}.png`` at 1280 px.
+last test also rewrites ``docs/screenshots/{home,ontology,graph,exports}.png`` and their Korean
+``*.ko.png`` versions at 1280 px.
 """
 
 import json
@@ -84,9 +85,9 @@ def browser():
         browser.close()
 
 
-def new_page(browser, viewport):
+def new_page(browser, viewport, locale="en-US"):
     width, height = viewport
-    page = browser.new_page(viewport={"width": width, "height": height}, locale="en-US")
+    page = browser.new_page(viewport={"width": width, "height": height}, locale=locale)
     errors = []
     page.on("pageerror", lambda exc: errors.append(str(exc)))
     page.errors = errors
@@ -388,7 +389,15 @@ def test_build_page_lists_runs_and_streams_the_log(live, browser):
     assert any(g.startswith("structured:") for g in groups), groups
     assert any(g.startswith("documents:") for g in groups), groups
     assert {"align", "merge", "snapshot"} <= set(groups), groups
-    steps = page.locator("#live-steps").inner_text()
+    # plain labels; the raw step ids only in their own muted mono spans
+    assert page.locator("#live-steps [data-step-id]").count() > 0
+    steps = page.locator("#live-steps").evaluate(
+        "el => { const c = el.cloneNode(true); c.querySelectorAll('[data-step-id]')"
+        ".forEach(e => e.remove()); document.body.appendChild(c); const t = c.innerText;"
+        " c.remove(); return t }"
+    )
+    ids = page.locator("#live-steps [data-step-id]").all_inner_texts()
+    assert any(i.startswith("structured:") for i in ids) and "compile" in ids, ids
     for label in (
         "Load tables",
         "Compile business concepts (LLM)",
@@ -525,6 +534,63 @@ def test_exports_show_ossie_and_okf_with_validation(live, browser):
     page.close()
 
 
+#: Korean headings of the pages checked in Korean (?lang=ko)
+KO_PAGES = {"": "시작하기", "sources": "소스", "build": "빌드"}
+
+
+@pytest.mark.parametrize("name", ["mobile", "desktop"])
+def test_korean_pages_fit(live, browser, name):
+    url, _, _ = live
+    page = new_page(browser, VIEWPORTS[name])
+    for path, heading in KO_PAGES.items():
+        page.goto(f"{url}/ui/{path}?lang=ko")
+        page.locator("main h1", has_text=heading).wait_for()
+        assert page.evaluate("document.documentElement.lang") == "ko"
+        if path == "":
+            page.locator("[data-step=export]:not([data-state=checking])").wait_for(timeout=15000)
+            assert page.locator("#checklist-progress").inner_text().startswith("5단계 중")
+        if path == "build":
+            page.locator("#runs-table").wait_for()
+        assert_fits(page, f"/{path}?lang=ko at {name}")
+    # the sidebar labels (open on mobile) are Korean too and fit
+    if name == "mobile":
+        page.get_by_role("button", name="메뉴 열기/닫기").click()
+    nav = page.locator("[data-nav=home]").first
+    nav.wait_for()
+    assert nav.inner_text().strip() == "시작하기"
+    assert page.evaluate(NO_HSCROLL)
+    # the choice is remembered: a reload without ?lang= stays Korean
+    page.goto(f"{url}/ui/sources")
+    page.locator("main h1", has_text="소스").wait_for()
+    assert page.errors == []
+    page.close()
+
+
+def test_lang_toggle_switches_without_reload(live, browser):
+    url, _, _ = live
+    page = new_page(browser, VIEWPORTS["desktop"])
+    page.goto(f"{url}/ui/?lang=en")
+    page.locator("main h1", has_text="Get started").wait_for()
+    page.evaluate("window.__noReload = 1")
+    page.locator("#lang-toggle").click()
+    page.locator("[data-lang-option=ko]").click()
+    page.locator("main h1", has_text="시작하기").wait_for()
+    assert page.evaluate("window.__noReload") == 1, "the page reloaded"
+    assert page.evaluate("document.documentElement.lang") == "ko"
+    assert page.evaluate("localStorage.getItem('autoontology.lang')") == "ko"
+    assert page.locator("#lang-toggle").get_attribute("aria-label") == "언어: 한국어"
+    # keyboard: open the menu with Enter, move to English, choose it
+    page.locator("#lang-toggle").focus()
+    page.keyboard.press("Enter")
+    page.locator("[data-lang-option=en]").wait_for()
+    page.keyboard.press("ArrowUp")
+    page.keyboard.press("Enter")
+    page.locator("main h1", has_text="Get started").wait_for()
+    assert page.evaluate("window.__noReload") == 1
+    assert page.errors == []
+    page.close()
+
+
 @pytest.mark.skipif(
     not os.environ.get("AUTOONTOLOGY_SCREENSHOTS"), reason="AUTOONTOLOGY_SCREENSHOTS unset"
 )
@@ -539,8 +605,10 @@ def test_screenshots(live, browser):
         "graph": ("/ui/graph", "#graph-canvas canvas"),
         "exports": ("/ui/exports", "[data-validation=okf][data-ok=true]"),
     }
-    for name, (path, ready) in shots.items():
-        page.goto(f"{url}{path}")
+    for (name, (path, ready)), lang in [
+        (shot, lang) for lang in ("en", "ko") for shot in shots.items()
+    ]:
+        page.goto(f"{url}{path}?lang={lang}")
         page.locator(ready).first.wait_for(timeout=30000)
         if name == "graph":
             page.wait_for_function(f"{STATS} && {STATS}.nodes > 0", timeout=30000)
@@ -548,7 +616,7 @@ def test_screenshots(live, browser):
         if name == "exports":
             page.locator("[data-dir=ossie] > summary").first.click()
         page.wait_for_timeout(500)
-        out = SCREENSHOTS / f"{name}.png"
+        out = SCREENSHOTS / (f"{name}.png" if lang == "en" else f"{name}.{lang}.png")
         page.screenshot(path=str(out))
         assert out.stat().st_size <= 300 * 1024, (out, out.stat().st_size)
     assert page.errors == []

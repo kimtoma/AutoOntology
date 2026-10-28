@@ -8,9 +8,10 @@ import { api, ApiError, errorMessage, type ProviderTest, type ServiceStatus } fr
 import { loginCommand, RESTART_COMMAND } from "@/lib/checklist"
 import { fmtSeconds, fmtTime } from "@/lib/labels"
 import { cn } from "@/lib/utils"
+import { useT } from "@/i18n"
 
 /** Plain names on the Home card (the Status table keeps the technical ones). */
-const SERVICE_NAME = { backend: "Ontology engine", postgres: "Database" } as const
+const SERVICE_NAME = { backend: "provider.service.backend", postgres: "provider.service.postgres" } as const
 
 export function Code({ children, className }: { children: string; className?: string }) {
   return (
@@ -20,21 +21,25 @@ export function Code({ children, className }: { children: string; className?: st
 }
 
 function TestResult({ result, fresh }: { result: ProviderTest; fresh: boolean }) {
+  const t = useT()
   const when = !fresh && result.at ? ` · ${fmtTime(result.at)}` : ""
   if (result.ok) {
     return (
       <p className="text-xs text-success" data-test-result="ok" role="status">
-        {fresh ? "Test passed" : "Last test passed"}: the model answered
-        {result.seconds != null ? ` in ${fmtSeconds(result.seconds)}` : ""}{when}
+        {result.seconds != null
+          ? t(fresh ? "provider.test.passedIn" : "provider.test.lastPassedIn", { time: fmtSeconds(result.seconds) })
+          : t(fresh ? "provider.test.passed" : "provider.test.lastPassed")}{when}
       </p>
     )
   }
   return (
     <div className="grid gap-1" data-test-result="error" role="status">
       <p className="text-xs break-words text-destructive">
-        {fresh ? "Test failed" : "Last test failed"}: {result.error || `answer ${JSON.stringify(result.answer ?? "")}`}{when}
+        {t(fresh ? "provider.test.error" : "provider.test.lastError", {
+          error: result.error || t("provider.test.answer", { answer: JSON.stringify(result.answer ?? "") }),
+        })}{when}
       </p>
-      {result.remedy && <p className="text-xs">Fix: <Code>{result.remedy}</Code></p>}
+      {result.remedy && <p className="text-xs">{t("common.fix")} <Code>{result.remedy}</Code></p>}
     </div>
   )
 }
@@ -42,6 +47,7 @@ function TestResult({ result, fresh }: { result: ProviderTest; fresh: boolean })
 /** The chat provider (login state, model, remedy, a Test button) and the embedding model.
     *services* also lists the backend and Postgres checks (the Home page has no checks table). */
 export function ProviderCard({ status, services = false }: { status: ServiceStatus; services?: boolean }) {
+  const t = useT()
   const qc = useQueryClient()
   const test = useMutation({
     mutationFn: api.testProvider,
@@ -50,7 +56,8 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
   const p = status.providers
   const chat = p.chat
   const ready = chat ? chat.available && chat.logged_in : true
-  const state = !chat ? "Configured" : !chat.available ? "Unavailable" : !chat.logged_in ? "Not logged in" : "Ready"
+  const state = t(!chat ? "provider.state.configured" : !chat.available ? "provider.state.unavailable"
+    : !chat.logged_in ? "provider.state.notLoggedIn" : "provider.state.ready")
   const login = ready ? null : loginCommand(status)
   const result = test.data ?? null
   // 409 test_in_progress: another tab or the CLI is testing; the status poll brings its result
@@ -59,12 +66,12 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
     <div className="grid min-w-0 gap-3 text-sm" id="provider-card" data-provider={chat?.name ?? p.chat_provider}
          data-ready={ready}>
       {services && (
-        <ul className="flex flex-wrap gap-1.5" aria-label="Services">
+        <ul className="flex flex-wrap gap-1.5" aria-label={t("provider.services")}>
           {(["backend", "postgres"] as const).map((k) => {
             const c = status.checks?.[k]
             return (
               <li key={k} data-service={k} data-status={c?.status ?? "error"}>
-                <CheckChip status={c?.status ?? "error"} label={`${SERVICE_NAME[k]} ${c?.status === "ok" ? "OK" : "down"}`} />
+                <CheckChip status={c?.status ?? "error"} label={t(c?.status === "ok" ? "provider.service.ok" : "provider.service.down", { name: t(SERVICE_NAME[k]) })} />
               </li>
             )
           })}
@@ -73,11 +80,11 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
       {services && (["backend", "postgres"] as const).map((k) => {
         const c = status.checks?.[k]
         return c && c.status !== "ok" && c.remedy
-          ? <p key={k} className="text-xs">{SERVICE_NAME[k]}: <Code>{c.remedy}</Code></p> : null
+          ? <p key={k} className="text-xs">{t(SERVICE_NAME[k])}: <Code>{c.remedy}</Code></p> : null
       })}
       <dl className="grid min-w-0 gap-2 sm:grid-cols-2">
         <div className="min-w-0">
-          <dt className="text-xs text-muted-foreground">Chat model (reads and writes the concepts)</dt>
+          <dt className="text-xs text-muted-foreground">{t("provider.chat")}</dt>
           <dd className="flex flex-wrap items-center gap-2">
             <span className="font-medium break-all" id="provider-chat">{chat?.name ?? p.chat_provider} · {chat?.model ?? p.chat_model}</span>
             <CheckChip status={ready ? "ok" : "error"} label={state} />
@@ -85,7 +92,7 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
           {chat?.detail && <dd className="mt-0.5 text-xs break-words text-muted-foreground">{chat.detail}</dd>}
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-muted-foreground">Embedding model (finds similar concepts)</dt>
+          <dt className="text-xs text-muted-foreground">{t("provider.embed")}</dt>
           <dd className="font-medium break-all" id="provider-embed">
             {p.embed?.name ?? p.embed_provider} · {p.embed?.model ?? p.embed_model}
           </dd>
@@ -94,25 +101,25 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
       {!ready && (
         <div className="grid gap-1 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs" id="provider-fix">
           {login && <p>{login.label}: <Code>{login.command}</Code></p>}
-          {chat?.remedy && !login?.command.includes(chat.remedy) && <p>Or: <Code>{chat.remedy}</Code></p>}
-          <p>then restart: <Code>{RESTART_COMMAND}</Code></p>
+          {chat?.remedy && !login?.command.includes(chat.remedy) && <p>{t("provider.or")} <Code>{chat.remedy}</Code></p>}
+          <p>{t("provider.restart")} <Code>{RESTART_COMMAND}</Code></p>
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
         <Button size="sm" variant="outline" id="btn-provider-test" disabled={test.isPending}
                 onClick={() => test.mutate()}>
           {test.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Zap aria-hidden />}
-          {test.isPending ? "Testing…" : "Test"}
+          {test.isPending ? t("provider.testing") : t("provider.test")}
         </Button>
-        <span className="text-xs text-muted-foreground">Sends one short question to the chat model.</span>
+        <span className="text-xs text-muted-foreground">{t("provider.test.hint")}</span>
       </div>
       {test.isError && (busy ? (
         <p className="text-xs text-muted-foreground" role="status" data-test-result="busy">
-          A test is already running; its result shows here when it ends.
+          {t("provider.test.busy")}
         </p>
       ) : (
         <p className="text-xs break-words text-destructive" role="status" data-test-result="error">
-          Test failed: {errorMessage(test.error)}
+          {t("provider.test.failed", { error: errorMessage(test.error) })}
         </p>
       ))}
       {result ? <TestResult result={result} fresh />

@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   api, errorMessage, type ElementChip, type RetrievedElement, type SseEvent,
 } from "@/lib/api"
+import { fmtNumber, t, tn, useT } from "@/i18n"
 
 interface Msg {
   role: "user" | "assistant"
@@ -26,8 +27,7 @@ interface Msg {
   incomplete?: boolean
 }
 
-const EXAMPLES = ["What approval does a contract (the 계약 table) need?", "How are customers and contracts linked?",
-                  "Which payment states (the 수납상태 column) can an invoice have?"]
+const examples = () => [t("playground.chat.example1"), t("playground.chat.example2"), t("playground.chat.example3")]
 
 function Retrieved({ items }: { items: RetrievedElement[] }) {
   const [open, setOpen] = useState(false)
@@ -36,7 +36,7 @@ function Retrieved({ items }: { items: RetrievedElement[] }) {
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
               className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
         <ChevronDown className={open ? "size-3.5 rotate-180" : "size-3.5"} aria-hidden />
-        {items.length} retrieved element{items.length === 1 ? "" : "s"}
+        {tn("playground.chat.retrieved", items.length)}
       </button>
       {open && (
         <ul className="mt-2 flex flex-wrap gap-1.5" data-retrieved={items.length}>
@@ -44,7 +44,7 @@ function Retrieved({ items }: { items: RetrievedElement[] }) {
             <li key={e.id} className="inline-flex items-center gap-1">
               <ChipLink chip={e} refName={e.ref} />
               <span className="text-muted-foreground tabular-nums">
-                {e.score === null ? "neighbour" : e.score.toFixed(2)}
+                {e.score === null ? t("playground.chat.neighbour") : e.score.toFixed(2)}
               </span>
             </li>
           ))}
@@ -55,6 +55,7 @@ function Retrieved({ items }: { items: RetrievedElement[] }) {
 }
 
 export function ChatTab() {
+  const t = useT()
   const [messages, setMessages] = useState<Msg[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [input, setInput] = useState("")
@@ -76,14 +77,14 @@ export function ChatTab() {
     setInput("")
     setBusy(true)
     setMessages((prev) => [...prev, { role: "user", content: q },
-                           { role: "assistant", content: "", pending: true, phase: "Searching" }])
+                           { role: "assistant", content: "", pending: true, phase: t("playground.chat.phase.searching") }])
     const ctrl = new AbortController()
     abort.current = ctrl
     const onEvent = (ev: SseEvent) => {
       const d = ev.data as Record<string, unknown>
-      if (ev.event === "status") patchLast((m) => ({ ...m, phase: "Checking the ontology index and searching" }))
+      if (ev.event === "status") patchLast((m) => ({ ...m, phase: t("playground.chat.phase.checking") }))
       else if (ev.event === "retrieved") {
-        patchLast((m) => ({ ...m, retrieved: d.elements as RetrievedElement[], phase: "Writing the answer" }))
+        patchLast((m) => ({ ...m, retrieved: d.elements as RetrievedElement[], phase: t("playground.chat.phase.writing") }))
       } else if (ev.event === "delta") patchLast((m) => ({ ...m, content: m.content + String(d.text ?? "") }))
       else if (ev.event === "citations") {
         patchLast((m) => ({ ...m, citations: d.citations as Record<string, ElementChip>,
@@ -112,24 +113,27 @@ export function ChatTab() {
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4" id="playground-chat">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
-          Scope: {index.data ? `revision ${index.data.revision} · ${index.data.scope.join(" + ")}` : "the latest ontology"}
-          {idx ? ` · ${idx.elements.toLocaleString()} elements (${idx.model})` : " · the index is built on the first question"}
-          {index.data?.stale && idx && " · the ontology changed: re-indexed on the next question"}
+          {t("playground.chat.scope", { scope: index.data
+            ? t("playground.chat.scopeRevision", { n: index.data.revision, scope: index.data.scope.join(" + ") })
+            : t("playground.chat.scopeLatest") })}
+          {" · "}{idx ? t("playground.chat.indexInfo", { n: fmtNumber(idx.elements), model: idx.model })
+            : t("playground.chat.indexLater")}
+          {index.data?.stale && idx && ` · ${t("playground.chat.stale")}`}
         </span>
         <Button type="button" size="sm" variant="ghost" disabled={busy || !messages.length}
                 onClick={() => { setMessages([]); setConversationId(null) }}>
-          <MessageSquarePlus aria-hidden /> New chat
+          <MessageSquarePlus aria-hidden /> {t("playground.chat.newChat")}
         </Button>
       </div>
       {index.data?.warnings.map((w) => <p key={w} className="text-xs text-amber-700 dark:text-amber-300">{w}</p>)}
 
       <div className="grid gap-3" aria-live="polite" id="chat-messages">
         {!messages.length && (
-          <EmptyState title="Ask the ontology"
-                      hint="Answers use only the retrieved ontology elements. Click a citation to open the concept, or the graph icon to see it in the graph."
+          <EmptyState title={t("playground.chat.askTitle")}
+                      hint={t("playground.chat.askHint")}
                       action={
                         <div className="flex flex-wrap justify-center gap-2">
-                          {EXAMPLES.map((e) => (
+                          {examples().map((e) => (
                             <Button key={e} type="button" size="sm" variant="outline" onClick={() => ask(e)}
                                     className="h-auto max-w-full py-1.5 whitespace-normal">{e}</Button>
                           ))}
@@ -148,15 +152,15 @@ export function ChatTab() {
                     <Loader2 className="size-4 animate-spin" aria-hidden /> {m.phase}
                   </span>
                 )}
-                {m.incomplete && <Badge variant="outline" className="mt-2 font-normal">Incomplete answer</Badge>}
+                {m.incomplete && <Badge variant="outline" className="mt-2 font-normal">{t("playground.chat.incomplete")}</Badge>}
                 {m.error && <p role="alert" className="mt-2 text-sm text-destructive break-words">{m.error}</p>}
                 {!m.pending && m.citations && (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs" data-citations={Object.keys(m.citations).length}>
-                    {Object.keys(m.citations).length ? <span className="text-muted-foreground">Sources</span>
-                      : <Badge variant="outline" className="font-normal">No citations</Badge>}
+                    {Object.keys(m.citations).length ? <span className="text-muted-foreground">{t("playground.chat.sources")}</span>
+                      : <Badge variant="outline" className="font-normal">{t("playground.chat.noCitations")}</Badge>}
                     {Object.entries(m.citations).map(([ref, chip]) => <ChipLink key={ref} chip={chip} refName={ref} />)}
                     {!!m.unknown?.length && (
-                      <span className="text-amber-700 dark:text-amber-300">Unknown citations {m.unknown.join(", ")}</span>
+                      <span className="text-amber-700 dark:text-amber-300">{t("playground.chat.unknownCitations", { list: m.unknown.join(", ") })}</span>
                     )}
                   </div>
                 )}
@@ -170,8 +174,8 @@ export function ChatTab() {
 
       <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); ask(input) }}>
         <Textarea id="chat-input" value={input} onChange={(e) => setInput(e.target.value)} rows={2}
-                  placeholder="e.g. Who approves a contract above a given amount? (Enter sends, Shift+Enter adds a line)"
-                  aria-label="Question" maxLength={2000}
+                  placeholder={t("playground.chat.placeholder")}
+                  aria-label={t("playground.chat.question")} maxLength={2000}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault()
@@ -181,11 +185,11 @@ export function ChatTab() {
         <div className="flex justify-end gap-2">
           {busy && (
             <Button type="button" variant="outline" onClick={() => abort.current?.abort()}>
-              <Square aria-hidden /> Stop
+              <Square aria-hidden /> {t("playground.stop")}
             </Button>
           )}
           <Button type="submit" id="chat-send" disabled={busy || !input.trim()}>
-            {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />} Send
+            {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />} {t("playground.chat.send")}
           </Button>
         </div>
       </form>

@@ -28,7 +28,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     rolldownOptions: {
       output: {
-        // three.js in its own chunk that only the lazy 그래프 page loads. No wider groups:
+        // three.js in its own chunk that only the lazy graph page loads. No wider groups:
         // a group that does not pull its dependencies in creates chunk cycles (the 2D chunk
         // then crashed with "Class extends value undefined"), one that does pulls react in.
         codeSplitting: {

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { CheckCircle2, CircleDashed, Loader2, MinusCircle, XCircle } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -25,7 +26,7 @@ const ICON: Record<string, typeof CheckCircle2> = {
 /** Run / step status as a colored chip (label defaults to the status name). */
 export function StatusChip({ status, label, className }: {
   status: string | null | undefined
-  label?: string
+  label?: ReactNode
   className?: string
 }) {
   const key = status || "pending"

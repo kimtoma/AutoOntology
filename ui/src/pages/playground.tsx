@@ -21,12 +21,13 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useOntology, useSources, useStatus } from "@/hooks/queries"
+import { t, useT } from "@/i18n"
 import { isNoSnapshot } from "@/lib/api"
 
 const TABS = [
-  { key: "chat", label: "Chat", icon: MessagesSquare },
-  { key: "sql", label: "SQL", icon: Database },
-  { key: "sparql", label: "SPARQL", icon: Sparkles },
+  { key: "chat", label: () => t("playground.tab.chat"), icon: MessagesSquare },
+  { key: "sql", label: () => "SQL", icon: Database },
+  { key: "sparql", label: () => "SPARQL", icon: Sparkles },
 ] as const
 type Tab = (typeof TABS)[number]["key"]
 const AUTO = "__auto"
@@ -36,22 +37,23 @@ function ProviderBadge() {
   const p = data?.providers
   if (!p) return null
   return (
-    <Link to="/status" title="Model providers (read-only, set in .env)" id="playground-provider">
+    <Link to="/status" title={t("playground.providerTitle")} id="playground-provider">
       <Badge variant="outline" className="max-w-full gap-1.5 font-normal">
         <Bot aria-hidden /> <span className="truncate">{p.chat_provider} · {p.chat_model}</span>
-        <span className="hidden text-muted-foreground sm:inline">/ embeddings {p.embed_model}</span>
+        <span className="hidden text-muted-foreground sm:inline">{t("playground.embeddings", { model: p.embed_model })}</span>
       </Badge>
     </Link>
   )
 }
 
 export default function PlaygroundPage() {
+  const t = useT()
   const [params, setParams] = useSearchParams()
   const ontology = useOntology()
   const sources = useSources()
   const structured = (sources.data ?? []).filter((s) => s.kind !== "documents" && s.built)
   const sqlSource = structured.find((s) => s.name === params.get("source"))?.name ?? null
-  const tab = (TABS.some((t) => t.key === params.get("tab")) ? params.get("tab") : "chat") as Tab
+  const tab = (TABS.some((x) => x.key === params.get("tab")) ? params.get("tab") : "chat") as Tab
   const conceptId = params.get("concept")
   const set = useCallback((patch: Record<string, string | null>) => {
     setParams((prev) => {
@@ -67,27 +69,27 @@ export default function PlaygroundPage() {
 
   return (
     <ConceptOpener.Provider value={openConcept}>
-      <PageHeader title="Playground"
-                  description="Ask the ontology in plain language, query the structured data, or run SPARQL over the exported Turtle."
+      <PageHeader title={t("playground.title")}
+                  description={t("playground.description")}
                   actions={<ProviderBadge />} />
       {isNoSnapshot(ontology.error) ? (
-        <EmptyState icon={FlaskConical} title="No ontology yet"
-                    hint="Build the ontology first; the playground works on its latest revision."
-                    action={<Button asChild><Link to="/build"><Hammer aria-hidden /> Go to Build</Link></Button>} />
+        <EmptyState icon={FlaskConical} title={t("ontology.empty.title")}
+                    hint={t("playground.empty.hint")}
+                    action={<Button asChild><Link to="/build"><Hammer aria-hidden /> {t("ontology.goBuild")}</Link></Button>} />
       ) : ontology.error ? <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />
         : !ontology.data ? <Skeleton className="h-64" />
         : (
           <Tabs value={tab} onValueChange={(v) => set({ tab: v })} id="playground-tabs">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <TabsList className="h-auto flex-wrap justify-start">
-                {TABS.map((t) => (
-                  <TabsTrigger key={t.key} value={t.key} data-tab={t.key} className="flex-none">
-                    <t.icon aria-hidden /> {t.label}
+                {TABS.map((tab) => (
+                  <TabsTrigger key={tab.key} value={tab.key} data-tab={tab.key} className="flex-none">
+                    <tab.icon aria-hidden /> {tab.label()}
                   </TabsTrigger>
                 ))}
               </TabsList>
               <span className="text-xs text-muted-foreground" id="playground-revision">
-                Revision {ontology.data.revision} · {ontology.data.workspace}
+                {t("playground.revision", { n: ontology.data.revision, workspace: ontology.data.workspace })}
               </span>
             </div>
             {/* each tab keeps its state while another one is shown */}
@@ -95,13 +97,13 @@ export default function PlaygroundPage() {
             <TabsContent value="sql" forceMount hidden={tab !== "sql"}>
               {structured.length > 1 && (
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">Structured source</span>
+                  <span className="text-muted-foreground">{t("playground.structuredSource")}</span>
                   <Select value={sqlSource ?? AUTO} onValueChange={(v) => set({ source: v === AUTO ? null : v })}>
-                    <SelectTrigger className="w-full sm:w-56" aria-label="Structured source" id="playground-source">
+                    <SelectTrigger className="w-full sm:w-56" aria-label={t("playground.structuredSource")} id="playground-source">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={AUTO}>Default (first in the snapshot)</SelectItem>
+                      <SelectItem value={AUTO}>{t("playground.defaultSource")}</SelectItem>
                       {structured.map((s) => <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>)}
                     </SelectContent>
                   </Select>

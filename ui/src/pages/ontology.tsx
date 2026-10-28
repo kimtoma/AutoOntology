@@ -16,7 +16,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { keys, retryServerErrors, useOntology } from "@/hooks/queries"
 import { useDebounced } from "@/hooks/use-debounced"
 import { api, isNoSnapshot, type OntologySummary } from "@/lib/api"
-import { CKIND_LABEL, fmtTime, ORIGIN_LABEL } from "@/lib/labels"
+import { fmtDate, fmtNumber, t, tn, useT } from "@/i18n"
+import { CKIND_LABEL, ORIGIN_LABEL } from "@/lib/labels"
 
 const ALL = "__all"
 const KINDS = ["term", "entity", "metric", "attribute", "process", "rule", "other"]
@@ -30,37 +31,38 @@ function num(v: unknown): number {
 function Summary({ o }: { o: OntologySummary }) {
   const c = o.counts
   const stats: [string, number][] = [
-    ["Terms", num(c.classes_structured)],
-    ["Document classes", num(c.classes_document)],
-    ["Individuals", num(c.individuals)],
-    ["Relations", num(c.object_properties)],
-    ["Merged", num(c.merged_concepts)],
-    ["Evidence", num(c.evidence)],
+    [t("ontology.stat.terms"), num(c.classes_structured)],
+    [t("ontology.stat.documentClasses"), num(c.classes_document)],
+    [t("ontology.stat.individuals"), num(c.individuals)],
+    [t("ontology.stat.relations"), num(c.object_properties)],
+    [t("ontology.stat.merged"), num(c.merged_concepts)],
+    [t("ontology.stat.evidence"), num(c.evidence)],
   ]
   return (
     <div className="mb-6 grid gap-3" id="ontology-summary" data-revision={o.revision}>
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge variant="secondary" className="font-normal tabular-nums">Revision {o.revision}</Badge>
-        <Badge variant="outline" className="font-normal">Workspace {o.workspace}</Badge>
-        <span className="text-xs text-muted-foreground">built {fmtTime(o.created_at)}</span>
+        <Badge variant="secondary" className="font-normal tabular-nums">{t("ontology.revision", { n: o.revision })}</Badge>
+        <Badge variant="outline" className="font-normal">{t("ontology.workspace", { name: o.workspace })}</Badge>
+        <span className="text-xs text-muted-foreground">{t("ontology.built", { date: fmtDate(o.created_at) })}</span>
         <span className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={o.base_iri}>{o.base_iri}</span>
       </div>
       <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         {stats.map(([k, v]) => (
           <div key={k} className="rounded-lg border px-3 py-2">
             <dt className="text-xs text-muted-foreground">{k}</dt>
-            <dd className="text-lg font-semibold tabular-nums">{v.toLocaleString()}</dd>
+            <dd className="text-lg font-semibold tabular-nums">{fmtNumber(v)}</dd>
           </div>
         ))}
       </dl>
       <p className="text-xs text-muted-foreground">
-        Sources: {o.sources.map((s) => `${s.name} (${s.kind})`).join(", ") || "-"}
+        {t("ontology.sources", { list: o.sources.map((s) => `${s.name} (${s.kind})`).join(", ") || "-" })}
       </p>
     </div>
   )
 }
 
 export default function OntologyPage() {
+  const t = useT()
   const [params, setParams] = useSearchParams()
   const urlQ = params.get("q") ?? ""
   const [q, setQ] = useState(urlQ)
@@ -108,12 +110,11 @@ export default function OntologyPage() {
 
   return (
     <>
-      <PageHeader title="Ontology"
-                  description="Every Term from the structured sources and every concept from the documents, in one list. Aligned Terms are joined to document concepts." />
+      <PageHeader title={t("ontology.title")} description={t("ontology.description")} />
       {noSnapshot ? (
-        <EmptyState icon={Hammer} title="No ontology yet"
-                    hint="Build the ontology from your sources to see its concepts here."
-                    action={<Button asChild id="btn-go-build"><Link to="/build"><Hammer aria-hidden /> Go to Build</Link></Button>} />
+        <EmptyState icon={Hammer} title={t("ontology.empty.title")}
+                    hint={t("ontology.empty.hint")}
+                    action={<Button asChild id="btn-go-build"><Link to="/build"><Hammer aria-hidden /> {t("ontology.goBuild")}</Link></Button>} />
       ) : (
         <>
           {ontology.error ? <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />
@@ -124,19 +125,19 @@ export default function OntologyPage() {
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
               <Input id="concept-q" type="search" value={q} onChange={(e) => setQ(e.target.value)}
-                     placeholder="Search names, synonyms, definitions" aria-label="Search concepts" className="pl-8" />
+                     placeholder={t("ontology.search.placeholder")} aria-label={t("ontology.search.label")} className="pl-8" />
             </div>
             <Select value={origin || ALL} onValueChange={(v) => update({ origin: v === ALL ? null : v, page: null })}>
-              <SelectTrigger aria-label="Origin" id="filter-origin" className="w-full sm:w-40"><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label={t("ontology.filter.origin")} id="filter-origin" className="w-full sm:w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL}>All origins</SelectItem>
+                <SelectItem value={ALL}>{t("ontology.filter.allOrigins")}</SelectItem>
                 {ORIGINS.map((o) => <SelectItem key={o} value={o} data-origin={o}>{ORIGIN_LABEL[o]}</SelectItem>)}
               </SelectContent>
             </Select>
             <Select value={kind || ALL} onValueChange={(v) => update({ kind: v === ALL ? null : v, page: null })}>
-              <SelectTrigger aria-label="Kind" id="filter-kind" className="w-full sm:w-36"><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label={t("ontology.filter.kind")} id="filter-kind" className="w-full sm:w-36"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL}>All kinds</SelectItem>
+                <SelectItem value={ALL}>{t("ontology.filter.allKinds")}</SelectItem>
                 {KINDS.map((k) => <SelectItem key={k} value={k}>{CKIND_LABEL[k]}</SelectItem>)}
               </SelectContent>
             </Select>
@@ -148,13 +149,13 @@ export default function OntologyPage() {
             ) : (
               <>
                 <p id="concept-summary" className="mb-3 text-sm text-muted-foreground" aria-live="polite">
-                  {concepts.data.total} concept{concepts.data.total === 1 ? "" : "s"}
-                  {query.q ? ` matching “${query.q}”` : ""}
+                  {tn("ontology.count", concepts.data.total)}
+                  {query.q ? ` ${t("ontology.matching", { q: query.q })}` : ""}
                   {origin ? ` · ${ORIGIN_LABEL[origin] ?? origin}` : ""}
                 </p>
                 {!concepts.data.items.length ? (
-                  <EmptyState icon={BookOpen} title="No matching concepts"
-                              hint="Change the search or the filters." />
+                  <EmptyState icon={BookOpen} title={t("ontology.noMatch.title")}
+                              hint={t("ontology.noMatch.hint")} />
                 ) : (
                   <ul id="concept-list" className="grid grid-cols-[minmax(0,1fr)] gap-2">
                     {concepts.data.items.map((c) => (
@@ -173,14 +174,14 @@ export default function OntologyPage() {
                             {!c.folded_into && c.alignment.best && c.alignment.best.accepted && (
                               <RelationChip relation={c.alignment.best.relation} term={c.alignment.best.label} />
                             )}
-                            <span className="text-xs text-muted-foreground">{c.evidence_count} evidence</span>
+                            <span className="text-xs text-muted-foreground">{t("ontology.evidence", { n: c.evidence_count })}</span>
                           </div>
                           {c.definition && <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{c.definition}</p>}
                           {c.merged_concepts.length > 0 && (
-                            <p className="mt-1 truncate text-xs text-muted-foreground">Merged: {c.merged_concepts.join(", ")}</p>
+                            <p className="mt-1 truncate text-xs text-muted-foreground">{t("ontology.mergedList", { list: c.merged_concepts.join(", ") })}</p>
                           )}
                           {c.synonyms.length > 0 && (
-                            <p className="mt-1 truncate text-xs text-muted-foreground">Synonyms: {c.synonyms.join(", ")}</p>
+                            <p className="mt-1 truncate text-xs text-muted-foreground">{t("ontology.synonymsList", { list: c.synonyms.join(", ") })}</p>
                           )}
                         </button>
                       </li>
@@ -188,15 +189,15 @@ export default function OntologyPage() {
                   </ul>
                 )}
                 {concepts.data.pages > 1 && (
-                  <nav aria-label="Pages" className="mt-4 flex items-center justify-center gap-3">
+                  <nav aria-label={t("ontology.pages")} className="mt-4 flex items-center justify-center gap-3">
                     <Button variant="outline" size="sm" disabled={page <= 1}
                             onClick={() => update({ page: String(page - 1) })}>
-                      <ChevronLeft aria-hidden /> Previous
+                      <ChevronLeft aria-hidden /> {t("ontology.previous")}
                     </Button>
                     <span className="text-sm text-muted-foreground">{page} / {concepts.data.pages}</span>
                     <Button variant="outline" size="sm" disabled={page >= concepts.data.pages}
                             onClick={() => update({ page: String(page + 1) })}>
-                      Next <ChevronRight aria-hidden />
+                      {t("ontology.next")} <ChevronRight aria-hidden />
                     </Button>
                   </nav>
                 )}

@@ -16,14 +16,22 @@ import {
 } from "@/lib/api"
 import { expectedTime, LAST_SAMPLE_KEY, otherSources } from "@/lib/checklist"
 import { fmtBytes } from "@/lib/labels"
+import { t, tn, tx, useT, type MessageKey } from "@/i18n"
 
 /** What each set is, in one line (the folder only has the files). */
-const SET_BLURB: Record<string, string> = {
-  quickstart: "A small set to try every step quickly: a few customer, contract and invoice tables and the policies that define them.",
-  hanbit: "The whole fictional company: many related tables, documents in every supported format and scanned images (OCR).",
+const SET_BLURB: Record<string, MessageKey> = {
+  quickstart: "samples.blurb.quickstart",
+  hanbit: "samples.blurb.hanbit",
 }
 
-const KIND_WORD: Record<string, string> = { files: "tables", structured: "tables", database: "database", documents: "documents" }
+const KIND_WORD: Record<string, MessageKey> = {
+  files: "samples.kind.tables", structured: "samples.kind.tables", database: "samples.kind.database",
+  documents: "samples.kind.documents",
+}
+const kindWord = (kind: string) => (KIND_WORD[kind] ? t(KIND_WORD[kind]) : kind)
+const ACTION: Record<string, MessageKey> = {
+  created: "samples.action.created", kept: "samples.action.kept", replaced: "samples.action.replaced",
+}
 
 function SetCard({ set, provider, pending, others, otherSamples, onLoad, onRemoveAndLoad }: {
   set: SampleSet
@@ -36,6 +44,7 @@ function SetCard({ set, provider, pending, others, otherSamples, onLoad, onRemov
   onLoad: () => void
   onRemoveAndLoad: () => void
 }) {
+  const t = useT()
   const time = expectedTime(set, provider)
   const files = set.sources.reduce((n, s) => n + s.files, 0)
   const names = (list: Source[]) => list.map((s) => s.name).join(", ")
@@ -43,30 +52,30 @@ function SetCard({ set, provider, pending, others, otherSamples, onLoad, onRemov
     <li className="grid gap-2 rounded-lg border p-3" data-sample-set={set.set}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium">{set.set}</span>
-        {set.registered && <Badge variant="outline" className="font-normal"><CheckCircle2 aria-hidden /> Loaded</Badge>}
+        {set.registered && <Badge variant="outline" className="font-normal"><CheckCircle2 aria-hidden /> {t("samples.loaded")}</Badge>}
       </div>
-      {SET_BLURB[set.set] && <p className="text-xs text-muted-foreground">{SET_BLURB[set.set]}</p>}
+      {SET_BLURB[set.set] && <p className="text-xs text-muted-foreground">{t(SET_BLURB[set.set])}</p>}
       <ul className="grid gap-1 text-xs">
         {set.sources.map((s) => (
           <li key={s.name} className="flex flex-wrap items-center gap-x-2 gap-y-0.5" data-sample-source={s.name}>
             {s.kind === "documents" ? <FileText className="size-3.5" aria-hidden /> : <Database className="size-3.5" aria-hidden />}
             <span className="font-medium">{s.name}</span>
             <span className="text-muted-foreground">
-              {s.files} {s.kind === "documents" ? "document" : "table file"}{s.files === 1 ? "" : "s"} · {fmtBytes(s.bytes)}
+              {tn(s.kind === "documents" ? "samples.docs" : "samples.tables", s.files)} · {fmtBytes(s.bytes)}
             </span>
             {s.formats?.length ? <span className="text-muted-foreground">· {s.formats.join(" ")}</span> : null}
           </li>
         ))}
       </ul>
       <p className="text-xs" data-expected-time>
-        {files} files. Expected build time{provider ? ` with ${provider}` : ""}: <b>{time ?? "unknown"}</b>
-        {others.length > 0 && time && " (for this set alone)"}
+        {tx(provider ? "samples.expectedWith" : "samples.expected",
+            { files, provider: provider ?? "", time: <b key="time">{time ?? t("samples.unknown")}</b> })}
+        {others.length > 0 && time && t("samples.alone")}
       </p>
       {others.length > 0 && !set.registered && (
         <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs" data-other-sources={set.set}>
-          Your other source{others.length === 1 ? "" : "s"} ({names(others)}) {others.length === 1 ? "stays" : "stay"} registered and will be built
-          together with this set, so the build takes longer than the time above.
-          {otherSamples.length > 0 && <> To build only {set.set}, remove the other sample sources first.</>}
+          {tn("samples.others", others.length, { names: names(others) })}
+          {otherSamples.length > 0 && t("samples.others.removeHint", { set: set.set })}
         </p>
       )}
       <div className="flex flex-wrap gap-2">
@@ -74,17 +83,17 @@ function SetCard({ set, provider, pending, others, otherSamples, onLoad, onRemov
           <>
             <Button size="sm" onClick={onRemoveAndLoad} disabled={pending} data-remove-load={set.set}>
               {pending ? <Loader2 className="animate-spin" aria-hidden /> : <Trash2 aria-hidden />}
-              Remove the other sample sources first
+              {t("samples.removeFirst")}
             </Button>
             <Button size="sm" variant="outline" onClick={onLoad} disabled={pending} data-load-set={set.set}>
-              <PackageOpen aria-hidden /> Keep both
+              <PackageOpen aria-hidden /> {t("samples.keepBoth")}
             </Button>
           </>
         ) : (
           <Button size="sm" variant={set.registered ? "outline" : "default"} onClick={onLoad} disabled={pending}
                   data-load-set={set.set}>
             {pending ? <Loader2 className="animate-spin" aria-hidden /> : <PackageOpen aria-hidden />}
-            {set.registered ? `Check ${set.set} again` : `Load ${set.set}`}
+            {t(set.registered ? "samples.checkAgain" : "samples.load", { set: set.set })}
           </Button>
         )}
       </div>
@@ -100,23 +109,24 @@ function RemovePanel({ set, remove, pending, onConfirm, onCancel }: {
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const t = useT()
   return (
     <div role="alertdialog" aria-labelledby="sample-remove-title" id="sample-remove"
          className="grid gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
       <p id="sample-remove-title" className="font-medium">
-        This deletes {remove.map((s) => s.name).join(", ")} (their database and extracted concepts).
+        {t("samples.remove.title", { names: remove.map((s) => s.name).join(", ") })}
       </p>
       <ul className="grid gap-0.5 text-xs">
         {remove.map((s) => (
-          <li key={s.name} data-remove-source={s.name}><b>{s.name}</b> ({KIND_WORD[s.kind] ?? s.kind})</li>
+          <li key={s.name} data-remove-source={s.name}><b>{s.name}</b> ({kindWord(s.kind)})</li>
         ))}
       </ul>
-      <p className="text-xs">The sample files stay in the samples folder; you can load them again. Remove and load {set}?</p>
+      <p className="text-xs">{t("samples.remove.body", { set })}</p>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="destructive" onClick={onConfirm} disabled={pending} id="btn-sample-remove">
-          {pending && <Loader2 className="animate-spin" aria-hidden /> } Remove and load
+          {pending && <Loader2 className="animate-spin" aria-hidden /> } {t("samples.remove.confirm")}
         </Button>
-        <Button size="sm" variant="outline" onClick={onCancel} disabled={pending}>Cancel</Button>
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={pending}>{t("common.cancel")}</Button>
       </div>
     </div>
   )
@@ -130,24 +140,24 @@ function ConflictPanel({ set, conflicts, pending, onReplace, onCancel }: {
   onReplace: () => void
   onCancel: () => void
 }) {
+  const t = useT()
   return (
     <div role="alertdialog" aria-labelledby="sample-conflict-title" id="sample-conflict"
          className="grid gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
-      <p id="sample-conflict-title" className="font-medium">These sources already exist and point elsewhere:</p>
+      <p id="sample-conflict-title" className="font-medium">{t("samples.conflict.title")}</p>
       <ul className="grid gap-0.5 text-xs">
         {conflicts.map((c) => (
-          <li key={c.name} data-conflict={c.name}><b>{c.name}</b>{c.kind ? ` (${KIND_WORD[c.kind] ?? c.kind})` : ""}</li>
+          <li key={c.name} data-conflict={c.name}><b>{c.name}</b>{c.kind ? ` (${kindWord(c.kind)})` : ""}</li>
         ))}
       </ul>
       <p className="text-xs">
-        Loading the {set} samples replaces them: replacing deletes their database and the concepts
-        extracted from them. Your files on disk are not touched. Replace?
+        {t("samples.conflict.body", { set })}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="destructive" onClick={onReplace} disabled={pending} id="btn-sample-replace">
-          {pending && <Loader2 className="animate-spin" aria-hidden />} Replace and load
+          {pending && <Loader2 className="animate-spin" aria-hidden />} {t("samples.conflict.confirm")}
         </Button>
-        <Button size="sm" variant="outline" onClick={onCancel} disabled={pending}>Cancel</Button>
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={pending}>{t("common.cancel")}</Button>
       </div>
     </div>
   )
@@ -160,6 +170,7 @@ export function SamplesDialog({ open, onOpenChange, onLoaded }: {
   onOpenChange: (open: boolean) => void
   onLoaded?: (result: SampleLoad) => void
 }) {
+  const t = useT()
   const qc = useQueryClient()
   const samples = useSamples()
   const sources = useSources()
@@ -178,7 +189,7 @@ export function SamplesDialog({ open, onOpenChange, onLoaded }: {
       setConflict(null)
       setRemoval(null)
       try { localStorage.setItem(LAST_SAMPLE_KEY, r.set) } catch { /* private mode */ }
-      toast.success(`Loaded the ${r.set} samples`, { description: "Build the ontology next." })
+      toast.success(t("samples.toast", { set: r.set }), { description: t("samples.toast.next") })
       onLoaded?.(r)
     },
     onError: (e, { set }) => {
@@ -200,17 +211,16 @@ export function SamplesDialog({ open, onOpenChange, onLoaded }: {
     }}>
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg" id="samples-dialog">
         <DialogHeader>
-          <DialogTitle>Load sample data</DialogTitle>
+          <DialogTitle>{t("samples.title")}</DialogTitle>
           <DialogDescription>
-            Ready-made tables and documents (in Korean) of a fictional company. Loading only registers
-            them as sources; nothing is sent to a model until you build.
+            {t("samples.description")}
           </DialogDescription>
         </DialogHeader>
         {samples.error ? <ErrorState error={samples.error} onRetry={() => samples.refetch()} />
           : samples.isPending ? <Skeleton className="h-40" />
           : !samples.data.length ? (
             <p className="text-sm text-muted-foreground">
-              No sample sets found next to the service (samples/). Update your checkout with <code>git pull</code>.
+              {tx("samples.none", { cmd: <code key="cmd">git pull</code> })}
             </p>
           ) : (
             <ul className="grid gap-3" id="sample-sets">
@@ -238,17 +248,17 @@ export function SamplesDialog({ open, onOpenChange, onLoaded }: {
         {showError && <p role="alert" className="text-sm break-words text-destructive">{errorMessage(load.error)}</p>}
         {result && (
           <div className="grid gap-1 rounded-md border border-success/30 bg-success/5 p-3 text-sm" id="samples-result" role="status">
-            <p className="font-medium">Sources ready:</p>
+            <p className="font-medium">{t("samples.result")}</p>
             <ul className="grid gap-0.5 text-xs">
               {result.sources.map((s) => (
-                <li key={s.name} data-loaded-source={s.name}><b>{s.name}</b> · {s.action}</li>
+                <li key={s.name} data-loaded-source={s.name}><b>{s.name}</b> · {ACTION[s.action] ? t(ACTION[s.action]) : s.action}</li>
               ))}
             </ul>
             {result.messages.map((m) => <p key={m} className="text-xs text-muted-foreground break-words">{m}</p>)}
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>{result ? "Done" : "Close"}</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{result ? t("common.done") : t("common.close")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

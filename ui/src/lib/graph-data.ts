@@ -2,6 +2,8 @@
    Pure, so the 3D view, the 2D fallback and the tests share it. */
 
 import type { GraphEdgeJson, GraphJson, GraphLayer, GraphNodeJson } from "@/lib/api"
+import { t } from "@/i18n"
+import { labelTable } from "@/i18n/core"
 import { CKIND_LABEL } from "@/lib/labels"
 
 export type ColorMode = "origin" | "type" | "source"
@@ -9,11 +11,9 @@ export type LinkStyle = "solid" | "dashed" | "arrow" | "evidence"
 
 /** The layer picker: `all` or one layer of the API (`/api/ontology/graph?layer=`). */
 export type LayerView = "all" | "structured" | "documents" | "aligned"
-export const LAYER_VIEWS: { key: LayerView; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "structured", label: "Structured" },
-  { key: "documents", label: "Documents" },
-  { key: "aligned", label: "Aligned" },
+const layerView = (key: LayerView) => ({ key, get label() { return t(`graph.view.${key}`) } })
+export const LAYER_VIEWS: { key: LayerView; readonly label: string }[] = [
+  layerView("all"), layerView("structured"), layerView("documents"), layerView("aligned"),
 ]
 export const isLayerView = (v: string | null): v is LayerView =>
   LAYER_VIEWS.some((l) => l.key === v)
@@ -32,12 +32,12 @@ export const ORIGIN_COLORS: Record<string, string> = {
   aligned: "#d97706",
   source_document: "#78716c",
 }
-export const ORIGIN_LABELS: Record<string, string> = {
-  structured: "Structured (Term)",
-  document: "Document concept",
-  aligned: "Aligned Term",
-  source_document: "Source document",
-}
+export const ORIGIN_LABELS: Record<string, string> = labelTable({
+  structured: "graph.origin.structured",
+  document: "graph.origin.document",
+  aligned: "graph.origin.aligned",
+  source_document: "graph.origin.sourceDocument",
+})
 export const RING_COLOR = "#f59e0b"
 
 /** Colour per node group in type mode (fixed, so the legend never shifts). */
@@ -52,9 +52,14 @@ export const TYPE_COLORS: Record<string, string> = {
   folded: "#65a30d",
   document: "#78716c",
 }
-export const TYPE_LABELS: Record<string, string> = {
-  ...CKIND_LABEL, term: "Term (structured)", folded: "Folded document concept", document: "Source document",
-}
+const OWN_TYPE_LABELS = labelTable({
+  term: "graph.type.term", folded: "graph.type.folded", document: "graph.type.document",
+})
+/** The concept kinds (CKIND_LABEL) plus the node groups of their own, read in the current
+    language on every access. */
+export const TYPE_LABELS: Record<string, string> = new Proxy({} as Record<string, string>, {
+  get: (_, k) => (typeof k === "string" ? OWN_TYPE_LABELS[k] ?? CKIND_LABEL[k] : undefined),
+})
 /** source mode: assigned in sorted source order. */
 export const SOURCE_PALETTE = [
   "#2563eb", "#16a34a", "#d97706", "#9333ea", "#dc2626", "#0891b2", "#db2777", "#4d7c0f",

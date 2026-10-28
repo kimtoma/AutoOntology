@@ -10,10 +10,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { keys, retryServerErrors } from "@/hooks/queries"
 import { api } from "@/lib/api"
 import type { GNode } from "@/lib/graph-data"
+import { tn, useT, type MessageKey } from "@/i18n"
 import { CKIND_LABEL } from "@/lib/labels"
 
-const TYPE_LABEL: Record<string, string> = {
-  class: "Class", concept: "Folded concept", individual: "Individual", document: "Source document",
+const TYPE_LABEL: Record<string, MessageKey> = {
+  class: "graph.nodeType.class", concept: "graph.nodeType.concept", individual: "graph.nodeType.individual",
+  document: "graph.nodeType.document",
 }
 
 /** Detail of a graph node: its own fields, then the concept detail (`/api/ontology/concepts/{id}`:
@@ -25,6 +27,7 @@ export function GraphDetail({ node, neighbours, onSelect, onExpand, onClose }: {
   onExpand: (id: string) => void
   onClose?: () => void
 }) {
+  const t = useT()
   const conceptId = node.type !== "document" && /^(term|concept)-/.test(node.id) ? node.id : null
   const q = useQuery({
     queryKey: keys.concept(conceptId ?? ""),
@@ -41,44 +44,44 @@ export function GraphDetail({ node, neighbours, onSelect, onExpand, onClose }: {
             {node.type !== "document" && <OriginBadge origin={node.origin} />}
             <Badge variant="outline" className="font-normal">
               <span className="size-2 rounded-full" style={{ background: node.color }} aria-hidden />
-              {TYPE_LABEL[node.type] ?? node.type}
+              {TYPE_LABEL[node.type] ? t(TYPE_LABEL[node.type]) : node.type}
               {node.type !== "document" && node.kind ? ` · ${CKIND_LABEL[node.kind] ?? node.kind}` : ""}
             </Badge>
             {node.source && <Badge variant="secondary" className="font-normal">{node.source}</Badge>}
             {node.enriched_by && <Badge variant="secondary" className="font-normal">+ {node.enriched_by}</Badge>}
-            <Badge variant="outline" className="font-normal">{node.degree} links</Badge>
+            <Badge variant="outline" className="font-normal">{t("graph.links", { n: node.degree })}</Badge>
           </div>
         </div>
         {onClose && (
           <Button variant="ghost" size="icon" className="-mt-1 -mr-2 shrink-0" onClick={onClose}
-                  aria-label="Close detail">
+                  aria-label={t("graph.closeDetail")}>
             <X aria-hidden />
           </Button>
         )}
       </div>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onClick={() => onExpand(node.id)} id="graph-expand">
-          <Focus aria-hidden /> Neighbours only
+          <Focus aria-hidden /> {t("graph.neighboursOnly")}
         </Button>
         {conceptId && (
           <Button size="sm" variant="outline" asChild>
             <Link to={`/ontology?concept=${encodeURIComponent(conceptId)}`} id="graph-concept-link">
-              <ExternalLink aria-hidden /> Concept detail
+              <ExternalLink aria-hidden /> {t("graph.conceptDetail")}
             </Link>
           </Button>
         )}
       </div>
       {node.type === "document" ? (
-        <Section title="Document">
+        <Section title={t("graph.document")}>
           <p className="text-sm break-all">{node.path || node.label}</p>
-          <p className="text-xs text-muted-foreground">Evidence for {node.degree} node{node.degree === 1 ? "" : "s"}</p>
+          <p className="text-xs text-muted-foreground">{tn("graph.evidenceFor", node.degree)}</p>
         </Section>
       ) : (
         <>
-          <Section title="Definition" id="definition"><p className="text-sm leading-relaxed">{node.definition || "-"}</p></Section>
-          {!!node.synonyms?.length && <Section title="Synonyms" id="synonyms"><Chips items={node.synonyms} /></Section>}
-          {!!node.tables?.length && <Section title="Tables" id="tables"><Chips items={node.tables} /></Section>}
-          {!!node.attributes?.length && !conceptId && <Section title="Attributes"><Chips items={node.attributes} /></Section>}
+          <Section title={t("concept.definition")} id="definition"><p className="text-sm leading-relaxed">{node.definition || "-"}</p></Section>
+          {!!node.synonyms?.length && <Section title={t("concept.synonyms")} id="synonyms"><Chips items={node.synonyms} /></Section>}
+          {!!node.tables?.length && <Section title={t("graph.tables")} id="tables"><Chips items={node.tables} /></Section>}
+          {!!node.attributes?.length && !conceptId && <Section title={t("concept.attributes")}><Chips items={node.attributes} /></Section>}
         </>
       )}
       {conceptId && (
@@ -87,7 +90,7 @@ export function GraphDetail({ node, neighbours, onSelect, onExpand, onClose }: {
             : <ConceptBody c={q.data} omitBasics onOpen={onSelect} />
       )}
       {neighbours.length > 0 && (
-        <Section title={`Neighbours (${neighbours.length})`}>
+        <Section title={t("graph.neighbours", { n: neighbours.length })}>
           <div className="flex flex-wrap gap-1.5">
             {neighbours.slice(0, 40).map((n) => (
               <button key={n.id} type="button" onClick={() => onSelect(n.id)}

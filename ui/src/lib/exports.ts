@@ -1,5 +1,6 @@
 /* Pure helpers of the Exports page: validation.json summaries and the file tree. */
 
+import { fmtNumber, t } from "@/i18n"
 import type { ExportDir } from "@/lib/api"
 
 export interface Validation {
@@ -72,5 +73,5 @@ export function previewText(name: string, text: string, max = 200_000): string {
   if (/\.(json|jsonld)$/i.test(name)) {
     try { out = JSON.stringify(JSON.parse(text), null, 2) } catch { /* keep the raw text */ }
   }
-  return out.length > max ? `${out.slice(0, max)}\n… (first ${max.toLocaleString("en-US")} characters shown)` : out
+  return out.length > max ? `${out.slice(0, max)}\n${t("exports.previewCut", { n: fmtNumber(max) })}` : out
 }

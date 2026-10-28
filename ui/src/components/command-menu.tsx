@@ -2,12 +2,14 @@ import { useEffect, useState } from "react"
 import { useNavigate } from "react-router"
 
 import { NAV } from "@/components/nav"
+import { useT } from "@/i18n"
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command"
 
 /** ⌘K / Ctrl+K: jump to a page or search the ontology's concepts. */
 export function CommandMenu() {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
   const navigate = useNavigate()
@@ -23,20 +25,20 @@ export function CommandMenu() {
   }, [])
   const go = (to: string) => { setOpen(false); setText(""); navigate(to) }
   return (
-    <CommandDialog open={open} onOpenChange={setOpen} title="Go to"
-                   description="Jump to a page or search concepts">
-      <CommandInput placeholder="Pages, concepts…" value={text} onValueChange={setText} />
+    <CommandDialog open={open} onOpenChange={setOpen} title={t("cmd.title")}
+                   description={t("cmd.description")}>
+      <CommandInput placeholder={t("cmd.placeholder")} value={text} onValueChange={setText} />
       <CommandList>
-        <CommandEmpty>No results</CommandEmpty>
+        <CommandEmpty>{t("cmd.empty")}</CommandEmpty>
         {text.trim() && (
-          <CommandGroup heading="Concepts">
+          <CommandGroup heading={t("cmd.concepts")}>
             <CommandItem value={`concept-search ${text}`}
                          onSelect={() => go(`/ontology?q=${encodeURIComponent(text.trim())}`)}>
-              Search the ontology for “{text.trim()}”
+              {t("cmd.search", { text: text.trim() })}
             </CommandItem>
           </CommandGroup>
         )}
-        <CommandGroup heading="Pages">
+        <CommandGroup heading={t("cmd.pages")}>
           {NAV.map((n) => (
             <CommandItem key={n.path} value={`${n.label} ${n.hint}`} onSelect={() => go(n.path)}>
               <n.icon aria-hidden /> {n.label}

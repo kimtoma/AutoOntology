@@ -1,9 +1,15 @@
 import "@testing-library/jest-dom/vitest"
 import { cleanup } from "@testing-library/react"
 
+import { setLang } from "@/i18n/core"
+
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  // every test starts in English with no remembered choice
+  setLang("en", false)
+  try { localStorage.clear() } catch { /* jsdom without storage */ }
+  window.history.replaceState(null, "", "/")
 })
 
 // jsdom lacks these; Radix/sonner touch them

@@ -1,9 +1,12 @@
 /* Pure helpers of the Playground page (unit-tested in src/test/playground.test.tsx). */
 
-export const ELEMENT_LABEL: Record<string, string> = {
-  term: "Term", concept: "Concept", rule: "Rule", process: "Process", individual: "Individual",
-  relation: "Relation", evidence: "Evidence",
-}
+import { labelTable } from "@/i18n/core"
+
+export const ELEMENT_LABEL: Record<string, string> = labelTable({
+  term: "playground.el.term", concept: "playground.el.concept", rule: "playground.el.rule",
+  process: "playground.el.process", individual: "playground.el.individual",
+  relation: "playground.el.relation", evidence: "playground.el.evidence",
+})
 
 export function cell(v: unknown): string {
   if (v === null || v === undefined) return ""

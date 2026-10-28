@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
+import { useT } from "@/i18n"
 
 export function EmptyState({ icon: Icon, title, hint, action, className }: {
   icon?: LucideIcon
@@ -23,16 +24,17 @@ export function EmptyState({ icon: Icon, title, hint, action, className }: {
 }
 
 export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+  const t = useT()
   const message = error instanceof Error ? error.message : String(error)
   return (
     <div role="alert"
          className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
-      <p className="font-medium text-destructive">Could not load</p>
+      <p className="font-medium text-destructive">{t("common.couldNotLoad")}</p>
       <p className="mt-1 break-words text-muted-foreground">{message}</p>
       {onRetry && (
         <button type="button" onClick={onRetry}
                 className="mt-2 text-sm font-medium underline underline-offset-4">
-          Try again
+          {t("common.tryAgain")}
         </button>
       )}
     </div>

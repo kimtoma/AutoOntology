@@ -2,6 +2,8 @@
    the upload `accept` lists, the dialog hints and the per-file preview. Nothing here lists
    extensions itself except the advice for formats the service cannot read. */
 
+import { t } from "@/i18n/core"
+
 export type Engine = "native" | "kordoc" | "kordoc-ocr"
 export interface FormatEntry { kind: "structured" | "document"; engine: Engine; note: string }
 export interface Formats {
@@ -55,34 +57,52 @@ export interface FileCheck {
 }
 
 /** Advice for formats the service cannot read: what to save them as. */
-const ALTERNATIVES: Record<string, string> = {
-  ".rtf": "save it as .docx",
-  ".odt": "save it as .docx",
-  ".pages": "export it as .docx or .pdf",
-  ".ppt": "save it as .pptx",
-  ".odp": "save it as .pptx",
-  ".key": "export it as .pptx or .pdf",
-  ".xlsb": "save it as .xlsx",
-  ".ods": "save it as .xlsx",
-  ".numbers": "export it as .xlsx",
-  ".gif": "convert it to .png",
-  ".bmp": "convert it to .png",
-  ".tif": "convert it to .png or .pdf",
-  ".tiff": "convert it to .png or .pdf",
-  ".heic": "convert it to .jpg",
-  ".zip": "unzip it and add the files",
-  ".7z": "extract it and add the files",
-  ".tar": "extract it and add the files",
-  ".gz": "extract it and add the files",
-  ".hwt": "save it as .hwp or .hwpx",
-  ".xml": "convert it to .json, .csv or .html",
-  ".msg": "save the message as .txt or .pdf",
-  ".eml": "save the message as .txt or .pdf",
+type Advice = [verb: "saveAs" | "exportAs" | "convert", targets: string[]] | "unzip" | "extract" | "message"
+const ALTERNATIVES: Record<string, Advice> = {
+  ".rtf": ["saveAs", [".docx"]],
+  ".odt": ["saveAs", [".docx"]],
+  ".pages": ["exportAs", [".docx", ".pdf"]],
+  ".ppt": ["saveAs", [".pptx"]],
+  ".odp": ["saveAs", [".pptx"]],
+  ".key": ["exportAs", [".pptx", ".pdf"]],
+  ".xlsb": ["saveAs", [".xlsx"]],
+  ".ods": ["saveAs", [".xlsx"]],
+  ".numbers": ["exportAs", [".xlsx"]],
+  ".gif": ["convert", [".png"]],
+  ".bmp": ["convert", [".png"]],
+  ".tif": ["convert", [".png", ".pdf"]],
+  ".tiff": ["convert", [".png", ".pdf"]],
+  ".heic": ["convert", [".jpg"]],
+  ".zip": "unzip",
+  ".7z": "extract",
+  ".tar": "extract",
+  ".gz": "extract",
+  ".hwt": ["saveAs", [".hwp", ".hwpx"]],
+  ".xml": ["convert", [".json", ".csv", ".html"]],
+  ".msg": "message",
+  ".eml": "message",
+}
+
+/** ".json, .csv or .html" (the "or" in the UI language) */
+function joinTargets(targets: string[]): string {
+  if (targets.length < 2) return targets.join("")
+  return `${targets.slice(0, -1).join(", ")} ${t("fmt.or")} ${targets[targets.length - 1]}`
+}
+
+function alternativeFor(ext: string): string {
+  const a = ALTERNATIVES[ext]
+  if (!a) return t("fmt.alt.default")
+  if (a === "unzip") return t("fmt.alt.unzip")
+  if (a === "extract") return t("fmt.alt.extract")
+  if (a === "message") return t("fmt.alt.message")
+  const [verb, targets] = a
+  return t(`fmt.alt.${verb}`, { target: joinTargets(targets) })
 }
 
 export const KORDOC_INSTALL = "uv run autoontology tools install-kordoc"
 
-const OTHER: Record<Family, string> = { structured: "Documents", documents: "Structured" }
+/** The other family, as named in the advice ("add it as a Documents source"). */
+const OTHER_FAMILY: Record<Family, Family> = { structured: "documents", documents: "structured" }
 
 /** Can a *family* source read *name*, given whether kordoc and its OCR models are installed? */
 export function classifyFile(
@@ -98,12 +118,11 @@ export function classifyFile(
   if (entry) {
     if (entry.engine === "kordoc" && !engines.kordoc) {
       return { ...base, engine: entry.engine, state: "needs_kordoc",
-               reason: `${ext} is read by kordoc, which is not installed` }
+               reason: t("fmt.reason.kordoc", { ext }) }
     }
     if (entry.engine === "kordoc-ocr" && !(engines.kordoc && engines.ocr)) {
       return { ...base, engine: entry.engine, state: "needs_ocr",
-               reason: engines.kordoc ? "images need the OCR models, which are not downloaded"
-                 : "images need kordoc and its OCR models, which are not installed" }
+               reason: engines.kordoc ? t("fmt.reason.ocrModels") : t("fmt.reason.ocrKordoc") }
     }
     return { ...base, engine: entry.engine, state: "supported" }
   }
@@ -111,13 +130,13 @@ export function classifyFile(
   const elsewhere = formats?.[other]?.[ext]
   if (elsewhere) {
     return { ...base, engine: null, state: "unsupported",
-             reason: `${ext} is not a ${family === "structured" ? "table" : "document"} format here`,
-             alternative: `add it as a ${OTHER[family]} source (${ext} is supported there${
-               elsewhere.engine === "native" ? " natively" : ""})` }
+             reason: t(family === "structured" ? "fmt.reason.notTable" : "fmt.reason.notDocument", { ext }),
+             alternative: t(elsewhere.engine === "native" ? "fmt.alt.otherFamilyNative" : "fmt.alt.otherFamily",
+                            { family: t(`family.${OTHER_FAMILY[family]}`), ext }) }
   }
   return { ...base, engine: null, state: "unsupported",
-           reason: ext ? `${ext} files cannot be read` : "the file has no extension",
-           alternative: ALTERNATIVES[ext] ?? "save it in one of the formats listed above" }
+           reason: ext ? t("fmt.reason.cannotRead", { ext }) : t("fmt.reason.noExt"),
+           alternative: alternativeFor(ext) }
 }
 
 /** Ignored the way the server ignores them when it scans a folder (hidden files, Office lock files). */

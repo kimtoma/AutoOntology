@@ -12,6 +12,7 @@ import OntologyPage from "@/pages/ontology"
 import SourcesPage from "@/pages/sources"
 import StatusPage from "@/pages/status"
 import { legacyTarget } from "@/lib/routes"
+import { useT } from "@/i18n"
 
 // three.js and the force-graph libraries only load with this page
 const GraphPage = lazy(() => import("@/pages/graph"))
@@ -40,6 +41,7 @@ const lazyPage = (Page: React.ComponentType) => (
 )
 
 export default function App() {
+  const t = useT()
   return (
     <>
       <LegacyHashRedirect />
@@ -57,7 +59,7 @@ export default function App() {
           <Route path="runs" element={<LegacyRedirect />} />
           <Route path="concepts" element={<LegacyRedirect />} />
           <Route path="settings" element={<LegacyRedirect />} />
-          <Route path="*" element={<EmptyState title="Page not found" hint="Pick a page in the sidebar." />} />
+          <Route path="*" element={<EmptyState title={t("shell.pageMissing")} hint={t("shell.pageMissing.hint")} />} />
         </Route>
       </Routes>
     </>

@@ -20,12 +20,13 @@ import { api, errorMessage, type ExportDir, type ExportEntry } from "@/lib/api"
 import {
   canPreview, okfValidation, ossieValidation, previewText, subGroups, type Validation,
 } from "@/lib/exports"
-import { fmtBytes, fmtTime } from "@/lib/labels"
+import { fmtDate, t, tn, type MessageKey } from "@/i18n"
+import { fmtBytes } from "@/lib/labels"
 
-const DIR_INFO: Record<string, string> = {
-  ossie: "Apache Ossie bundle: semantic model, ontology and mapping (spec 0.2.0.dev0)",
-  okf: "Open Knowledge Format v0.2: one Markdown file per concept, table and document",
-  upstream: "The upstream backend's own per-source model and Ossie zip",
+const DIR_INFO: Record<string, MessageKey> = {
+  ossie: "exports.dir.ossie",
+  okf: "exports.dir.okf",
+  upstream: "exports.dir.upstream",
 }
 
 /** export folders shown at first; "Show more" adds this many at a time */
@@ -43,13 +44,13 @@ function FileRow({ entry, path, label, bytes, onPreview, loading }: {
       <a href={api.exportFileUrl(entry.dir, path)} download
          className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs outline-none
                     hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
-         title={`Download ${path}`}>
+         title={t("exports.downloadFile", { path })}>
         <Download className="size-3.5 shrink-0" aria-hidden />
         <span className="truncate font-mono">{label}</span>
         {bytes !== undefined && <span className="shrink-0 text-muted-foreground">{fmtBytes(bytes)}</span>}
       </a>
       {canPreview(path) && (
-        <Button variant="ghost" size="icon" className="size-6 shrink-0" aria-label={`Preview ${path}`}
+        <Button variant="ghost" size="icon" className="size-6 shrink-0" aria-label={t("exports.previewFile", { path })}
                 data-preview={path} disabled={!!loading} onClick={() => onPreview(entry.dir, path)}>
           {loading === key ? <Loader2 className="animate-spin" aria-hidden /> : <Eye aria-hidden />}
         </Button>
@@ -60,12 +61,12 @@ function FileRow({ entry, path, label, bytes, onPreview, loading }: {
 
 function ValidationBadge({ name, v }: { name: string; v: Validation | null | undefined }) {
   if (v === undefined) return <Badge variant="outline" className="font-normal text-muted-foreground">{name} …</Badge>
-  if (v === null) return <Badge variant="outline" className="font-normal text-muted-foreground" data-validation={name.toLowerCase()} data-ok="unknown">{name}: no validation.json</Badge>
+  if (v === null) return <Badge variant="outline" className="font-normal text-muted-foreground" data-validation={name.toLowerCase()} data-ok="unknown">{t("exports.noValidation", { name })}</Badge>
   return (
     <span title={v.parts.join("\n")} data-validation={name.toLowerCase()} data-ok={String(v.ok)}>
       <StatusChip status={v.ok ? "succeeded" : "failed"}
-                  label={v.ok ? `${name} ok${v.warnings ? ` · ${v.warnings} warning${v.warnings === 1 ? "" : "s"}` : ""}`
-                    : `${name} · ${v.errors} error${v.errors === 1 ? "" : "s"}`} />
+                  label={v.ok ? `${t("exports.validationOk", { name })}${v.warnings ? ` · ${tn("exports.warnings", v.warnings)}` : ""}`
+                    : `${name} · ${tn("exports.errors", v.errors)}`} />
     </span>
   )
 }
@@ -102,9 +103,9 @@ function DirGroup({ entry, dir, sizes, onPreview, loading, validation }: {
                           outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden />
         <span className="font-mono font-medium">{dir.name}/</span>
-        <span className="text-xs text-muted-foreground">{dir.files.length} files · {fmtBytes(dir.bytes)}</span>
+        <span className="text-xs text-muted-foreground">{t("exports.filesSize", { n: dir.files.length, size: fmtBytes(dir.bytes) })}</span>
         {validation !== undefined && <ValidationBadge name={dir.name === "okf" ? "OKF" : "Ossie"} v={validation} />}
-        <span className="basis-full pl-6 text-xs text-muted-foreground">{DIR_INFO[dir.name] ?? ""}</span>
+        <span className="basis-full pl-6 text-xs text-muted-foreground">{DIR_INFO[dir.name] ? t(DIR_INFO[dir.name]) : ""}</span>
       </summary>
       <div className="grid gap-3 border-t px-3 py-2">
         {groups.map((g) => (
@@ -139,9 +140,9 @@ function ExportCard({ entry, latest, onPreview, loading }: {
         <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
           <FolderOpen className="size-4" aria-hidden />
           <span className="font-mono font-semibold">exports/{entry.dir}/</span>
-          <Badge variant="secondary" className="font-normal">Revision {entry.revision}</Badge>
-          {latest && <Badge variant="outline" className="font-normal">latest</Badge>}
-          <span className="text-xs font-normal text-muted-foreground">{fmtTime(entry.created_at)} · {entry.files.length} files · {fmtBytes(total)}</span>
+          <Badge variant="secondary" className="font-normal">{t("exports.revision", { n: entry.revision })}</Badge>
+          {latest && <Badge variant="outline" className="font-normal">{t("exports.latest")}</Badge>}
+          <span className="text-xs font-normal text-muted-foreground">{fmtDate(entry.created_at)} · {t("exports.filesSize", { n: entry.files.length, size: fmtBytes(total) })}</span>
         </CardTitle>
         <div className="flex flex-wrap gap-1.5" id={latest ? "export-validation" : undefined}>
           {entry.dirs.some((d) => d.name === "ossie") && <ValidationBadge name="Ossie" v={ossie} />}
@@ -149,7 +150,7 @@ function ExportCard({ entry, latest, onPreview, loading }: {
         </div>
       </CardHeader>
       <CardContent className="grid gap-3 px-4">
-        <ul className="grid gap-0.5 sm:grid-cols-2" aria-label="Files">
+        <ul className="grid gap-0.5 sm:grid-cols-2" aria-label={t("exports.files")}>
           {top.map((f) => (
             <FileRow key={f.name} entry={entry} path={f.name} label={f.name} bytes={f.bytes}
                      onPreview={onPreview} loading={loading} />
@@ -176,7 +177,7 @@ export default function ExportsPage() {
       const text = await api.exportText(dir, file)
       setPreview({ dir, file, text: previewText(file, text) })
     } catch (err) {
-      toast.error(`Could not load ${file}`, { description: errorMessage(err) })
+      toast.error(t("exports.loadFailed", { file }), { description: errorMessage(err) })
     } finally {
       setLoading(null)
     }
@@ -184,14 +185,13 @@ export default function ExportsPage() {
 
   return (
     <>
-      <PageHeader title="Exports"
-                  description="Every export writes one folder per revision: Turtle, JSON-LD, GraphML, a report, an Apache Ossie bundle and an OKF bundle. Preview text files inline or download them." />
+      <PageHeader title={t("exports.title")} description={t("exports.description")} />
       {list.error ? <ErrorState error={list.error} onRetry={() => list.refetch()} />
         : list.isPending ? <div className="grid gap-3"><Skeleton className="h-24" /><Skeleton className="h-24" /></div>
         : !list.data.length ? (
-          <EmptyState icon={FolderOpen} title="No exports yet"
-                      hint="Build the ontology, then press Export on the Build page."
-                      action={<Button asChild><Link to="/build"><Hammer aria-hidden /> Go to Build</Link></Button>} />
+          <EmptyState icon={FolderOpen} title={t("exports.empty.title")}
+                      hint={t("exports.empty.hint")}
+                      action={<Button asChild><Link to="/build"><Hammer aria-hidden /> {t("ontology.goBuild")}</Link></Button>} />
         ) : (
           <div id="exports-list" className="grid gap-4">
             {list.data.slice(0, shown).map((e, i) => (
@@ -200,7 +200,7 @@ export default function ExportsPage() {
             {list.data.length > shown && (
               <Button variant="outline" className="justify-self-center" id="exports-more"
                       onClick={() => setShown((n) => n + PAGE)}>
-                Show more ({list.data.length - shown} older)
+                {t("exports.more", { n: list.data.length - shown })}
               </Button>
             )}
           </div>
@@ -219,7 +219,7 @@ export default function ExportsPage() {
           {preview && (
             <div className="flex justify-end">
               <Button variant="outline" size="sm" asChild>
-                <a href={api.exportFileUrl(preview.dir, preview.file)} download><Download aria-hidden /> Download</a>
+                <a href={api.exportFileUrl(preview.dir, preview.file)} download><Download aria-hidden /> {t("exports.download")}</a>
               </Button>
             </div>
           )}

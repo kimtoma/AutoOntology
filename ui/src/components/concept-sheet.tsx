@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table"
 import { keys, retryServerErrors } from "@/hooks/queries"
 import { api, type ConceptDetail, type Origin } from "@/lib/api"
+import { t, tx, useT } from "@/i18n"
 import { CKIND_LABEL, ORIGIN_LABEL, REL_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 
@@ -77,6 +78,7 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
   omitBasics?: boolean
   onOpen?: (id: string) => void
 }) {
+  const t = useT()
   const other = (id: string, label: string) => (onOpen && isConcept(id)
     ? <button type="button" onClick={() => onOpen(id)} data-open={id}
               className="text-left font-medium underline-offset-4 hover:underline">{label || id}</button>
@@ -85,31 +87,31 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
   return (
     <div className="grid min-w-0 gap-5">
       {!omitBasics && (
-        <Section title="Definition" id="definition">
+        <Section title={t("concept.definition")} id="definition">
           {definitions.length
             ? definitions.map((d, i) => <p key={i} className="text-sm leading-relaxed">{d}</p>)
             : <p className="text-sm text-muted-foreground">-</p>}
         </Section>
       )}
-      {!omitBasics && c.synonyms.length > 0 && <Section title="Synonyms" id="synonyms"><Chips items={c.synonyms} /></Section>}
-      <Section title="Source" id="source">
+      {!omitBasics && c.synonyms.length > 0 && <Section title={t("concept.synonyms")} id="synonyms"><Chips items={c.synonyms} /></Section>}
+      <Section title={t("concept.source")} id="source">
         <p className="text-sm">
           {c.source || "-"}
-          {c.enriched_by && <span className="text-muted-foreground"> · enriched by {c.enriched_by}</span>}
-          {c.individual_type && <span className="text-muted-foreground"> · instance of {c.individual_type}</span>}
+          {c.enriched_by && <span className="text-muted-foreground"> · {t("concept.enrichedBy", { name: c.enriched_by })}</span>}
+          {c.individual_type && <span className="text-muted-foreground"> · {t("concept.instanceOf", { name: c.individual_type })}</span>}
         </p>
       </Section>
       {(c.tables.length > 0 || c.attributes.length > 0) && (
-        <Section title={c.kind === "term" ? "Table and columns" : "Attributes"} id="columns">
+        <Section title={c.kind === "term" ? t("concept.tableColumns") : t("concept.attributes")} id="columns">
           {c.tables.length > 0 && <Chips items={c.tables} />}
           {c.attributes.length > 0 && (
             <div className="overflow-x-auto rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Attribute</TableHead>
-                    <TableHead>{c.kind === "term" ? "Column" : "Range"}</TableHead>
-                    <TableHead>Type</TableHead>
+                    <TableHead>{t("concept.attribute")}</TableHead>
+                    <TableHead>{c.kind === "term" ? t("concept.column") : t("concept.range")}</TableHead>
+                    <TableHead>{t("concept.type")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -127,19 +129,19 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
         </Section>
       )}
       {(c.merged_concepts.length > 0 || c.folded_into) && (
-        <Section title="Merged concepts" id="merged">
+        <Section title={t("concept.merged")} id="merged">
           {c.folded_into && (
-            <p className="text-sm">Folded into the Term {other(c.folded_into.id, c.folded_into.name)} (same concept).</p>
+            <p className="text-sm">{tx("concept.foldedInto", { term: other(c.folded_into.id, c.folded_into.name) })}</p>
           )}
           {c.merged_concepts.length > 0 && (
             <>
-              <p className="text-xs text-muted-foreground">Document concepts folded into this Term:</p>
+              <p className="text-xs text-muted-foreground">{t("concept.foldedHere")}</p>
               <Chips items={c.merged_concepts} />
             </>
           )}
         </Section>
       )}
-      <Section title={`Alignments (${c.alignments.length})`} id="alignments">
+      <Section title={t("concept.alignments", { n: c.alignments.length })} id="alignments">
         {c.alignments.length ? (
           <ul className="grid gap-1.5">
             {c.alignments.map((a, i) => (
@@ -147,21 +149,21 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
                 <RelationChip relation={a.relation} />
                 {other(a.with, a.label)}
                 <span className="text-xs text-muted-foreground">
-                  {a.confidence != null && `confidence ${a.confidence.toFixed(2)}`}
-                  {a.accepted ? " · accepted" : " · proposal"}
+                  {a.confidence != null && t("concept.confidence", { n: a.confidence.toFixed(2) })}
+                  {" · "}{a.accepted ? t("concept.accepted") : t("concept.proposal")}
                 </span>
               </li>
             ))}
           </ul>
-        ) : <p className="text-sm text-muted-foreground">No alignment</p>}
+        ) : <p className="text-sm text-muted-foreground">{t("concept.noAlignment")}</p>}
       </Section>
       {c.relations.length > 0 && (
-        <Section title={`Relations (${c.relations.length})`} id="relations">
+        <Section title={t("concept.relations", { n: c.relations.length })} id="relations">
           <ul className="grid gap-1 text-sm">
             {c.relations.map((r, i) => (
               <li key={`${r.id}-${i}`} className="flex flex-wrap items-center gap-1.5">
-                {r.direction === "out" ? <ArrowRight className="size-3.5 text-muted-foreground" aria-label="outgoing" />
-                  : <ArrowLeft className="size-3.5 text-muted-foreground" aria-label="incoming" />}
+                {r.direction === "out" ? <ArrowRight className="size-3.5 text-muted-foreground" aria-label={t("concept.outgoing")} />
+                  : <ArrowLeft className="size-3.5 text-muted-foreground" aria-label={t("concept.incoming")} />}
                 <code className="rounded bg-muted px-1 text-xs">{r.predicate}</code>
                 {other(r.other, r.other_label)}
                 {r.label && r.label !== r.predicate && <span className="text-xs text-muted-foreground">{r.label}</span>}
@@ -171,20 +173,20 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
         </Section>
       )}
       <Separator />
-      <Section title={`Evidence (${c.evidence.length})`} id="evidence">
+      <Section title={t("concept.evidence", { n: c.evidence.length })} id="evidence">
         {c.evidence.length ? (
           <ul className="grid gap-2" id="evidence-list">
             {c.evidence.map((e, i) => (
               <li key={i} className="quote rounded-md border-l-2 border-primary/40 bg-muted/40 px-3 py-2">
                 <blockquote className="text-sm leading-relaxed">“{e.quote}”</blockquote>
                 <p className="mt-1 text-xs break-all text-muted-foreground">
-                  {e.document || e.path}{e.page ? ` · p. ${e.page}` : ""}
-                  {!e.verified && <span className="text-destructive"> · not found verbatim in the source</span>}
+                  {e.document || e.path}{e.page ? ` · ${t("concept.page", { n: e.page })}` : ""}
+                  {!e.verified && <span className="text-destructive"> · {t("concept.notVerbatim")}</span>}
                 </p>
               </li>
             ))}
           </ul>
-        ) : <p className="text-sm text-muted-foreground">No evidence ({c.kind === "term" ? "from the structured schema" : "none recorded"})</p>}
+        ) : <p className="text-sm text-muted-foreground">{c.kind === "term" ? t("concept.noEvidenceTerm") : t("concept.noEvidence")}</p>}
       </Section>
     </div>
   )
@@ -209,14 +211,14 @@ export function ConceptSheet({ conceptId, onClose, onOpen }: {
       <SheetContent className="w-full gap-0 sm:max-w-lg" id="drawer"
                     focusSelf>
         <SheetHeader className="border-b pr-12">
-          <SheetTitle className="break-words">{c?.name ?? "Concept"}</SheetTitle>
+          <SheetTitle className="break-words">{c?.name ?? t("concept.title")}</SheetTitle>
           <SheetDescription asChild>
             <div className="flex flex-wrap items-center gap-1.5">
               {c && (
                 <>
                   <OriginBadge origin={c.origin} />
                   <Badge variant="outline" className="font-normal">{CKIND_LABEL[c.kind] ?? c.kind}</Badge>
-                  <span className="text-xs">{c.evidence_count} evidence</span>
+                  <span className="text-xs">{t("concept.evidenceCount", { n: c.evidence_count })}</span>
                 </>
               )}
             </div>
@@ -225,7 +227,7 @@ export function ConceptSheet({ conceptId, onClose, onOpen }: {
             <div className="pt-1">
               <Button size="sm" variant="outline" asChild>
                 <Link to={`/graph?focus=${encodeURIComponent(conceptId)}`} id="concept-graph-link">
-                  <Network aria-hidden /> Show in graph
+                  <Network aria-hidden /> {t("concept.showInGraph")}
                 </Link>
               </Button>
             </div>

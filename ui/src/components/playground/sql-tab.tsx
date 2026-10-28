@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { api, errorMessage, type SseEvent } from "@/lib/api"
+import { useT } from "@/i18n"
 import { tabulate } from "@/lib/playground"
 
 interface Step { node: string; label: string; done: boolean }
@@ -23,6 +24,7 @@ const newConversation = () =>
 
 /** *source*: the structured source to query; null = the snapshot's first one. */
 export function SqlTab({ source }: { source: string | null }) {
+  const t = useT()
   const [question, setQuestion] = useState("")
   const [asked, setAsked] = useState("")
   const [steps, setSteps] = useState<Step[]>([])
@@ -76,8 +78,8 @@ export function SqlTab({ source }: { source: string | null }) {
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4" id="playground-sql">
       <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); run(question) }}>
         <Textarea id="sql-input" value={question} onChange={(e) => setQuestion(e.target.value)} rows={2}
-                  aria-label="Data question" maxLength={2000}
-                  placeholder="e.g. How many customers are there? / The 5 largest contracts by amount (the 계약금액 column)"
+                  aria-label={t("playground.sql.label")} maxLength={2000}
+                  placeholder={t("playground.sql.placeholder")}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault()
@@ -85,13 +87,11 @@ export function SqlTab({ source }: { source: string | null }) {
                     }
                   }} />
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
-            The upstream text-to-SQL agent writes SQL from the structured source's semantic layer and runs it. Local models can take a few minutes.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("playground.sql.hint")}</p>
           <div className="flex gap-2">
-            {busy && <Button type="button" variant="outline" onClick={() => abort.current?.abort()}><Square aria-hidden /> Stop</Button>}
+            {busy && <Button type="button" variant="outline" onClick={() => abort.current?.abort()}><Square aria-hidden /> {t("playground.stop")}</Button>}
             <Button type="submit" id="sql-send" disabled={busy || !question.trim()}>
-              {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />} Ask
+              {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />} {t("playground.sql.ask")}
             </Button>
           </div>
         </div>
@@ -99,7 +99,7 @@ export function SqlTab({ source }: { source: string | null }) {
       {notices.map((n) => <p key={n} className="text-xs text-amber-700 dark:text-amber-300">{n}</p>)}
       {(steps.length > 0 || busy) && (
         <Card className="gap-2 py-4">
-          <CardHeader><CardTitle className="text-sm break-words">Agent steps · {asked}</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm break-words">{t("playground.sql.steps", { q: asked })}</CardTitle></CardHeader>
           <CardContent>
             <ol className="grid gap-1 text-sm" id="sql-steps">
               {steps.map((s, i) => (
@@ -109,7 +109,7 @@ export function SqlTab({ source }: { source: string | null }) {
                   {s.label}
                 </li>
               ))}
-              {busy && !steps.length && <li className="text-muted-foreground">Starting the agent…</li>}
+              {busy && !steps.length && <li className="text-muted-foreground">{t("playground.sql.starting")}</li>}
             </ol>
           </CardContent>
         </Card>
@@ -117,7 +117,7 @@ export function SqlTab({ source }: { source: string | null }) {
       {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive break-words">{error}</p>}
       {answer?.response && (
         <Card className="gap-2 py-4" id="sql-answer">
-          <CardHeader><CardTitle className="text-sm">Answer</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">{t("playground.sql.answer")}</CardTitle></CardHeader>
           <CardContent><p className="text-sm whitespace-pre-wrap break-words">{answer.response}</p></CardContent>
         </Card>
       )}
@@ -125,7 +125,7 @@ export function SqlTab({ source }: { source: string | null }) {
         <Card className="gap-2 py-4" id="sql-code">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm">SQL</CardTitle>
-            <CopyButton text={sql} label="Copy SQL" />
+            <CopyButton text={sql} label={t("playground.sql.copy")} />
           </CardHeader>
           <CardContent>
             <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs"><code>{sql}</code></pre>

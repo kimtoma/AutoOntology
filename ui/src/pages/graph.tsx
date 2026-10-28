@@ -33,6 +33,7 @@ import {
   type LegendItem, neighbours, ORIGIN_COLORS, ORIGIN_LABELS, originGroup, reuseNodes, RING_COLOR,
   originCounts, searchKeywords,
 } from "@/lib/graph-data"
+import { t, useT } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { hasWebGL } from "@/lib/webgl"
 
@@ -66,7 +67,7 @@ function useSize<T extends HTMLElement>() {
 
 function Legend({ items }: { items: LegendItem[] }) {
   return (
-    <ul id="graph-legend" aria-label="Legend" className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+    <ul id="graph-legend" aria-label={t("graph.legend")} className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
       {items.map((i) => (
         <li key={i.key} className="inline-flex items-center gap-1.5" data-legend={i.key}>
           <span className="size-2.5 rounded-full" aria-hidden
@@ -81,13 +82,13 @@ function Legend({ items }: { items: LegendItem[] }) {
 
 function LinkKey() {
   return (
-    <ul className="grid gap-1 text-xs text-muted-foreground" aria-label="Link legend">
-      <li className="flex items-center gap-2"><span className="w-5 border-t border-current" aria-hidden />Relation (object property)</li>
+    <ul className="grid gap-1 text-xs text-muted-foreground" aria-label={t("graph.linkLegend")}>
+      <li className="flex items-center gap-2"><span className="w-5 border-t border-current" aria-hidden />{t("graph.link.relation")}</li>
       <li className="flex items-center gap-2"><span className="w-5 border-t border-current" aria-hidden />▸ subClassOf</li>
-      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#16a34a]" aria-hidden />Alignment: same (particles)</li>
-      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#0ea5e9]" aria-hidden />Alignment: broader / narrower</li>
-      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#8b5cf6]" aria-hidden />Alignment: related</li>
-      <li className="flex items-center gap-2"><span className="w-5 border-t border-[#b45309]" aria-hidden />Evidence → document</li>
+      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#16a34a]" aria-hidden />{t("graph.link.same")}</li>
+      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#0ea5e9]" aria-hidden />{t("graph.link.broader")}</li>
+      <li className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[#8b5cf6]" aria-hidden />{t("graph.link.related")}</li>
+      <li className="flex items-center gap-2"><span className="w-5 border-t border-[#b45309]" aria-hidden />{t("graph.link.evidence")}</li>
     </ul>
   )
 }
@@ -110,8 +111,8 @@ function Controls({ view, setView, evidence, setEvidence, colorMode, setColorMod
   return (
     <div className="grid gap-4" id="graph-controls">
       <fieldset className="grid gap-2">
-        <legend className="mb-1 text-xs font-medium text-muted-foreground">Layer</legend>
-        <div className="grid grid-cols-2 gap-0.5 rounded-md border p-0.5" role="radiogroup" aria-label="Layer" id="graph-layers">
+        <legend className="mb-1 text-xs font-medium text-muted-foreground">{t("graph.layer")}</legend>
+        <div className="grid grid-cols-2 gap-0.5 rounded-md border p-0.5" role="radiogroup" aria-label={t("graph.layer")} id="graph-layers">
           {LAYER_VIEWS.map((l) => (
             <button key={l.key} type="button" role="radio" aria-checked={view === l.key}
                     data-layer={l.key} id={`layer-${l.key}`} onClick={() => setView(l.key)}
@@ -121,23 +122,23 @@ function Controls({ view, setView, evidence, setEvidence, colorMode, setColorMod
           ))}
         </div>
         <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="layer-evidence" className="font-normal">Evidence (source documents)</Label>
+          <Label htmlFor="layer-evidence" className="font-normal">{t("graph.evidenceSwitch")}</Label>
           <Switch id="layer-evidence" data-layer="evidence" checked={evidence} onCheckedChange={setEvidence} />
         </div>
         {ground !== null && (
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="layer-ground" className="font-normal">Ground grid</Label>
+            <Label htmlFor="layer-ground" className="font-normal">{t("graph.ground")}</Label>
             <Switch id="layer-ground" checked={ground} onCheckedChange={setGround} />
           </div>
         )}
       </fieldset>
       <fieldset className="grid gap-2">
-        <legend className="mb-1 text-xs font-medium text-muted-foreground">Colour by</legend>
-        <div className="inline-flex rounded-md border p-0.5" role="radiogroup" aria-label="Colour by">
+        <legend className="mb-1 text-xs font-medium text-muted-foreground">{t("graph.colourBy")}</legend>
+        <div className="inline-flex rounded-md border p-0.5" role="radiogroup" aria-label={t("graph.colourBy")}>
           {(["origin", "type", "source"] as const).map((m) => (
             <button key={m} type="button" role="radio" aria-checked={colorMode === m}
                     data-color-mode={m} onClick={() => setColorMode(m)} className={segment(colorMode === m)}>
-              {{ origin: "Origin", type: "Kind", source: "Source" }[m]}
+              {t(`graph.colour.${m}`)}
             </button>
           ))}
         </div>
@@ -149,6 +150,7 @@ function Controls({ view, setView, evidence, setEvidence, colorMode, setColorMod
 }
 
 export default function GraphPage() {
+  const t = useT()
   const q = useQuery({ queryKey: keys.graph, queryFn: api.graph, retry: retryServerErrors })
   const { resolvedTheme } = useTheme()
   const dark = resolvedTheme === "dark"
@@ -294,11 +296,11 @@ export default function GraphPage() {
     const node = q.data.nodes.find((n) => n.id === focusParam)
     if (!node) {
       setFocusNote(q.data.truncated
-        ? `“${focusParam}” is not among the ${q.data.counts.nodes} best-connected nodes shown`
-        : `“${focusParam}” is not in the graph`)
+        ? t("graph.focus.notShown", { id: focusParam, n: q.data.counts.nodes })
+        : t("graph.focus.notInGraph", { id: focusParam }))
       return
     }
-    setFocusNote(nodeById.has(focusParam) ? null : `Switched to all layers to show “${node.label}”`)
+    setFocusNote(nodeById.has(focusParam) ? null : t("graph.focus.switched", { label: node.label }))
     pickSearch(focusParam)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusParam, q.data, built, size.width])
@@ -320,12 +322,12 @@ export default function GraphPage() {
     <div className={cn("relative h-[calc(100svh-3.5rem)] w-full overflow-hidden bg-background",
                        fullscreen && "fixed inset-0 z-40 h-svh")}
          id="graph-page" data-renderer={webgl ? "3d" : "2d"}>
-      <h1 className="sr-only">Graph</h1>
+      <h1 className="sr-only">{t("graph.title")}</h1>
       <div ref={canvasRef} className="absolute inset-0" id="graph-canvas">
         {isNoSnapshot(q.error) ? (
           <div className="p-6">
-            <EmptyState icon={Hammer} title="No ontology yet" hint="Build the ontology to see its graph."
-                        action={<Button asChild><Link to="/build"><Hammer aria-hidden /> Go to Build</Link></Button>} />
+            <EmptyState icon={Hammer} title={t("ontology.empty.title")} hint={t("graph.empty.hint")}
+                        action={<Button asChild><Link to="/build"><Hammer aria-hidden /> {t("ontology.goBuild")}</Link></Button>} />
           </div>
         ) : q.error ? (
           <div className="p-6"><ErrorState error={q.error} onRetry={() => q.refetch()} /></div>
@@ -333,8 +335,8 @@ export default function GraphPage() {
           <div className="grid h-full place-items-center"><Skeleton className="size-48 rounded-full" /></div>
         ) : !q.data!.nodes.length ? (
           <div className="p-6">
-            <EmptyState icon={Network} title="The graph is empty"
-                        hint="The latest build produced no classes. Add sources and build again." />
+            <EmptyState icon={Network} title={t("graph.emptyGraph.title")}
+                        hint={t("graph.emptyGraph.hint")} />
           </div>
         ) : size.width > 0 && (
           <Suspense fallback={<div className="grid h-full place-items-center"><Skeleton className="size-48 rounded-full" /></div>}>
@@ -350,53 +352,53 @@ export default function GraphPage() {
       <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start gap-2 p-3">
         <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-lg border bg-background/90 p-1 shadow-sm backdrop-blur">
           <Button variant="ghost" size="sm" onClick={() => setSearchOpen(true)} id="graph-search-open">
-            <Search aria-hidden /> <span className="hidden sm:inline">Find node</span>
+            <Search aria-hidden /> <span className="hidden sm:inline">{t("graph.find")}</span>
             <kbd className="hidden rounded border px-1 text-[10px] text-muted-foreground sm:inline">/</kbd>
           </Button>
           {isMobile && (
             <Button variant="ghost" size="sm" onClick={() => setControlsOpen(true)} id="graph-controls-open">
-              <SlidersHorizontal aria-hidden /> View
+              <SlidersHorizontal aria-hidden /> {t("graph.viewButton")}
             </Button>
           )}
           {webgl && (
             <Button variant={autoRotate ? "secondary" : "ghost"} size="icon" aria-pressed={autoRotate}
-                    onClick={() => setAutoRotate((v) => !v)} aria-label="Auto-rotate" title="Auto-rotate" id="graph-rotate">
+                    onClick={() => setAutoRotate((v) => !v)} aria-label={t("graph.autoRotate")} title={t("graph.autoRotate")} id="graph-rotate">
               <RotateCw aria-hidden />
             </Button>
           )}
           <Button variant="ghost" size="icon" onClick={() => handle.current?.reset()}
-                  aria-label="Reset camera" title="Reset camera" id="graph-reset">
+                  aria-label={t("graph.reset")} title={t("graph.reset")} id="graph-reset">
             <LocateFixed aria-hidden />
           </Button>
           <Button variant="ghost" size="icon" onClick={toggleFullscreen} aria-pressed={fullscreen}
-                  aria-label={fullscreen ? "Exit full screen" : "Full screen"} title="Full screen" id="graph-fullscreen">
+                  aria-label={fullscreen ? t("graph.exitFullscreen") : t("graph.fullscreen")} title={t("graph.fullscreen")} id="graph-fullscreen">
             {fullscreen ? <Shrink aria-hidden /> : <Expand aria-hidden />}
           </Button>
         </div>
         <div className="pointer-events-auto flex flex-wrap items-center gap-1.5" id="graph-badges" aria-live="polite">
           {built && (
             <Badge variant="secondary" className="font-normal tabular-nums" id="graph-stats">
-              {built.stats.nodes} nodes · {built.stats.links} links
+              {t("graph.stats", { nodes: built.stats.nodes, links: built.stats.links })}
             </Badge>
           )}
-          {!webgl && <Badge variant="outline" className="border-warning/40 bg-warning/10" id="graph-2d-badge">{forced2d ? "2D view" : "2D fallback"}</Badge>}
+          {!webgl && <Badge variant="outline" className="border-warning/40 bg-warning/10" id="graph-2d-badge">{forced2d ? t("graph.view2d") : t("graph.fallback2d")}</Badge>}
           {q.data?.truncated && (
             <Badge variant="outline" className="border-warning/40 bg-warning/10 font-normal" id="graph-truncated">
-              Showing the {q.data.counts.nodes} best-connected of {q.data.counts.total_nodes} nodes
+              {t("graph.truncated", { n: q.data.counts.nodes, total: q.data.counts.total_nodes })}
             </Badge>
           )}
           {focusNote && (
             <Badge variant="outline" className="max-w-full gap-1 border-warning/40 bg-warning/10 pr-1 font-normal"
                    id="graph-focus-note" role="status">
               <span className="truncate">{focusNote}</span>
-              <button type="button" onClick={() => setFocusNote(null)} aria-label="Dismiss"
+              <button type="button" onClick={() => setFocusNote(null)} aria-label={t("graph.dismiss")}
                       className="rounded p-0.5 hover:bg-accent"><X className="size-3" aria-hidden /></button>
             </Badge>
           )}
           {expanded.length > 0 && (
             <Badge variant="outline" className="gap-1 pr-1 font-normal" id="graph-expanded">
-              Neighbours only · {expanded.map((id) => cache.get(id)?.label ?? id).join(", ")}
-              <button type="button" onClick={() => setExpanded([])} aria-label="Show all"
+              {t("graph.neighboursOnly")} · {expanded.map((id) => cache.get(id)?.label ?? id).join(", ")}
+              <button type="button" onClick={() => setExpanded([])} aria-label={t("graph.showAll")}
                       className="rounded p-0.5 hover:bg-accent"><X className="size-3" aria-hidden /></button>
             </Badge>
           )}
@@ -413,7 +415,7 @@ export default function GraphPage() {
         </div>
       )}
       {!isMobile && detail && (
-        <aside aria-label="Node detail"
+        <aside aria-label={t("graph.nodeDetail")}
                className="absolute top-3 right-3 bottom-3 flex w-[min(24rem,calc(100%-17rem))] flex-col rounded-lg border bg-background/95 shadow-sm backdrop-blur">
           <ScrollArea className="min-h-0 flex-1"><div className="p-4">{detail}</div></ScrollArea>
         </aside>
@@ -425,8 +427,8 @@ export default function GraphPage() {
           <Sheet open={controlsOpen} onOpenChange={setControlsOpen}>
             <SheetContent side="bottom" className="max-h-[75svh]">
               <SheetHeader>
-                <SheetTitle>Graph view</SheetTitle>
-                <SheetDescription>Layers, colours, legend</SheetDescription>
+                <SheetTitle>{t("graph.sheet.title")}</SheetTitle>
+                <SheetDescription>{t("graph.sheet.description")}</SheetDescription>
               </SheetHeader>
               <ScrollArea className="min-h-0 flex-1"><div className="px-4 pb-4">{controls}</div></ScrollArea>
             </SheetContent>
@@ -434,7 +436,7 @@ export default function GraphPage() {
           <Sheet open={!!detail} onOpenChange={(o) => { if (!o) setSelectedId(null) }}>
             <SheetContent side="bottom" className="max-h-[70svh] gap-0" focusSelf>
               <SheetHeader className="sr-only">
-                <SheetTitle>{selected?.label ?? "Node detail"}</SheetTitle>
+                <SheetTitle>{selected?.label ?? t("graph.nodeDetail")}</SheetTitle>
                 <SheetDescription>{selected ? ORIGIN_LABELS[selected.originGroup] : ""}</SheetDescription>
               </SheetHeader>
               <ScrollArea className="min-h-0 flex-1"><div className="p-4 pr-10">{detail}</div></ScrollArea>
@@ -448,12 +450,12 @@ export default function GraphPage() {
         </>
       )}
 
-      <CommandDialog open={searchOpen} onOpenChange={setSearchOpen} title="Find node"
-                     description="Find a node by name, synonym or table and move the camera to it">
-        <CommandInput placeholder="Node name, synonym, table…" id="graph-search-input" />
+      <CommandDialog open={searchOpen} onOpenChange={setSearchOpen} title={t("graph.find")}
+                     description={t("graph.search.description")}>
+        <CommandInput placeholder={t("graph.search.placeholder")} id="graph-search-input" />
         <CommandList>
-          <CommandEmpty>No results</CommandEmpty>
-          <CommandGroup heading="Nodes">
+          <CommandEmpty>{t("graph.search.empty")}</CommandEmpty>
+          <CommandGroup heading={t("graph.search.nodes")}>
             {(q.data?.nodes ?? []).map((n) => (
               <CommandItem key={n.id} value={`${n.label} ${n.id}`} keywords={searchKeywords(n)}
                            data-node-id={n.id} onSelect={() => pickSearch(n.id)}>

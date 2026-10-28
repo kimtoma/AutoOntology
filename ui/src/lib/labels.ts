@@ -1,53 +1,54 @@
+import { fmtDate, fmtSecs, labelTable, t } from "@/i18n/core"
 import type { Progress, Run, Source, Step } from "@/lib/api"
 
-export const KIND_LABEL: Record<string, string> = {
-  files: "Structured files", database: "Database", documents: "Documents",
-}
+export const KIND_LABEL = labelTable({
+  files: "kind.files", database: "kind.database", documents: "kind.documents",
+})
 /** The two source families of the Sources page. */
-export const FAMILY_LABEL: Record<string, string> = { structured: "Structured", documents: "Documents" }
+export const FAMILY_LABEL = labelTable({ structured: "family.structured", documents: "family.documents" })
 export const familyOf = (kind: string) => (kind === "documents" ? "documents" : "structured")
 
-export const RUN_LABEL: Record<string, string> = { build: "Build", export: "Export" }
-export const STATUS_LABEL: Record<string, string> = {
-  pending: "Pending", running: "Running", succeeded: "Succeeded", failed: "Failed",
-  cancelled: "Cancelled", skipped: "Skipped",
-}
-export const STEP_LABEL: Record<string, string> = {
-  load: "Load", register: "Register", ingest: "Ingest", compile: "Compile",
-  read: "Read", extract: "Extract", consolidate: "Consolidate",
-  align: "Align", merge: "Merge", snapshot: "Snapshot",
-  collect: "Collect", serialize: "Serialize", upstream: "Upstream files", ossie: "Ossie",
-  okf: "OKF", report: "Report",
-}
-export const CKIND_LABEL: Record<string, string> = {
-  term: "Term", entity: "Entity", metric: "Metric", attribute: "Attribute", process: "Process",
-  rule: "Rule", other: "Other",
-}
-export const ORIGIN_LABEL: Record<string, string> = {
-  structured: "Structured", document: "Document", aligned: "Aligned",
-}
-export const REL_LABEL: Record<string, string> = {
-  same: "Same as", broader: "Broader", narrower: "Narrower", related: "Related", none: "None",
-}
-export const CHECK_LABEL: Record<string, string> = { ok: "OK", warn: "Warning", error: "Error" }
-export const CHECK_NAME: Record<string, string> = {
-  backend: "Upstream backend", postgres: "Postgres", ollama: "Ollama models", kordoc: "kordoc",
-  ocr: "OCR models", claude: "Claude CLI", codex: "Codex CLI",
-}
+export const RUN_LABEL = labelTable({ build: "run.build", export: "run.export" })
+export const STATUS_LABEL = labelTable({
+  pending: "status.pending", running: "status.running", succeeded: "status.succeeded",
+  failed: "status.failed", cancelled: "status.cancelled", skipped: "status.skipped",
+})
+export const STEP_LABEL = labelTable({
+  load: "step.load", register: "step.register", ingest: "step.ingest", compile: "step.compile",
+  read: "step.read", extract: "step.extract", consolidate: "step.consolidate",
+  align: "step.align", merge: "step.merge", snapshot: "step.snapshot",
+  collect: "step.collect", serialize: "step.serialize", upstream: "step.upstream", ossie: "step.ossie",
+  okf: "step.okf", report: "step.report",
+})
+export const CKIND_LABEL = labelTable({
+  term: "ckind.term", entity: "ckind.entity", metric: "ckind.metric", attribute: "ckind.attribute",
+  process: "ckind.process", rule: "ckind.rule", other: "ckind.other",
+})
+export const ORIGIN_LABEL = labelTable({
+  structured: "origin.structured", document: "origin.document", aligned: "origin.aligned",
+})
+export const REL_LABEL = labelTable({
+  same: "rel.same", broader: "rel.broader", narrower: "rel.narrower", related: "rel.related", none: "rel.none",
+})
+export const CHECK_LABEL = labelTable({ ok: "check.ok", warn: "check.warn", error: "check.error" })
+export const CHECK_NAME = labelTable({
+  backend: "checkName.backend", postgres: "checkName.postgres", ollama: "checkName.ollama",
+  kordoc: "checkName.kordoc", ocr: "checkName.ocr", claude: "checkName.claude", codex: "checkName.codex",
+})
 
 /** Build steps in plain words (the chip inside a step group). Export steps keep STEP_LABEL. */
-export const STEP_HUMAN: Record<string, string> = {
-  load: "Load tables",
-  register: "Register with the engine",
-  ingest: "Ingest rows",
-  compile: "Compile business concepts (LLM)",
-  read: "Read documents",
-  extract: "Extract concepts (LLM)",
-  consolidate: "Merge duplicate concepts",
-  align: "Match document concepts to table concepts",
-  merge: "Build the unified ontology",
-  snapshot: "Save revision",
-}
+export const STEP_HUMAN = labelTable({
+  load: "human.load",
+  register: "human.register",
+  ingest: "human.ingest",
+  compile: "human.compile",
+  read: "human.read",
+  extract: "human.extract",
+  consolidate: "human.consolidate",
+  align: "human.align",
+  merge: "human.merge",
+  snapshot: "human.snapshot",
+})
 
 /** The whole step in plain words: `structured:hanbit:load` -> "hanbit · Load tables",
     `align:hanbit-docs` -> "hanbit-docs · Match document concepts to table concepts",
@@ -138,14 +139,7 @@ export function runSeconds(run: Pick<Run, "started_at" | "finished_at">, steps: 
 }
 
 export function fmtSeconds(s: number | null | undefined): string {
-  if (s == null || !Number.isFinite(s) || s < 0) return ""
-  if (s < 60) return `${s.toFixed(1)} s`
-  if (s < 3600) {
-    const m = Math.floor(s / 60)
-    return `${m} min ${Math.round(s - m * 60)} s`
-  }
-  const h = Math.floor(s / 3600)
-  return `${h} h ${Math.round((s - h * 3600) / 60)} min`
+  return fmtSecs(s)
 }
 
 /** What a failed step says about itself: the error, a remedy, and the remedies of failed
@@ -167,17 +161,14 @@ export function stepFailure(step: Pick<Step, "status" | "detail">): { error: str
 
 export function sourceState(s: Source): string {
   if (s.kind === "documents") {
-    return s.concepts ? `${s.documents} documents · ${s.concepts} concepts` : "Not extracted yet"
+    return s.concepts ? t("source.state.docs", { documents: s.documents, concepts: s.concepts })
+      : t("source.state.notExtracted")
   }
-  return s.built ? "Built" : "Not built yet"
+  return s.built ? t("source.state.built") : t("source.state.notBuilt")
 }
 
 export function fmtTime(iso: string | null | undefined): string {
-  if (!iso) return "-"
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? iso
-    : d.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })
+  return fmtDate(iso)
 }
 
 export function fmtBytes(n: number): string {
@@ -190,9 +181,7 @@ export function fmtDuration(start: string | null, end: string | null): string {
   if (!start || !end) return ""
   const s = (new Date(end).getTime() - new Date(start).getTime()) / 1000
   if (!Number.isFinite(s) || s < 0) return ""
-  if (s < 60) return `${s.toFixed(1)} s`
-  const m = Math.floor(s / 60)
-  return `${m} min ${Math.round(s - m * 60)} s`
+  return fmtSecs(s)
 }
 
 export function progressText(progress: Progress | undefined, withFailed = true): string {
@@ -200,7 +189,7 @@ export function progressText(progress: Progress | undefined, withFailed = true):
     .map(([label, counts]) => {
       const total = Object.values(counts).reduce((a, b) => a + (b || 0), 0)
       const done = counts.succeeded || 0
-      const failed = withFailed && counts.failed ? `, ${counts.failed} failed` : ""
+      const failed = withFailed && counts.failed ? t("progress.failed", { n: counts.failed }) : ""
       return `${label} ${done}/${total}${failed}`
     })
     .join(" · ")

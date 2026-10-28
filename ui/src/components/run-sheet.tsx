@@ -19,6 +19,7 @@ import {
   fmtSeconds, fmtTime, groupSteps, humanStep, progressText, RUN_LABEL, runSeconds, STATUS_LABEL,
   stepFailure, stepLabel, stepSeconds,
 } from "@/lib/labels"
+import { t, useT } from "@/i18n"
 
 /** Append *text* to the log, keeping it scrolled to the bottom when it already was. */
 function appendLog(el: HTMLPreElement, text: string) {
@@ -132,7 +133,7 @@ function useRunStream(runId: string, logEl: HTMLPreElement | null) {
         ended = true
         es?.close()
         if (!lastLogId) {
-          appendLine("This run has no log file (started from the CLI). Full log: data/logs/jobs.log")
+          appendLine(t("runSheet.noLog"))
         }
         setLive((cur) => cur && { ...cur, ended: true })
         qc.invalidateQueries({ queryKey: keys.runs })
@@ -147,7 +148,7 @@ function useRunStream(runId: string, logEl: HTMLPreElement | null) {
       // CLOSED without an end event = the server refused the stream (404/500): no retries.
       es.onerror = () => {
         if (!closed && !ended && es?.readyState === EventSource.CLOSED) {
-          setStreamError("Could not open the live log stream (server error). Try again or read data/logs/jobs.log.")
+          setStreamError(t("runSheet.streamError"))
         }
       }
     }).catch((err) => {
@@ -168,31 +169,39 @@ function useRunStream(runId: string, logEl: HTMLPreElement | null) {
 function runScope(run: Run): string {
   const p = run.params
   if (run.kind === "export") {
-    return `${p.revision ? ` · revision ${p.revision}` : ""}${p.format ? ` · ${p.format}` : ""}`
+    return `${p.revision ? t("runSheet.scope.revision", { revision: String(p.revision) }) : ""}${p.format ? ` · ${p.format}` : ""}`
   }
-  const sources = Array.isArray(p.sources) && p.sources.length ? ` · ${p.sources.join(", ")}` : " · all sources"
-  return `${sources}${p.resume ? " · resume" : ""}`
+  const sources = Array.isArray(p.sources) && p.sources.length ? ` · ${p.sources.join(", ")}` : t("runSheet.scope.all")
+  return `${sources}${p.resume ? t("runSheet.scope.resume") : ""}`
 }
 
 /** The run's steps grouped as the build runs them: `structured:<name>`, `documents:<name>`,
     `align`, `merge`, `snapshot`, in plain words, with the time each took. A step still
     pending in a finished run did not run; a failed one shows its error and remedy. */
 export function StepList({ steps, ended }: { steps: Step[]; ended: boolean }) {
+  const t = useT()
   const now = useNow(!ended && steps.some((s) => s.status === "running"))
   return (
-    <ol id="live-steps" aria-label="Steps" className="grid gap-2">
+    <ol id="live-steps" aria-label={t("runSheet.steps")} className="grid gap-2">
       {groupSteps(steps).map((g) => (
         <li key={g.key} data-group={g.key} className="grid gap-1 rounded-md border px-3 py-2">
-          <span className="text-xs font-medium break-all">{g.title}</span>
+          <span className="flex flex-wrap items-baseline gap-x-2 text-xs font-medium">
+            <span className="break-words">{g.title}</span>
+            <code className="font-mono text-[11px] font-normal break-all text-muted-foreground" data-step-id={g.key}>{g.key}</code>
+          </span>
           <div className="flex flex-wrap gap-1.5">
             {g.steps.map((s) => {
               const notRun = ended && s.status === "pending"
               const took = notRun ? "" : fmtSeconds(stepSeconds(s, now))
-              const label = [stepLabel(s.short, g.key), notRun ? "not run" : STATUS_LABEL[s.status] ?? s.status, took]
+              const own = stepLabel(s.short, g.key)
+              const label = [own, notRun ? t("runSheet.notRun") : STATUS_LABEL[s.status] ?? s.status, took]
                 .filter(Boolean).join(" · ")
+              // the step's own id next to its plain label (a top step's id is the group's)
+              const id = g.key === "align" || s.short === g.key ? null : s.short
               return (
-                <span key={s.name} data-step={s.name} title={humanStep(s.name)} className="max-w-full">
-                  <StatusChip status={notRun ? "skipped" : s.status} label={label}
+                <span key={s.name} data-step={s.name} title={`${humanStep(s.name)} (${s.name})`} className="max-w-full">
+                  <StatusChip status={notRun ? "skipped" : s.status}
+                              label={<>{label}{id && <code className="font-mono text-[10px] opacity-60" data-step-id={s.name}>{id}</code>}</>}
                               className="max-w-full whitespace-normal" />
                 </span>
               )
@@ -203,7 +212,7 @@ export function StepList({ steps, ended }: { steps: Step[]; ended: boolean }) {
             return f && (
               <div key={`${s.name}-error`} className="grid gap-1 text-xs" data-step-error={s.name}>
                 {f.error && <p className="break-words text-destructive">{humanStep(s.name)}: {f.error}</p>}
-                {f.remedies.map((r) => <p key={r}>Fix: <Code>{r}</Code></p>)}
+                {f.remedies.map((r) => <p key={r}>{t("common.fix")} <Code>{r}</Code></p>)}
               </div>
             )
           })}
@@ -216,6 +225,7 @@ export function StepList({ steps, ended }: { steps: Step[]; ended: boolean }) {
 /** "Expected: ~5 min with claude (estimate), quickstart sample set" when the run covers only
     the sources of one sample set. */
 function EtaNote({ run }: { run: Run }) {
+  const t = useT()
   const samples = useSamples()
   const sources = useSources()
   const status = useStatus()
@@ -228,7 +238,7 @@ function EtaNote({ run }: { run: Run }) {
   if (!set || !time) return null
   return (
     <p className="text-xs text-muted-foreground" id="live-eta">
-      Expected for the {set.set} sample set with {provider}: {time}
+      {t("runSheet.eta", { set: set.set, provider, time })}
     </p>
   )
 }
@@ -248,15 +258,17 @@ function RunTimes({ live }: { live: Live }) {
   const running = !live.ended && ["pending", "running"].includes(live.status)
   const now = useNow(running)
   const total = runSeconds(live.run, live.steps, running ? now : undefined)
+  const t = useT()
   return (
     <p className="text-xs text-muted-foreground" id="live-total">
-      Started {fmtTime(live.run.started_at)}
-      {total != null && ` · ${running ? "running for" : "took"} ${fmtSeconds(total)}`}
+      {t("runSheet.started", { date: fmtTime(live.run.started_at) })}
+      {total != null && t(running ? "runSheet.runningFor" : "runSheet.took", { time: fmtSeconds(total) })}
     </p>
   )
 }
 
 function RunSheetBody({ runId }: { runId: string }) {
+  const t = useT()
   const [logEl, setLogEl] = useState<HTMLPreElement | null>(null)
   const { live, error, streamError, retry } = useRunStream(runId, logEl)
   const [cancelling, setCancelling] = useState(false)
@@ -266,18 +278,18 @@ function RunSheetBody({ runId }: { runId: string }) {
     if (!live?.ended || announced.current) return
     announced.current = true
     if (live.status === "failed") {
-      toast.error(`${RUN_LABEL[live.run.kind] ?? live.run.kind} failed`, { description: live.error?.slice(0, 200) || undefined })
+      toast.error(t("runSheet.failed", { kind: RUN_LABEL[live.run.kind] ?? live.run.kind }), { description: live.error?.slice(0, 200) || undefined })
     }
-  }, [live])
+  }, [live, t])
 
   const cancel = async () => {
     setCancelling(true)
     try {
       await api.cancelRun(runId)
-      if (logEl) appendLog(logEl, "cancel requested: stops after the current step\n")
-      toast("Cancel requested", { description: "The run stops after the current step" })
+      if (logEl) appendLog(logEl, `${t("runSheet.cancelLog")}\n`)
+      toast(t("runSheet.cancelRequested"), { description: t("runSheet.cancelRequested.hint") })
     } catch (err) {
-      toast.error("Cancel failed", { description: errorMessage(err) })
+      toast.error(t("runSheet.cancelFailed"), { description: errorMessage(err) })
     } finally {
       setCancelling(false)
     }
@@ -288,7 +300,7 @@ function RunSheetBody({ runId }: { runId: string }) {
     <>
       <SheetHeader className="border-b">
         <SheetTitle className="flex flex-wrap items-center gap-2">
-          {live ? `${RUN_LABEL[live.run.kind] ?? live.run.kind} run` : "Run"}
+          {live ? t("runSheet.title", { kind: RUN_LABEL[live.run.kind] ?? live.run.kind }) : t("runSheet.titleBare")}
           {live && <StatusChip status={live.status} />}
         </SheetTitle>
         <SheetDescription id="live-desc" className="break-all">
@@ -302,10 +314,10 @@ function RunSheetBody({ runId }: { runId: string }) {
           <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30
                                        bg-destructive/5 px-3 py-2 text-sm">
             <span className="min-w-0 flex-1 break-words text-destructive">
-              {error ? `Could not load the run: ${error}` : streamError}
+              {error ? t("runSheet.loadError", { error }) : streamError}
             </span>
             <Button size="sm" variant="outline" onClick={retry}>
-              <RotateCw aria-hidden /> Try again
+              <RotateCw aria-hidden /> {t("common.tryAgain")}
             </Button>
           </div>
         )}
@@ -322,7 +334,7 @@ function RunSheetBody({ runId }: { runId: string }) {
             </span>
           </>
         )}
-        <pre ref={setLogEl} id="live-log" role="log" aria-live="off" aria-label="Run log"
+        <pre ref={setLogEl} id="live-log" role="log" aria-live="off" aria-label={t("runSheet.log")}
              tabIndex={0}
              className="min-h-48 flex-1 overflow-auto rounded-md border bg-muted/40 p-3 font-mono
                         text-xs leading-relaxed whitespace-pre-wrap break-all outline-none
@@ -332,7 +344,7 @@ function RunSheetBody({ runId }: { runId: string }) {
         <SheetFooter className="border-t">
           <Button variant="outline" onClick={cancel} disabled={cancelling} id="btn-cancel">
             {cancelling ? <Loader2 className="animate-spin" aria-hidden /> : <Square aria-hidden />}
-            Cancel
+            {t("runSheet.cancel")}
           </Button>
         </SheetFooter>
       )}

@@ -23,7 +23,8 @@ import {
   api, ApiError, errorMessage, isNoSnapshot, type ExportEntry, type OntologySummary, type Run, type RunRequest,
   type ServiceStatus, type Source,
 } from "@/lib/api"
-import { GUIDE_URL, STEP_COPY } from "@/lib/home-copy"
+import { guideUrl, stepCopy } from "@/lib/home-copy"
+import { fmtNumber, tx, useT } from "@/i18n"
 import {
   allDone, checklist, expectedTime, isActiveRun, latestExport, latestRun, sampleSetFor, sampleSetsTouched,
   STEP_ORDER, type StepId,
@@ -49,23 +50,22 @@ function cachedStates(qc: QueryClient) {
   })
 }
 
-const STATE_LABEL: Record<StepState, string> = {
-  done: "Done", active: "Next", pending: "Later", checking: "Checking…",
-}
 
 function StateBadge({ state }: { state: StepState }) {
+  const t = useT()
   const Icon = state === "done" ? CheckCircle2 : state === "checking" ? Loader2 : CircleDashed
   return (
     <Badge variant="outline" data-state={state}
            className={cn("font-normal", state === "done" && "border-success/30 bg-success/10 text-success",
                          state === "active" && "border-primary/40 bg-primary/10 text-foreground")}>
-      <Icon className={cn(state === "checking" && "animate-spin")} aria-hidden /> {STATE_LABEL[state]}
+      <Icon className={cn(state === "checking" && "animate-spin")} aria-hidden /> {t(`home.state.${state}`)}
     </Badge>
   )
 }
 
 function StepCard({ id, n, state, children }: { id: StepId; n: number; state: StepState; children?: ReactNode }) {
-  const copy = STEP_COPY[id]
+  const t = useT()
+  const copy = stepCopy(id)
   return (
     <li data-step={id} data-state={state}
         className={cn("grid min-w-0 gap-3 rounded-xl border bg-card p-4 sm:p-5",
@@ -83,8 +83,8 @@ function StepCard({ id, n, state, children }: { id: StepId; n: number; state: St
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground"
-                        data-help={id} aria-label={`What is "${copy.title}"?`}>
-                  <HelpCircle aria-hidden /> What is this?
+                        data-help={id} aria-label={t("home.help.aria", { step: copy.title })}>
+                  <HelpCircle aria-hidden /> {t("home.help")}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="grid gap-2 text-sm" data-help-content={id}>
@@ -93,7 +93,7 @@ function StepCard({ id, n, state, children }: { id: StepId; n: number; state: St
               </PopoverContent>
             </Popover>
           </div>
-          <p className="text-sm text-muted-foreground">{copy.description}</p>
+          <p className="text-sm text-muted-foreground text-pretty">{copy.description}</p>
         </div>
       </div>
       {children && <div className="min-w-0 sm:pl-10">{children}</div>}
@@ -124,23 +124,25 @@ function useRunEvents(runId: string | undefined) {
 }
 
 function Counts({ ontology }: { ontology: OntologySummary }) {
+  const t = useT()
   const c = ontology.counts as Record<string, number>
   const items: [string, number | undefined][] = [
-    ["business concepts found in your tables", c.classes_structured],
-    ["concepts found in your documents", c.classes_document],
-    ["concepts matched between both", c.merged_concepts],
-    ["links between concepts", c.object_properties],
+    [t("home.counts.structured"), c.classes_structured],
+    [t("home.counts.document"), c.classes_document],
+    [t("home.counts.merged"), c.merged_concepts],
+    [t("home.counts.links"), c.object_properties],
   ]
   return (
     <ul className="grid gap-1 text-sm sm:grid-cols-2" id="explore-counts">
       {items.filter(([, v]) => typeof v === "number").map(([label, v]) => (
-        <li key={label}><b className="tabular-nums">{v}</b> {label}</li>
+        <li key={label}><b className="tabular-nums">{fmtNumber(v!)}</b> {label}</li>
       ))}
     </ul>
   )
 }
 
 export default function HomePage() {
+  const t = useT()
   const qc = useQueryClient()
   const interval = () => (allDone(cachedStates(qc)) ? false : POLL_MS)
   const status = useQuery({ queryKey: keys.status, queryFn: api.status, refetchInterval: interval })
@@ -174,7 +176,7 @@ export default function HomePage() {
       qc.invalidateQueries({ queryKey: keys.runs })
       qc.invalidateQueries({ queryKey: keys.sources })
     },
-    onError: (e, body) => toast.error(`${RUN_LABEL[body.kind]} did not start`, { description: errorMessage(e) }),
+    onError: (e, body) => toast.error(t("home.runFailed", { kind: RUN_LABEL[body.kind] }), { description: errorMessage(e) }),
   })
 
   const names = (sources.data ?? []).map((s) => s.name)
@@ -187,10 +189,9 @@ export default function HomePage() {
 
   return (
     <>
-      <PageHeader title="Get started"
-                  description="Five steps from your tables and documents to one ontology. Each step checks itself; this page updates while something is left to do." />
+      <PageHeader title={t("home.title")} description={t("home.description")} />
       <p className="mb-4 text-sm font-medium" id="checklist-progress" data-done={doneCount}>
-        {doneCount} of 5 done
+        {t("home.progress", { done: doneCount })}
       </p>
       <ol className="grid gap-4" id="checklist">
         <StepCard id="models" n={1} state={states.models}>
@@ -203,18 +204,19 @@ export default function HomePage() {
           <div className="grid gap-3">
             {sources.data && (
               <p className="text-sm" id="sources-count">
-                {sources.data.length ? <><b>{sources.data.length}</b> source{sources.data.length === 1 ? "" : "s"}: {names.join(", ")}</>
-                  : "No sources yet."}
-                {sources.data.length > 0 && <> · <Link to="/sources" className="underline underline-offset-4">Manage</Link></>}
+                {sources.data.length ? tx(`home.sources.count.${sources.data.length === 1 ? "one" : "other"}`,
+                                          { n: <b key="n">{sources.data.length}</b>, names: names.join(", ") })
+                  : t("home.sources.none")}
+                {sources.data.length > 0 && <> · <Link to="/sources" className="underline underline-offset-4">{t("home.sources.manage")}</Link></>}
               </p>
             )}
             <div className="flex flex-wrap gap-2">
               <Button variant={states.sources === "active" ? "default" : "outline"} id="btn-load-samples"
                       onClick={() => setSamplesOpen(true)}>
-                <PackageOpen aria-hidden /> Load sample data
+                <PackageOpen aria-hidden /> {t("home.sources.loadSamples")}
               </Button>
               <Button variant="outline" id="btn-add-own" onClick={() => setAdding(true)}>
-                <Plus aria-hidden /> Add my own data
+                <Plus aria-hidden /> {t("home.sources.addOwn")}
               </Button>
             </div>
           </div>
@@ -224,11 +226,11 @@ export default function HomePage() {
           <div className="grid gap-3">
             {build && (
               <div className="flex flex-wrap items-center gap-2 text-sm" id="last-build" data-status={build.status}>
-                <span>Last build:</span>
+                <span>{t("home.build.last")}</span>
                 <StatusChip status={build.status} />
                 {buildSecs != null && (
                   <span className="text-muted-foreground" id="last-build-elapsed">
-                    {isActiveRun(build) ? "running for " : ""}{fmtSeconds(buildSecs)}
+                    {isActiveRun(build) ? t("home.build.runningFor", { time: fmtSeconds(buildSecs) }) : fmtSeconds(buildSecs)}
                   </span>
                 )}
                 <span className="text-muted-foreground">{fmtTime(build.started_at)}</span>
@@ -241,40 +243,39 @@ export default function HomePage() {
               <p className="text-xs break-words text-destructive">{build.error.slice(0, 300)}</p>
             )}
             {ontologyValue && (
-              <p className="text-sm">Revision <b>{ontologyValue.revision}</b> saved {fmtTime(ontologyValue.created_at)}.</p>
+              <p className="text-sm">{tx("home.build.revision", { revision: <b key="r">{ontologyValue.revision}</b>, date: fmtTime(ontologyValue.created_at) })}</p>
             )}
             {eta && !ontologyValue && (
               <p className="text-xs text-muted-foreground" id="build-eta">
-                Expected for the {set?.set} sample set with {status.data?.providers.chat_provider}: {eta}
+                {t("home.build.eta", { set: set?.set ?? "", provider: status.data?.providers.chat_provider ?? "", time: eta })}
               </p>
             )}
             {!set && touched.length > 1 && !ontologyValue && (
               <p className="text-xs text-muted-foreground" id="build-eta">
-                No time estimate: your sources come from more than one sample set ({touched.map((t) => t.set).join(", ")}),
-                so the build takes about as long as each of them together.
+                {t("home.build.noEta", { sets: touched.map((x) => x.set).join(", ") })}
               </p>
             )}
             {!modelsOk && names.length > 0 && (
               <p className="text-xs text-muted-foreground" id="build-needs-models">
-                Connect the model first (step 1): a build without it would fail after a few minutes.
+                {t("home.build.needsModels")}
               </p>
             )}
             <div className="flex flex-wrap gap-2">
-              <span title={!modelsOk ? "Connect the model first (step 1)" : !names.length ? "Add a source first (step 2)" : undefined}
+              <span title={!modelsOk ? t("home.build.needsModels.short") : !names.length ? t("home.build.needsSource") : undefined}
                     className="inline-flex">
               <Button id="btn-home-build" disabled={busy || !names.length || !modelsOk}
                       variant={states.build === "active" ? "default" : "outline"}
                       onClick={() => start.mutate({ kind: "build" })}>
                 {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />}
-                {active?.kind === "build" ? "Building…" : ontologyValue ? "Build again" : "Start build"}
+                {active?.kind === "build" ? t("home.build.building") : ontologyValue ? t("home.build.again") : t("home.build.start")}
               </Button>
               </span>
               {(active ?? build) && (
                 <Button variant="ghost" id="btn-live-run" onClick={() => setRunId((active ?? build)!.id)}>
-                  Open the live run
+                  {t("home.build.openLive")}
                 </Button>
               )}
-              <Button variant="ghost" asChild><Link to="/build">Build page</Link></Button>
+              <Button variant="ghost" asChild><Link to="/build">{t("home.build.page")}</Link></Button>
             </div>
           </div>
         </StepCard>
@@ -283,9 +284,9 @@ export default function HomePage() {
           <div className="grid gap-3">
             {ontologyValue && <Counts ontology={ontologyValue} />}
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" asChild><Link to="/ontology"><BookOpen aria-hidden /> Ontology</Link></Button>
-              <Button variant="outline" asChild><Link to="/graph"><Network aria-hidden /> Graph</Link></Button>
-              <Button variant="outline" asChild><Link to="/playground"><FlaskConical aria-hidden /> Playground</Link></Button>
+              <Button variant="outline" asChild><Link to="/ontology"><BookOpen aria-hidden /> {t("nav.ontology")}</Link></Button>
+              <Button variant="outline" asChild><Link to="/graph"><Network aria-hidden /> {t("nav.graph")}</Link></Button>
+              <Button variant="outline" asChild><Link to="/playground"><FlaskConical aria-hidden /> {t("nav.playground")}</Link></Button>
             </div>
           </div>
         </StepCard>
@@ -293,27 +294,31 @@ export default function HomePage() {
         <StepCard id="export" n={5} state={states.export}>
           <div className="grid gap-3">
             <p className="text-sm" id="latest-export">
-              {latest ? <>Latest export: revision <b>{latest.revision}</b> ({latest.dir}), {fmtTime(latest.created_at)}.</>
-                : "Nothing exported yet."}
+              {latest ? tx("home.export.latest", { revision: <b key="r">{latest.revision}</b>, dir: latest.dir,
+                                                   date: fmtTime(latest.created_at) })
+                : t("home.export.none")}
               {latest && ontologyValue && latest.revision < ontologyValue.revision &&
-                ` Revision ${ontologyValue.revision} is not exported yet.`}
+                t("home.export.stale", { revision: ontologyValue.revision })}
             </p>
             <div className="flex flex-wrap gap-2">
               <Button id="btn-home-export" variant={states.export === "active" ? "default" : "outline"}
                       disabled={busy || !ontologyValue} onClick={() => start.mutate({ kind: "export" })}>
-                {active?.kind === "export" ? <Loader2 className="animate-spin" aria-hidden /> : <Download aria-hidden />} Export
+                {active?.kind === "export" ? <Loader2 className="animate-spin" aria-hidden /> : <Download aria-hidden />} {t("home.export.button")}
               </Button>
-              <Button variant="ghost" asChild><Link to="/exports">Open exports</Link></Button>
+              <Button variant="ghost" asChild><Link to="/exports">{t("home.export.open")}</Link></Button>
             </div>
           </div>
         </StepCard>
       </ol>
       <p className="mt-6 text-sm text-muted-foreground">
-        New to this? Read the{" "}
-        <a href={GUIDE_URL} target="_blank" rel="noreferrer" id="guide-link"
-           className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4">
-          step-by-step guide <ExternalLink className="size-3.5" aria-hidden />
-        </a>.
+        {tx("home.guide", {
+          link: (
+            <a key="guide" href={guideUrl()} target="_blank" rel="noreferrer" id="guide-link"
+               className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-4">
+              {t("home.guide.link")} <ExternalLink className="size-3.5" aria-hidden />
+            </a>
+          ),
+        })}
       </p>
       <SamplesDialog open={samplesOpen} onOpenChange={setSamplesOpen} />
       <NewSourceDialog open={adding} onOpenChange={setAdding} />

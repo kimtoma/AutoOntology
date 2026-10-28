@@ -10,12 +10,13 @@ import {
 import { KORDOC_INSTALL, summarize, type FileCheck, type FileState } from "@/lib/formats"
 import { fmtBytes } from "@/lib/labels"
 import { cn } from "@/lib/utils"
+import { tn, tx, useT, type MessageKey } from "@/i18n"
 
-const STATE_LABEL: Record<FileState, string> = {
-  supported: "Supported",
-  needs_kordoc: "Needs kordoc",
-  needs_ocr: "Needs OCR models",
-  unsupported: "Unsupported",
+const STATE_LABEL: Record<FileState, MessageKey> = {
+  supported: "preview.state.supported",
+  needs_kordoc: "preview.state.needs_kordoc",
+  needs_ocr: "preview.state.needs_ocr",
+  unsupported: "preview.state.unsupported",
 }
 const STATE_TONE: Record<FileState, string> = {
   supported: "succeeded", needs_kordoc: "cancelled", needs_ocr: "cancelled", unsupported: "failed",
@@ -25,6 +26,7 @@ const MAX_ROWS = 100
 
 /** One row per file: name, size, detected engine and whether it can be read. */
 export function FilePreview({ checks }: { checks: FileCheck[] }) {
+  const t = useT()
   if (!checks.length) return null
   const counts = summarize(checks)
   const needsKordoc = counts.needs_kordoc > 0
@@ -32,19 +34,19 @@ export function FilePreview({ checks }: { checks: FileCheck[] }) {
   return (
     <div className="grid min-w-0 gap-2" id="file-preview-table">
       <p className="text-xs text-muted-foreground" data-summary>
-        {checks.length} file{checks.length === 1 ? "" : "s"}: {counts.supported} supported
-        {counts.needs_kordoc ? `, ${counts.needs_kordoc} need kordoc` : ""}
-        {counts.needs_ocr ? `, ${counts.needs_ocr} need the OCR models` : ""}
-        {counts.unsupported ? `, ${counts.unsupported} unsupported` : ""}
+        {tn("preview.summary", checks.length, { supported: counts.supported })}
+        {counts.needs_kordoc ? t("preview.summary.kordoc", { n: counts.needs_kordoc }) : ""}
+        {counts.needs_ocr ? t("preview.summary.ocr", { n: counts.needs_ocr }) : ""}
+        {counts.unsupported ? t("preview.summary.unsupported", { n: counts.unsupported }) : ""}
       </p>
       <div className="max-h-64 overflow-y-auto rounded-md border">
         <Table className="text-xs">
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-3">File</TableHead>
-              <TableHead className="hidden sm:table-cell">Size</TableHead>
-              <TableHead>Read by</TableHead>
-              <TableHead className="pr-3">Status</TableHead>
+              <TableHead className="pl-3">{t("preview.col.file")}</TableHead>
+              <TableHead className="hidden sm:table-cell">{t("preview.col.size")}</TableHead>
+              <TableHead>{t("preview.col.readBy")}</TableHead>
+              <TableHead className="pr-3">{t("preview.col.status")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -57,22 +59,24 @@ export function FilePreview({ checks }: { checks: FileCheck[] }) {
                 <TableCell className="hidden sm:table-cell">{c.size != null ? fmtBytes(c.size) : "-"}</TableCell>
                 <TableCell><code>{c.engine ?? "-"}</code></TableCell>
                 <TableCell className="max-w-48 pr-3 whitespace-normal">
-                  <StatusChip status={STATE_TONE[c.state]} label={STATE_LABEL[c.state]} />
+                  <StatusChip status={STATE_TONE[c.state]} label={t(STATE_LABEL[c.state])} />
                   {c.reason && <span className="mt-0.5 block text-muted-foreground">{c.reason}</span>}
-                  {c.alternative && <span className="block">Instead: {c.alternative}</span>}
+                  {c.alternative && <span className="block">{t("preview.instead", { alt: c.alternative })}</span>}
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
         {checks.length > MAX_ROWS && (
-          <p className="px-3 py-2 text-xs text-muted-foreground">… and {checks.length - MAX_ROWS} more</p>
+          <p className="px-3 py-2 text-xs text-muted-foreground">{t("preview.more", { n: checks.length - MAX_ROWS })}</p>
         )}
       </div>
       {(needsKordoc || needsOcr) && (
         <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs" role="note" id="preview-install">
-          {needsKordoc ? "kordoc is not installed" : "kordoc's OCR models are not downloaded"}: these files are
-          {" "}skipped until you run <Code>{KORDOC_INSTALL}</Code> and build again.
+          {tx("preview.install.body", {
+            what: t(needsKordoc ? "preview.install.kordoc" : "preview.install.ocr"),
+            cmd: <Code key="cmd">{KORDOC_INSTALL}</Code>,
+          })}
         </p>
       )}
     </div>
@@ -108,6 +112,7 @@ export function FolderCheck({ recursive, onNames }: {
   recursive: boolean
   onNames: (names: PickedName[]) => void
 }) {
+  const t = useT()
   const input = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
   const onDrop = async (ev: DragEvent) => {
@@ -129,11 +134,11 @@ export function FolderCheck({ recursive, onNames }: {
          onDrop={onDrop} id="folder-check"
          className={cn("flex flex-wrap items-center gap-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground",
                        over && "border-primary bg-accent")}>
-      <span className="min-w-0 flex-1">Optional: preview which files will be read by dropping or picking the same folder from this computer. Your browser may call this an upload; nothing is sent.</span>
+      <span className="min-w-0 flex-1">{t("preview.folder.hint")}</span>
       <Button type="button" size="sm" variant="outline" onClick={() => input.current?.click()}>
-        <FolderSearch aria-hidden /> Preview a folder
+        <FolderSearch aria-hidden /> {t("preview.folder.button")}
       </Button>
-      <input ref={input} type="file" className="hidden" aria-label="Folder to check" multiple
+      <input ref={input} type="file" className="hidden" aria-label={t("preview.folder.aria")} multiple
              {...{ webkitdirectory: "" }}
              onChange={(e) => {
                const files = [...(e.target.files ?? [])]
