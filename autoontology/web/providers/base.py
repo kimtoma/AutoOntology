@@ -454,9 +454,10 @@ class CLIProvider:
         caller is cancelled (client disconnect)."""
         timeout = provider_timeout_s() if timeout is None else timeout
         start = time.monotonic()
-        # child_env may touch files under a lock (codex: the private CODEX_HOME)
-        env = {**(await asyncio.to_thread(self.child_env)), **(extra_env or {})}
         try:
+            # child_env may touch files under a lock (codex: the private CODEX_HOME); an
+            # OSError there is "cannot start" (503), like one from the spawn itself
+            env = {**(await asyncio.to_thread(self.child_env)), **(extra_env or {})}
             proc = await asyncio.create_subprocess_exec(
                 *argv,
                 cwd=str(cwd),

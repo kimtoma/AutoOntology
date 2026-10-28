@@ -157,6 +157,7 @@ def _sync_back(target: Path) -> bool:
         return True
     source = user_codex_home() / "auth.json"
     try:
+        seen = _identity(link)
         with _locked(source.parent / USER_SYNC_LOCK):
             newer = not source.exists() or link.stat().st_mtime > source.stat().st_mtime
             if newer:
@@ -171,10 +172,24 @@ def _sync_back(target: Path) -> bool:
             exc.errno,
         )
         return False
+    # a concurrent codex call (one private home, several in flight) may have renamed a
+    # newer token over the file since it was read: never delete that one, sync it next time
+    try:
+        changed = _identity(link) != seen
+    except OSError:
+        changed = True
+    if changed:
+        return False
     # written back, or older than the user's own (their codex refreshed later): relink
     link.unlink(missing_ok=True)
     link.symlink_to(source)
     return True
+
+
+def _identity(path: Path) -> tuple[int, int, int, int]:
+    """What changes when codex renames a new file over *path* (no symlink following)."""
+    st = path.lstat()
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
 
 
 def _replace_with_copy(src: Path, dest: Path) -> None:

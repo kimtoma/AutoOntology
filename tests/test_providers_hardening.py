@@ -513,3 +513,56 @@ def test_codex_call_raises_no_provider_error_for_a_sync_failure(fakes, monkeypat
     assert res.status_code == 200, res.text
     private = Settings.from_env().home.resolve() / "run" / "codex-home" / "auth.json"
     assert not private.is_symlink() and json.loads(private.read_text()) == ROTATED
+
+
+# --- re-review follow-ups (N1-N3) ---------------------------------------------------------
+
+
+def test_child_env_failure_is_503_not_500(fakes, monkeypatch):  # noqa: F811
+    def unwritable(home):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(codex_cli, "ensure_codex_home", unwritable)
+    res = _chat(_client("codex"), "openai/codex:gpt-6-astra", response_format=FMT)
+    assert res.status_code == 503, res.text
+    assert res.json()["error"]["type"] == "provider_unavailable"
+    assert fakes() == []
+
+
+def test_a_failed_disconnect_watcher_is_not_a_disconnect():
+    from autoontology.web.providers.router import until_disconnected
+
+    class Req:
+        async def receive(self):
+            raise RuntimeError("Unexpected message received: http.request")
+
+    async def answer():
+        await asyncio.sleep(0.2)
+        return "answer"
+
+    async def go():
+        return await until_disconnected(Req(), answer())
+
+    assert asyncio.run(go()) == "answer"
+
+
+def test_a_token_renamed_in_during_the_sync_is_not_deleted(codex_user, isolated_env, monkeypatch):
+    home = isolated_env / "h"
+    link = _refresh(home, json.dumps({"tokens": {"refresh_token": "first"}}))
+    newer = json.dumps({"tokens": {"refresh_token": "second"}})
+    real = codex_cli._replace_with_copy
+
+    def copy_then_codex_refreshes_again(src, dest):
+        real(src, dest)
+        # a second codex call renames an even newer token over the private file
+        tmp = link.with_name("auth.json.codex-new")
+        tmp.write_text(newer)
+        os.replace(tmp, link)
+
+    monkeypatch.setattr(codex_cli, "_replace_with_copy", copy_then_codex_refreshes_again)
+    assert codex_cli.sync_codex_home(home) is False
+    assert not link.is_symlink() and link.read_text() == newer  # not unlinked
+    monkeypatch.setattr(codex_cli, "_replace_with_copy", real)
+    os.utime(link, (time.time() + 20,) * 2)
+    assert codex_cli.sync_codex_home(home) is True  # the next sync delivers it
+    assert (codex_user / "auth.json").read_text() == newer and link.is_symlink()

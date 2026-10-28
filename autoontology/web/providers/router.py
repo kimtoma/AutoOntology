@@ -168,7 +168,15 @@ async def until_disconnected(request: Request, coro: Any) -> Any:
     watcher = asyncio.ensure_future(_disconnected(request))
     try:
         done, _ = await asyncio.wait({task, watcher}, return_when=asyncio.FIRST_COMPLETED)
-        if task in done:
+        if task not in done and watcher.exception() is not None:
+            # only a real http.disconnect counts: a failed watcher says nothing about the
+            # client, so keep serving it
+            logger.warning(
+                "disconnect watcher failed (%s); the call continues",
+                type(watcher.exception()).__name__,
+            )
+            await asyncio.wait({task})
+        if task.done():
             return task.result()
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
