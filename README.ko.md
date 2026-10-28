@@ -347,6 +347,12 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
 - API 키는 로그, 상태 응답, 업스트림에서 전달되는 오류 본문에서 마스킹됩니다.
 - 데이터베이스 이름은 `autoontology`와 `autoontology_src_*`로 제한되므로, 공유 Postgres 서버의
   다른 데이터베이스는 절대 건드리지 않습니다.
+- `docker-compose.yml`은 Postgres를 `127.0.0.1`에만 게시하며, 기본 자격 증명
+  (`autoontology` / `autoontology`)은 로컬 사용용입니다. 바꾸려면 처음 `docker compose up -d`를
+  실행하기 전에 `.env`의 `POSTGRES_USER`와 `POSTGRES_PASSWORD`를 설정하세요(Compose도 같은
+  `.env`를 읽습니다). 비밀번호는 데이터 볼륨이 처음 만들어질 때 고정됩니다. 기존 볼륨이라면
+  `psql`에서 `ALTER USER ... PASSWORD ...`를 실행하거나, `docker compose down -v`로 볼륨을 다시
+  만드세요(데이터가 삭제됩니다).
 
 취약점 신고 방법은 [SECURITY.md](SECURITY.md)를 보세요.
 

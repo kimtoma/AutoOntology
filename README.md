@@ -364,6 +364,12 @@ are overridden.
 - API keys are masked in logs, status responses and error bodies relayed from upstream.
 - Database names are restricted to `autoontology` and `autoontology_src_*`, so
   AutoOntology never touches other databases on a shared Postgres server.
+- `docker-compose.yml` publishes Postgres on `127.0.0.1` only, and its default
+  credentials (`autoontology` / `autoontology`) are for local use. To change them, set
+  `POSTGRES_USER` and `POSTGRES_PASSWORD` in `.env` before the first `docker compose up -d`
+  (Compose reads the same `.env`). The password is fixed when the data volume is first
+  created: on an existing volume, run `ALTER USER ... PASSWORD ...` in `psql`, or recreate
+  the volume with `docker compose down -v` (this deletes the data).
 
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
