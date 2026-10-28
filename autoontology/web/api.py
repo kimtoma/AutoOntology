@@ -463,7 +463,6 @@ class Api:
             except Exception:  # noqa: BLE001 - optional component
                 ocr_ready = False
         from autoontology import formats
-
         from autoontology.config import CLI_PROVIDERS
 
         chat = self._chat_provider_status()
