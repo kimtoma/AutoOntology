@@ -413,3 +413,67 @@ def test_xlsx_colliding_headers_keep_every_column(tmp_path, headers, names):
     conn = _CopyConn()
     (report,) = write_tables([plan], duck, conn)
     assert report.rows == 1 and conn.rows["hdr"] == [("left", "right", "keep")]
+
+
+def _write_xls(path, sheets):
+    import datetime as dt
+
+    import xlwt
+
+    wb = xlwt.Workbook(encoding="utf-8")
+    date_style = xlwt.easyxf(num_format_str="YYYY-MM-DD")
+    for name, rows in sheets.items():
+        ws = wb.add_sheet(name)
+        for r, row in enumerate(rows):
+            for c, value in enumerate(row):
+                if value is None:
+                    continue
+                style = date_style if isinstance(value, dt.date) else xlwt.Style.default_style
+                ws.write(r, c, value, style)
+    wb.save(str(path))
+
+
+def test_xls_one_table_per_sheet_with_types(tmp_path):
+    import datetime as dt
+
+    path = tmp_path / "suppliers.xls"
+    _write_xls(
+        path,
+        {
+            "거래처": [
+                ("코드", "이름", "신용등급", "거래한도", "등록일"),
+                ("S001", "한빛물산", 1, 1500.5, dt.date(2024, 1, 5)),
+                ("S002", "동해상사", 2, 300.0, dt.date(2024, 3, 1)),
+                ("S003", "서해무역", None, None, None),
+            ],
+            "등급": [("등급", "설명"), (1, "우수"), (2, "보통")],
+            "빈시트": [],
+        },
+    )
+    assert discover_files(path) == [path]
+    assert path in discover_files(tmp_path)
+    duck = duckdb.connect()
+    warnings: list[str] = []
+    plans = {p.name: p for p in read_tables([path], duck, warnings)}
+    assert set(plans) == {"suppliers_거래처", "suppliers_등급"}
+    assert any("빈시트" in w for w in warnings)
+    sup = plans["suppliers_거래처"]
+    assert sup.sheet == "거래처" and sup.source_file.endswith("suppliers.xls")
+    assert {c.name: c.pg_type for c in sup.columns} == {
+        "코드": "text",
+        "이름": "text",
+        "신용등급": "bigint",
+        "거래한도": "double precision",
+        "등록일": "date",
+    }
+    rows = duck.execute(sup.select_sql).fetchall()
+    assert rows[0] == ("S001", "한빛물산", 1, 1500.5, dt.date(2024, 1, 5))
+    assert rows[2] == ("S003", "서해무역", None, None, None)
+    assert [c.pg_type for c in plans["suppliers_등급"].columns] == ["bigint", "text"]
+
+
+def test_xls_single_sheet_is_named_after_the_file(tmp_path):
+    path = tmp_path / "단가표.xls"
+    _write_xls(path, {"Sheet1": [("품목", "단가"), ("볼트", 120)]})
+    (plan,) = read_tables([path], duckdb.connect(), [])
+    assert plan.name == "단가표" and plan.sheet == "Sheet1"

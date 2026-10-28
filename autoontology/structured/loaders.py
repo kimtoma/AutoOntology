@@ -2,7 +2,7 @@
 """Load local tabular files into a per-source Postgres database ``autoontology_src_<name>``.
 
 DuckDB (in-process) sniffs and types every file; rows then stream into Postgres with
-``COPY ... FROM STDIN``. One file = one table, except XLSX (one table per sheet) and
+``COPY ... FROM STDIN``. One file = one table, except XLSX/XLS (one table per sheet) and
 SQLite (one table per SQLite table). Tables are replaced on every load, and tables of the
 database that the current input set no longer produces are dropped (the database is owned
 by the source). The load returns a manifest (table -> input file, sheet, columns and types)
@@ -365,6 +365,8 @@ def _relations_for_file(
             select_sql = register_typed(duck, view, typed, casts)
             base = path.stem if len(sheets) == 1 else f"{path.stem}_{sheet}"
             yield base, str(sheet), select_sql, labels
+    elif suffix in XLS_SUFFIXES:
+        yield from _xls_relations(duck, path, warnings)
     elif suffix in SQLITE_SUFFIXES:
         with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
             names = [
@@ -385,6 +387,33 @@ def _relations_for_file(
                 yield table, table, register_typed(duck, view, frame, casts), labels
     else:  # pragma: no cover - discover_files filters
         raise LoadError(f"unsupported file type: {path.name}")
+
+
+def _xls_relations(
+    duck: duckdb.DuckDBPyConnection, path: Path, warnings: list[str]
+) -> Iterator[tuple[str, str | None, str, list[str] | None]]:
+    """Excel 97-2003 sheets via python-calamine (same naming and typing as XLSX: the first
+    row is the header, the cells go through :func:`typed_frame`; empty cells are NULL)."""
+    from python_calamine import CalamineWorkbook
+
+    book = CalamineWorkbook.from_path(str(path))
+    names = list(book.sheet_names)
+    for sheet in names:
+        rows = book.get_sheet_by_name(sheet).to_python()
+        if not rows or not any(str(c).strip() for c in rows[0]):
+            warnings.append(f"{path.name}: sheet {sheet!r} is empty, skipped")
+            continue
+        header, body = rows[0], rows[1:]
+        width = len(header)
+        cells = [
+            [None if v == "" else v for v in row] + [None] * (width - len(row)) for row in body
+        ]
+        typed, casts, labels = typed_frame(
+            [(header[i], [row[i] for row in cells]) for i in range(width)]
+        )
+        view = f"xls_{len(duck.execute('SHOW TABLES').fetchall())}"
+        base = path.stem if len(names) == 1 else f"{path.stem}_{sheet}"
+        yield base, str(sheet), register_typed(duck, view, typed, casts), labels
 
 
 def read_tables(
