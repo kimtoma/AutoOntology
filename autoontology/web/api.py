@@ -831,7 +831,56 @@ def build_router(api: Api) -> APIRouter:
     async def test_provider(request: Request) -> dict[str, Any]:
         return await api.test_provider(request.app)
 
+    # sample sets ----------------------------------------------------------------------
+
+    @router.get("/samples")
+    def list_samples() -> list[dict[str, Any]]:
+        from autoontology import onboarding
+
+        return onboarding.list_sample_sets(api.settings, api.store)
+
+    @router.post("/samples/load")
+    async def load_samples(body: dict[str, Any]) -> dict[str, Any]:
+        return await anyio.to_thread.run_sync(_load_samples, api, body)
+
     return router
+
+
+def _load_samples(api: Api, body: dict[str, Any]) -> dict[str, Any]:
+    """Register a sample set's sources exactly like ``autoontology demo``."""
+    from autoontology import onboarding
+    from autoontology.engine.jobs import JobError
+    from autoontology.structured.loaders import LoadError
+    from autoontology.structured.remove import RemoveError
+
+    name = body.get("set") if isinstance(body, dict) else None
+    if not isinstance(name, str) or name not in onboarding.SAMPLE_SETS:
+        raise ApiError(
+            400,
+            "unknown_sample_set",
+            f"unknown sample set {name!r} (choose one of: {', '.join(onboarding.SAMPLE_SETS)})",
+        )
+    busy = api.runs.busy()
+    if busy is not None or api.store.active_runs():
+        raise ApiError(
+            409,
+            "run_active",
+            "a build or export is running: load the samples when it has finished",
+        )
+    messages: list[str] = []
+    try:
+        registered = onboarding.register_sample_set(
+            api.settings, api.store, name, notify=lambda m: messages.append(mask(m))
+        )
+    except onboarding.SampleSetError as exc:
+        raise ApiError(400, "unknown_sample_set", mask(str(exc))) from exc
+    except (RemoveError, LoadError, JobError, ValueError) as exc:
+        raise ApiError(409, "samples_not_loaded", mask(str(exc))) from exc
+    return {
+        "set": name,
+        "sources": [{**api.source_dict(src), "action": action} for src, action in registered],
+        "messages": messages,
+    }
 
 
 def _validation_text(exc: Exception) -> str:

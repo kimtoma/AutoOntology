@@ -207,6 +207,11 @@ class RunManager:
         with self._lock:
             return self._by_source.get(source) or self._by_source.get(WORKSPACE)
 
+    def busy(self) -> _Active | None:
+        """Any run or claim this service holds (None when idle)."""
+        with self._lock:
+            return next(iter(self._by_source.values()), None)
+
     def is_managed(self, run_id: str) -> bool:
         with self._lock:
             return run_id in self._by_run
