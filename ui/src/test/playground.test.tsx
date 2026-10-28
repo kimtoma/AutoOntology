@@ -72,6 +72,14 @@ describe("playground helpers", () => {
     expect(screen.getByText("[E9]")).toBeInTheDocument()
   })
 
+  it("keeps markup in an answer as text", () => {
+    const { container } = renderPage(
+      <CitedText text={'<script>window.pwned = 1</script><img src=x onerror="window.pwned=1"> [E1]'}
+                 citations={{ E1: CHIP }} />)
+    expect(container.querySelector("script, img")).toBeNull()
+    expect(screen.getByText(/<script>window.pwned = 1<\/script>/)).toBeInTheDocument()
+  })
+
   it("omits the graph link of an element that is not a graph node", () => {
     renderPage(<CitedText text="값 [E1]" citations={{ E1: { ...CHIP, graph_link: "" } }} />)
     expect(screen.getByRole("link", { name: /Contracts/ })).toHaveAttribute("href", "/ontology?concept=term-t-c")

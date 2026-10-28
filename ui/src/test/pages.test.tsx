@@ -291,6 +291,35 @@ describe("Exports page", () => {
     expect(await screen.findByText(/type: Business Concept/)).toBeInTheDocument()
   })
 
+  it("previews markup as text and shows failed validations", async () => {
+    const user = userEvent.setup()
+    mockFetch({
+      "GET /exports": { exports: [{
+        revision: 3, dir: "r0003", created_at: "2026-10-28T12:06:24+00:00",
+        files: [{ name: "report.md", bytes: 40 }, { name: "ossie/validation.json", bytes: 5 },
+                { name: "okf/validation.json", bytes: 5 }],
+        dirs: [{ name: "ossie", files: ["validation.json"], bytes: 5 }, { name: "okf", files: ["validation.json"], bytes: 5 }],
+      }] },
+      "GET /exports/r0003/ossie/validation.json": () => new Response(JSON.stringify(
+        { semantic_model: "error: bad", roundtrip: "ok", ontology: "ok", mapping: "ok", warnings: [] }),
+        { headers: { "content-type": "text/plain" } }),
+      "GET /exports/r0003/okf/validation.json": () => new Response(JSON.stringify(
+        { okf_version: "0.2", ok: false, files: 3, errors: ["a", "b"], warnings: [] }),
+        { headers: { "content-type": "text/plain" } }),
+      "GET /exports/r0003/report.md": () => new Response('# Report\n<script>window.pwned = 1</script><img src=x onerror="x()">',
+                                                        { headers: { "content-type": "text/plain" } }),
+    })
+    renderPage(<ExportsPage />)
+    const root = (await screen.findByText("exports/r0003/")).closest("[data-export]") as HTMLElement
+    await waitFor(() => expect(root.querySelectorAll("[data-validation=ossie][data-ok=false]").length).toBeGreaterThan(0))
+    await waitFor(() => expect(root.querySelectorAll("[data-validation=okf][data-ok=false]").length).toBeGreaterThan(0))
+    expect(within(root).getAllByText("OKF · 2 errors").length).toBeGreaterThan(0)
+    await user.click(within(root).getByRole("button", { name: "Preview report.md" }))
+    const pre = await screen.findByText(/<script>window.pwned = 1<\/script>/)
+    expect(pre.id).toBe("file-preview")
+    expect(pre.querySelector("script, img")).toBeNull()
+  })
+
   it("shows 20 export folders, then more on request", async () => {
     const user = userEvent.setup()
     const entry = (n: number) => ({ revision: n, dir: `r${String(n).padStart(4, "0")}`,
