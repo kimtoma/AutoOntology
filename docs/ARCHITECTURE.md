@@ -65,7 +65,9 @@ merge -> snapshot
     attributes and semantic foreign keys.
 - **Documents path.**
   - `read` uses the native readers (`.md`, `.txt`, `.html`) or kordoc and produces
-    section-aware chunks (tiktoken).
+    section-aware chunks (tiktoken). Without kordoc, documents that need it are skipped
+    with a run warning, not counted as failed; a source whose documents all need kordoc
+    reads 0 documents and `consolidate` stores an empty ontology for it.
   - `extract` makes one LLM call per chunk and returns concepts, relations and verbatim
     evidence. The output is schema-validated, and evidence quotes are checked against the
     chunk text.
@@ -82,8 +84,13 @@ merge -> snapshot
 
 `--source N` records the other sources' steps as skipped, but align, merge and snapshot
 still cover everything. `--resume` reuses the latest build run. Each per-source step
-stores an `inputs_sha` (the locator plus the path and sha256 of every input file), and
-`--resume` keeps a step only when that hash is unchanged. A re-run step invalidates the
+stores an `inputs_sha` (the locator plus the path and sha256 of every input file; for a
+documents source also kordoc's availability; for a database-URL source its live schema
+from `information_schema` on Postgres), and `--resume` keeps a step only when that hash is
+unchanged. A database source that cannot be read, or is MySQL or Snowflake (no bundled
+driver), never matches, so its steps always run again. align, merge and snapshot also run
+again when the set of registered sources changed, and a resumed align re-judges a concept
+whose candidate Terms changed. A re-run step invalidates the
 later steps of its own source and every global step. Failed chunks or documents make the
 run `failed` with a `partial` note, but the snapshot is still saved.
 
@@ -107,7 +114,16 @@ folder and swaps it into `exports/r<rev:04d>/`:
   (`third_party/ossie`, offline `$ref` resolution) and round-trips the semantic model
   through the engine's Ossie converter.
 - `okf` (`export/okf.py`) writes the OKF v0.2 bundle and validates it.
-- `report` writes `report.md` and `export.json`.
+- `report` writes `report.md` and `export.json`, whose `files` list names every file the
+  exporter wrote.
+
+Replacing an existing revision folder (under `exports/` or `--out`) is refused unless
+every file in it, at any depth including `okf/`, `ossie/` and `upstream/`, is on that
+list (`check_replaceable`). A folder whose `export.json` has no list, from before the list
+existed, is refused with a message to move or delete it. During the swap the previous
+folder is renamed to `r<NNNN>.prev-<ts>-<run>` and deleted after the new one is in place;
+the run is `succeeded` only after that. GraphML edge ids are `e0`, `e1`, ... and unique
+across the file.
 
 `--format` runs only the steps that format needs and carries the other formats' entries
 over from the previous export of the same revision. A validation failure writes
@@ -120,15 +136,19 @@ embeds one text per Term, concept, rule, process, relation, axiom and evidence n
 rebuilt when the snapshot changes. Chat (`service.py`) retrieves the top-k elements,
 quotes them inside a delimited context block and streams the answer with citations. SQL
 is relayed to the engine. SPARQL (`sparql.py`) evaluates against the snapshot's Turtle
-in-process with rdflib, using a deadline-checking graph wrapper, a semaphore of 2 and a
-row cap, plus a keyword pre-filter and an algebra-level guard against `SERVICE`, `FROM`
-and `LOAD`.
+with rdflib in up to two spawn-context worker processes, with a semaphore of 2 and a row
+cap. Past the 10 s deadline the worker is killed (408), so a query that never reads the
+graph also stops; a worker above 1024 MB resident memory exits and the query answers 413
+`sparql_memory_limit`. The service parses the graph too, so memory is about twice the
+parsed graph, and the first query after a kill pays one process start and one Turtle
+parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` and
+`LOAD`.
 
 ## Store tables (SQLite, `store/db.py`)
 
 | Table | Holds |
 |---|---|
-| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground). |
+| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground, v3: `term_alias_additions.source_id`). |
 | `sources` | Registered sources: name, kind (`files`, `database`, `documents`), locator, catalog database id. |
 | `source_leases` | Leases that keep builds, exports and deletes from overlapping. |
 | `runs`, `steps` | Build and export runs and their steps, with details, timings and `inputs_sha`. |
@@ -137,7 +157,7 @@ and `LOAD`.
 | `concepts`, `relations`, `evidence` | Extracted and consolidated document knowledge. |
 | `term_embeddings` | Cached Term passage embeddings, by text hash and model. |
 | `alignments`, `alignment_previews` | Judge verdicts with the identity policy version, and dry-run proposals. |
-| `term_alias_additions`, `term_refresh_pending` | Synonyms AutoOntology added to Terms, and Terms awaiting a refresh. |
+| `term_alias_additions`, `term_refresh_pending` | Synonyms AutoOntology added to Terms (with `source_id`, the documents source whose alignment added them, since v3; NULL on older rows), and Terms awaiting a refresh. `source rm` of a documents source removes that source's additions from the upstream Terms first. |
 | `ontology_snapshots` | One row per revision: the run, sources, counts and the full model JSON. |
 | `playground_index`, `playground_index_meta` | The element vectors and the snapshot they were built from. |
 | `playground_conversations`, `playground_messages` | Stored chats, keyed by workspace. |

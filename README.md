@@ -107,9 +107,14 @@ What to expect:
   Apple-silicon machine the first build takes roughly 20 minutes without kordoc and 50
   minutes with it. Later builds reuse everything that did not change.
 - The sample folder has three files that need kordoc (`.pdf`, `.hwp`, `.docx`). **If you
-  skipped `--docs`, `build` reports them as `ENGINE_MISSING`, still saves the snapshot from
-  everything else, and exits with status 1 ("partial").** To add them later, run
-  `uv run autoontology tools install-kordoc` and then `uv run autoontology build --resume`.
+  skipped `--docs`, `build` skips them, prints a warning naming them and the install
+  command, and still succeeds (exit 0)**:
+  `` warning: documents:<source>:read: 3 document(s) need kordoc and were skipped (...): run
+  `uv run autoontology tools install-kordoc`, then build again ``. A documents source whose
+  files all need kordoc is read as 0 documents with the same warning. To add them later,
+  run `uv run autoontology tools install-kordoc` and then `uv run autoontology build` (or
+  `build --resume`): kordoc's availability is part of the documents source's fingerprint,
+  so the documents are read again.
 - `export` prints the folder it wrote, for example `exports/r0001/`.
 - `ui` opens http://127.0.0.1:7800/ui/.
 
@@ -150,8 +155,8 @@ source has been ingested (see Troubleshooting).
 | `autoontology ui [--no-browser]` | Prints the web UI URL and opens it. |
 | `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | Registers a source. Structured sources are loaded into `autoontology_src_<name>`. |
 | `autoontology source list` | Lists the sources. |
-| `autoontology source rm N [--drop-db] [--force]` | Removes a source; `--drop-db` also drops its database. |
-| `autoontology build [--source N ...] [--resume]` | Builds every source into one snapshot. `--source` rebuilds only the named sources (align, merge and snapshot still cover all of them). `--resume` continues the latest build and keeps steps whose inputs did not change. |
+| `autoontology source rm N [--drop-db] [--force]` | Removes a source; `--drop-db` also drops its database. For a documents source it first removes, from the upstream Terms, the synonyms that source's alignments added (manual aliases, other sources' aliases and aliases still covered by another source's accepted `same` alignment are kept). This needs the engine database; if it fails, the source is kept unless `--force` is given. |
+| `autoontology build [--source N ...] [--resume]` | Builds every source into one snapshot. `--source` rebuilds only the named sources (align, merge and snapshot still cover all of them). `--resume` continues the latest build and keeps steps whose inputs did not change (see [Resuming a build](#resuming-a-build)). |
 | `autoontology ontology` | Shows the latest snapshot: revision, sources and counts. |
 | `autoontology runs [--limit N]` | Shows recent runs and their steps. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
@@ -162,6 +167,20 @@ source has been ingested (see Troubleshooting).
 
 `build` exits 1 when a run is partial (for example a document failed to read or a chunk
 failed to extract), and prints a `--resume` hint. A partial run still saves its snapshot.
+Documents skipped only because kordoc is not installed are a warning, not a failure: the
+run succeeds and exits 0.
+
+### Resuming a build
+
+`build --resume` keeps a step only while its inputs are unchanged:
+
+- Files and documents are hashed. A documents source's fingerprint also includes whether
+  kordoc is available.
+- A database-URL source's fingerprint includes its live schema, read from
+  `information_schema` for Postgres. If the database cannot be read, or it is MySQL or
+  Snowflake (no bundled driver), its steps always run again.
+- align, merge and snapshot also run again when the set of registered sources changed.
+- A resumed align judges a concept again when its candidate Terms changed.
 
 ## HTTP API
 
@@ -173,7 +192,7 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 | `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, and a provider summary (never the key). |
 | `GET /api/sources` | Lists the sources. |
 | `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
-| `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion fails or does not finish, like `source rm --force`). |
+| `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion or the alias cleanup fails or does not finish, like `source rm --force`). A documents source's alias additions are removed from the upstream Terms first, as with `source rm`. |
 | `POST /api/runs` | Starts a run: `{kind: "build", sources?, resume?}` or `{kind: "export", revision?, format?}`. |
 | `GET /api/runs`, `GET /api/runs/{id}` | Lists runs; shows one run with its steps. |
 | `GET /api/runs/{id}/events` | Server-sent events: the live log and step updates of a run. |
@@ -197,27 +216,34 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 ## Export formats
 
 `autoontology export` writes everything below into `exports/r<rev:04d>/`, together with
-`export.json`, a marker that records the workspace, the revision and which export run
-wrote each format.
+`export.json`, a marker that records the workspace, the revision, which export run
+wrote each format, and a `files` list of every file the exporter wrote.
 
 | File | Format | What it contains |
 |---|---|---|
 | `ontology.ttl` | [RDF 1.1 Turtle](https://www.w3.org/TR/turtle/) | OWL classes for Terms and document concepts, object and datatype properties, individuals (rules, processes), `rdfs:subClassOf` and `skos:related` axioms, `skos:altLabel` synonyms, and evidence nodes with quotes, all under the `ao:` namespace (`AUTOONTOLOGY_BASE_IRI`). It is checked by a parse round-trip. |
 | `ontology.jsonld` | [JSON-LD 1.1](https://www.w3.org/TR/json-ld11/) | The same graph as JSON-LD. |
-| `ontology.graphml` | [GraphML](http://graphml.graphdrawing.org/specification.html) | Nodes and edges with string attributes, for Gephi, yEd or networkx. |
+| `ontology.graphml` | [GraphML](http://graphml.graphdrawing.org/specification.html) | Nodes and edges with string attributes, for Gephi, yEd or networkx. Edge ids are `e0`, `e1`, ... and unique across the file. |
 | `ossie/semantic_model.yaml`, `ossie/ontology.yaml`, `ossie/mapping.yaml` | [Apache Ossie](https://github.com/apache/ossie) spec 0.2.0.dev0 | The structured sources' datasets merged into one semantic model; the unified ontology (Terms and document concepts as `EntityType`s, column and document relationships with verbalizations, `extends` for subclass axioms); object mappings for Terms whose dataset declares a key. `validation.json` holds the JSON Schema results, structural checks and the round-trip through the engine's Ossie converter. |
 | `okf/` | [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) | A Markdown bundle with YAML frontmatter: `index.md`, `log.md`, `concepts/*.md` (type `Business Concept`), `tables/<source>.<table>.md` (type `Table`) and `documents/*.md` (type `Document`), with relationships as bundle links and evidence as footnotes. `validation.json` holds the conformance report. |
 | `report.md` | Markdown | A human-readable summary: counts, sources, merged concepts and every file with its sha256. |
 | `upstream/<source>.model.yaml`, `upstream/<source>.ossie.zip` | Engine native | The engine's own exports per structured source, fetched at export time. |
-| `export.json` | JSON | The marker: workspace, revision and the export run that wrote each format. |
+| `export.json` | JSON | The marker: workspace, revision, the export run that wrote each format, and `files`, the list of every file the exporter wrote. |
 
 Options:
 
 - `--format rdf|ossie|okf` rewrites only that format (`rdf` covers ttl, jsonld, graphml and
   `upstream/`) and keeps the other formats' files from the previous export of the same
   revision.
-- `--out DIR` writes `DIR/r<rev>/`. It only ever replaces files the exporter wrote, and
-  refuses a non-empty folder that has no `export.json`.
+- `--out DIR` writes `DIR/r<rev>/`.
+
+Re-exporting a revision replaces its folder only when every file in it, at any depth
+(inside `okf/`, `ossie/` and `upstream/` too), is on the `files` list of its
+`export.json`. This holds under `exports/` as well as under `--out`. A folder with any other
+file, without `export.json`, or whose `export.json` has no `files` list (an export from
+before this list existed) is refused, and nothing in it is removed. During the swap the
+previous folder is renamed to `r<NNNN>.prev-<timestamp>-<run>` and deleted once the new
+one is in place; the export run is `succeeded` only after that.
 
 ## How the unified ontology is built
 
@@ -268,8 +294,11 @@ With the samples, the judge accepts 계약 → Contracts, 고객 → Customers a
   Korean, like the sample data. Conversations are stored per workspace.
 - **SQL** turns a question into SQL through the engine's NL-to-SQL agent, runs it against
   a structured source and shows the table.
-- **SPARQL** runs read-only queries in-process with rdflib over the snapshot's Turtle. The
-  limits are 10 s per query, 500 rows and 2 concurrent queries. `SERVICE`, `FROM` and
+- **SPARQL** runs read-only queries with rdflib over the snapshot's Turtle in up to two
+  worker processes (spawn context). The limits are 10 s per query, 500 rows and 2
+  concurrent queries. Past the deadline the worker is killed and the query answers 408, so
+  a query that never reads the graph also stops. A worker above 1024 MB resident memory
+  exits, and the query answers 413 `sparql_memory_limit`. `SERVICE`, `FROM` and
   `LOAD` are refused. Example:
 
   ```bash
@@ -300,7 +329,7 @@ then `.env`, then the built-in default.
 | `AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S` | `120` | Maximum total wait for a SQLite store lock. |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | `localhost` / `5432` | Postgres server. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` | `autoontology` / `autoontology` | Postgres credentials; this user needs permission to create databases. |
-| `POSTGRES_DATABASE` | `autoontology` | Catalog database. Source databases are `autoontology_src_<source>`; AutoOntology refuses any other name. |
+| `POSTGRES_DATABASE` | `autoontology` | Catalog database. Source databases are `autoontology_src_<source>`; AutoOntology refuses any other name. The catalog name may not start with `autoontology_src_` (reserved for source databases); such a value is refused when settings load. |
 | `AUTOONTOLOGY_CHAT_PROVIDER` | `ollama` | `ollama` or `openai` (any OpenAI-compatible endpoint). |
 | `AUTOONTOLOGY_EMBED_PROVIDER` | `ollama` | `ollama` or `openai`. |
 | `AUTOONTOLOGY_OLLAMA_ENDPOINT` | `http://localhost:11434/v1` | Ollama's OpenAI-compatible endpoint. |
@@ -345,13 +374,24 @@ are overridden.
   whose upstream semantic model declares a key. In the samples only `customers` does.
 - **Snapshots are never pruned.** Each successful build adds a revision with the full model
   JSON.
-- **`build --resume` hashes files, not database schemas.** It notices changed input files
-  and documents, but a database source is identified by its URL only. Run a plain `build`
-  after a schema change inside that database.
+- **`build --resume` cannot always see a database's schema.** It reads a Postgres source's
+  live schema, but a MySQL or Snowflake source, or a database it cannot reach, is never
+  reused: its steps run again on every resume.
+- **Export folders from before the `files` list refuse re-export.** An `exports/rNNNN/` (or
+  `--out`) folder written before `export.json` listed its files cannot be replaced. Move or
+  delete it once, then export again.
+- **A stray file inside an export folder blocks re-export** (by design). Anything you put
+  in `exports/rNNNN/` that the exporter did not write makes the next export of that
+  revision refuse, instead of deleting your file. Keep notes outside the revision folder.
+- **SPARQL costs memory and a cold start.** The service and the worker each parse the
+  graph, so memory is about twice the parsed graph. The first query after a timeout pays one
+  process start plus one Turtle parse.
 - **Finished runs list only the steps that ran.** Steps that were never reached do not
   appear as pending.
 - **Upgrading a pre-release home:** store migration v2 drops older playground
   conversations, and the first `build --resume` after upgrading rebuilds every source once.
+  Alias records written before store schema v3 carry no source, so `source rm` does not
+  remove the synonyms they added; remove those by hand in the engine if needed.
 - Names stay in the source language: Korean concept names are kept in Ossie identifiers
   and OKF file names.
 
@@ -387,7 +427,7 @@ See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 | `setup`: permission denied to create database | Give the user `CREATEDB`, or create the `autoontology` database yourself. |
 | Chat model `openai/qwen3:8b` not found | Run `uv run autoontology setup` (or `setup --force-alias`). The `openai/` prefix is part of the Ollama alias name; `ollama list` should show it. |
 | `doctor` FAIL "vector tables": the embedder emits N dimensions | You switched embedding models after ingesting. Restore the old `*_EMBED_MODEL`, or remove every source (`source rm`) so that the vector tables are empty. An empty table is recreated automatically. |
-| `build` fails a document with `ENGINE_MISSING` | Install kordoc (`uv run autoontology tools install-kordoc`, Node 20 or newer), then `build --resume`. |
+| `build` warns "N document(s) need kordoc and were skipped" | The run succeeded without those documents. Install kordoc (`uv run autoontology tools install-kordoc`, Node 20 or newer), then `build` or `build --resume` to read them. |
 | `/ui/` returns 503 `ui_not_built` | The committed UI is missing (for example in a source archive). Run `uv run autoontology tools build-ui` (needs Node and pnpm). |
 | A build seems stuck | Run `uv run autoontology runs` and read `data/logs/`. Each chunk takes one to two minutes with `qwen3:8b`. |
 

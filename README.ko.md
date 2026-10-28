@@ -101,10 +101,14 @@ uv run autoontology ui
   빌드는 kordoc 없이 대략 20분, kordoc을 쓰면 50분쯤 걸립니다. 이후 빌드는 바뀌지 않은 것을
   모두 재사용합니다.
 - 샘플 폴더에는 kordoc이 필요한 파일이 세 개(`.pdf`, `.hwp`, `.docx`) 있습니다. **`--docs`를
-  생략했다면 `build`는 이 파일들을 `ENGINE_MISSING`으로 보고하고, 나머지로 만든 스냅샷은
-  저장하며, 종료 코드 1("partial")로 끝납니다.** 나중에 추가하려면
-  `uv run autoontology tools install-kordoc`을 실행한 뒤 `uv run autoontology build --resume`을
-  실행하세요.
+  생략했다면 `build`는 이 파일들을 건너뛰고, 파일 이름과 설치 명령을 담은 경고를 출력한 뒤,
+  성공(종료 코드 0)으로 끝납니다**:
+  `` warning: documents:<source>:read: 3 document(s) need kordoc and were skipped (...): run
+  `uv run autoontology tools install-kordoc`, then build again ``. 모든 파일이 kordoc을
+  필요로 하는 문서 소스도 같은 경고와 함께 문서 0개로 읽힙니다. 나중에 추가하려면
+  `uv run autoontology tools install-kordoc`을 실행한 뒤 `uv run autoontology build`(또는
+  `build --resume`)를 실행하세요. kordoc 사용 가능 여부가 문서 소스 지문(fingerprint)에
+  포함되므로 문서를 다시 읽습니다.
 - `export`는 자신이 쓴 폴더를 출력합니다(예: `exports/r0001/`).
 - `ui`는 http://127.0.0.1:7800/ui/ 를 엽니다.
 
@@ -144,8 +148,8 @@ AUTOONTOLOGY_EMBED_PROVIDER=ollama
 | `autoontology ui [--no-browser]` | 웹 UI URL을 출력하고 엽니다. |
 | `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | 소스를 등록합니다. 정형 소스는 `autoontology_src_<name>`에 적재됩니다. |
 | `autoontology source list` | 소스 목록을 보여 줍니다. |
-| `autoontology source rm N [--drop-db] [--force]` | 소스를 제거합니다. `--drop-db`는 그 데이터베이스도 삭제합니다. |
-| `autoontology build [--source N ...] [--resume]` | 모든 소스를 스냅샷 하나로 빌드합니다. `--source`는 지정한 소스만 다시 빌드합니다(정렬, 병합, 스냅샷은 여전히 전체를 대상으로 합니다). `--resume`은 최근 빌드를 이어 가며, 입력이 바뀌지 않은 단계는 유지합니다. |
+| `autoontology source rm N [--drop-db] [--force]` | 소스를 제거합니다. `--drop-db`는 그 데이터베이스도 삭제합니다. 문서 소스라면 먼저 그 소스의 정렬이 업스트림 Term에 추가한 동의어를 지웁니다(수동 별칭, 다른 소스의 별칭, 다른 소스의 수락된 `same` 정렬이 여전히 덮는 별칭은 유지). 이 작업에는 엔진 데이터베이스가 필요하며, 실패하면 `--force`를 주지 않는 한 소스를 유지합니다. |
+| `autoontology build [--source N ...] [--resume]` | 모든 소스를 스냅샷 하나로 빌드합니다. `--source`는 지정한 소스만 다시 빌드합니다(정렬, 병합, 스냅샷은 여전히 전체를 대상으로 합니다). `--resume`은 최근 빌드를 이어 가며, 입력이 바뀌지 않은 단계는 유지합니다([빌드 이어 가기](#빌드-이어-가기) 참고). |
 | `autoontology ontology` | 최신 스냅샷의 리비전, 소스, 개수를 보여 줍니다. |
 | `autoontology runs [--limit N]` | 최근 run과 그 단계들을 보여 줍니다. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
@@ -156,6 +160,18 @@ AUTOONTOLOGY_EMBED_PROVIDER=ollama
 
 run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 청크 추출이 실패한 경우) `build`는
 1로 종료하고 `--resume` 힌트를 출력합니다. 부분 실패한 run도 스냅샷은 저장합니다.
+kordoc이 설치되지 않아 건너뛴 문서는 실패가 아니라 경고입니다. run은 성공하고 0으로 종료합니다.
+
+### 빌드 이어 가기
+
+`build --resume`은 입력이 바뀌지 않은 단계만 유지합니다.
+
+- 파일과 문서는 해시합니다. 문서 소스의 지문에는 kordoc 사용 가능 여부도 들어갑니다.
+- 데이터베이스 URL 소스의 지문에는 실제 스키마가 들어가며, Postgres는 `information_schema`에서
+  읽습니다. 데이터베이스를 읽을 수 없거나 MySQL, Snowflake(드라이버 미포함)라면 그 단계는 항상
+  다시 실행됩니다.
+- 등록된 소스 집합이 바뀌면 정렬, 병합, 스냅샷도 다시 실행됩니다.
+- 이어 간 정렬은 후보 Term이 바뀐 개념을 다시 판정합니다.
 
 ## HTTP API
 
@@ -167,7 +183,7 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
 | `GET /api/status` | 버전, 백엔드와 Postgres 상태, Ollama 모델, `kordoc_available`, 제공자 요약(키는 절대 포함하지 않음). |
 | `GET /api/sources` | 소스 목록. |
 | `POST /api/sources` | 소스 추가: JSON `{name, kind: files\|database\|documents, locator, recursive?}` 또는 multipart 업로드. |
-| `DELETE /api/sources/{name}` | 소스 제거(`?drop_db=true`는 데이터베이스도 삭제, `&force=true`는 `source rm --force`처럼 엔진의 그래프 삭제가 실패하거나 끝나지 않아도 로컬에서 제거). |
+| `DELETE /api/sources/{name}` | 소스 제거(`?drop_db=true`는 데이터베이스도 삭제, `&force=true`는 `source rm --force`처럼 엔진의 그래프 삭제나 별칭 정리가 실패하거나 끝나지 않아도 로컬에서 제거). 문서 소스는 `source rm`과 마찬가지로 먼저 업스트림 Term에서 그 소스가 추가한 별칭을 지웁니다. |
 | `POST /api/runs` | run 시작: `{kind: "build", sources?, resume?}` 또는 `{kind: "export", revision?, format?}`. |
 | `GET /api/runs`, `GET /api/runs/{id}` | run 목록, 그리고 단계가 포함된 run 하나. |
 | `GET /api/runs/{id}/events` | 서버 전송 이벤트(SSE): run의 실시간 로그와 단계 갱신. |
@@ -191,26 +207,32 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
 ## 내보내기 형식
 
 `autoontology export`는 아래 파일을 모두 `exports/r<rev:04d>/`에 쓰고, 함께 `export.json`을
-씁니다. `export.json`은 워크스페이스, 리비전, 그리고 각 형식을 어느 내보내기 run이 썼는지를
-기록하는 마커입니다.
+씁니다. `export.json`은 워크스페이스, 리비전, 각 형식을 어느 내보내기 run이 썼는지, 그리고
+내보내기가 쓴 모든 파일의 `files` 목록을 기록하는 마커입니다.
 
 | 파일 | 형식 | 내용 |
 |---|---|---|
 | `ontology.ttl` | [RDF 1.1 Turtle](https://www.w3.org/TR/turtle/) | Term과 문서 개념의 OWL 클래스, 객체·데이터타입 속성, 개체(규칙, 절차), `rdfs:subClassOf`와 `skos:related` 공리, `skos:altLabel` 동의어, 인용이 담긴 근거 노드. 모두 `ao:` 네임스페이스(`AUTOONTOLOGY_BASE_IRI`) 아래에 있습니다. 파싱 라운드트립으로 검사합니다. |
 | `ontology.jsonld` | [JSON-LD 1.1](https://www.w3.org/TR/json-ld11/) | 같은 그래프의 JSON-LD 표현. |
-| `ontology.graphml` | [GraphML](http://graphml.graphdrawing.org/specification.html) | 문자열 속성을 가진 노드와 엣지. Gephi, yEd, networkx용. |
+| `ontology.graphml` | [GraphML](http://graphml.graphdrawing.org/specification.html) | 문자열 속성을 가진 노드와 엣지. Gephi, yEd, networkx용. 엣지 id는 `e0`, `e1`, ...이며 파일 전체에서 고유합니다. |
 | `ossie/semantic_model.yaml`, `ossie/ontology.yaml`, `ossie/mapping.yaml` | [Apache Ossie](https://github.com/apache/ossie) spec 0.2.0.dev0 | 정형 소스들의 데이터셋을 하나로 병합한 시맨틱 모델, 통합 온톨로지(Term과 문서 개념은 `EntityType`, 컬럼·문서 관계는 verbalization 포함, 하위 클래스 공리는 `extends`), 데이터셋이 키를 선언한 Term의 object mapping. `validation.json`에는 JSON 스키마 결과, 구조 검사, 엔진 Ossie 변환기를 통한 라운드트립 결과가 담깁니다. |
 | `okf/` | [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) | YAML frontmatter가 붙은 마크다운 번들: `index.md`, `log.md`, `concepts/*.md`(type `Business Concept`), `tables/<source>.<table>.md`(type `Table`), `documents/*.md`(type `Document`). 관계는 번들 링크로, 근거는 각주로 표현합니다. `validation.json`에 적합성 보고서가 담깁니다. |
 | `report.md` | Markdown | 사람이 읽는 요약: 개수, 소스, 병합된 개념, 그리고 sha256이 붙은 모든 파일. |
 | `upstream/<source>.model.yaml`, `upstream/<source>.ossie.zip` | 엔진 고유 형식 | 정형 소스별 엔진 자체 내보내기. 내보내기 시점에 받아 옵니다. |
-| `export.json` | JSON | 마커: 워크스페이스, 리비전, 각 형식을 쓴 내보내기 run. |
+| `export.json` | JSON | 마커: 워크스페이스, 리비전, 각 형식을 쓴 내보내기 run, 그리고 내보내기가 쓴 모든 파일의 목록 `files`. |
 
 옵션:
 
 - `--format rdf|ossie|okf`는 그 형식만 다시 쓰고(`rdf`는 ttl, jsonld, graphml, `upstream/`),
   나머지 형식의 파일은 같은 리비전의 직전 내보내기에서 유지합니다.
-- `--out DIR`은 `DIR/r<rev>/`에 씁니다. 내보내기가 쓴 파일만 교체하며, `export.json`이 없는
-  비어 있지 않은 폴더는 거부합니다.
+- `--out DIR`은 `DIR/r<rev>/`에 씁니다.
+
+리비전을 다시 내보낼 때는 그 폴더의 모든 파일이(`okf/`, `ossie/`, `upstream/` 안까지) `export.json`의
+`files` 목록에 있을 때만 폴더를 교체합니다. `--out`뿐 아니라 `exports/` 아래에서도 같습니다.
+다른 파일이 있거나, `export.json`이 없거나, `export.json`에 `files` 목록이 없는(목록이 생기기
+전의 내보내기) 폴더는 거부하며 아무것도 지우지 않습니다. 교체하는 동안 이전 폴더는
+`r<NNNN>.prev-<timestamp>-<run>`으로 이름이 바뀌고 새 폴더가 자리 잡은 뒤 삭제됩니다. 내보내기
+run은 그다음에야 `succeeded`가 됩니다.
 
 ## 통합 온톨로지가 만들어지는 방식
 
@@ -253,8 +275,10 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
   근거)를 찾아 인용하며, 인용을 누르면 Ontology 페이지나 그래프에서 그 개념이 열립니다. 시스템
   프롬프트는 샘플 데이터처럼 한국어로 답합니다. 대화는 워크스페이스별로 저장됩니다.
 - **SQL**은 엔진의 NL→SQL 에이전트로 질문을 SQL로 바꾸고, 정형 소스에서 실행해 표로 보여 줍니다.
-- **SPARQL**은 스냅샷의 Turtle을 대상으로 rdflib로 프로세스 안에서 읽기 전용 쿼리를 실행합니다.
-  제한은 쿼리당 10초, 500행, 동시 쿼리 2개입니다. `SERVICE`, `FROM`, `LOAD`는 거부합니다. 예:
+- **SPARQL**은 스냅샷의 Turtle을 대상으로 rdflib로 최대 두 개의 워커 프로세스(spawn
+  컨텍스트)에서 읽기 전용 쿼리를 실행합니다. 제한은 쿼리당 10초, 500행, 동시 쿼리 2개입니다.
+  기한을 넘기면 워커를 종료하고 408로 응답하므로, 그래프를 읽지 않는 쿼리도 멈춥니다. 상주
+  메모리가 1024 MB를 넘은 워커는 종료되고, 쿼리는 413 `sparql_memory_limit`으로 응답합니다. `SERVICE`, `FROM`, `LOAD`는 거부합니다. 예:
 
   ```bash
   curl -s http://127.0.0.1:7800/api/playground/sparql -H 'content-type: application/json' \
@@ -284,7 +308,7 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
 | `AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S` | `120` | SQLite 저장소 잠금의 최대 총 대기 시간. |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | `localhost` / `5432` | Postgres 서버. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` | `autoontology` / `autoontology` | Postgres 자격 증명. 이 사용자에게 데이터베이스 생성 권한이 있어야 합니다. |
-| `POSTGRES_DATABASE` | `autoontology` | 카탈로그 데이터베이스. 소스 데이터베이스 이름은 `autoontology_src_<source>`이며, AutoOntology는 다른 이름을 모두 거부합니다. |
+| `POSTGRES_DATABASE` | `autoontology` | 카탈로그 데이터베이스. 소스 데이터베이스 이름은 `autoontology_src_<source>`이며, AutoOntology는 다른 이름을 모두 거부합니다. 카탈로그 이름은 `autoontology_src_`로 시작할 수 없으며(소스 데이터베이스용으로 예약), 그런 값은 설정을 읽을 때 거부됩니다. |
 | `AUTOONTOLOGY_CHAT_PROVIDER` | `ollama` | `ollama` 또는 `openai`(임의의 OpenAI 호환 엔드포인트). |
 | `AUTOONTOLOGY_EMBED_PROVIDER` | `ollama` | `ollama` 또는 `openai`. |
 | `AUTOONTOLOGY_OLLAMA_ENDPOINT` | `http://localhost:11434/v1` | Ollama의 OpenAI 호환 엔드포인트. |
@@ -328,13 +352,24 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
   데이터셋에만 작성됩니다. 샘플에서는 `customers`만 키를 선언합니다.
 - **스냅샷은 정리되지 않습니다.** 빌드가 성공할 때마다 전체 모델 JSON을 가진 리비전이 하나씩
   추가됩니다.
-- **`build --resume`은 데이터베이스 스키마가 아니라 파일을 해시합니다.** 바뀐 입력 파일과 문서는
-  알아채지만, 데이터베이스 소스는 URL로만 식별합니다. 그 데이터베이스 안에서 스키마가 바뀌었다면
-  일반 `build`를 실행하세요.
+- **`build --resume`이 데이터베이스 스키마를 항상 볼 수는 없습니다.** Postgres 소스는 실제
+  스키마를 읽지만, MySQL·Snowflake 소스나 연결할 수 없는 데이터베이스는 재사용하지 않고 매번 단계를
+  다시 실행합니다.
+- **`files` 목록 이전의 내보내기 폴더는 다시 내보내기를 거부합니다.** `export.json`이 파일 목록을
+  기록하기 전에 쓴 `exports/rNNNN/`(또는 `--out`) 폴더는 교체할 수 없습니다. 한 번 옮기거나
+  삭제한 뒤 다시 내보내세요.
+- **내보내기 폴더 안의 다른 파일은 다시 내보내기를 막습니다**(의도된 동작). 내보내기가 쓰지 않은
+  파일을 `exports/rNNNN/`에 두면 그 리비전의 다음 내보내기는 파일을 지우는 대신 거부합니다. 메모는
+  리비전 폴더 밖에 두세요.
+- **SPARQL은 메모리와 콜드 스타트 비용이 있습니다.** 서비스와 워커가 각각 그래프를 파싱하므로
+  메모리는 파싱된 그래프의 약 두 배입니다. 타임아웃 뒤 첫 쿼리는 프로세스 시작 한 번과 Turtle 파싱
+  한 번의 비용을 치릅니다.
 - **완료된 run에는 실행된 단계만 나열됩니다.** 도달하지 못한 단계는 대기(pending)로 나타나지
   않습니다.
 - **정식 공개 이전 홈을 업그레이드할 때:** 저장소 마이그레이션 v2는 이전 플레이그라운드 대화를
-  삭제하고, 업그레이드 후 첫 `build --resume`은 모든 소스를 한 번 다시 빌드합니다.
+  삭제하고, 업그레이드 후 첫 `build --resume`은 모든 소스를 한 번 다시 빌드합니다. 저장소 스키마
+  v3 이전에 기록된 별칭 레코드에는 소스가 없으므로, `source rm`은 그 레코드가 추가한 동의어를
+  지우지 않습니다. 필요하면 엔진에서 직접 지우세요.
 - 이름은 원래 언어로 유지됩니다. 한국어 개념 이름은 Ossie 식별자와 OKF 파일 이름에 그대로
   남습니다.
 
@@ -369,7 +404,7 @@ run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 �
 | `setup`: 데이터베이스 생성 권한 없음 | 사용자에게 `CREATEDB` 권한을 주거나, `autoontology` 데이터베이스를 직접 만드세요. |
 | 채팅 모델 `openai/qwen3:8b`를 찾을 수 없음 | `uv run autoontology setup`(또는 `setup --force-alias`)을 실행하세요. `openai/` 접두사는 Ollama 별칭 이름의 일부이며, `ollama list`에 보여야 합니다. |
 | `doctor`의 "vector tables" FAIL: 임베더가 N차원을 출력 | ingest 후에 임베딩 모델을 바꿨습니다. 이전 `*_EMBED_MODEL`로 되돌리거나, 벡터 테이블이 비도록 모든 소스를 제거(`source rm`)하세요. 빈 테이블은 자동으로 다시 만들어집니다. |
-| `build`가 문서를 `ENGINE_MISSING`으로 실패 | kordoc을 설치하고(`uv run autoontology tools install-kordoc`, Node 20 이상) `build --resume`을 실행하세요. |
+| `build`가 "N document(s) need kordoc and were skipped" 경고 | run은 그 문서 없이 성공했습니다. kordoc을 설치하고(`uv run autoontology tools install-kordoc`, Node 20 이상) `build` 또는 `build --resume`으로 읽으세요. |
 | `/ui/`가 503 `ui_not_built`를 반환 | 커밋된 UI가 없습니다(예: 소스 아카이브). `uv run autoontology tools build-ui`를 실행하세요(Node와 pnpm 필요). |
 | 빌드가 멈춘 것 같음 | `uv run autoontology runs`를 실행하고 `data/logs/`를 읽어 보세요. `qwen3:8b`로는 청크 하나에 1~2분이 걸립니다. |
 
