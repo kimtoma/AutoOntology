@@ -70,12 +70,17 @@ def test_status_not_ready_then_download(fake):
     status = kordoc.ocr_models_status(home)
     assert status == {
         "ready": False,
+        "known": True,
         "detail": "OCR models missing or unverified: det.onnx, rec_korean.onnx",
     }
     assert "/home/someone" not in json.dumps(status)
     lines: list[str] = []
     ready = kordoc.download_ocr_models(home, echo=lines.append)
-    assert ready == {"ready": True, "detail": "2/2 OCR models verified (PP-OCRv5 korean)"}
+    assert ready == {
+        "ready": True,
+        "known": True,
+        "detail": "2/2 OCR models verified (PP-OCRv5 korean)",
+    }
     calls = _calls(state)
     assert [c["args"] for c in calls] == [
         ["check-ocr-models", "--status-only"],
@@ -122,9 +127,14 @@ def test_install_kordoc_downloads_models_unless_skipped(fake, monkeypatch):
     skipped = kordoc.install_kordoc(home, runner=runner, echo=lambda _: None, ocr_models=False)
     assert skipped.action == "already installed" and skipped.ocr is None and calls == []
     result = kordoc.install_kordoc(home, runner=runner, echo=lambda _: None)
-    assert result.ocr == {"ready": True, "detail": "2/2 OCR models verified (PP-OCRv5 korean)"}
+    assert result.ocr == {
+        "ready": True,
+        "known": True,
+        "detail": "2/2 OCR models verified (PP-OCRv5 korean)",
+    }
     ((argv, kw),) = calls
     assert argv[-1] == "check-ocr-models" and "KORDOC_OFFLINE" not in kw["env"]
+    assert kw["stdin"] is subprocess.DEVNULL  # never waits on the terminal
     omitted = kordoc.install_kordoc(home, runner=runner, echo=lambda _: None, omit_optional=True)
     assert omitted.ocr is None
 
@@ -168,10 +178,21 @@ def test_doctor_ocr_models_row(fake, monkeypatch, tmp_path):
 
     settings = Settings(home=fake["home"])
     check = doctor.check_ocr_models(settings)
-    assert check.status == "WARN" and "images and scanned PDFs will be skipped" in check.detail
+    assert check.status == "WARN"
+    assert "images and image-only PDFs are skipped" in check.detail
+    assert "scanned pages of other PDFs yield no text" in check.detail
     assert check.remedy == "run `uv run autoontology tools install-kordoc`"
     (fake["state"] / "ready").write_text("ok")
     assert doctor.check_ocr_models(settings).status == "OK"
     monkeypatch.delenv("KORDOC_CLI")
     monkeypatch.setenv("PATH", str(tmp_path / "nobin"))
     assert doctor.check_ocr_models(settings).status == "SKIP"
+
+
+def test_status_timeout_is_unknown_not_missing(fake, monkeypatch):
+    def timeout(*_a, **_kw):
+        raise kordoc.KordocError("TIMEOUT", "check-ocr-models took longer than 30s")
+
+    monkeypatch.setattr(kordoc, "run_cli", timeout)
+    status = kordoc.ocr_models_status(fake["home"], engine=fake["engine"])
+    assert status["ready"] is False and status["known"] is False

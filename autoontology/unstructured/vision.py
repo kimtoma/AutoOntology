@@ -73,6 +73,12 @@ def caption_image(
     return text
 
 
+def captioned_engine(engine: str, model: str) -> str:
+    """The stored engine of a document captioned by *model* (``kordoc+vision:<model>``),
+    so a later build knows whether an unchanged image still needs this model's caption."""
+    return f"{engine}+vision:{model}"
+
+
 def add_caption(
     doc: Document,
     *,
@@ -87,4 +93,4 @@ def add_caption(
     sections = [Section(CAPTION_TITLE, None, text, 0, "caption")] + [
         replace(s, char_start=s.char_start + shift) for s in doc.sections
     ]
-    return replace(doc, sections=sections)
+    return replace(doc, sections=sections, engine=captioned_engine(doc.engine, model))

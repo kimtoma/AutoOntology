@@ -1446,14 +1446,22 @@ def _fake_kordoc(monkeypatch, tmp_path, *, ready):
     engine = kordoc.KordocEngine(node="/usr/bin/node", cli=cli, origin="KORDOC_CLI")
     state = {"ready": ready, "parsed": []}
     monkeypatch.setattr(kordoc, "resolve_engine", lambda home, env=None: engine)
+    state["known"] = True
     monkeypatch.setattr(
         kordoc,
         "ocr_models_status",
-        lambda home, engine=None: {"ready": state["ready"], "detail": "fake"},
+        lambda home, engine=None: {
+            "ready": state["ready"],
+            "known": state["known"],
+            "detail": "fake",
+        },
     )
 
     def parse(engine, path, **kw):
         state["parsed"].append(Path(path).name)
+        if Path(path).name.startswith("scan") and not state["ready"]:
+            # kordoc offline without the models: a scanned page is only an image
+            return [kordoc.KordocChunk("c1", "text", (), "![image](image_001.png)", 1)]
         return [kordoc.KordocChunk("c1", "text", (), "조직도 영업본부 재무본부", 1)]
 
     monkeypatch.setattr(kordoc, "parse_chunks", parse)
@@ -1472,7 +1480,7 @@ def test_images_wait_for_the_ocr_models_without_failing(env, monkeypatch, tmp_pa
     assert "tools install-kordoc" in read["needs_ocr"][0]["error"]
     assert state["parsed"] == []
     (warning,) = result.warnings
-    assert "1 image(s) need the OCR models" in warning and "조직도.png" in warning
+    assert "1 image(s) or scanned PDF(s) need the OCR models" in warning and "조직도.png" in warning
     assert "tools install-kordoc" in warning
     # nothing changed: resume keeps the read
     assert "documents:hanbit-docs:read" not in run(env, resume=True).details
@@ -1541,3 +1549,99 @@ def test_vision_caption_is_prepended_or_skipped_on_failure(env, monkeypatch, tmp
     (image,) = [d for d in docs.list_documents(source.id) if d.path.endswith(".png")]
     text = "\n".join(c.text for c in docs.chunks_for_document(image.id))
     assert "회사 조직도" not in text and "조직도 영업본부" in text
+
+
+def test_scanned_pdfs_wait_for_the_ocr_models_without_failing(env, monkeypatch, tmp_path):
+    state = _fake_kordoc(monkeypatch, tmp_path, ready=False)
+    (env["docs"] / "scan.pdf").write_bytes(b"%PDF scanned")
+    add_documents(env)
+    result = run(env)
+    assert result.status == "succeeded", result.problems
+    read = result.details["documents:hanbit-docs:read"]
+    assert read["failed"] == []
+    assert [Path(f["path"]).name for f in read["needs_ocr"]] == ["scan.pdf"]
+    assert read["needs_ocr"][0]["code"] == "OCR_MODELS_MISSING"
+    state["ready"] = True
+    after = run(env, resume=True)
+    read = after.details["documents:hanbit-docs:read"]
+    assert read["needs_ocr"] == [] and read["failed"] == []
+    assert any(
+        Path(d["path"]).name == "scan.pdf" and d["action"] == "new" for d in read["documents"]
+    )
+
+
+def test_ocr_state_keeps_the_last_known_state_on_a_transient_failure(monkeypatch, tmp_path):
+    state = _fake_kordoc(monkeypatch, tmp_path, ready=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    state["known"] = False
+    assert bj.ocr_state(home) == "unknown"  # nothing seen yet
+    state["known"] = True
+    assert bj.ocr_state(home) == "ready"
+    state["known"] = False
+    state["ready"] = False  # a timeout says "not ready": ignored
+    assert bj.ocr_state(home) == "ready"
+    state["known"] = True
+    assert bj.ocr_state(home) == "missing"
+
+
+def test_vision_model_is_part_of_the_fingerprint_for_images(env, monkeypatch, tmp_path):
+    _fake_kordoc(monkeypatch, tmp_path, ready=True)
+    add_documents(env)
+    source = env["store"].get_source("hanbit-docs")
+    home = env["settings"].home
+    assert bj.input_fingerprint(source, home, vision_model="gemma4:e4b") == bj.input_fingerprint(
+        source, home
+    )  # no image: the vision model does not matter
+    (env["docs"] / "조직도.png").write_bytes(b"\x89PNG")
+    plain = bj.input_fingerprint(source, home)
+    captioned = bj.input_fingerprint(source, home, vision_model="gemma4:e4b")
+    assert captioned != plain
+    assert bj.input_fingerprint(source, home, vision_model="other") not in (plain, captioned)
+
+
+def test_setting_the_vision_model_captions_images_already_read(env, monkeypatch, tmp_path):
+    import dataclasses
+
+    from autoontology.unstructured import vision
+
+    _fake_kordoc(monkeypatch, tmp_path, ready=True)
+    captions: list[str] = []
+
+    def caption(path, *, endpoint, model, **kw):
+        captions.append(Path(path).name)
+        return f"{model}: 조직도 그림"
+
+    monkeypatch.setattr(vision, "caption_image", caption)
+    (env["docs"] / "조직도.png").write_bytes(b"\x89PNG")
+    add_documents(env)
+    assert run(env).status == "succeeded" and captions == []
+    env["settings"] = dataclasses.replace(env["settings"], vision_model="gemma4:e4b")
+    after = run(env, resume=True)
+    read = after.details["documents:hanbit-docs:read"]
+    (image,) = [d for d in read["documents"] if Path(d["path"]).name == "조직도.png"]
+    assert image["action"] != "unchanged" and captions == ["조직도.png"]
+    assert image["engine"] == "kordoc+vision:gemma4:e4b"
+    # unchanged image, same model: not captioned again
+    again = run(env)
+    read = again.details["documents:hanbit-docs:read"]
+    (image,) = [d for d in read["documents"] if Path(d["path"]).name == "조직도.png"]
+    assert image["action"] == "unchanged" and captions == ["조직도.png"]
+
+
+def test_unexpected_vision_errors_only_warn(monkeypatch, tmp_path, caplog):
+    import types
+
+    import httpx
+
+    from autoontology.unstructured import readers, vision
+
+    def boom(*_a, **_kw):
+        raise httpx.InvalidURL("bad endpoint")
+
+    monkeypatch.setattr(vision, "caption_image", boom)
+    doc = readers.Document("x", tmp_path / "x.png", "image/png", [readers.Section("", 1, "t", 0)])
+    settings = types.SimpleNamespace(ollama_endpoint="http://h:1", vision_model="m")
+    ctx = types.SimpleNamespace(settings=settings)
+    assert ex._with_caption(ctx, tmp_path / "x.png", doc) is doc
+    assert "no image description" in caplog.text

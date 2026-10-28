@@ -121,21 +121,43 @@ def kordoc_state(home: Path) -> str:
 OCR_SUFFIXES = frozenset({".pdf"}) | formats.IMAGE_SUFFIXES
 
 
+#: the last OCR readiness a status check reported, under the home (``ocr_state``)
+OCR_STATE_FILE = Path("kordoc") / "ocr-state"
+
+
 def ocr_state(home: Path) -> str:
     """Whether kordoc's OCR models are ready (``ready``/``missing``), or ``none`` without
-    kordoc -- so downloading the models changes the fingerprint of sources with images."""
+    kordoc -- so downloading the models changes the fingerprint of sources with images.
+    When the status check itself fails (a timeout on a busy machine), the last state it
+    reported is kept (``unknown`` if there is none), so the fingerprint does not flip."""
     from autoontology.unstructured import kordoc
 
     try:
-        return "ready" if kordoc.ocr_models_status(home)["ready"] else "missing"
+        status = kordoc.ocr_models_status(home)
     except (kordoc.KordocError, OSError):
         return "none"
+    marker = Path(home) / OCR_STATE_FILE
+    if status.get("known", True):
+        state = "ready" if status["ready"] else "missing"
+        try:
+            if not marker.is_file() or marker.read_text(encoding="utf-8").strip() != state:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(state + "\n", encoding="utf-8")
+        except OSError:
+            pass
+        return state
+    try:
+        last = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        last = ""
+    return last if last in ("ready", "missing") else "unknown"
 
 
-def input_fingerprint(source: Source, home: Path | None = None) -> str:
+def input_fingerprint(source: Source, home: Path | None = None, vision_model: str = "") -> str:
     """A hash of what the per-source steps of *source* read: the locator plus, for files
     and documents sources, every input file's path and content hash -- and, for documents
-    sources holding kordoc formats, whether kordoc is available (*home*); for database
+    sources holding kordoc formats, whether kordoc is available (*home*), and for those
+    holding images the OCR readiness and the vision model that captions them; for database
     sources, the live schema (:func:`autoontology.structured.pipeline.schema_fingerprint`).
     "" when the inputs cannot be listed or the database cannot be reached -- never equal
     to a recorded fingerprint, so the steps run again."""
@@ -152,6 +174,8 @@ def input_fingerprint(source: Source, home: Path | None = None) -> str:
                 digest.update(f"kordoc\0{kordoc_state(home)}\0".encode())
             if home is not None and any(p.suffix.lower() in OCR_SUFFIXES for p in files):
                 digest.update(f"ocr\0{ocr_state(home)}\0".encode())
+            if vision_model and any(p.suffix.lower() in formats.IMAGE_SUFFIXES for p in files):
+                digest.update(f"vision\0{vision_model}\0".encode())
         else:
             files = []
             schema = pipeline.schema_fingerprint(source)
@@ -221,7 +245,7 @@ class _Build:
         def run() -> dict[str, Any]:
             if source.name not in self._fingerprints:
                 self._fingerprints[source.name] = input_fingerprint(
-                    self.fresh(source), self.settings.home
+                    self.fresh(source), self.settings.home, self.settings.vision_model
                 )
             detail = fn()
             detail[INPUTS_KEY] = self._fingerprints[source.name]
@@ -461,7 +485,7 @@ def _resume_reuse(
         kept = {n for n in already if n.startswith(f"{group}:{source.name}:")}
         if not kept:
             continue
-        current = input_fingerprint(source, settings.home)
+        current = input_fingerprint(source, settings.home, settings.vision_model)
         if not current or any(rows[n].detail.get(INPUTS_KEY) != current for n in kept):
             logger.info("--resume: inputs of %s changed since run %s: rebuilt", source.name, run.id)
             already -= kept
@@ -821,7 +845,8 @@ def _warnings(store: Store, run_id: str, planned: set[str] | None = None) -> lis
         if no_ocr:
             names = ", ".join(display_path(f["path"]) for f in no_ocr)
             out.append(
-                f"{step.name}: {len(no_ocr)} image(s) need the OCR models and were skipped "
+                f"{step.name}: {len(no_ocr)} image(s) or scanned PDF(s) need the OCR models "
+                "and were skipped "
                 f"({names}): run `{INSTALL_COMMAND}`, then build again"
             )
     return out

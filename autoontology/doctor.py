@@ -238,7 +238,8 @@ def check_ocr_models(settings: Settings) -> Check:
     return Check(
         "ocr models",
         "WARN",
-        f"{status['detail']}; images and scanned PDFs will be skipped",
+        f"{status['detail']}; images and image-only PDFs are skipped, "
+        "scanned pages of other PDFs yield no text",
         f"run `{kordoc.INSTALL_COMMAND}`",
     )
 

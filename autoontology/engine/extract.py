@@ -117,10 +117,29 @@ KORDOC_UNAVAILABLE_CODES = frozenset({"ENGINE_MISSING", "NODE_MISSING"})
 
 
 def _ocr_ready(ctx: _ExtractCtx, engine: Any) -> bool:
+    """Whether the OCR models are ready. When the status check itself fails (timeout),
+    the read is attempted: a real failure is then recorded and retried by ``--resume``."""
     try:
-        return bool(readers.kordoc.ocr_models_status(ctx.settings.home, engine=engine)["ready"])
+        status = readers.kordoc.ocr_models_status(ctx.settings.home, engine=engine)
     except readers.kordoc.KordocError:
         return False
+    return bool(status["ready"]) or not status.get("known", True)
+
+
+def _needs_caption(ctx: _ExtractCtx, path: Path, stored_engine: str) -> bool:
+    """An unchanged image read without the current vision model's caption."""
+    from autoontology.unstructured import vision
+
+    model = ctx.settings.vision_model
+    if not model or path.suffix.lower() not in formats.IMAGE_SUFFIXES:
+        return False
+    return not stored_engine.endswith(vision.captioned_engine("", model))
+
+
+def _ocr_missing(path: Path, code: str, message: str) -> bool:
+    """A PDF that read as no text (or that kordoc could not OCR offline): a scanned PDF
+    waiting for the OCR models, when they are not ready."""
+    return path.suffix.lower() == ".pdf" and (code == "EMPTY" or "KORDOC_OFFLINE" in message)
 
 
 def _with_caption(ctx: _ExtractCtx, path: Path, doc: readers.Document) -> readers.Document:
@@ -132,8 +151,13 @@ def _with_caption(ctx: _ExtractCtx, path: Path, doc: readers.Document) -> reader
         return vision.add_caption(
             doc, endpoint=ctx.settings.ollama_endpoint, model=ctx.settings.vision_model
         )
-    except (vision.VisionError, OSError) as exc:
-        logger.warning("  %s: no image description (%s); OCR text only", path.name, exc)
+    except Exception as exc:  # noqa: BLE001 - a caption is optional: never fail the read
+        logger.warning(
+            "  %s: no image description (%s: %s); OCR text only",
+            path.name,
+            type(exc).__name__,
+            exc,
+        )
         return doc
 
 
@@ -195,7 +219,7 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             )
             continue
         existing = stored.get(sha)
-        if existing is not None:
+        if existing is not None and not _needs_caption(ctx, path, existing.engine):
             documents.append(
                 {
                     "path": shown,
@@ -243,6 +267,19 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             if code in KORDOC_UNAVAILABLE_CODES:
                 needs_kordoc.append({"path": shown, "code": code, "error": message})
                 continue
+            if _ocr_missing(path, code, message):
+                if ocr_ready is None:
+                    ocr_ready = _ocr_ready(ctx, engine)
+                if not ocr_ready:
+                    needs_ocr.append(
+                        {
+                            "path": shown,
+                            "code": readers.kordoc.OCR_MODELS_MISSING,
+                            "error": "no text layer and kordoc's OCR models are not "
+                            f"downloaded; run `{readers.kordoc.INSTALL_COMMAND}`",
+                        }
+                    )
+                    continue
             remedy = getattr(exc, "remedy", "")
             failed.append(
                 {
@@ -299,7 +336,8 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
         )
     if needs_ocr:
         logger.warning(
-            "  %d image(s) need the OCR models, skipped: %s; run `%s`, then build again",
+            "  %d image(s) or scanned PDF(s) need the OCR models, skipped: %s; run `%s`, "
+            "then build again",
             len(needs_ocr),
             ", ".join(display_path(f["path"]) for f in needs_ocr),
             readers.kordoc.INSTALL_COMMAND,

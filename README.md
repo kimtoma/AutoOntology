@@ -202,9 +202,11 @@ returns the same list as `formats`.
 | documents | `.hwp` `.hwpx` `.hml` `.hwpml` `.pdf` `.docx` `.pptx` `.xls` `.xlsx` | kordoc | Needs Node.js 20+ and `tools install-kordoc`. PDFs run with `--ocr`: scanned pages are recognised. |
 | documents | `.png` `.jpg` `.jpeg` `.webp` | kordoc OCR | Needs the OCR models (`tools install-kordoc`). With `AUTOONTOLOGY_VISION_MODEL` set, an Ollama vision model adds an "Image description" section before the OCR text. |
 
-Images skipped because the OCR models are missing are a warning, like documents that need
-kordoc: the build succeeds, and the next build after `uv run autoontology tools
-install-kordoc` reads them.
+Images and image-only (scanned) PDFs skipped because the OCR models are missing are a
+warning, like documents that need kordoc: the build succeeds, and the next build after
+`uv run autoontology tools install-kordoc` reads them. Scanned pages inside a PDF that
+also has a text layer yield no text until then. Setting `AUTOONTOLOGY_VISION_MODEL` later
+re-reads the images already stored so they get a description.
 
 ## HTTP API
 

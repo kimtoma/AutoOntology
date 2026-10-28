@@ -338,8 +338,10 @@ def _ocr_detail(data: Any) -> tuple[bool, str]:
 
 
 def ocr_models_status(home: Path, *, engine: KordocEngine | None = None) -> dict[str, Any]:
-    """``{"ready": bool, "detail": str}`` from ``check-ocr-models --status-only`` (offline;
-    no paths in the detail). :class:`KordocUnavailable` when there is no engine at all."""
+    """``{"ready": bool, "known": bool, "detail": str}`` from ``check-ocr-models
+    --status-only`` (offline; no paths in the detail). ``known`` is False when the check
+    itself failed (timeout, crash, unreadable output): ``ready`` then says nothing about
+    the models. :class:`KordocUnavailable` when there is no engine at all."""
     engine = engine or resolve_engine(home)
     try:
         proc = run_cli(
@@ -351,15 +353,19 @@ def ocr_models_status(home: Path, *, engine: KordocEngine | None = None) -> dict
     except KordocUnavailable:
         raise
     except KordocError as exc:
-        return {"ready": False, "detail": exc.message}
+        return {"ready": False, "known": False, "detail": exc.message}
     try:
         data = json.loads(proc.stdout) if proc.stdout.strip() else None
     except json.JSONDecodeError:
         data = None
     if proc.returncode != 0 or data is None:
-        return {"ready": False, "detail": f"check-ocr-models exited {proc.returncode}"}
+        return {
+            "ready": False,
+            "known": False,
+            "detail": f"check-ocr-models exited {proc.returncode}",
+        }
     ready, detail = _ocr_detail(data)
-    return {"ready": ready, "detail": detail}
+    return {"ready": ready, "known": True, "detail": detail}
 
 
 def download_ocr_models(
@@ -381,7 +387,9 @@ def download_ocr_models(
     echo("downloading the OCR models (PP-OCRv5 korean, ~18 MB): " + " ".join(argv[1:]))
     run = runner or subprocess.run
     try:
-        proc = run(argv, check=False, env=env, timeout=OCR_DOWNLOAD_TIMEOUT_S)
+        proc = run(
+            argv, check=False, env=env, timeout=OCR_DOWNLOAD_TIMEOUT_S, stdin=subprocess.DEVNULL
+        )
     except subprocess.TimeoutExpired as exc:
         raise KordocError(OCR_MODELS_MISSING, "the OCR model download timed out") from exc
     status = ocr_models_status(home, engine=engine)
