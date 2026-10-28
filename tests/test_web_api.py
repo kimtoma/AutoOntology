@@ -1129,3 +1129,26 @@ def test_service_start_sweeps_stale_runs(isolated_env):
     run = store.create_run(kind="ingest", source_id=None, params={"pid": 2**22 + 12345})
     web.create_app(settings)
     assert store.get_run(run.id).status == "failed"
+
+
+def test_status_cache_misses_share_one_probe_round(isolated_env, monkeypatch):
+    """Review M-7: concurrent /api/status misses wait for one probe instead of each
+    paying the backend/Postgres/Ollama timeouts."""
+    import time
+
+    api = web_api.Api(Settings.from_env())
+    calls = []
+
+    def probe():
+        calls.append(1)
+        time.sleep(0.2)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(api, "_probe_status", probe)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(api.status())) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1 and results == [{"status": "ok"}] * 5

@@ -195,6 +195,8 @@ class Api:
         self._models: dict[int, Any] = {}
         self._model_lock = threading.Lock()
         self._status: tuple[float, dict[str, Any]] | None = None
+        #: One probe round at a time: concurrent cache misses wait for it and share it.
+        self._status_lock = threading.Lock()
 
     @property
     def store(self) -> Store:
@@ -350,9 +352,18 @@ class Api:
         """Read-only service status (cached ``STATUS_CACHE_S``): backend health, Postgres
         reachability, Ollama models present, kordoc availability and the provider summary
         (names and models only, never keys)."""
-        now = time.monotonic()
-        if self._status and now - self._status[0] < STATUS_CACHE_S:
-            return self._status[1]
+        cached = self._status
+        if cached and time.monotonic() - cached[0] < STATUS_CACHE_S:
+            return cached[1]
+        with self._status_lock:
+            cached = self._status  # another request may have probed while we waited
+            if cached and time.monotonic() - cached[0] < STATUS_CACHE_S:
+                return cached[1]
+            result = self._probe_status()
+            self._status = (time.monotonic(), result)
+            return result
+
+    def _probe_status(self) -> dict[str, Any]:
         s = self.settings
         checks: dict[str, dict[str, str]] = {}
         try:
@@ -431,9 +442,7 @@ class Api:
             "doctor": "uv run autoontology doctor",
             "upload_max_mb": round(upload_limit_bytes() / (1024 * 1024), 1),
         }
-        result = mask(result)
-        self._status = (now, result)
-        return result
+        return mask(result)
 
 
 def _short_detail(detail: dict[str, Any]) -> dict[str, Any]:
