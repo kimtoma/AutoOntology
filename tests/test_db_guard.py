@@ -120,6 +120,29 @@ def test_setup_database_creates_db_and_extensions_idempotently(isolated_env, mon
     ]
 
 
+def test_setup_database_treats_a_concurrent_create_as_exists(isolated_env, monkeypatch):
+    """Review M-2: check-then-create races with a parallel setup or compose's first boot."""
+    server = _FakeServer(False)
+    real = server.connect
+
+    def connect(**kw):
+        conn = real(**kw)
+        execute = conn.execute
+
+        def racing(query, params=None):
+            text = query if isinstance(query, str) else query.as_string(None)
+            if text.startswith("create database"):
+                raise pg.psycopg.errors.DuplicateDatabase('database "autoontology" already exists')
+            return execute(query, params)
+
+        conn.execute = racing
+        return conn
+
+    monkeypatch.setattr(pg.psycopg, "connect", connect)
+    line = pg.setup_database(Settings.from_env())
+    assert "(exists)" in line and "vector 0.8.0" in line
+
+
 def test_setup_database_refuses_foreign_names_before_connecting(isolated_env, monkeypatch):
     called = []
     monkeypatch.setattr(pg.psycopg, "connect", lambda **kw: called.append(kw))

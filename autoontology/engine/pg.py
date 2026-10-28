@@ -65,7 +65,12 @@ def setup_database(settings: Settings) -> str:
                 is not None
             )
             if not exists:
-                conn.execute(sql.SQL("create database {}").format(sql.Identifier(db)))
+                try:
+                    conn.execute(sql.SQL("create database {}").format(sql.Identifier(db)))
+                except psycopg.errors.DuplicateDatabase:
+                    # a parallel setup (or the compose image's first boot) created it
+                    # between the check and the create
+                    exists = True
     except psycopg.Error as exc:
         raise SetupError(
             f"cannot prepare database {db} on {where}: "
