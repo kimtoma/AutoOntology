@@ -371,7 +371,8 @@ def test_ontology_mapping_rules(bundle):
     assert rels["계약금액"]["roles"] == [{"concept": "Integer"}]
     assert rels["계약금액"]["verbalizes"] == ["{Contracts} has 계약금액 {Integer}"]
     assert rels["시작일"]["roles"] == [{"concept": "Date"}]
-    assert rels["계약id"]["multiplicity"] == "ManyToOne"
+    assert rels["계약금액"]["multiplicity"] == "ManyToOne"
+    assert rels["계약id"]["multiplicity"] == "OneToOne"  # identify_by: a single-field key
     # semantic FK
     assert rels["customers"]["roles"] == [{"concept": "Customers"}]
     assert rels["customers"]["verbalizes"] == ["{Contracts} refers to {Customers}"]
@@ -442,6 +443,14 @@ def test_mapping_keys_compound_keys_and_links(bundle):
     comps = _concepts(_load(out / "ossie/ontology.yaml"))
     assert comps["Customers"]["identify_by"] == ["고객id"]
     assert comps["Invoices"]["identify_by"] == ["청구id", "순번"]
+    multiplicity = {
+        (c, r["name"]): r["multiplicity"]
+        for c in ("Customers", "Invoices")
+        for r in comps[c]["relationships"]
+    }
+    assert multiplicity[("Customers", "고객id")] == "OneToOne"
+    # a field of a compound key does not identify alone
+    assert multiplicity[("Invoices", "청구id")] == multiplicity[("Invoices", "순번")] == "ManyToOne"
     # Invoices -> Contracts: Invoices has a compound key, so no link mapping
     assert any("Invoices.contracts -> Contracts" in w for w in result["validation"]["warnings"])
     assert ossie.mapping_errors(mapping, _load(out / "ossie/ontology.yaml")) == []

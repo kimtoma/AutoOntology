@@ -712,6 +712,10 @@ def build_mapping(
                 continue
             if "identify_by" not in comp and all(rels):
                 comp["identify_by"] = list(rels)
+                if len(rels) == 1:  # a single-field key names one instance: one-to-one
+                    for item in comp.get("relationships", []):
+                        if item["name"] == rels[0]:
+                            item["multiplicity"] = "OneToOne"
         if object_mappings:
             mappings[cls.local] = {"concept": name, "object_mappings": object_mappings}
 
