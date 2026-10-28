@@ -16,6 +16,7 @@ import re
 import shutil
 import threading
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -50,7 +51,11 @@ DEFAULT_UPLOAD_MAX_MB = 200
 #: Slack for multipart boundaries/headers when comparing Content-Length with the cap.
 MULTIPART_OVERHEAD = 1024 * 1024
 FILE_NAME_RE = re.compile(r"^[^/\\\x00]{1,200}$")
-EXPORT_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
+#: one segment of an export file path: letters (Hangul too, e.g. ``okf/concepts/계약.md``),
+#: digits, ``._-``; never empty, never starting with ``.`` or ``_``
+EXPORT_FILE_RE = re.compile(r"^[^\W_][\w.-]{0,200}$")
+#: deepest export file: ``okf/concepts/<slug>.md``
+EXPORT_PATH_DEPTH = 3
 # Masking is the only barrier between log records (ours and upstream's) and the SSE stream.
 _URL_PASSWORD_RE = re.compile(r"(://[^:/@\s]*:)[^@\s]+@")  # user may be empty
 #: KEY=value / KEY: value / "key": "value" / 'key': 'value' for any name ending in a secret
@@ -127,6 +132,8 @@ class RunIn(BaseModel):
     resume: bool = False
     #: export: the snapshot revision (default: the latest)
     revision: int | None = Field(default=None, ge=1)
+    #: export: all | rdf | ossie | okf
+    format: Literal["all", "rdf", "ossie", "okf"] | None = None
 
 
 # --- helpers -----------------------------------------------------------------------------
@@ -699,12 +706,21 @@ def build_router(api: Api) -> APIRouter:
                 ),
                 key=lambda f: f["name"],
             )
+            dirs: dict[str, dict[str, Any]] = {}
+            for f in files:
+                head, sep, rest = f["name"].partition("/")
+                if sep:
+                    entry = dirs.setdefault(head, {"name": head, "files": [], "bytes": 0})
+                    entry["files"].append(rest)
+                    entry["bytes"] += f["bytes"]
             out.append(
                 {
                     "revision": int(folder.name[1:]),
                     "dir": folder.name,
                     "created_at": _iso(folder.stat().st_mtime),
                     "files": files,
+                    #: the sub-folders (upstream/, ossie/, okf/) with their files
+                    "dirs": [dirs[k] for k in sorted(dirs)],
                 }
             )
         return {"exports": out}
@@ -718,7 +734,7 @@ def build_router(api: Api) -> APIRouter:
         if not EXPORT_DIR_RE.fullmatch(rev) or not _export_path_ok(file_path):
             raise ApiError(400, "invalid_path", "invalid export path")
         root = Path(api.settings.exports_dir).resolve()
-        candidate = (root / rev / file_path).resolve()
+        candidate = (root / rev / unicodedata.normalize("NFC", file_path)).resolve()
         if candidate.is_file() and candidate.is_relative_to(root / rev):
             if inline:
                 if candidate.stat().st_size > 5 * 1024 * 1024:
@@ -865,9 +881,10 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
 
 
 def _export_path_ok(path: str) -> bool:
-    """A file path inside an export folder: at most two plain segments (``upstream/...``)."""
-    parts = path.split("/")
-    return 1 <= len(parts) <= 2 and all(EXPORT_FILE_RE.fullmatch(p) for p in parts)
+    """A file path inside an export folder: at most :data:`EXPORT_PATH_DEPTH` plain
+    segments (``upstream/...``, ``ossie/...``, ``okf/concepts/...``)."""
+    parts = unicodedata.normalize("NFC", path).split("/")
+    return 1 <= len(parts) <= EXPORT_PATH_DEPTH and all(EXPORT_FILE_RE.fullmatch(p) for p in parts)
 
 
 def _job_call(api: Api, req: RunIn):
@@ -879,9 +896,10 @@ def _job_call(api: Api, req: RunIn):
             raise ApiError(400, "no_sources", "no sources: add one first")
         return lambda fn, store: fn(store, settings, sources=sources, resume=req.resume)
     if req.sources or req.resume:
-        raise ApiError(400, "invalid_request", "export takes only `revision`")
+        raise ApiError(400, "invalid_request", "export takes only `revision` and `format`")
     api.snapshot(req.revision)  # 404 before a thread starts
-    return lambda fn, store: fn(store, settings, revision=req.revision)
+    fmt = req.format or "all"
+    return lambda fn, store: fn(store, settings, revision=req.revision, format=fmt)
 
 
 async def _events(api: Api, run_id: str, request: Request):

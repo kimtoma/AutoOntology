@@ -1,11 +1,14 @@
 """The unified build (``engine/build.py``), the snapshot store and the export from a
 snapshot, with fake upstream/LLM backends."""
 
+import io
 import json
 import os
+import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 from autoontology.config import REPO_ROOT, Settings
 from autoontology.engine import build as bj
@@ -74,7 +77,43 @@ class Client(TermsClient):
 
     def export_model(self, ids, fmt="auto_ontology", include_ontology=False):
         self.exports.append((tuple(ids), fmt, include_ontology))
+        if fmt == "ossie":
+            return ossie_zip()
         return f"{fmt}:{','.join(ids)}:{include_ontology}".encode()
+
+
+def _dataset(name, key, columns):
+    return {
+        "name": name,
+        "source": f"autoontology_src_hanbit.public.{name}",
+        "unique_keys": [[key]],
+        "fields": [
+            {
+                "name": c,
+                "expression": {"dialects": [{"dialect": "ANSI_SQL", "expression": c}]},
+                "datatype": "String",
+            }
+            for c in columns
+        ],
+    }
+
+
+def ossie_zip() -> bytes:
+    """An upstream Ossie export of the fake catalog (the shape the backend returns)."""
+    model = {
+        "version": "0.2.0.dev0",
+        "name": "autoontology_src_hanbit",
+        "datasets": [
+            _dataset("contracts", "계약id", ["계약id", "고객id"]),
+            _dataset("customers", "고객id", ["고객id"]),
+        ],
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("semantic_model.yaml", yaml.safe_dump(model, allow_unicode=True))
+        zf.writestr("ontology.yaml", "version: 0.2.0.dev0\n")
+        zf.writestr("mapping.yaml", "version: 0.2.0.dev0\n")
+    return buf.getvalue()
 
 
 VECTORS = {"Contract": [1.0, 0.0, 0.0], "Customer": [0.0, 1.0, 0.0]}
@@ -368,18 +407,30 @@ def test_export_reads_the_snapshot_and_overwrites_its_folder(env):
     folder = settings.exports_dir / "r0001"
     assert result.export_dir == folder
     names = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
-    assert names == [
+    assert [n for n in names if not n.startswith("okf/")] == [
         "export.json",
         "ontology.graphml",
         "ontology.jsonld",
         "ontology.ttl",
+        "ossie/mapping.yaml",
+        "ossie/ontology.yaml",
+        "ossie/semantic_model.yaml",
+        "ossie/validation.json",
         "report.md",
         "upstream/hanbit.model.yaml",
         "upstream/hanbit.ossie.zip",
     ]
+    assert {"okf/index.md", "okf/log.md", "okf/validation.json"} <= set(names)
+    assert any(n.startswith("okf/concepts/") for n in names)
+    assert any(n.startswith("okf/tables/hanbit.") for n in names)
+    checks = json.loads((folder / "ossie/validation.json").read_text(encoding="utf-8"))
+    assert [checks[k] for k in ("semantic_model", "ontology", "mapping", "roundtrip")] == ["ok"] * 4
+    assert json.loads((folder / "okf/validation.json").read_text("utf-8"))["ok"] is True
     marker = export_job.read_export_metadata(folder)
     assert marker["revision"] == 1 and marker["workspace"] == settings.workspace
-    assert (folder / "upstream/hanbit.ossie.zip").read_bytes() == b"ossie:db1:True"
+    assert marker["format"] == "all"
+    assert (folder / "upstream/hanbit.ossie.zip").read_bytes() == ossie_zip()
+    assert "ossie/ontology.yaml" in (folder / "report.md").read_text(encoding="utf-8")
     ttl = (folder / "ontology.ttl").read_text(encoding="utf-8")
     assert "@prefix ao: <http://example.com/autoontology#>" in ttl
     report = (folder / "report.md").read_text(encoding="utf-8")
@@ -485,8 +536,39 @@ def test_cli_build_ontology_export_and_runs(env, monkeypatch):
     res = runner.invoke(app, ["export"])
     assert res.exit_code == 0, res.output
     assert "upstream/hanbit.ossie.zip" in res.output and "r0001" in res.output
+    assert "ossie: semantic_model ok, roundtrip ok, ontology ok, mapping ok" in res.output
+    assert "okf: ok (" in res.output and "okf/concepts/" not in res.output  # one summary line
+    res = runner.invoke(app, ["export", "--format", "rdf"])
+    assert res.exit_code == 0 and "ossie/" not in res.output and "ontology.ttl" in res.output
     res = runner.invoke(app, ["runs"])
     assert "align:hanbit-docs=succeeded" in res.output and "chunks[succeeded=" in res.output
     assert "chunk:" not in res.output
     res = runner.invoke(app, ["build", "--source", "nope"])
     assert res.exit_code == 1 and "unknown source 'nope'" in res.output
+
+
+def test_export_format_writes_only_the_chosen_formats(env):
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    client = env["client"]
+    client.exports.clear()
+    client.health = lambda: (_ for _ in ()).throw(AssertionError("okf needs no backend"))
+    result = export_job.run_export(store, settings, format="okf", client=client)
+    folder = result.export_dir
+    top = sorted(p.name for p in folder.iterdir())
+    assert top == ["export.json", "okf", "report.md"] and client.exports == []
+    assert result.steps["serialize"] == result.steps["upstream"] == "skipped"
+    assert result.steps["ossie"] == "skipped" and result.steps["okf"] == "succeeded"
+    assert export_job.read_export_metadata(folder)["format"] == "okf"
+    del client.health  # back to the class method
+    result = export_job.run_export(store, settings, format="ossie", client=client)
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "export.json",
+        "ossie",
+        "report.md",
+        "upstream",
+    ]
+    with pytest.raises(JobError, match="unknown export format 'pdf'"):
+        export_job.run_export(store, settings, format="pdf", client=client)

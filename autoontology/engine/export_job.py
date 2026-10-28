@@ -1,7 +1,10 @@
 """``autoontology export``: the latest (or a given) ontology snapshot as Turtle, JSON-LD
-and GraphML, plus ``report.md`` and the structured sources' upstream exports.
+and GraphML, an Apache Ossie bundle and an OKF bundle, plus ``report.md`` and the
+structured sources' upstream exports.
 
-Steps ``collect -> serialize -> upstream -> report`` (:func:`autoontology.engine.jobs._execute`).
+Steps ``collect -> serialize -> upstream -> ossie -> okf -> report``
+(:func:`autoontology.engine.jobs._execute`); ``--format rdf|ossie|okf`` skips the steps the
+other formats need (``all``, the default, runs every step).
 ``collect`` loads the snapshot written by ``autoontology build`` -- the export never
 rebuilds the model -- and every format writer serialises that same object; ``serialize``
 re-parses the Turtle file and fails the run if the export invariants do not hold. The
@@ -9,7 +12,9 @@ files go to ``exports/r<revision:04d>/`` (``--out DIR`` writes ``DIR/r<revision:
 ``ontology.ttl``, ``ontology.jsonld``, ``ontology.graphml``, ``report.md``, the
 ``export.json`` marker (workspace, revision, snapshot run and time, upstream fetch time)
 and, per structured source, ``upstream/<source>.model.yaml`` and
-``upstream/<source>.ossie.zip`` fetched from the backend. Exporting a revision again
+``upstream/<source>.ossie.zip`` fetched from the backend, ``ossie/`` (semantic model,
+ontology, mapping, ``validation.json``: :mod:`autoontology.export.ossie`, built from those
+upstream zips) and ``okf/`` (:mod:`autoontology.export.okf`). Exporting a revision again
 replaces its folder; outside the exports root only a folder that holds nothing but what
 this exporter writes (:data:`EXPORT_ENTRIES`) -- one with any other file is refused, never
 deleted.
@@ -37,7 +42,7 @@ from autoontology.engine.jobs import (
     hold_sources,
     setup_job_logging,
 )
-from autoontology.export import graphml, rdf
+from autoontology.export import graphml, okf, ossie, rdf
 from autoontology.export import report as export_report
 from autoontology.ontology import model as merged
 from autoontology.store.alignments import AlignmentStore
@@ -49,7 +54,14 @@ from autoontology.unstructured.report import display_path
 logger = logging.getLogger("autoontology.jobs")
 
 EXPORT_KIND = "export"
-EXPORT_STEPS: tuple[str, ...] = ("collect", "serialize", "upstream", "report")
+EXPORT_STEPS: tuple[str, ...] = ("collect", "serialize", "upstream", "ossie", "okf", "report")
+#: ``export --format``: what each format needs besides ``collect`` and ``report``
+EXPORT_FORMATS: dict[str, frozenset[str]] = {
+    "all": frozenset({"serialize", "upstream", "ossie", "okf"}),
+    "rdf": frozenset({"serialize", "upstream"}),
+    "ossie": frozenset({"upstream", "ossie"}),
+    "okf": frozenset({"okf"}),
+}
 UPSTREAM_DIR = "upstream"
 #: per structured source: (file suffix, upstream export format)
 UPSTREAM_FILES: tuple[tuple[str, str], ...] = (
@@ -70,8 +82,8 @@ EXPORT_ENTRIES = frozenset(
         "report.md",
         EXPORT_MARKER,
         UPSTREAM_DIR,
-        "ossie",
-        "okf",
+        ossie.OSSIE_DIR,
+        okf.OKF_DIR,
     }
 )
 REVISION_DIR = re.compile(r"r\d{4,}")
@@ -150,6 +162,10 @@ class _ExportCtx:
     upstream: list[dict[str, Any]] = field(default_factory=list)
     #: when the upstream files were fetched (None: no structured source)
     upstream_fetched_at: str | None = None
+    #: ``upstream/<source>.ossie.zip`` per structured source (the Ossie step's input)
+    ossie_zips: list[tuple[str, Path]] = field(default_factory=list)
+    validation: dict[str, Any] = field(default_factory=dict)
+    format: str = "all"
 
 
 def _file_entry(path: Path, root: Path) -> dict[str, Any]:
@@ -252,6 +268,8 @@ def _step_upstream(ctx: _ExportCtx) -> dict[str, Any]:
             target = folder / f"{source.name}.{suffix}"
             target.write_bytes(data)
             ctx.files.append(target)
+            if fmt == "ossie":
+                ctx.ossie_zips.append((source.name, target))
             ctx.upstream.append(
                 {
                     "name": target.relative_to(ctx.out_dir).as_posix(),
@@ -263,6 +281,53 @@ def _step_upstream(ctx: _ExportCtx) -> dict[str, Any]:
     return {"upstream": ctx.upstream, "upstream_fetched_at": ctx.upstream_fetched_at}
 
 
+def _step_ossie(ctx: _ExportCtx) -> dict[str, Any]:
+    """``ossie/``: the merged semantic model of the upstream zips, the unified ontology and
+    the mapping, each validated against the vendored Ossie schemas (any error fails)."""
+    assert ctx.model is not None
+    result = ossie.write(
+        ctx.model,
+        ctx.out_dir,
+        revision=ctx.snapshot.revision,
+        created_at=ctx.snapshot.created_at,
+        upstream=ctx.ossie_zips,
+    )
+    ctx.files += result["files"]
+    ctx.validation["ossie"] = result["validation"]
+    record = result["validation"]
+    logger.info(
+        "  ossie: semantic_model %s, ontology %s, mapping %s, round-trip %s; %d warning(s)",
+        *(_short(record[k]) for k in ("semantic_model", "ontology", "mapping", "roundtrip")),
+        len(record["warnings"]),
+    )
+    for warning in record["warnings"]:
+        logger.warning("  ossie: %s", warning)
+    return {"validation": record}
+
+
+def _step_okf(ctx: _ExportCtx) -> dict[str, Any]:
+    """``okf/``: an OKF v0.2 bundle, validated with :func:`autoontology.export.okf.validate`."""
+    assert ctx.model is not None
+    result = okf.write(
+        ctx.model, ctx.out_dir, revision=ctx.snapshot.revision, created_at=ctx.snapshot.created_at
+    )
+    ctx.files += result["files"]
+    ctx.validation["okf"] = result["validation"]
+    record = result["validation"]
+    logger.info(
+        "  okf: %d markdown file(s) conformant, %d warning(s)",
+        record["files"],
+        len(record["warnings"]),
+    )
+    for warning in record["warnings"][:20]:
+        logger.warning("  okf: %s", warning)
+    return {"validation": {k: v for k, v in record.items() if k != "warnings"}}
+
+
+def _short(value: Any) -> str:
+    return value if isinstance(value, str) else f"{len(value)} error(s)"
+
+
 def export_metadata(ctx: _ExportCtx) -> dict[str, Any]:
     """What :data:`EXPORT_MARKER` records: which snapshot of which workspace this is."""
     return {
@@ -271,6 +336,7 @@ def export_metadata(ctx: _ExportCtx) -> dict[str, Any]:
         "snapshot_run": ctx.snapshot.run_id,
         "snapshot_created_at": ctx.snapshot.created_at,
         "export_run": ctx.run.id,
+        "format": ctx.format,
         "upstream_fetched_at": ctx.upstream_fetched_at,
     }
 
@@ -308,6 +374,8 @@ EXPORT_STEP_FUNCS: dict[str, Callable[[Any], dict[str, Any]]] = {
     "collect": _step_collect,
     "serialize": _step_serialize,
     "upstream": _step_upstream,
+    "ossie": _step_ossie,
+    "okf": _step_okf,
     "report": _step_report,
 }
 
@@ -319,11 +387,19 @@ def run_export(
     revision: int | None = None,
     out: Path | None = None,
     client: BackendClient | None = None,
+    format: str = "all",
 ) -> RunResult:
-    """Export snapshot *revision* (default: the latest) to ``exports/r<rev>/`` or *out*."""
+    """Export snapshot *revision* (default: the latest) to ``exports/r<rev>/`` or *out*;
+    *format* (``all`` | ``rdf`` | ``ossie`` | ``okf``) picks the formats written. The
+    revision folder is replaced as a whole, so it then holds only those formats."""
     from autoontology.engine.build import WORKSPACE_LEASE, refuse_if_active
 
     log_path = setup_job_logging(settings)
+    if format not in EXPORT_FORMATS:
+        raise JobError(
+            f"unknown export format {format!r} (choose {'|'.join(EXPORT_FORMATS)})",
+            log_path=log_path,
+        )
     head = (
         store.latest_snapshot(with_model=False)
         if revision is None
@@ -353,6 +429,7 @@ def run_export(
             gone=gone,
             out=out,
             client=client,
+            format=format,
         )
 
 
@@ -365,11 +442,18 @@ def _run_export_held(
     gone: list[str],
     out: Path | None,
     client: BackendClient | None,
+    format: str = "all",
 ) -> RunResult:
     final = export_target(settings, snapshot.revision, out)
     check_replaceable(settings, final)
+    wanted = EXPORT_FORMATS[format]
+    skip = {
+        name: f"--format {format}"
+        for name in EXPORT_STEPS
+        if name not in ("collect", "report") and name not in wanted
+    }
     client = client or BackendClient(settings.backend_url)
-    if structured:
+    if structured and "upstream" in wanted:
         client.health()  # BackendUnavailable -> "run autoontology up"
     run = store.create_run(
         kind=EXPORT_KIND,
@@ -377,6 +461,7 @@ def _run_export_held(
         params={
             "revision": snapshot.revision,
             "out": str(out) if out else None,
+            "format": format,
             "pid": os.getpid(),
         },
     )
@@ -396,9 +481,12 @@ def _run_export_held(
         structured=structured,
         client=client,
         out_dir=work,
+        format=format,
     )
     try:
-        result = _execute(ctx, list(EXPORT_STEPS), skip={}, already=set(), steps=EXPORT_STEP_FUNCS)
+        result = _execute(
+            ctx, list(EXPORT_STEPS), skip=skip, already=set(), steps=EXPORT_STEP_FUNCS
+        )
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
         raise

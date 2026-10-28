@@ -21,3 +21,27 @@ later cleanup:
   inside an external database source; a plain `build` picks that up.
 - **Upstream files in an export are fetched at export time**, not build time
   (`report.md` and `export.json` `upstream_fetched_at` say so).
+
+Items from T3 (Ossie and OKF exporters):
+
+- **`export --format all|rdf|ossie|okf`** (default `all`; `POST /api/runs` takes `format`).
+  The revision folder is replaced as a whole, so a `--format okf` export leaves only `okf/`,
+  `report.md` and `export.json` in it. `okf` needs no backend; `ossie` and `rdf` fetch the
+  upstream files.
+- **Ossie alignment semantics follow the model, not the T3 brief's wording.** `broader`
+  means the Term is broader (concept `extends` Term) and `narrower` means the Term is
+  narrower (Term `extends` concept), as in `ontology.ttl` and `unstructured/schemas.py`;
+  `related` becomes `related_to`. Unaccepted proposals are exported like the TTL does.
+- **Concept names keep Hangul** (`ontology.json` has no name pattern; names are Python-style
+  identifiers). IRIs are the TTL IRIs (`ao:term-<id>`, `ao:concept-<id>`) so the Ossie,
+  OKF and RDF exports name each node the same way.
+- **OKF `generated.by` is `autoontology/<version>`** (the OKF actor convention), and
+  `generated.at` is the snapshot time, so exports of one snapshot are byte-identical.
+- **OKF file names keep Hangul** (`okf/concepts/계약-상태.md`); `/api/exports` accepts
+  Unicode letters in path segments and up to three segments.
+- **A document attribute/metric attached by `has_attribute`/`measured_by`** becomes a value
+  relationship of its subject in `ontology.yaml` and has no concept of its own unless
+  something else refers to it (listed in `validation.json` warnings).
+- **Link mappings need single-field keys at both ends.** On the sample data only
+  `customers` declares a key upstream, so `Contracts`/`Invoices` get no object mapping (a
+  warning each).

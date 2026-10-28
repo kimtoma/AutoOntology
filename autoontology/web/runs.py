@@ -176,7 +176,7 @@ def default_jobs() -> dict[str, JobFn]:
 #: Fixed top-level steps per kind (a build's steps depend on its sources).
 TOP_STEPS: dict[str, tuple[str, ...]] = {
     "build": (),
-    "export": ("collect", "serialize", "upstream", "report"),
+    "export": ("collect", "serialize", "upstream", "ossie", "okf", "report"),
 }
 
 

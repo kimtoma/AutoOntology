@@ -546,9 +546,16 @@ def export(
     out: str = typer.Option(
         None, "--out", help="Parent directory: writes <DIR>/r<rev>/ (default: exports/r<rev>/)."
     ),
+    format: str = typer.Option(
+        "all",
+        "--format",
+        help="all | rdf (ttl, jsonld, graphml) | ossie | okf. The revision folder is "
+        "replaced, so it then holds only the chosen formats.",
+    ),
 ) -> None:
     """Write an ontology snapshot (default: the latest) as ontology.ttl, ontology.jsonld,
-    ontology.graphml and report.md, plus the structured sources' upstream exports."""
+    ontology.graphml, an Apache Ossie bundle (ossie/) and an OKF bundle (okf/), plus
+    report.md and the structured sources' upstream exports."""
     import time
     from pathlib import Path
 
@@ -562,7 +569,7 @@ def export(
     try:
         jobs.setup_job_logging(settings, console=True)
         result = export_job.run_export(
-            store, settings, revision=revision, out=Path(out) if out else None
+            store, settings, revision=revision, out=Path(out) if out else None, format=format
         )
     except (jobs.JobError, BackendError) as exc:
         hint = f"\nlog: {exc.log_path}" if getattr(exc, "log_path", None) else ""
@@ -605,8 +612,30 @@ def export(
                 ],
             )
         )
-    for entry in result.details.get("report", {}).get("files", []):
-        typer.echo(f"  {entry['name']}  {entry['bytes']} bytes")
+    entries = result.details.get("report", {}).get("files", [])
+    for entry in entries:
+        if not entry["name"].startswith("okf/"):
+            typer.echo(f"  {entry['name']}  {entry['bytes']} bytes")
+    bundle = [e for e in entries if e["name"].startswith("okf/")]
+    if bundle:
+        typer.echo(f"  okf/  {len(bundle)} files, {sum(e['bytes'] for e in bundle)} bytes")
+    checks = result.details.get("ossie", {}).get("validation")
+    if checks:
+        typer.echo(
+            "ossie: "
+            + ", ".join(
+                f"{k} {v if isinstance(v, str) else 'errors'}"
+                for k, v in checks.items()
+                if k != "warnings"
+            )
+            + f"; {len(checks.get('warnings', []))} warning(s) (ossie/validation.json)"
+        )
+    okf_check = result.details.get("okf", {}).get("validation")
+    if okf_check:
+        typer.echo(
+            f"okf: {'ok' if okf_check.get('ok') else 'errors'} "
+            f"({okf_check.get('files', 0)} markdown files; okf/validation.json)"
+        )
     typer.echo(f"export {result.run_id}: {result.status} in {time.monotonic() - started:.1f}s")
     if result.export_dir:
         typer.echo(f"dir: {result.export_dir}")

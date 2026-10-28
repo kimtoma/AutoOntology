@@ -324,9 +324,21 @@ def test_export_run_takes_a_revision(env, isolated_env):
     assert c.post(f"{API}/runs", json={"kind": "export", "revision": 9}).status_code == 404
     run_id = c.post(f"{API}/runs", json={"kind": "export", "revision": 1}).json()["run_id"]
     manager.join(run_id, 5)
-    assert fake.calls == [("export", {"revision": 1})]
+    assert fake.calls == [("export", {"revision": 1, "format": "all"})]
     state = c.get(f"{API}/runs/{run_id}").json()
-    assert [s["name"] for s in state["steps"]] == ["collect", "serialize", "upstream", "report"]
+    assert [s["name"] for s in state["steps"]] == [
+        "collect",
+        "serialize",
+        "upstream",
+        "ossie",
+        "okf",
+        "report",
+    ]
+    run_id = c.post(f"{API}/runs", json={"kind": "export", "format": "okf"}).json()["run_id"]
+    manager.join(run_id, 5)
+    assert fake.calls[-1] == ("export", {"revision": None, "format": "okf"})
+    bad = c.post(f"{API}/runs", json={"kind": "export", "format": "pdf"})
+    assert bad.status_code == 400
 
 
 def test_cancel_stops_before_the_next_step(env, isolated_env):
@@ -753,16 +765,32 @@ def test_exports_list_and_path_safe_download(env):
     (rev_dir / "ontology.ttl").write_text("@prefix ao: <x#> .\n", encoding="utf-8")
     (rev_dir / "report.md").write_text("# 보고서\n", encoding="utf-8")
     (rev_dir / "upstream" / "hanbit.ossie.zip").write_bytes(b"PK")
+    (rev_dir / "ossie").mkdir()
+    (rev_dir / "ossie" / "ontology.yaml").write_text("version: 0.2.0.dev0\n", encoding="utf-8")
+    (rev_dir / "okf" / "concepts").mkdir(parents=True)
+    (rev_dir / "okf" / "index.md").write_text("---\nokf_version: '0.2'\n---\n", "utf-8")
+    (rev_dir / "okf" / "concepts" / "계약.md").write_text("---\ntype: X\n---\n# 계약\n", "utf-8")
     (Path(settings.exports_dir) / "r0001").mkdir()
     (Path(settings.exports_dir) / "hanbit-docs").mkdir()  # not a revision folder
     (Path(settings.exports_dir) / "secret.txt").write_text("top secret")
     listed = c.get(f"{API}/exports").json()["exports"]
     assert [e["revision"] for e in listed] == [3, 1] and listed[0]["dir"] == "r0003"
     assert [f["name"] for f in listed[0]["files"]] == [
+        "okf/concepts/계약.md",
+        "okf/index.md",
         "ontology.ttl",
+        "ossie/ontology.yaml",
         "report.md",
         "upstream/hanbit.ossie.zip",
     ]
+    assert [(d["name"], d["files"]) for d in listed[0]["dirs"]] == [
+        ("okf", ["concepts/계약.md", "index.md"]),
+        ("ossie", ["ontology.yaml"]),
+        ("upstream", ["hanbit.ossie.zip"]),
+    ]
+    for path, start in (("ossie/ontology.yaml", "version"), ("okf/concepts/계약.md", "---")):
+        shown = c.get(f"{API}/exports/r0003/{path}", params={"inline": True})
+        assert shown.status_code == 200 and shown.text.startswith(start), path
 
     resp = c.get(f"{API}/exports/r0003/ontology.ttl")
     assert resp.status_code == 200 and resp.text.startswith("@prefix")
@@ -778,7 +806,9 @@ def test_exports_list_and_path_safe_download(env):
         "r0003/.hidden",
         "r0003/%2Fetc%2Fpasswd",
         "r0003/upstream/../../secret.txt",
-        "r0003/a/b/c.txt",
+        "r0003/a/b/c/d.txt",
+        "r0003/okf/_x.md",
+        "r0003/okf/concepts/..",
         "x/ontology.ttl",
     ]:
         resp = c.get(f"{API}/exports/{bad}")
