@@ -227,6 +227,15 @@ What to know:
   `AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT` (2) calls run at once, each within
   `AUTOONTOLOGY_PROVIDER_TIMEOUT_S` (120 s).
 
+### Language
+
+The web UI speaks English and Korean: pick one with the globe menu in the header (or open
+`/ui/?lang=ko`). The choice is remembered in the browser; without one the UI follows the
+browser language. The onboarding commands (`init`, `demo`, `provider`, `setup`, `doctor`)
+print Korean when `AUTOONTOLOGY_LANG=ko` is set (shell or `.env`) or the locale (`LANG`,
+`LC_ALL`) is Korean; `AUTOONTOLOGY_LANG=en` forces English. Commands and error codes stay
+the same in both languages.
+
 ## CLI reference
 
 | Command | What it does |
@@ -470,6 +479,7 @@ then `.env`, then the built-in default.
 | `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS` | `200` | Rows a CSV/TSV document keeps. |
 | `AUTOONTOLOGY_DOC_MAX_BYTES` | `52428800` (50 MB) | Largest CSV/TSV, text, Markdown, HTML or `.doc` document the native readers accept; larger files fail with `FILE_TOO_LARGE`. |
 | `AUTOONTOLOGY_SAMPLES_DIR` | `<repo>/samples` | Folder holding the sample sets that `demo` and `/api/samples` use. |
+| `AUTOONTOLOGY_LANG` | `ko` for a Korean locale, else `en` | Language of the CLI messages (`en` or `ko`). The web UI has its own switch. |
 | `AUTOONTOLOGY_VISION_MODEL` | unset | Ollama vision model (for example `gemma4:e4b`) that describes image documents before their OCR text; `setup` pulls it. Unset: OCR text only. |
 | `AUTOONTOLOGY_CHUNK_TOKENS` / `_CHUNK_OVERLAP_TOKENS` / `_CHUNK_PACK_TOKENS` | `1200` / `100` / `400` | Chunk size, overlap when a section is split, and how far small neighbouring sections are packed together (tiktoken `cl100k_base` tokens). |
 | `AUTOONTOLOGY_LLM_WORKERS` | `1` with ollama, else `3` | Parallel chunk extraction calls. |

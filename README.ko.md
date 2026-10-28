@@ -169,6 +169,14 @@ AUTOONTOLOGY_EMBED_PROVIDER=ollama
 아는 이름 그대로 적으세요. 엔진에 필요한 `openai/` 접두사는 AutoOntology가 붙이고 라우터에서
 다시 떼어 냅니다. 임베딩 차원은 첫 소스를 ingest한 시점에 고정됩니다(문제 해결 참고).
 
+### 언어
+
+웹 UI는 영어와 한국어를 지원합니다. 헤더의 지구본 메뉴에서 고르거나 `/ui/?lang=ko`로 열면
+됩니다. 고른 언어는 브라우저에 저장되며, 고르지 않았다면 브라우저 언어를 따릅니다. 온보딩
+명령(`init`, `demo`, `provider`, `setup`, `doctor`)은 `AUTOONTOLOGY_LANG=ko`(셸 또는 `.env`)를
+설정하거나 로캘(`LANG`, `LC_ALL`)이 한국어이면 한국어로 출력하고, `AUTOONTOLOGY_LANG=en`이면
+영어로 출력합니다. 명령어와 오류 코드는 두 언어에서 같습니다.
+
 ## CLI 레퍼런스
 
 | 명령 | 하는 일 |
@@ -371,6 +379,7 @@ run은 그다음에야 `succeeded`가 됩니다(지우지 못한 백업은 경�
 | `AUTOONTOLOGY_ALIGN_MIN_SIM` | `0.55` | 후보 Term 코사인 하한. |
 | `AUTOONTOLOGY_ALIGN_MIN_CONF` | `0.7` | 판정을 적용하는 데 필요한 신뢰도(`same`은 0.90도 필요, 위 참고). |
 | `AUTOONTOLOGY_ALIGN_ALLOW_METRIC_SAME` | `0` | `1`이면 metric 개념도 Term과 `same`으로 판정될 수 있습니다. |
+| `AUTOONTOLOGY_LANG` | 한국어 로캘이면 `ko`, 아니면 `en` | CLI 메시지 언어(`en` 또는 `ko`). 웹 UI는 헤더에서 따로 바꿉니다. |
 | `AUTOONTOLOGY_INTEGRATION` | `0` | `1`이면 통합 테스트를 실행합니다(실제 Postgres와 Ollama, 셸에서 설정). |
 
 엔진 자체의 모델 변수(`DEFAULT_MODELS_*`, `REASONING_*`, `NON_REASONING_*`, `EMBED_*`,

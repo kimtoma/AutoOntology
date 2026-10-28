@@ -229,10 +229,14 @@ Two languages, English and Korean, with no extra dependency on either side.
   translates the headers and the known remedy descriptions only when printing
   (`i18n.remedy`), and `source rm` translates the known notices of `structured/remove.py`
   in the CLI (`i18n.notice`). Tables pad by display width (Hangul is double-width).
-- **Web UI** (`ui/src/i18n/`): `en.ts` is the key set and `ko.ts` is typed as
-  `Record<keyof typeof en, string>`, so a missing key fails `tsc`. `LangProvider` holds the
-  language and `useT()` returns `t(key, vars?)` with `{name}` interpolation; dates, numbers
-  and durations go through `Intl` with the current language. The language comes from
+- **Web UI** (`ui/src/i18n/`): `en.ts` is the key set (it spreads `en.explore.ts`, the
+  Ontology/Graph/Playground/Exports/Status strings) and `ko.ts` is typed as
+  `Record<keyof typeof en, string>`, so a missing key fails `tsc`. The current language lives
+  in `core.ts`, so pure helpers (label tables, the file classifier, durations) translate
+  too; `LangProvider` re-mounts the tree under the query cache when it changes, and
+  `useT()` returns `t(key, vars?)` with `{name}` interpolation (`tx` fills placeholders with
+  React nodes, `tn` picks `.one`/`.other`). Dates, numbers and durations go through `Intl`
+  with the current language. The language comes from
   `?lang=`, then `localStorage["autoontology.lang"]`, then `navigator.language` (`ko*`),
   else English; the header's globe menu switches it without a reload and updates
   `<html lang>`. Backend remedy commands and `detail` texts are shown verbatim.
