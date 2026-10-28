@@ -263,7 +263,9 @@ def judge_key(
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-#: :func:`judge_key`: a Term whose description apply set before the text was recorded.
+#: :func:`judge_key`: a Term whose description apply set before the text was recorded,
+#: until the next judge step records the description it sees as the baseline
+#: (:meth:`~autoontology.store.alignments.AlignmentStore.settle_legacy_descriptions`).
 ANY_DESCRIPTION = "\0any"
 
 Judge = Callable[[dict[str, Any], list[dict[str, Any]]], AlignmentVerdict]

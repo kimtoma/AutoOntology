@@ -229,9 +229,41 @@ class AlignmentStore:
                     (now_iso(), term_id, alias),
                 )
 
+    def settle_legacy_descriptions(self, current: dict[str, str]) -> int:
+        """A ``description_set`` record from before the text was kept gets a concrete
+        baseline: the description its Term has now (*current*: term id -> description, the
+        Terms the judge step sees), so :func:`auto_descriptions` stops answering
+        ``ANY_DESCRIPTION`` for it and a later change of the description re-judges.
+        Returns the number of records settled."""
+        settled = 0
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, applied_json FROM alignments WHERE applied_json LIKE "
+                "'%description_set%'"
+            ).fetchall()
+            for row_id, raw in rows:
+                applied = json.loads(raw or "{}")
+                term_id = applied.get("term_id")
+                if (
+                    not applied.get("description_set")
+                    or applied.get("description_baseline")  # settled once, never again
+                    or str(applied.get("description") or "").strip()
+                    or term_id not in current
+                ):
+                    continue
+                applied["description"] = str(current[term_id] or "").strip()
+                applied["description_baseline"] = True  # observed at the re-judge, not written
+                conn.execute(
+                    "UPDATE alignments SET applied_json = ? WHERE id = ?",
+                    (_dumps(applied), row_id),
+                )
+                settled += 1
+        return settled
+
     def auto_descriptions(self) -> dict[str, set[str]]:
-        """term id -> the descriptions apply set on it (``applied.description``); a record
-        from before the text was kept yields ``ANY_DESCRIPTION`` for its Term."""
+        """term id -> the descriptions apply set on it (``applied.description``, or the
+        baseline :func:`settle_legacy_descriptions` recorded); only a record from before
+        the text was kept and not settled yet yields ``ANY_DESCRIPTION`` for its Term."""
         from autoontology.unstructured.align import ANY_DESCRIPTION
 
         out: dict[str, set[str]] = {}
@@ -244,6 +276,8 @@ class AlignmentStore:
             if not applied.get("description_set") or not applied.get("term_id"):
                 continue
             text = str(applied.get("description") or "").strip()
+            if not text and applied.get("description_baseline"):
+                continue  # settled on an empty description: nothing of apply's to hide
             out.setdefault(applied["term_id"], set()).add(text or ANY_DESCRIPTION)
         return out
 

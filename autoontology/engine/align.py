@@ -313,6 +313,9 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
     stats = {"judged": 0, "cached": 0, "resumed": 0, "failed": 0, "proposals": 0}
     failed: list[dict[str, str]] = []
     auto_added = ctx.aligns.alias_additions()  # synonyms AutoOntology wrote: never evidence
+    # a legacy description record without its text: the description seen now becomes its
+    # baseline (never a permanent wildcard), here and in the step's Terms fingerprint
+    ctx.aligns.settle_legacy_descriptions({t.id: t.description for t in terms.values()})
     auto_descriptions = ctx.aligns.auto_descriptions()  # left out of the judge key too
 
     def guard(

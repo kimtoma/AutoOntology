@@ -509,6 +509,53 @@ def test_align_rejudges_when_the_candidate_description_changed(env):
     assert judged() == 1
 
 
+def _forget_description_texts(store):
+    """Turn the recorded description writes into pre-fix records (no ``description``)."""
+    import json as _json
+
+    with store._conn() as conn:
+        rows = conn.execute(
+            "SELECT id, applied_json FROM alignments WHERE applied_json LIKE '%description_set%'"
+        ).fetchall()
+        for row_id, raw in rows:
+            applied = _json.loads(raw)
+            applied.pop("description", None)
+            conn.execute(
+                "UPDATE alignments SET applied_json = ? WHERE id = ?",
+                (_json.dumps(applied), row_id),
+            )
+    return len(rows)
+
+
+def test_legacy_description_record_is_not_a_permanent_wildcard(env):
+    """Round 3 #2: a pre-fix ``description_set`` record without the text used to hide every
+    later description change. The first re-judge records the description it saw as the
+    baseline, so the next change re-judges (judged=1, not resumed)."""
+    add_structured(env)
+    add_documents(env)
+    client, store = env["client"], env["store"]
+    assert run(env).status == "succeeded"
+    assert _forget_description_texts(store) >= 1
+
+    def judged():
+        result = run(env)
+        assert result.status == "succeeded", result.problems
+        return result.details["align:hanbit-docs"]["judged"]
+
+    term = client.terms["t-customer"]
+    term["synonyms"] = [*term.get("synonyms", []), "거래처"]
+    assert judged() == 1  # the first re-judge after the upgrade
+    term["description"] = "판매 고객이 아닌 고용 상대방"
+    assert judged() == 1
+    assert judged() == 0
+    # the align-step Terms fingerprint uses the same baseline: --resume runs align again
+    first = run(env)
+    term["description"] = "고객사의 담당자"
+    again = run(env, resume=True)
+    assert again.run_id == first.run_id and again.status == "succeeded", again.problems
+    assert again.details["align:hanbit-docs"]["judged"] == 1
+
+
 def test_resume_runs_align_again_when_an_upstream_term_changed(env):
     """Follow-up of recheck #2: with unchanged inputs `--resume` used to keep the whole
     align step, so an edited upstream Term was never re-judged. The step records a
