@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -20,6 +21,13 @@ from autoontology.web.providers.base import ProviderStatus
 from autoontology.web.providers.openai_compat import ChatRequest, ChatResponse, ProviderError
 
 logger = logging.getLogger("autoontology.llm_proxy")
+
+#: Upstream error bodies longer than this are cut (and re-wrapped as an OpenAI error).
+MAX_ERROR_CHARS = 2000
+#: Credential-looking strings some endpoints echo back on 401 (``sk-ab***``, ``nvapi-…``,
+#: ``Bearer …``); they are masked before an upstream error reaches the caller.
+_TOKEN_RE = re.compile(r"(?i)\bbearer\s+[^\s\"',]+|\b(?:sk|nvapi)-[A-Za-z0-9_\-*.]{2,}")
+REDACTED = "[redacted]"
 
 
 def _passthrough(resp: httpx.Response, content: bytes) -> Response:
@@ -55,6 +63,30 @@ class PassthroughProvider:
 
     def status(self) -> ProviderStatus:
         raise NotImplementedError
+
+    def secrets(self) -> list[str]:
+        """Credentials this provider sends (masked, with their prefixes, in error bodies)."""
+        return []
+
+    def redact(self, text: str) -> str:
+        for secret in self.secrets():
+            if len(secret) >= 8:  # also partial echoes such as "nvapi-abcd1234***"
+                prefixes = (re.escape(secret[:n]) for n in range(len(secret), 7, -1))
+                text = re.sub("|".join(prefixes), REDACTED, text)
+            elif secret:
+                text = text.replace(secret, REDACTED)
+        return _TOKEN_RE.sub(REDACTED, text)
+
+    def error_response(self, resp: httpx.Response, content: bytes) -> Response:
+        """An upstream error relayed with credentials masked and the body bounded."""
+        text = self.redact(content.decode("utf-8", errors="replace"))
+        media_type = resp.headers.get("content-type")
+        if len(text) > MAX_ERROR_CHARS:
+            text = json.dumps(
+                {"error": {"message": text[:MAX_ERROR_CHARS] + " ...", "type": "upstream_error"}}
+            )
+            media_type = "application/json"
+        return Response(content=text.encode(), status_code=resp.status_code, media_type=media_type)
 
     def models(self) -> list[str]:
         return []
@@ -111,6 +143,8 @@ class PassthroughProvider:
                 return self.upstream_error(url, exc)
             finally:
                 await close()
+            if upstream.status_code >= 400:
+                return self.error_response(upstream, content)
             return _passthrough(upstream, content)
 
         async def relay():
@@ -179,4 +213,6 @@ class PassthroughProvider:
                 resp = await http.get(url, headers=self.headers(request))
             except httpx.HTTPError as exc:
                 return self.upstream_error(url, exc)
+            if resp.status_code >= 400:
+                return self.error_response(resp, resp.content)
             return _passthrough(resp, resp.content)

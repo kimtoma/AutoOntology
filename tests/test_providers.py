@@ -269,6 +269,26 @@ def test_openai_errors_never_echo_the_key(openai_env):
     assert SECRET not in res.text
 
 
+def test_openai_upstream_error_bodies_are_redacted_and_bounded(openai_env):
+    """Review M-5: endpoints echo (partial) keys on 401; never relay them verbatim."""
+    echo = {
+        "error": {
+            "message": f"Incorrect API key provided: {SECRET[:12]}***. "
+            "Header was Bearer abc.def-ghi; other key sk-proj-XYZ123",
+            "type": "invalid_request_error",
+        }
+    }
+    res = _chat(_client(Upstream(lambda r: httpx.Response(401, json=echo))), "openai/m")
+    assert res.status_code == 401
+    message = res.json()["error"]["message"]
+    assert SECRET[:8] not in res.text and "abc.def-ghi" not in res.text
+    assert "sk-proj" not in res.text and message.count("[redacted]") == 3
+    huge = "x" * 50_000
+    res = _chat(_client(Upstream(lambda r: httpx.Response(500, text=huge))), "openai/m")
+    assert res.status_code == 500 and len(res.content) < 3000
+    assert res.json()["error"]["type"] == "upstream_error"
+
+
 def test_openai_models_lists_the_configured_model(openai_env):
     res = _client(Upstream()).get("/v1/models")
     assert res.json()["data"] == [

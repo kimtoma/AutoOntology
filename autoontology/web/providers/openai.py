@@ -52,6 +52,9 @@ class OpenAIProvider(PassthroughProvider):
             out["authorization"] = f"Bearer {self._key}"
         return out
 
+    def secrets(self) -> list[str]:
+        return [self._key] if self._key else []
+
     def models(self) -> list[str]:
         return [self.settings.openai_chat_model] if self.settings.openai_chat_model else []
 
