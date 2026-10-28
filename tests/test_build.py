@@ -1294,3 +1294,33 @@ def test_export_refuses_a_listed_file_whose_content_changed(env, tmp_path):
     assert export_job.run_export(store, settings, out=out, client=env["client"]).status == (
         "succeeded"
     )
+
+
+def test_export_refuses_a_marker_without_file_hashes(env, tmp_path):
+    """Round 3 #4: a marker with no ``file_sha256`` (an exporter before hashes, or the
+    field removed) can no longer vouch for the content, so an edited ``okf/index.md``
+    would be deleted: the re-export refuses, naming the folder and the migration step;
+    a complete marker is accepted again."""
+    add_structured(env)
+    add_documents(env)
+    store, settings = env["store"], env["settings"]
+    run(env)
+    out = tmp_path / "desk"
+    folder = export_job.run_export(store, settings, out=out, client=env["client"]).export_dir
+    marker = export_job.read_export_metadata(folder)
+    index = folder / "okf" / "index.md"
+    index.write_text("my own notes now")
+    legacy = {k: v for k, v in marker.items() if k != "file_sha256"}
+    for meta in (legacy, {**legacy, "file_sha256": None}):
+        (folder / "export.json").write_text(json.dumps(meta), encoding="utf-8")
+        with pytest.raises(JobError) as err:
+            export_job.run_export(store, settings, out=out, client=env["client"])
+        assert str(folder) in str(err.value) and "file_sha256" in str(err.value)
+        assert "move or delete the folder" in str(err.value)
+        assert index.read_text() == "my own notes now"
+    shutil.rmtree(folder)  # the migration step: a fresh export writes a complete marker
+    folder = export_job.run_export(store, settings, out=out, client=env["client"]).export_dir
+    assert export_job.read_export_metadata(folder)["file_sha256"]
+    assert export_job.run_export(store, settings, out=out, client=env["client"]).status == (
+        "succeeded"
+    )

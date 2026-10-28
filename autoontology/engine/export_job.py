@@ -170,9 +170,7 @@ def _unlisted(folder: Path, listed: set[str]) -> list[str]:
 def _changed(folder: Path, listed: set[str], hashes: Any) -> list[str]:
     """The *listed* files whose content no longer matches the sha256 the marker recorded
     (or that have no recorded hash): reused or edited by the user, so not the exporter's.
-    A marker without ``file_sha256`` (an exporter before hashes) is trusted by path."""
-    if hashes is None:
-        return []
+    A marker without ``file_sha256`` is refused earlier (:func:`check_replaceable`)."""
     if not isinstance(hashes, dict):
         return sorted(listed - {EXPORT_MARKER})
     out = []
@@ -210,7 +208,15 @@ def check_replaceable(settings: Settings, final: Path) -> set[str] | None:
             f"refusing to replace {final}: its {EXPORT_MARKER} does not list the files it "
             "wrote (an older or edited export); move or delete the folder, then export again"
         )
-    foreign = _unlisted(final, listed) + _changed(final, listed, (meta or {}).get("file_sha256"))
+    hashes = (meta or {}).get("file_sha256")
+    if not isinstance(hashes, dict):
+        raise JobError(
+            f"refusing to replace {final}: its {EXPORT_MARKER} records no file_sha256 (an "
+            "export written before content hashes, or an edited marker), so edited files "
+            "cannot be told apart from the exporter's; move or delete the folder (keep what "
+            "you changed), then export again"
+        )
+    foreign = _unlisted(final, listed) + _changed(final, listed, hashes)
     if foreign:
         raise JobError(
             f"refusing to replace {final}: it holds files this exporter did not write "
