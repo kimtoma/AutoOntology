@@ -726,11 +726,14 @@ def _execute(
     return result
 
 
-def _problems(store: Store, run_id: str) -> list[str]:
+def _problems(store: Store, run_id: str, planned: set[str] | None = None) -> list[str]:
     """Why a finished build is partial: failed documents/chunks, an incomplete
-    consolidation, failed align judgements (all retried by ``--resume``)."""
+    consolidation, failed align judgements (all retried by ``--resume``); only the steps
+    in *planned* (when given)."""
     out: list[str] = []
     for step in store.get_steps(run_id):
+        if planned is not None and step.name not in planned:
+            continue
         d = step.detail
         if step.name.endswith(":read") and d.get("failed"):
             out.append(f"{step.name}: {len(d['failed'])} document(s) failed to read")
@@ -743,13 +746,16 @@ def _problems(store: Store, run_id: str) -> list[str]:
     return out
 
 
-def _warnings(store: Store, run_id: str) -> list[str]:
-    """What the run skipped without failing: documents that need the kordoc engine."""
+def _warnings(store: Store, run_id: str, planned: set[str] | None = None) -> list[str]:
+    """What the run skipped without failing: documents that need the kordoc engine (only
+    the steps in *planned*, when given)."""
     from autoontology.unstructured.kordoc import INSTALL_COMMAND
     from autoontology.unstructured.report import display_path
 
     out = []
     for step in store.get_steps(run_id):
+        if planned is not None and step.name not in planned:
+            continue
         skipped = step.detail.get("needs_kordoc") if step.name.endswith(":read") else None
         if skipped:
             names = ", ".join(display_path(f["path"]) for f in skipped)
@@ -769,8 +775,10 @@ def _finish(build: _Build, result: BuildResult) -> BuildResult:
     if snap is not None:
         result.revision = snap.detail.get("revision")
         result.counts = snap.detail.get("counts", {})
-    result.problems = _problems(store, run.id)
-    result.warnings = _warnings(store, run.id)  # the CLI prints them after the run
+    # only the steps of this run's plan: a resumed run keeps the rows of removed sources
+    planned = set(step_names(build.sources))
+    result.problems = _problems(store, run.id, planned)
+    result.warnings = _warnings(store, run.id, planned)  # the CLI prints them after the run
     if result.problems:
         error = "partial: " + " | ".join(result.problems)
         store.update_run(

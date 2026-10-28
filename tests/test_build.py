@@ -421,6 +421,31 @@ def test_resume_after_a_source_was_removed_merges_and_snapshots_again(env):
     assert "merge" not in kept.details and kept.revision == 2
 
 
+def test_resume_drops_the_problems_and_warnings_of_a_removed_source(env, monkeypatch):
+    """Recheck #6: after the failing documents source is removed, the resumed build only
+    reports the steps of its current plan: no stale chunk failure, no kordoc warning."""
+    monkeypatch.delenv("KORDOC_CLI", raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    (env["docs"] / "규정.hwp").write_bytes(b"x")
+    add_structured(env)
+    add_documents(env)
+
+    class Flaky(FakeLLM):
+        def structured(self, system, human, schema):
+            if schema is not MergeDecision and "청구서" in human:
+                raise ValueError("flaky chunk")
+            return super().structured(system, human, schema)
+
+    first = run(env, llm=Flaky())
+    assert first.status == "failed" and first.problems and first.warnings
+    store = env["store"]
+    store.delete_source(store.get_source("hanbit-docs").id)
+    again = run(env, resume=True)
+    assert again.run_id == first.run_id
+    assert again.problems == [] and again.warnings == []
+    assert again.status == "succeeded"
+
+
 def test_resumed_align_rejudges_when_the_candidate_term_changed(env):
     """Codex #7: the structured source changes and its Term old -> new id; the resumed
     align must judge the concept against the new candidate (judged=1), not keep the
