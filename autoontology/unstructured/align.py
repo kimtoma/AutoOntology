@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -272,7 +273,9 @@ def apply_kind_guard(
 
 #: Bumped whenever the rules below change; recorded on refused proposals and in the judge
 #: step. Every path (fresh, cached, resumed verdicts) re-applies the current policy.
-IDENTITY_POLICY_VERSION = "identity-v1"
+#: v2: an English plural and its singular count as the same alias (``Contracts`` /
+#: ``contracts`` table vs. ``Contract``), still whole aliases only, never substrings.
+IDENTITY_POLICY_VERSION = "identity-v2"
 #: A destructive identity merge needs at least this confidence (and at least --min-conf).
 IDENTITY_MIN_CONF = 0.90
 
@@ -282,6 +285,28 @@ def norm_alias(text: str) -> str:
     import unicodedata
 
     return "".join(unicodedata.normalize("NFKC", str(text)).split()).casefold()
+
+
+_LATIN_ALIAS = re.compile(r"^[a-z][a-z0-9_-]*[a-z]$")
+
+
+def singular(alias: str) -> str:
+    """The English singular of a normalized all-Latin alias (``contracts`` -> ``contract``,
+    ``categories`` -> ``category``, ``boxes`` -> ``box``); anything else unchanged."""
+    if len(alias) <= 3 or not _LATIN_ALIAS.fullmatch(alias) or not alias.endswith("s"):
+        return alias
+    if alias.endswith("ies"):
+        return alias[:-3] + "y"
+    if alias.endswith(("sses", "xes", "ches", "shes", "zes")):
+        return alias[:-2]
+    if alias.endswith(("ss", "us", "is")):
+        return alias
+    return alias[:-1]
+
+
+def identity_keys(aliases: set[str]) -> set[str]:
+    """Comparison keys of normalized aliases: each alias and its English singular."""
+    return aliases | {singular(a) for a in aliases}
 
 
 def concept_aliases(concept: ConceptInfo) -> set[str]:
@@ -318,7 +343,10 @@ def apply_identity_policy(
     if verdict.relation != "same" or term is None:
         return verdict, {}
     bar = identity_bar(min_conf)
-    evidence = sorted(concept_aliases(concept) & trusted_term_aliases(term, auto_added))
+    evidence = sorted(
+        identity_keys(concept_aliases(concept))
+        & identity_keys(trusted_term_aliases(term, auto_added))
+    )
     reason = ""
     if verdict.confidence < bar:
         reason = f"confidence {verdict.confidence:.2f} < {bar:.2f}"

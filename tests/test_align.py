@@ -979,3 +979,26 @@ def _second_docs_source(store, name, concepts):
     ev = [EvidenceRecord(chunk.id, "약정", True)]
     docs.replace_ontology(src.id, [ConceptRecord(*c, evidence=ev) for c in concepts], [])
     return src
+
+
+def test_identity_policy_matches_english_plurals_only_as_whole_aliases():
+    assert [
+        al.singular(a) for a in ("contracts", "categories", "boxes", "status", "계약들", "gas")
+    ] == [
+        "contract",
+        "category",
+        "box",
+        "status",
+        "계약들",
+        "gas",
+    ]
+    term = al.TermInfo("t", "Contracts", "계약 정보", [], tables=[{"name": "contracts"}])
+    same = al.ValidatedVerdict("t", "same", 0.95, "ok")
+    concept = al.ConceptInfo("c", "계약", "entity", "약정", name_en="Contract")
+    verdict, proposal = al.apply_identity_policy(same, concept, term, min_conf=0.7)
+    assert verdict.relation == "same" and proposal == {}
+    other = al.ConceptInfo("c2", "계약금", "entity", "돈", name_en="Contract fee")
+    verdict, proposal = al.apply_identity_policy(
+        al.ValidatedVerdict("t", "same", 0.95, "ok"), other, term, min_conf=0.7
+    )
+    assert verdict.relation == "related" and proposal["policy"] == "identity-v2"
