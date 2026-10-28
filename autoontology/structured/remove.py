@@ -4,7 +4,8 @@
 Structured sources: delete the upstream connection, wait until the service has torn down
 the ingested graph (``/ingest/delete`` -> ``delete_all_data``), then optionally drop the
 files source's ``autoontology_src_<name>`` database, then delete the store rows. Documents
-sources only live in the store.
+sources live in the store; the synonyms their alignments wrote to upstream Terms are taken
+off first (:func:`remove_added_aliases`; manual and other sources' synonyms stay).
 """
 
 from __future__ import annotations
@@ -120,7 +121,8 @@ def _remove_held(
 
     if store.active_runs(src.id):
         raise RemoveError(f"source {src.name!r} has an active run; wait for it to finish")
-    if src.kind == "documents":  # nothing upstream: documents/concepts live in the store
+    if src.kind == "documents":  # documents/concepts live in the store
+        remove_added_aliases(settings, store, src, force=force, say=say)
         store.delete_source(src.id)
         say(
             f"removed documents source {src.name} (documents, chunks, concepts, "
@@ -184,3 +186,80 @@ def _remove_held(
             say(f"dropped database {src.pg_database}")
     store.delete_source(src.id)
     say(f"removed source {name}")
+
+
+def alias_removal_plan(store: Store, src: Source) -> dict[str, list[str]]:
+    """term id -> the live synonyms that documents source *src*'s alignments wrote to the
+    Term (recorded provenance), minus those an accepted ``same`` alignment of another
+    documents source also accounts for. Manual aliases and other sources' are never in it."""
+    from autoontology.store.alignments import AlignmentStore
+    from autoontology.store.documents import DocumentStore
+    from autoontology.unstructured import align as al
+
+    aligns, docs = AlignmentStore(store), DocumentStore(store)
+    protected: dict[str, set[str]] = {}
+    for other in store.list_sources():
+        if other.kind != "documents" or other.id == src.id:
+            continue
+        concepts = {c.id: c for c in docs.list_concepts(other.id)}
+        for a in aligns.list(other.id):
+            c = concepts.get(a.concept_id)
+            if not (a.accepted and a.relation == "same" and a.term_id and c is not None):
+                continue
+            info = al.ConceptInfo(
+                id=c.id, name=c.name, kind=c.kind, name_en=c.name_en, synonyms=c.synonyms
+            )
+            protected.setdefault(a.term_id, set()).update(al.accepted_aliases(info))
+    plan: dict[str, list[str]] = {}
+    for term_id, records in aligns.alias_provenance(live=True).items():
+        safe = protected.get(term_id, set())
+        mine = [
+            r["alias"]
+            for r in records
+            if r["source_id"] == src.id and al.norm_alias(r["alias"]) not in safe
+        ]
+        if mine:
+            plan[term_id] = mine
+    return plan
+
+
+def remove_added_aliases(
+    settings: Settings,
+    store: Store,
+    src: Source,
+    *,
+    force: bool,
+    say: Callable[..., None],
+    remover: Callable[[Settings, str, list[str]], dict[str, Any]] | None = None,
+) -> None:
+    """Take the synonyms *src*'s alignments added (:func:`alias_removal_plan`) off the
+    upstream Terms before the source goes. A failure keeps the source (RemoveError)
+    unless *force*, which only warns."""
+    from autoontology.store.alignments import AlignmentStore
+
+    plan = alias_removal_plan(store, src)
+    if not plan:
+        return
+    if remover is None:
+        from autoontology.engine.upstream_terms import remove_term_synonyms as remover
+    aligns = AlignmentStore(store)
+    for term_id, aliases in sorted(plan.items()):
+        try:
+            result = remover(settings, term_id, aliases)
+            removed = result.get("removed", [])
+        except LookupError:
+            removed = []  # the Term is gone already
+        except Exception as exc:  # noqa: BLE001 - one message; --force continues
+            if not force:
+                raise RemoveError(
+                    f"could not remove the synonyms {src.name} added to Term {term_id} "
+                    f"({', '.join(aliases)}): {exc} (start the services, or --force to keep "
+                    "them)"
+                ) from exc
+            say(f"warning: synonyms of Term {term_id} kept (--force): {exc}", True)
+            continue
+        aligns.mark_aliases_removed(term_id, aliases)
+        say(
+            f"removed {len(removed)} synonym(s) {src.name} added to Term {term_id}"
+            + (f" ({', '.join(removed)})" if removed else "")
+        )

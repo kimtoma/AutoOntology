@@ -338,6 +338,15 @@ MIGRATIONS: list[tuple[int, str]] = [
             ON playground_messages (conversation_id, id)
         """,
     ),
+    (
+        3,
+        # Schema v3: term_alias_additions.source_id = the documents source whose alignment
+        # wrote the synonym (a unified build run has no source of its own, so the run's
+        # source_id cannot say it). NULL on older rows: provenance falls back to the run.
+        """
+        ALTER TABLE term_alias_additions ADD COLUMN source_id TEXT
+        """,
+    ),
 ]
 
 #: Seconds a lease stays valid without a heartbeat (the holder refreshes it every third).

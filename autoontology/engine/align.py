@@ -634,7 +634,11 @@ def _step_apply(ctx: _AlignCtx) -> dict[str, Any]:
                 refresh_failed.append(patch.term_name)
             # never identity evidence from now on (alias registry, review #4)
             ctx.aligns.record_alias_additions(
-                patch.term_id, result["synonyms_added"], run_id=ctx.run.id, concepts=patch.concepts
+                patch.term_id,
+                result["synonyms_added"],
+                run_id=ctx.run.id,
+                concepts=patch.concepts,
+                source_id=ctx.source.id,  # the documents source (a build run has none)
             )
             applied = {"run_id": ctx.run.id, "at": now_iso(), **result}
             for alignment_id in patch.alignment_ids:

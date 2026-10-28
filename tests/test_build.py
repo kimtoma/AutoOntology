@@ -458,6 +458,18 @@ def test_resumed_align_rejudges_when_the_candidate_term_changed(env):
     assert "t-contract" not in accepted().values()
 
 
+def test_build_records_the_documents_source_on_the_aliases_it_adds(env):
+    add_structured(env)
+    add_documents(env)
+    store = env["store"]
+    assert run(env).status == "succeeded"
+    from autoontology.store.alignments import AlignmentStore
+
+    prov = AlignmentStore(store).alias_provenance()
+    sources = {r["source_id"] for records in prov.values() for r in records}
+    assert prov and sources == {store.get_source("hanbit-docs").id}
+
+
 def test_documents_that_need_kordoc_are_skipped_not_failed(env, monkeypatch):
     """Without kordoc the canonical quickstart must still exit 0: the HWP/PDF files are
     skipped with a warning naming them and the install command, and once kordoc is

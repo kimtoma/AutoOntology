@@ -165,7 +165,7 @@ def test_schema_has_every_table_and_no_playground_tests(store):
     assert not {"playground_tests", "playground_test_runs", "ontology_revision"} & tables
     assert {"dry_run", "proposal_json"} <= cols and "incomplete" in msg_cols
     assert "scope" in conv_cols and "source_id" not in conv_cols  # v2: workspace-scoped
-    assert store.schema_version() == 2
+    assert store.schema_version() == 3
 
 
 def _hold_write_lock(path):

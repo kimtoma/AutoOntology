@@ -194,22 +194,29 @@ class AlignmentStore:
     # --- synonyms AutoOntology added to upstream Terms -------------------------------------
 
     def record_alias_additions(
-        self, term_id: str, aliases: Sequence[str], *, run_id: str, concepts: Sequence[str] = ()
+        self,
+        term_id: str,
+        aliases: Sequence[str],
+        *,
+        run_id: str,
+        concepts: Sequence[str] = (),
+        source_id: str | None = None,
     ) -> None:
         """Remember synonyms align wrote to a Term: they never count as identity evidence
         (otherwise a wrong merge would validate itself on the next run). A re-addition (the
         alias was removed, then written again, possibly by another documents source)
-        replaces the provenance with the current write's run and concepts, so `align
-        repair` attributes the live alias to whoever added it last; the row itself is never
-        dropped, so the alias stays untrusted."""
+        replaces the provenance with the current write's run, documents *source_id* and
+        concepts, so a repair or ``source rm`` attributes the live alias to whoever added it
+        last; the row itself is never dropped, so the alias stays untrusted."""
         with self._conn() as conn:
             for alias in aliases:
                 conn.execute(
                     "INSERT INTO term_alias_additions (term_id, alias, run_id, concepts_json, "
-                    "added_at) VALUES (?,?,?,?,?) ON CONFLICT (term_id, alias) DO UPDATE SET "
-                    "run_id = excluded.run_id, concepts_json = excluded.concepts_json, "
-                    "added_at = excluded.added_at, removed_at = NULL",
-                    (term_id, alias, run_id, _dumps(list(concepts)), now_iso()),
+                    "added_at, source_id) VALUES (?,?,?,?,?,?) ON CONFLICT (term_id, alias) "
+                    "DO UPDATE SET run_id = excluded.run_id, concepts_json = "
+                    "excluded.concepts_json, added_at = excluded.added_at, removed_at = NULL, "
+                    "source_id = excluded.source_id",
+                    (term_id, alias, run_id, _dumps(list(concepts)), now_iso(), source_id),
                 )
 
     def mark_aliases_removed(self, term_id: str, aliases: Sequence[str]) -> None:
@@ -235,15 +242,17 @@ class AlignmentStore:
                 out.setdefault(row[0], []).append(row[1])
         return out
 
-    def alias_provenance(self) -> dict[str, list[dict[str, Any]]]:
-        """term id -> [{alias, source_id (the documents source whose align run added it;
-        None when unknown), concepts}] from ``term_alias_additions`` + ``runs``."""
+    def alias_provenance(self, *, live: bool = False) -> dict[str, list[dict[str, Any]]]:
+        """term id -> [{alias, source_id (the documents source whose alignment added it:
+        the recorded one, else the run's; None when unknown), concepts}] from
+        ``term_alias_additions`` + ``runs``; *live*: only aliases not marked removed."""
         out: dict[str, list[dict[str, Any]]] = {}
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT a.term_id, a.alias, a.concepts_json, r.source_id FROM "
-                "term_alias_additions a LEFT JOIN runs r ON r.id = a.run_id "
-                "ORDER BY a.added_at, a.alias"
+                "SELECT a.term_id, a.alias, a.concepts_json, COALESCE(a.source_id, r.source_id) "
+                "FROM term_alias_additions a LEFT JOIN runs r ON r.id = a.run_id "
+                + ("WHERE a.removed_at IS NULL " if live else "")
+                + "ORDER BY a.added_at, a.alias"
             ).fetchall()
         for term_id, alias, concepts, source_id in rows:
             out.setdefault(term_id, []).append(

@@ -119,3 +119,70 @@ def test_evidence_rows_carry_document_and_page(stores):
     rows = docs.evidence_rows(src.id)
     assert len(rows) == 3 and {r["doc_id"] for r in rows} == {doc.id}
     assert sum(r["relation_id"] is not None for r in rows) == 1
+
+
+def test_alias_provenance_records_the_documents_source_of_a_build_run(stores):
+    """A unified build run has no source_id: the alias record itself must carry the
+    documents source, or every alias the build adds has unknown provenance."""
+    store, _docs, aligns, src = stores
+    run = store.create_run(kind="build", source_id=None, params={})
+    aligns.record_alias_additions("t1", ["계약서"], run_id=run.id, source_id=src.id)
+    aligns.record_alias_additions("t1", ["옛 별칭"], run_id=run.id)  # pre-v3 row: unknown
+    prov = aligns.alias_provenance()
+    assert {r["alias"]: r["source_id"] for r in prov["t1"]} == {"계약서": src.id, "옛 별칭": None}
+    aligns.mark_aliases_removed("t1", ["계약서"])
+    assert [r["alias"] for r in aligns.alias_provenance(live=True)["t1"]] == ["옛 별칭"]
+
+
+def test_source_rm_removes_only_the_aliases_that_source_added(stores, tmp_path, monkeypatch):
+    from autoontology.config import Settings
+    from autoontology.structured import remove
+
+    store, docs, aligns, a = stores
+    b = store.add_source(name="other", kind="documents", locator="{}")
+    run = store.create_run(kind="build", source_id=None, params={})
+    # A added 계약서 and 약정서 to t1; B added its own alias and accepted 약정서 too
+    aligns.record_alias_additions("t1", ["계약서", "약정서"], run_id=run.id, source_id=a.id)
+    aligns.record_alias_additions("t1", ["남의 별칭"], run_id=run.id, source_id=b.id)
+    aligns.record_alias_additions("t2", ["고객사"], run_id=run.id, source_id=a.id)
+    doc, _ = _add(docs, b)
+    chunk = docs.chunks_for_document(doc.id)[0]
+    ev = [EvidenceRecord(chunk.id, "약정서", True)]
+    docs.replace_ontology(b.id, [ConceptRecord("약정서", "entity", "d", evidence=ev)], [])
+    [concept] = docs.list_concepts(b.id)
+    aligns.put(
+        AlignmentRecord(b.id, concept.id, "약정서", "same", run.id, term_id="t1", accepted=True)
+    )
+    assert remove.alias_removal_plan(store, a) == {"t1": ["계약서"], "t2": ["고객사"]}
+    calls = []
+
+    def remover(settings, term_id, aliases):
+        calls.append((term_id, list(aliases)))
+        if term_id == "t2":
+            raise LookupError("gone")
+        return {"removed": list(aliases)}
+
+    said = []
+    settings = Settings(home=tmp_path / "home")
+    remove.remove_added_aliases(
+        settings, store, a, force=False, say=lambda m, w=False: said.append(m), remover=remover
+    )
+    assert calls == [("t1", ["계약서"]), ("t2", ["고객사"])]
+    live = {(t, r["alias"]) for t, rs in aligns.alias_provenance(live=True).items() for r in rs}
+    assert live == {("t1", "약정서"), ("t1", "남의 별칭")}
+    assert remove.alias_removal_plan(store, a) == {}
+
+    # an unreachable upstream keeps the source unless --force
+    aligns.record_alias_additions("t3", ["x"], run_id=run.id, source_id=a.id)
+
+    def down(settings, term_id, aliases):
+        raise OSError("connection refused")
+
+    import autoontology.engine.upstream_terms as upstream_terms
+
+    monkeypatch.setattr(upstream_terms, "remove_term_synonyms", down)
+    with pytest.raises(remove.RemoveError, match="--force"):
+        remove.remove_source(settings, store, a)
+    assert store.get_source("docs") is not None
+    remove.remove_source(settings, store, a, force=True)
+    assert store.get_source("docs") is None
