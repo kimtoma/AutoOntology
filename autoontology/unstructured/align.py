@@ -9,7 +9,7 @@
 3. Identity policy (:func:`apply_identity_policy`, versioned): ``same`` needs confidence
    >= max(--min-conf, 0.90) and a normalized full-alias match with the Term's trusted
    aliases (never ones AutoOntology added itself); otherwise ``related`` + a review proposal.
-   ``identity-v2`` rule: aliases are compared after NFKC, case folding and whitespace
+   ``identity-v2.1`` rule: aliases are compared after NFKC, case folding and whitespace
    removal, and an all-Latin alias longer than 3 characters also matches as its English
    singular (:func:`singular`: ``Contracts`` = ``Contract``, ``categories`` = ``category``,
    ``boxes`` = ``box``; ``-ss``/``-us``/``-is`` are kept). Plurals that are a different
@@ -282,7 +282,9 @@ def apply_kind_guard(
 #: step. Every path (fresh, cached, resumed verdicts) re-applies the current policy.
 #: v2: an English plural and its singular count as the same alias (``Contracts`` /
 #: ``contracts`` table vs. ``Contract``), still whole aliases only, never substrings.
-IDENTITY_POLICY_VERSION = "identity-v2"
+#: v2.1: the :data:`NO_SINGULAR` stop-list (a workspace aligned under v2 re-judges its
+#: stored verdicts on ``--resume``, no LLM call).
+IDENTITY_POLICY_VERSION = "identity-v2.1"
 #: A destructive identity merge needs at least this confidence (and at least --min-conf).
 IDENTITY_MIN_CONF = 0.90
 

@@ -11,7 +11,7 @@ later cleanup:
   `pending`. The UI/README should say so.
 - **Migration v2 drops the playground conversations.** Upgrading a pre-T2 home deletes
   the stored playground chats without a copy. The README upgrade note must mention it.
-- **identity-v2 rule** (documented in `autoontology/unstructured/align.py`): English
+- **identity-v2.1 rule** (documented in `autoontology/unstructured/align.py`): English
   singular/plural aliases match (`Contracts` = `Contract`), except a stop-list of known
   false-positive pairs (`goods`, `customs`, `news`, `arms`, `glasses`, `means`). README
   and plan should describe it.

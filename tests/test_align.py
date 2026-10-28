@@ -887,13 +887,16 @@ def test_identity_case5_cached_bad_same_is_recomputed(approver_env, monkeypatch)
     assert "승인권자" in AlignmentStore(store).alias_additions()["t-contract"]
 
 
-def test_identity_case5_resumed_bad_same_is_recomputed(approver_env, monkeypatch):
+@pytest.mark.parametrize("old_policy", [None, "identity-v2"])
+def test_identity_case5_resumed_bad_same_is_recomputed(approver_env, monkeypatch, old_policy):
     settings, store = approver_env
     client = FakeClient()
     first, judge = _bad_first_run(settings, store, client, monkeypatch)
     run = store.get_run(first.run_id)
     params = {k: v for k, v in run.params.items() if k != "identity_policy"}
-    with store._conn() as conn:  # a run judged before the policy existed
+    if old_policy:  # judged before the stop-list
+        params["identity_policy"] = old_policy
+    with store._conn() as conn:  # a run judged before the policy (or this version) existed
         conn.execute(
             "UPDATE runs SET params_json = ? WHERE id = ?",
             (__import__("json").dumps(params), run.id),
@@ -981,7 +984,7 @@ def test_identity_v2_stop_list_keeps_false_positive_pairs_apart(plural, single):
     verdict, proposal = al.apply_identity_policy(
         al.ValidatedVerdict("t", "same", 0.97, "ok"), concept, term, min_conf=0.7
     )
-    assert verdict.relation == "related" and proposal["policy"] == "identity-v2"
+    assert verdict.relation == "related" and proposal["policy"] == "identity-v2.1"
     exact = al.ConceptInfo("c", "개념", "entity", "x", name_en=plural.upper())
     verdict, _ = al.apply_identity_policy(
         al.ValidatedVerdict("t", "same", 0.97, "ok"), exact, term, min_conf=0.7
@@ -1040,4 +1043,4 @@ def test_identity_policy_matches_english_plurals_only_as_whole_aliases():
     verdict, proposal = al.apply_identity_policy(
         al.ValidatedVerdict("t", "same", 0.95, "ok"), other, term, min_conf=0.7
     )
-    assert verdict.relation == "related" and proposal["policy"] == "identity-v2"
+    assert verdict.relation == "related" and proposal["policy"] == "identity-v2.1"
