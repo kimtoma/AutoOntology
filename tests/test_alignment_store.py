@@ -221,3 +221,30 @@ def test_removing_the_last_supporting_source_removes_a_shared_alias(stores, tmp_
     remove.remove_added_aliases(settings, store, b, force=False, say=quiet, remover=remover)
     assert calls == [("t1", ["약정서"])]
     assert aligns.alias_provenance(live=True) == {}
+
+
+def test_source_rm_queues_a_failed_embedding_refresh(stores, tmp_path):
+    """Recheck #7: the alias came off but the Term's re-embedding failed: the Term goes to
+    the retry queue the next align drains, not silently dropped."""
+    from autoontology.config import Settings
+    from autoontology.structured import remove
+
+    store, _docs, aligns, a = stores
+    run = store.create_run(kind="build", source_id=None, params={})
+    aligns.record_alias_additions("t1", ["계약서"], run_id=run.id, source_id=a.id)
+
+    def remover(settings, term_id, aliases):
+        return {"removed": list(aliases), "embeddings_refreshed": False}
+
+    said = []
+    remove.remove_added_aliases(
+        Settings(home=tmp_path / "home"),
+        store,
+        a,
+        force=False,
+        say=lambda m, w=False: said.append((m, w)),
+        remover=remover,
+    )
+    store.delete_source(a.id)
+    assert aligns.pending_refreshes() == ["t1"]
+    assert any(w and "embedding" in m for m, w in said)

@@ -285,6 +285,13 @@ def remove_added_aliases(
             say(f"warning: synonyms of Term {term_id} kept (--force): {exc}", True)
             continue
         aligns.mark_aliases_removed(term_id, aliases)
+        if removed and result.get("embeddings_refreshed") is False:
+            # the next align run retries it (the queue outlives this source)
+            aligns.add_pending_refresh(term_id, f"synonyms removed by source rm {src.name}")
+            say(
+                f"warning: re-embedding Term {term_id} failed; queued for the next align run",
+                True,
+            )
         say(
             f"removed {len(removed)} synonym(s) {src.name} added to Term {term_id}"
             + (f" ({', '.join(removed)})" if removed else "")
