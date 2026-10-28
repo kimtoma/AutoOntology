@@ -333,6 +333,8 @@ class SampleSource:
     path: Path
     files: int
     bytes: int
+    #: the file extensions present (lowercase, dotted, sorted)
+    formats: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -341,6 +343,7 @@ class SampleSource:
             "path": str(self.path),
             "files": self.files,
             "bytes": self.bytes,
+            "formats": self.formats,
         }
 
 
@@ -387,6 +390,7 @@ def sample_sources(settings: Settings, set_name: str) -> list[SampleSource]:
                 path=path.resolve(),
                 files=len(files),
                 bytes=sum(f.stat().st_size for f in files),
+                formats=sorted({f.suffix.lower() for f in files}),
             )
         )
     if not out:
@@ -430,6 +434,11 @@ def list_sample_sets(settings: Settings, store: Any) -> list[dict[str, Any]]:
                 "path": str((Path(settings.samples_dir) / set_name).resolve()),
                 "sources": [s.as_dict() for s in sources],
                 "registered": all(is_registered(store, s) for s in sources),
+                #: expected build time per chat provider (the table `demo` prints)
+                "durations": {
+                    provider: {"text": text, "measured": measured}
+                    for provider, (text, measured) in DEMO_DURATIONS.get(set_name, {}).items()
+                },
             }
         )
     return out

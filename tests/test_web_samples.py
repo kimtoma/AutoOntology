@@ -44,6 +44,20 @@ def test_list_samples(client):
     ]
 
 
+def test_list_samples_names_formats_and_expected_build_times(client):
+    """The UI's "Load sample data" dialog shows each source's formats and the expected
+    build time per provider (the table `demo` prints)."""
+    from autoontology.onboarding import DEMO_DURATIONS
+
+    c, *_ = client
+    quick = c.get(f"{API}/samples").json()[0]
+    assert [s["formats"] for s in quick["sources"]] == [[".csv"], [".md"]]
+    assert quick["durations"] == {
+        provider: {"text": text, "measured": measured}
+        for provider, (text, measured) in DEMO_DURATIONS["quickstart"].items()
+    }
+
+
 def test_load_samples_registers_like_demo(client):
     c, settings, _ = client
     resp = c.post(f"{API}/samples/load", json={"set": "quickstart"})
