@@ -175,7 +175,10 @@ def write(
     root = out_dir / OKF_DIR
     generated = {"by": GENERATOR, "at": created_at}
     aligned = model.aligned_terms()
-    pending = {e.get("name") for e in [*model.low_confidence, *model.dry_run_same]}
+    # judged same but not folded; matched by (documents source, name), not by label alone
+    pending = {
+        (e.get("source"), e.get("name")) for e in [*model.low_confidence, *model.dry_run_same]
+    }
 
     # paths ------------------------------------------------------------------------------
     nodes: list[Any] = sorted(
@@ -292,7 +295,9 @@ def write(
             "resource": f"{model.base}{node.local}",
             "tags": tags,
             "generated": dict(generated),
-            "status": "draft" if not structured and node.label in pending else "stable",
+            "status": "draft"
+            if not structured and (node.documents_source, node.label) in pending
+            else "stable",
         }
         if sources:
             meta["sources"] = sources

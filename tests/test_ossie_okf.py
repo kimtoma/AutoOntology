@@ -625,6 +625,27 @@ def test_okf_body_text_cannot_open_html_or_blocks(tmp_path):
     assert okf.validate(tmp_path / "okf").ok
 
 
+def test_okf_draft_status_is_per_documents_source(tmp_path):
+    base = documents()
+    evidence = [dict(base.evidence[-1], id=99, concept_id="o9")]
+    other = merged.DocumentsInput(
+        "other-docs",
+        base.documents,
+        [_concept("o9", "담당자", "entity", "다른 문서의 담당자")],
+        [],
+        evidence,
+        [],  # no alignment: 담당자 of this source is not pending
+    )
+    m = merged.build("ws", structured=[structured()], documents=[documents(), other])
+    okf.write(m, tmp_path, revision=1, created_at=CREATED)
+    status = {}
+    for path in (tmp_path / "okf/concepts").glob("*.md"):
+        meta, _, _ = okf.split_frontmatter(path.read_text(encoding="utf-8"))
+        if meta["title"] == "담당자":
+            status[next(t for t in meta["tags"] if t.startswith("source:"))] = meta["status"]
+    assert status == {"source:hanbit-docs": "draft", "source:other-docs": "stable"}
+
+
 def test_okf_concept_frontmatter_and_body(bundle):
     out, _, _ = bundle
     meta, body = _okf(out, "concepts/contracts.md")
