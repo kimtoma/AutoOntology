@@ -47,3 +47,7 @@ Items from T3 (Ossie and OKF exporters):
 - **Link mappings need single-field keys at both ends.** On the sample data only
   `customers` declares a key upstream, so `Contracts`/`Invoices` get no object mapping (a
   warning each).
+- **OKF body text is escaped, not sanitized.** Definitions, evidence quotes and labels get
+  `<` as `&lt;` and a backslash before a line-leading `#`, `>`, list marker or `1.`, so
+  they cannot open raw HTML or a block. A UI that renders the `.md` files as HTML must
+  still sanitize its output (the API serves them as `text/plain`).

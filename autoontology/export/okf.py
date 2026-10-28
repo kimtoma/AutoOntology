@@ -82,10 +82,29 @@ def _one_line(text: str, limit: int = 240) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+#: a line start that Markdown reads as a heading, list item, block quote or rule
+_BLOCK_START = re.compile(r"^(#|>|[-+*](?=\s|$)|[-*_]{3}|\d+(?=[.)](?:\s|$))|=+\s*$)")
+
+
 def _escape(text: str) -> str:
-    """Inline text that cannot open a link, footnote or table cell."""
+    """Inline text (definitions, quotes, labels come from documents and the LLM) that
+    cannot open a link, footnote, table cell, raw HTML or a block: ``<`` becomes ``&lt;``
+    and a leading ``#``/``>``/list marker/ordered-list number is backslash-escaped."""
     text = " ".join(str(text or "").split())
-    return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("|", "\\|")
+    text = (
+        text.replace("\\", "\\\\")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("|", "\\|")
+        .replace("<", "&lt;")
+    )
+    match = _BLOCK_START.match(text)
+    if match is None:
+        return text
+    if match.group(0)[0].isdigit():  # "1." -> "1\."
+        end = match.end()
+        return f"{text[:end]}\\{text[end:]}"
+    return f"\\{text}"
 
 
 def _iri_path(path: str) -> str:

@@ -609,6 +609,22 @@ def test_okf_bundle_is_conformant_with_working_links(bundle):
                 assert (root / target.lstrip("/")).is_file(), (rel, target)
 
 
+def test_okf_body_text_cannot_open_html_or_blocks(tmp_path):
+    m = merged.build("ws", documents=[documents()])
+    cls = next(c for c in m.classes.values() if c.label == "거래처")
+    cls.definitions[:] = ["# 거래처 <img src=x onerror=alert(1)>", "1. 첫째 항목", "- 목록"]
+    ev = m.evidence[cls.derived_from[0]]
+    ev.quote = "> 인용 <script>x</script>"
+    okf.write(m, tmp_path, revision=1, created_at=CREATED)
+    _, body = _okf(tmp_path, "concepts/거래처.md")
+    lines = body.splitlines()
+    assert "\\# 거래처 &lt;img src=x onerror=alert(1)>" in lines
+    assert "1\\. 첫째 항목" in lines and "\\- 목록" in lines
+    assert any(line.startswith("- “\\> 인용 &lt;script>x&lt;/script>”[^") for line in lines)
+    assert "<" not in body.replace("&lt;", "")
+    assert okf.validate(tmp_path / "okf").ok
+
+
 def test_okf_concept_frontmatter_and_body(bundle):
     out, _, _ = bundle
     meta, body = _okf(out, "concepts/contracts.md")
