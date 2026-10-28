@@ -228,6 +228,14 @@ class MergedOntology:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MergedOntology:
+        """The model of a :meth:`to_dict` snapshot; a snapshot written in a newer
+        :data:`MODEL_FORMAT` than this code knows is refused, never silently mis-read."""
+        version = data.get("format", 1)
+        if not isinstance(version, int) or version > MODEL_FORMAT:
+            raise ValueError(
+                f"ontology snapshot format {version!r} is newer than this AutoOntology "
+                f"(format {MODEL_FORMAT}): upgrade AutoOntology to read it"
+            )
         data = {k: v for k, v in data.items() if k != "format"}
         nested: dict[str, type] = {
             "classes": OClass,
