@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from autoontology import formats
 from autoontology.config import Settings
 from autoontology.engine.jobs import (
     JobError,
@@ -115,6 +116,27 @@ def sha256_file(path: Path) -> str:
 KORDOC_UNAVAILABLE_CODES = frozenset({"ENGINE_MISSING", "NODE_MISSING"})
 
 
+def _ocr_ready(ctx: _ExtractCtx, engine: Any) -> bool:
+    try:
+        return bool(readers.kordoc.ocr_models_status(ctx.settings.home, engine=engine)["ready"])
+    except readers.kordoc.KordocError:
+        return False
+
+
+def _with_caption(ctx: _ExtractCtx, path: Path, doc: readers.Document) -> readers.Document:
+    """The optional vision caption (``AUTOONTOLOGY_VISION_MODEL``) before the OCR text; a
+    failure only logs a warning and keeps the OCR sections."""
+    from autoontology.unstructured import vision
+
+    try:
+        return vision.add_caption(
+            doc, endpoint=ctx.settings.ollama_endpoint, model=ctx.settings.vision_model
+        )
+    except (vision.VisionError, OSError) as exc:
+        logger.warning("  %s: no image description (%s); OCR text only", path.name, exc)
+        return doc
+
+
 def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
     files = readers.discover_documents(ctx.target, recursive=ctx.recursive)
     if not files:
@@ -129,6 +151,10 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
     #: failure); kordoc's availability is part of the source's input fingerprint, so the
     #: next build after `tools install-kordoc` reads them
     needs_kordoc: list[dict[str, str]] = []
+    #: images that need kordoc's OCR models, which are not downloaded: skipped the same way
+    #: (OCR readiness is part of the input fingerprint too)
+    needs_ocr: list[dict[str, str]] = []
+    ocr_ready: bool | None = None
     duplicates: list[dict[str, str]] = []
     superseded: list[dict[str, str]] = []
     # Ownership comes from the *current* contents of the whole input set, decided before
@@ -180,15 +206,31 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             )
             logger.info("  %s: unchanged", display_path(shown))
             continue
+        is_image = path.suffix.lower() in formats.IMAGE_SUFFIXES
         try:
             if path.suffix.lower() in readers.kordoc.EXTENSIONS and engine is None:
                 engine = readers.kordoc.resolve_engine(ctx.settings.home)
+            if is_image:
+                if ocr_ready is None:
+                    ocr_ready = _ocr_ready(ctx, engine)
+                if not ocr_ready:
+                    needs_ocr.append(
+                        {
+                            "path": shown,
+                            "code": readers.kordoc.OCR_MODELS_MISSING,
+                            "error": "kordoc's OCR models are not downloaded; run "
+                            f"`{readers.kordoc.INSTALL_COMMAND}`",
+                        }
+                    )
+                    continue
             doc = readers.read_document(
                 path,
                 home=ctx.settings.home,
                 engine=engine,
                 max_table_rows=ctx.settings.doc_table_max_rows,
             )
+            if is_image and ctx.settings.vision_model:
+                doc = _with_caption(ctx, path, doc)
             chunks = chunker.chunk(
                 doc, max_tokens=max_tokens, overlap_tokens=overlap, pack_tokens=pack
             )
@@ -200,7 +242,15 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             if code in KORDOC_UNAVAILABLE_CODES:
                 needs_kordoc.append({"path": shown, "code": code, "error": message})
                 continue
-            failed.append({"path": shown, "code": code, "error": message})
+            remedy = getattr(exc, "remedy", "")
+            failed.append(
+                {
+                    "path": shown,
+                    "code": code,
+                    "error": message,
+                    **({"remedy": remedy} if remedy else {}),
+                }
+            )
             logger.warning("  %s: FAILED (%s) %s", display_path(shown), code, message)
             continue
         row, replaced = ctx.docs.replace_document(
@@ -232,7 +282,7 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             len(doc.sections),
             len(chunks),
         )
-    if not documents and not needs_kordoc:
+    if not documents and not needs_kordoc and not needs_ocr:
         # documents that only wait for kordoc are a warning, not a failure: the step
         # succeeds with 0 documents and the next build after the install reads them
         raise RuntimeError(
@@ -244,6 +294,13 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             "  %d document(s) need kordoc, skipped: %s; run `%s`, then build again",
             len(needs_kordoc),
             ", ".join(display_path(f["path"]) for f in needs_kordoc),
+            readers.kordoc.INSTALL_COMMAND,
+        )
+    if needs_ocr:
+        logger.warning(
+            "  %d image(s) need the OCR models, skipped: %s; run `%s`, then build again",
+            len(needs_ocr),
+            ", ".join(display_path(f["path"]) for f in needs_ocr),
             readers.kordoc.INSTALL_COMMAND,
         )
     pruned: list[str] = []
@@ -267,6 +324,7 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
         "documents": documents,
         "failed": failed,
         "needs_kordoc": needs_kordoc,
+        "needs_ocr": needs_ocr,
         "duplicates": duplicates,
         "pruned": pruned,
         "superseded": superseded,

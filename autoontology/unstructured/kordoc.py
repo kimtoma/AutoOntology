@@ -9,7 +9,13 @@ AutoOntology runs the CLI as a subprocess (no shell), one process per document::
 stdout is JSON: a list of RAG chunks on success, ``{"success": false, "code", "error"}``
 (exit 1) on failure. Everything kordoc returns is document data -- untrusted, never
 instructions. ``KORDOC_OFFLINE=1`` is always set so the engine never touches the
-network (OCR models must then already be present locally).
+network (OCR models must then already be present locally). PDFs get ``--ocr`` (scanned
+pages are recognised; pages with a text layer are not); images are always OCR'd.
+
+OCR models (PP-OCRv5 korean, ~18 MB, kordoc's model cache): :func:`ocr_models_status`
+asks ``check-ocr-models --status-only``; :func:`download_ocr_models` runs
+``check-ocr-models`` with network access -- the one call without ``KORDOC_OFFLINE``
+(``tools install-kordoc`` does it unless ``--skip-ocr-models``).
 
 Engine resolution: ``KORDOC_CLI`` (path to ``dist/cli.js``) -> ``<home>/kordoc/
 node_modules/kordoc/dist/cli.js`` (``autoontology tools install-kordoc``) -> ``kordoc`` on
@@ -38,6 +44,9 @@ DEFAULT_VERSION = "4.24.13"
 MIN_NODE_MAJOR = 20
 DEFAULT_TIMEOUT_S = 300.0
 INSTALL_COMMAND = "uv run autoontology tools install-kordoc"
+OCR_MODELS_MISSING = "OCR_MODELS_MISSING"
+OCR_STATUS_TIMEOUT_S = 60.0
+OCR_DOWNLOAD_TIMEOUT_S = 900.0
 VERSION_FILE = "kordoc.version"
 #: File types kordoc parses (``kordoc --help``; HWPML is ``.hml``): documents and images.
 EXTENSIONS: frozenset[str] = formats.DOCUMENT_KORDOC_SUFFIXES | formats.IMAGE_SUFFIXES
@@ -248,8 +257,10 @@ def parse_chunks(
     timeout: float | None = None,
     extra_args: list[str] | None = None,
 ) -> list[KordocChunk]:
-    """``--format chunks`` (the extractor's input). Malformed entries are skipped."""
+    """``--format chunks`` (the extractor's input; ``--ocr`` for PDFs). Malformed entries
+    are skipped."""
     path = Path(path)
+    ocr = ["--ocr"] if path.suffix.lower() == ".pdf" else []
     proc = run_cli(
         engine,
         [
@@ -258,6 +269,7 @@ def parse_chunks(
             "--table-format",
             "gfm",
             "--silent",
+            *ocr,
             *(extra_args or []),
             *_path_args(path),
         ],
@@ -311,6 +323,77 @@ def engine_version(engine: KordocEngine) -> str:
     return version
 
 
+# --- OCR models -----------------------------------------------------------------------
+
+
+def _ocr_detail(data: Any) -> tuple[bool, str]:
+    if not isinstance(data, dict) or not isinstance(data.get("allReady"), bool):
+        return False, "check-ocr-models gave no allReady field"
+    models = [m for m in data.get("models") or [] if isinstance(m, dict)]
+    ok = [m for m in models if m.get("exists") and m.get("verified")]
+    if data["allReady"]:
+        return True, f"{len(ok)}/{len(models)} OCR models verified (PP-OCRv5 korean)"
+    missing = [str(m.get("filename") or m.get("name") or "?") for m in models if m not in ok]
+    return False, f"OCR models missing or unverified: {', '.join(missing) or 'unknown'}"
+
+
+def ocr_models_status(home: Path, *, engine: KordocEngine | None = None) -> dict[str, Any]:
+    """``{"ready": bool, "detail": str}`` from ``check-ocr-models --status-only`` (offline;
+    no paths in the detail). :class:`KordocUnavailable` when there is no engine at all."""
+    engine = engine or resolve_engine(home)
+    try:
+        proc = run_cli(
+            engine,
+            ["check-ocr-models", "--status-only"],
+            timeout=OCR_STATUS_TIMEOUT_S,
+            label="check-ocr-models",
+        )
+    except KordocUnavailable:
+        raise
+    except KordocError as exc:
+        return {"ready": False, "detail": exc.message}
+    try:
+        data = json.loads(proc.stdout) if proc.stdout.strip() else None
+    except json.JSONDecodeError:
+        data = None
+    if proc.returncode != 0 or data is None:
+        return {"ready": False, "detail": f"check-ocr-models exited {proc.returncode}"}
+    ready, detail = _ocr_detail(data)
+    return {"ready": ready, "detail": detail}
+
+
+def download_ocr_models(
+    home: Path,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess] | None = None,
+    echo: Callable[[str], None] = print,
+    engine: KordocEngine | None = None,
+) -> dict[str, Any]:
+    """Download kordoc's OCR models (``check-ocr-models``, network allowed for this call
+    only) unless they are already verified; returns :func:`ocr_models_status` afterwards,
+    or raises :class:`KordocError` (``OCR_MODELS_MISSING``) when they are still missing."""
+    engine = engine or resolve_engine(home)
+    status = ocr_models_status(home, engine=engine)
+    if status["ready"]:
+        return status
+    env = {k: v for k, v in os.environ.items() if k != "KORDOC_OFFLINE"}
+    argv = [engine.node, str(engine.cli), "check-ocr-models"]
+    echo("downloading the OCR models (PP-OCRv5 korean, ~18 MB): " + " ".join(argv[1:]))
+    run = runner or subprocess.run
+    try:
+        proc = run(argv, check=False, env=env, timeout=OCR_DOWNLOAD_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        raise KordocError(OCR_MODELS_MISSING, "the OCR model download timed out") from exc
+    status = ocr_models_status(home, engine=engine)
+    if proc.returncode != 0 or not status["ready"]:
+        raise KordocError(
+            OCR_MODELS_MISSING,
+            f"the OCR model download failed (exit {proc.returncode}; {status['detail']}); "
+            "it needs network access for this one step",
+        )
+    return status
+
+
 # --- install --------------------------------------------------------------------------
 
 
@@ -320,6 +403,8 @@ class InstallResult:
     version: str
     cli: Path
     omit_optional: bool
+    #: :func:`ocr_models_status` after the model download (None: not attempted)
+    ocr: dict[str, Any] | None = None
 
 
 def read_version_file(home: Path) -> dict[str, Any] | None:
@@ -339,8 +424,38 @@ def install_kordoc(
     npm: str | None = None,
     runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     echo: Callable[[str], None] = print,
+    ocr_models: bool = True,
 ) -> InstallResult:
-    """``npm install --prefix <home>/kordoc --no-audit --no-fund kordoc@<version>``."""
+    """``npm install --prefix <home>/kordoc --no-audit --no-fund kordoc@<version>``, then
+    (*ocr_models*, not with *omit_optional*) :func:`download_ocr_models` -- also when the
+    package was already installed, so re-running the install fetches missing models."""
+    result = _install_package(
+        home,
+        version=version,
+        omit_optional=omit_optional,
+        force=force,
+        npm=npm,
+        runner=runner,
+        echo=echo,
+    )
+    if ocr_models and not omit_optional:
+        status = download_ocr_models(home, runner=runner, echo=echo)
+        result = InstallResult(
+            result.action, result.version, result.cli, result.omit_optional, status
+        )
+    return result
+
+
+def _install_package(
+    home: Path,
+    *,
+    version: str,
+    omit_optional: bool,
+    force: bool,
+    npm: str | None,
+    runner: Callable[..., subprocess.CompletedProcess],
+    echo: Callable[[str], None],
+) -> InstallResult:
     if not _VERSION_RE.fullmatch(version):
         raise KordocError("BAD_VERSION", f"not a kordoc version: {version!r}")
     target = install_dir(home)

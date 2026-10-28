@@ -224,6 +224,46 @@ def check_kordoc(settings: Settings) -> Check:
     return Check("kordoc", "OK", detail)
 
 
+def check_ocr_models(settings: Settings) -> Check:
+    """kordoc's OCR models (images and scanned PDFs). SKIP without kordoc."""
+    from autoontology.unstructured import kordoc
+
+    try:
+        engine = kordoc.resolve_engine(settings.home)
+    except kordoc.KordocUnavailable as exc:
+        return Check("ocr models", "SKIP", f"kordoc not available ({exc.code})")
+    status = kordoc.ocr_models_status(settings.home, engine=engine)
+    if status["ready"]:
+        return Check("ocr models", "OK", status["detail"])
+    return Check(
+        "ocr models",
+        "WARN",
+        f"{status['detail']}; images and scanned PDFs will be skipped",
+        f"run `{kordoc.INSTALL_COMMAND}`",
+    )
+
+
+def check_vision_model(settings: Settings) -> Check:
+    """The optional Ollama vision model that captions images (AUTOONTOLOGY_VISION_MODEL)."""
+    from autoontology.engine.ollama import has_model, list_models
+
+    model = settings.vision_model
+    if not model:
+        return Check("vision model", "SKIP", "AUTOONTOLOGY_VISION_MODEL not set (images: OCR only)")
+    try:
+        names = list_models(settings.ollama_endpoint)
+    except (httpx.HTTPError, ValueError) as exc:
+        return Check(
+            "vision model",
+            "FAIL",
+            f"{model}: Ollama at {settings.ollama_root_url} not reachable ({type(exc).__name__})",
+            "start Ollama (`ollama serve`)",
+        )
+    if not has_model(names, model):
+        return Check("vision model", "FAIL", f"{model} is not pulled", "uv run autoontology setup")
+    return Check("vision model", "OK", f"{model} at {settings.ollama_root_url}")
+
+
 def check_profile(settings: Settings) -> Check:
     problems = validate_model_profile(settings)
     if problems:
@@ -468,6 +508,14 @@ def run_checks(settings: Settings, *, skip_models: bool = False) -> list[Check]:
     checks.append(
         _guard("kordoc", lambda: check_kordoc(settings), "uv run autoontology tools install-kordoc")
     )
+    checks.append(
+        _guard(
+            "ocr models",
+            lambda: check_ocr_models(settings),
+            "uv run autoontology tools install-kordoc",
+        )
+    )
+    checks.append(_guard("vision model", lambda: check_vision_model(settings)))
     profile = check_profile(settings)
     checks.append(profile)
     provider = _guard("chat provider", lambda: check_chat_provider(settings))

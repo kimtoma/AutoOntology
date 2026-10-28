@@ -1434,3 +1434,110 @@ def test_export_refuses_a_marker_without_file_hashes(env, tmp_path):
     assert export_job.run_export(store, settings, out=out, client=env["client"]).status == (
         "succeeded"
     )
+
+
+def _fake_kordoc(monkeypatch, tmp_path, *, ready):
+    """A resolvable kordoc engine whose OCR readiness the test controls; parse_chunks
+    returns one OCR line."""
+    from autoontology.unstructured import kordoc
+
+    cli = tmp_path / "kordoc-cli.js"
+    cli.write_text("//", encoding="utf-8")
+    engine = kordoc.KordocEngine(node="/usr/bin/node", cli=cli, origin="KORDOC_CLI")
+    state = {"ready": ready, "parsed": []}
+    monkeypatch.setattr(kordoc, "resolve_engine", lambda home, env=None: engine)
+    monkeypatch.setattr(
+        kordoc,
+        "ocr_models_status",
+        lambda home, engine=None: {"ready": state["ready"], "detail": "fake"},
+    )
+
+    def parse(engine, path, **kw):
+        state["parsed"].append(Path(path).name)
+        return [kordoc.KordocChunk("c1", "text", (), "조직도 영업본부 재무본부", 1)]
+
+    monkeypatch.setattr(kordoc, "parse_chunks", parse)
+    return state
+
+
+def test_images_wait_for_the_ocr_models_without_failing(env, monkeypatch, tmp_path):
+    state = _fake_kordoc(monkeypatch, tmp_path, ready=False)
+    (env["docs"] / "조직도.png").write_bytes(b"\x89PNG")
+    add_documents(env)
+    result = run(env)
+    assert result.status == "succeeded", result.problems
+    read = result.details["documents:hanbit-docs:read"]
+    assert read["failed"] == [] and read["needs_kordoc"] == []
+    assert [f["code"] for f in read["needs_ocr"]] == ["OCR_MODELS_MISSING"]
+    assert "tools install-kordoc" in read["needs_ocr"][0]["error"]
+    assert state["parsed"] == []
+    (warning,) = result.warnings
+    assert "1 image(s) need the OCR models" in warning and "조직도.png" in warning
+    assert "tools install-kordoc" in warning
+    # nothing changed: resume keeps the read
+    assert "documents:hanbit-docs:read" not in run(env, resume=True).details
+    # the models arrive: the fingerprint changes and the image is read
+    state["ready"] = True
+    after = run(env, resume=True)
+    read = after.details["documents:hanbit-docs:read"]
+    assert read["needs_ocr"] == [] and state["parsed"] == ["조직도.png"]
+    assert after.warnings == []
+
+
+def test_ocr_state_is_part_of_the_fingerprint(env, monkeypatch, tmp_path):
+    state = _fake_kordoc(monkeypatch, tmp_path, ready=False)
+    add_documents(env)
+    source = env["store"].get_source("hanbit-docs")
+    home = env["settings"].home
+    md_only = bj.input_fingerprint(source, home)
+    state["ready"] = True
+    assert bj.input_fingerprint(source, home) == md_only  # no image, no PDF: no OCR state
+    (env["docs"] / "scan.pdf").write_bytes(b"%PDF")
+    ready = bj.input_fingerprint(source, home)
+    state["ready"] = False
+    assert bj.input_fingerprint(source, home) != ready
+
+
+def test_vision_caption_is_prepended_or_skipped_on_failure(env, monkeypatch, tmp_path, caplog):
+    import dataclasses
+
+    from autoontology.unstructured import vision
+
+    _fake_kordoc(monkeypatch, tmp_path, ready=True)
+    (env["docs"] / "조직도.png").write_bytes(b"\x89PNG")
+    add_documents(env)
+    env["settings"] = dataclasses.replace(env["settings"], vision_model="gemma4:e4b")
+    seen = {}
+
+    def caption(path, *, endpoint, model, **kw):
+        seen.update(path=Path(path).name, endpoint=endpoint, model=model)
+        return "회사 조직도: 영업본부와 재무본부가 대표이사 아래에 있다."
+
+    monkeypatch.setattr(vision, "caption_image", caption)
+    result = run(env)
+    assert result.status == "succeeded", result.problems
+    assert seen == {
+        "path": "조직도.png",
+        "endpoint": env["settings"].ollama_endpoint,
+        "model": "gemma4:e4b",
+    }
+    from autoontology.store.documents import DocumentStore
+
+    docs = DocumentStore(env["store"])
+    source = env["store"].get_source("hanbit-docs")
+    (image,) = [d for d in docs.list_documents(source.id) if d.path.endswith(".png")]
+    text = "\n".join(c.text for c in docs.chunks_for_document(image.id))
+    assert text.index("회사 조직도") < text.index("조직도 영업본부 재무본부")
+
+    def broken(path, **kw):
+        raise vision.VisionError("gemma4:e4b at http://x/api/chat: HTTP 404")
+
+    monkeypatch.setattr(vision, "caption_image", broken)
+    (env["docs"] / "조직도.png").write_bytes(b"\x89PNG changed")
+    caplog.set_level("WARNING")
+    again = run(env)
+    assert again.status == "succeeded", again.problems
+    assert "no image description" in caplog.text
+    (image,) = [d for d in docs.list_documents(source.id) if d.path.endswith(".png")]
+    text = "\n".join(c.text for c in docs.chunks_for_document(image.id))
+    assert "회사 조직도" not in text and "조직도 영업본부" in text

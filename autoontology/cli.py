@@ -81,6 +81,11 @@ def setup(
     force_alias: bool = typer.Option(
         False, "--force-alias", help="Rebuild the Ollama chat alias even if it exists."
     ),
+    skip_ocr_models: bool = typer.Option(
+        False,
+        "--skip-ocr-models",
+        help="With --docs: do not download kordoc's OCR models (images/scans then skipped).",
+    ),
 ) -> None:
     """Prepare everything (idempotent): database + extensions -> migrations -> models -> kordoc."""
     from autoontology.engine.migrate import (
@@ -150,14 +155,37 @@ def setup(
                 f"completion_tokens {result.completion_tokens} (thinking off); "
                 f"embeddings {settings.ollama_embed_model}"
             )
+    if settings.vision_model and not skip_models:
+        from autoontology.engine.ollama import OllamaSetupError, pull_models
+
+        try:
+            pulled = pull_models(settings.ollama_endpoint, [settings.vision_model], echo=typer.echo)
+        except OllamaSetupError as exc:
+            _fail(f"vision model: {exc}")
+        typer.echo(
+            f"vision model: {settings.vision_model} present" + (" (pulled)" if pulled else "")
+        )
     if docs:
-        _install_kordoc(settings, version=None, omit_optional=False, force=False)
+        _install_kordoc(
+            settings,
+            version=None,
+            omit_optional=False,
+            force=False,
+            skip_ocr_models=skip_ocr_models,
+        )
     else:
         typer.echo("kordoc: skipped (pass --docs for HWP/PDF/DOCX/PPTX documents)")
     typer.echo("next: uv run autoontology up")
 
 
-def _install_kordoc(settings, *, version: str | None, omit_optional: bool, force: bool) -> None:
+def _install_kordoc(
+    settings,
+    *,
+    version: str | None,
+    omit_optional: bool,
+    force: bool,
+    skip_ocr_models: bool = False,
+) -> None:
     from autoontology.unstructured import kordoc
 
     try:
@@ -167,6 +195,7 @@ def _install_kordoc(settings, *, version: str | None, omit_optional: bool, force
             omit_optional=omit_optional,
             force=force,
             echo=typer.echo,
+            ocr_models=False,
         )
         engine = kordoc.KordocEngine(node=kordoc.require_node()[0], cli=result.cli, origin="home")
         reported = kordoc.engine_version(engine)
@@ -178,6 +207,22 @@ def _install_kordoc(settings, *, version: str | None, omit_optional: bool, force
         f"kordoc: {result.action}: kordoc {reported} at {result.cli}"
         + (" (optional deps omitted: PDF/OCR unavailable)" if result.omit_optional else "")
     )
+    if result.omit_optional:
+        return
+    if skip_ocr_models:
+        typer.echo(
+            "ocr models: skipped (--skip-ocr-models; images and scanned PDFs are skipped "
+            f"until `{kordoc.INSTALL_COMMAND}` runs without it)"
+        )
+        return
+    try:
+        status = kordoc.download_ocr_models(settings.home, engine=engine, echo=typer.echo)
+    except kordoc.KordocError as exc:
+        _fail(
+            f"ocr models: {exc.message}\n"
+            f"retry `{kordoc.INSTALL_COMMAND}`, or pass --skip-ocr-models to go on without OCR"
+        )
+    typer.echo(f"ocr models: {status['detail']}")
 
 
 @tools_app.command("install-kordoc")
@@ -187,9 +232,21 @@ def tools_install_kordoc(
         False, "--omit-optional", help="Skip optional deps (PDF/OCR then unavailable)."
     ),
     force: bool = typer.Option(False, "--force", help="Reinstall even if present."),
+    skip_ocr_models: bool = typer.Option(
+        False,
+        "--skip-ocr-models",
+        help="Do not download the OCR models (~18 MB; images and scanned PDFs need them).",
+    ),
 ) -> None:
-    """Install the kordoc document engine into <home>/kordoc (npm, Node >= 20)."""
-    _install_kordoc(_settings(), version=version, omit_optional=omit_optional, force=force)
+    """Install the kordoc document engine into <home>/kordoc (npm, Node >= 20), then its
+    OCR models."""
+    _install_kordoc(
+        _settings(),
+        version=version,
+        omit_optional=omit_optional,
+        force=force,
+        skip_ocr_models=skip_ocr_models,
+    )
 
 
 @tools_app.command("build-ui")

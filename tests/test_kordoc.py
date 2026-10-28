@@ -138,7 +138,9 @@ class _Runner:
 def test_install_kordoc_argv_and_idempotence(tmp_path):
     home = tmp_path / "home"
     runner = _Runner(home)
-    result = kordoc.install_kordoc(home, npm="/x/npm", runner=runner, echo=lambda _: None)
+    result = kordoc.install_kordoc(
+        home, npm="/x/npm", runner=runner, echo=lambda _: None, ocr_models=False
+    )
     assert result.action == "installed" and result.version == kordoc.DEFAULT_VERSION == "4.24.13"
     assert runner.calls == [
         [
@@ -152,7 +154,9 @@ def test_install_kordoc_argv_and_idempotence(tmp_path):
         ]
     ]
     assert (home / "kordoc" / "kordoc.version").read_text() == "4.24.13\n"
-    again = kordoc.install_kordoc(home, npm="/x/npm", runner=runner, echo=lambda _: None)
+    again = kordoc.install_kordoc(
+        home, npm="/x/npm", runner=runner, echo=lambda _: None, ocr_models=False
+    )
     assert again.action == "already installed" and len(runner.calls) == 1
     kordoc.install_kordoc(
         home,
@@ -161,6 +165,7 @@ def test_install_kordoc_argv_and_idempotence(tmp_path):
         npm="/x/npm",
         runner=runner,
         echo=lambda _: None,
+        ocr_models=False,
     )
     assert runner.calls[-1][-2:] == ["kordoc@4.24.12", "--omit=optional"]
     assert kordoc.read_version_file(home) == {"version": "4.24.12", "omit_optional": True}
@@ -172,6 +177,7 @@ def test_install_kordoc_argv_and_idempotence(tmp_path):
         npm="/x/npm",
         runner=runner,
         echo=lambda _: None,
+        ocr_models=False,
     )
     assert len(runner.calls) == 3
 
@@ -185,9 +191,12 @@ def test_install_kordoc_failures(tmp_path):
             npm="/x/npm",
             runner=_Runner(home),
             echo=lambda _: None,
+            ocr_models=False,
         )
     with pytest.raises(kordoc.KordocError, match="npm install failed"):
-        kordoc.install_kordoc(home, npm="/x/npm", runner=_Runner(home, 1), echo=lambda _: None)
+        kordoc.install_kordoc(
+            home, npm="/x/npm", runner=_Runner(home, 1), echo=lambda _: None, ocr_models=False
+        )
     assert not (Path(home) / "kordoc" / "kordoc.version").exists()
 
 

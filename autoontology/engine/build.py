@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from autoontology import formats
 from autoontology.config import Settings
 from autoontology.engine import align as align_job
 from autoontology.engine import extract as extract_job
@@ -116,6 +117,21 @@ def kordoc_state(home: Path) -> str:
     return f"{engine.cli}:{stamp}:{engine.node}"
 
 
+#: inputs whose reading depends on the OCR models (images; scanned PDF pages)
+OCR_SUFFIXES = frozenset({".pdf"}) | formats.IMAGE_SUFFIXES
+
+
+def ocr_state(home: Path) -> str:
+    """Whether kordoc's OCR models are ready (``ready``/``missing``), or ``none`` without
+    kordoc -- so downloading the models changes the fingerprint of sources with images."""
+    from autoontology.unstructured import kordoc
+
+    try:
+        return "ready" if kordoc.ocr_models_status(home)["ready"] else "missing"
+    except (kordoc.KordocError, OSError):
+        return "none"
+
+
 def input_fingerprint(source: Source, home: Path | None = None) -> str:
     """A hash of what the per-source steps of *source* read: the locator plus, for files
     and documents sources, every input file's path and content hash -- and, for documents
@@ -134,6 +150,8 @@ def input_fingerprint(source: Source, home: Path | None = None) -> str:
                 p.suffix.lower() in extract_job.readers.kordoc.EXTENSIONS for p in files
             ):
                 digest.update(f"kordoc\0{kordoc_state(home)}\0".encode())
+            if home is not None and any(p.suffix.lower() in OCR_SUFFIXES for p in files):
+                digest.update(f"ocr\0{ocr_state(home)}\0".encode())
         else:
             files = []
             schema = pipeline.schema_fingerprint(source)
@@ -783,8 +801,8 @@ def _problems(store: Store, run_id: str, planned: set[str] | None = None) -> lis
 
 
 def _warnings(store: Store, run_id: str, planned: set[str] | None = None) -> list[str]:
-    """What the run skipped without failing: documents that need the kordoc engine (only
-    the steps in *planned*, when given)."""
+    """What the run skipped without failing: documents that need the kordoc engine or its
+    OCR models (only the steps in *planned*, when given)."""
     from autoontology.unstructured.kordoc import INSTALL_COMMAND
     from autoontology.unstructured.report import display_path
 
@@ -797,6 +815,13 @@ def _warnings(store: Store, run_id: str, planned: set[str] | None = None) -> lis
             names = ", ".join(display_path(f["path"]) for f in skipped)
             out.append(
                 f"{step.name}: {len(skipped)} document(s) need kordoc and were skipped "
+                f"({names}): run `{INSTALL_COMMAND}`, then build again"
+            )
+        no_ocr = step.detail.get("needs_ocr") if step.name.endswith(":read") else None
+        if no_ocr:
+            names = ", ".join(display_path(f["path"]) for f in no_ocr)
+            out.append(
+                f"{step.name}: {len(no_ocr)} image(s) need the OCR models and were skipped "
                 f"({names}): run `{INSTALL_COMMAND}`, then build again"
             )
     return out
