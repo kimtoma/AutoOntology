@@ -1,0 +1,13 @@
+.env
+.venv/
+data/
+exports/
+*.duckdb
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.log
+.DS_Store
+node_modules/
+.superpowers/
+.claude/settings.local.json

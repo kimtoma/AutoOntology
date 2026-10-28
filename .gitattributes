@@ -1,0 +1,3 @@
+# Committed build of ui/ (uv run autoontology tools build-ui)
+autoontology/web/static/dist/** linguist-generated=true -diff
+ui/pnpm-lock.yaml linguist-generated=true

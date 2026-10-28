@@ -1,0 +1,3 @@
+[submodule "vendor/auto-ontology"]
+	path = vendor/auto-ontology
+	url = https://github.com/NVIDIA/auto-ontology

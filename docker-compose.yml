@@ -1,0 +1,18 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-autoontology}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autoontology}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-autoontology}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - autoontology-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autoontology}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  autoontology-pgdata:
