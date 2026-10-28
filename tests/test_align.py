@@ -992,6 +992,37 @@ def test_identity_v2_stop_list_keeps_false_positive_pairs_apart(plural, single):
     assert verdict.relation == "same"  # the exact word still matches
 
 
+@pytest.mark.parametrize(
+    ("plural", "single"),
+    [
+        ("Trade Goods", "Trade Good"),
+        ("IMPORT CUSTOMS", "import custom"),
+        ("trade_goods", "Trade Good"),
+        ("TradeGoods", "trade good"),
+    ],
+)
+@pytest.mark.parametrize("term_side", [True, False])
+def test_identity_stop_list_applies_to_the_last_word(plural, single, term_side):
+    assert al.last_word(plural) in al.NO_SINGULAR
+    term_name, concept_name = (plural, single) if term_side else (single, plural)
+    term = al.TermInfo("t", term_name, "x", [], tables=[])
+    concept = al.ConceptInfo("c", "개념", "entity", "x", name_en=concept_name)
+    verdict, proposal = al.apply_identity_policy(
+        al.ValidatedVerdict("t", "same", 0.97, "ok"), concept, term, min_conf=0.7
+    )
+    assert verdict.relation == "related" and proposal["policy"] == al.IDENTITY_POLICY_VERSION
+    # other multi-word plurals still match their singular, and the exact name matches
+    assert al.identity_keys_of(["Sales Contracts"]) & al.identity_keys_of(["sales contract"])
+    exact = al.ConceptInfo("c", "개념", "entity", "x", name_en=plural.swapcase())
+    verdict, _ = al.apply_identity_policy(
+        al.ValidatedVerdict("t", "same", 0.97, "ok"),
+        exact,
+        al.TermInfo("t", plural, "x", [], tables=[]),
+        min_conf=0.7,
+    )
+    assert verdict.relation == "same"
+
+
 def test_identity_v2_contracts_matches_contract():
     assert al.identity_keys({al.norm_alias("Contracts")}) & {al.norm_alias("Contract")}
     term = al.TermInfo("t", "Contracts", "계약 정보", [], tables=[])

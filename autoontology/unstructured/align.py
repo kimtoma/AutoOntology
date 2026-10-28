@@ -15,7 +15,8 @@
    ``boxes`` = ``box``; ``-ss``/``-us``/``-is`` are kept). Plurals that are a different
    word than their "singular" are on a stop-list (:data:`NO_SINGULAR`: ``goods/good``,
    ``customs/custom``, ``news/new``, ``arms/arm``, ``glasses/glass``, ``means/mean``) and
-   only match exactly. Whole aliases only, never substrings.
+   only match exactly, also as the last word of a longer alias (``Trade Goods`` is not
+   ``Trade Good``; :func:`last_word`). Whole aliases only, never substrings.
 4. Apply policy for accepted ``same`` verdicts: add the concept's
    name and synonyms to the Term's synonyms (case-insensitive dedupe, never remove), and
    set the description only when the Term has none or upstream's fallback.
@@ -321,23 +322,57 @@ def singular(alias: str) -> str:
     return alias[:-1]
 
 
+_WORD_BREAK = re.compile(r"[\s_\-]+|(?<=[a-z0-9])(?=[A-Z])")
+
+
+def last_word(name: str) -> str:
+    """The last word of a raw alias, NFKC and case-folded (split at whitespace, ``_``,
+    ``-`` and camelCase): ``Trade Goods`` / ``trade_goods`` / ``TradeGoods`` -> ``goods``."""
+    import unicodedata
+
+    words = [w for w in _WORD_BREAK.split(unicodedata.normalize("NFKC", str(name))) if w]
+    return words[-1].casefold() if words else ""
+
+
 def identity_keys(aliases: set[str]) -> set[str]:
     """Comparison keys of normalized aliases: each alias and its English singular."""
     return aliases | {singular(a) for a in aliases}
 
 
+def identity_keys_of(names: Sequence[str]) -> set[str]:
+    """Comparison keys of raw names: :func:`identity_keys`, except that a multi-word name
+    whose last word is on :data:`NO_SINGULAR` (``Trade Goods``) keeps its plural only."""
+    keys: set[str] = set()
+    for name in names:
+        n = norm_alias(name)
+        if not n:
+            continue
+        keys.add(n)
+        if last_word(name) not in NO_SINGULAR:
+            keys.add(singular(n))
+    return keys
+
+
+def concept_names(concept: ConceptInfo) -> list[str]:
+    return [n for n in [concept.name, concept.name_en, *concept.synonyms] if norm_alias(n)]
+
+
 def concept_aliases(concept: ConceptInfo) -> set[str]:
-    return {n for n in map(norm_alias, [concept.name, concept.name_en, *concept.synonyms]) if n}
+    return {norm_alias(n) for n in concept_names(concept)}
 
 
-def trusted_term_aliases(term: TermInfo, auto_added: Sequence[str] = ()) -> set[str]:
+def trusted_term_names(term: TermInfo, auto_added: Sequence[str] = ()) -> list[str]:
     """The Term's own name, the names of the tables it represents, and its synonyms except
     those AutoOntology's alignment added (an auto-added alias is never evidence: a wrong merge
     would otherwise validate itself on the next run)."""
     added = {norm_alias(a) for a in auto_added}
-    own = {norm_alias(n) for n in [term.name, *(t.get("name") or "" for t in term.tables)]}
-    synonyms = {norm_alias(n) for n in term.synonyms} - added
-    return {n for n in own | synonyms if n}
+    own = [term.name, *(t.get("name") or "" for t in term.tables)]
+    synonyms = [n for n in term.synonyms if norm_alias(n) not in added]
+    return [n for n in [*own, *synonyms] if norm_alias(n)]
+
+
+def trusted_term_aliases(term: TermInfo, auto_added: Sequence[str] = ()) -> set[str]:
+    return {norm_alias(n) for n in trusted_term_names(term, auto_added)}
 
 
 def identity_bar(min_conf: float) -> float:
@@ -361,8 +396,8 @@ def apply_identity_policy(
         return verdict, {}
     bar = identity_bar(min_conf)
     evidence = sorted(
-        identity_keys(concept_aliases(concept))
-        & identity_keys(trusted_term_aliases(term, auto_added))
+        identity_keys_of(concept_names(concept))
+        & identity_keys_of(trusted_term_names(term, auto_added))
     )
     reason = ""
     if verdict.confidence < bar:

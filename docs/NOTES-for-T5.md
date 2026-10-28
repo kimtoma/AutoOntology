@@ -13,8 +13,8 @@ later cleanup:
   the stored playground chats without a copy. The README upgrade note must mention it.
 - **identity-v2.1 rule** (documented in `autoontology/unstructured/align.py`): English
   singular/plural aliases match (`Contracts` = `Contract`), except a stop-list of known
-  false-positive pairs (`goods`, `customs`, `news`, `arms`, `glasses`, `means`). README
-  and plan should describe it.
+  false-positive pairs (`goods`, `customs`, `news`, `arms`, `glasses`, `means`), also as the last word of a
+  longer alias (`Trade Goods` is not `Trade Good`). README and plan should describe it.
 - **`export --out DIR` writes `DIR/r<rev>/`** and refuses to replace a folder that holds
   files the exporter did not write; every export has an `export.json` marker.
 - **`build --resume` sees changed input files** (content hashes) but not a schema change
