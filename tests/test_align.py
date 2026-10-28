@@ -962,6 +962,44 @@ def test_stale_auto_aliases_plan():
     assert al.stale_auto_aliases({"t": term}, prov, every, "A")[0] == []
 
 
+@pytest.mark.parametrize(
+    ("plural", "single"),
+    [
+        ("goods", "good"),
+        ("customs", "custom"),
+        ("news", "new"),
+        ("arms", "arm"),
+        ("glasses", "glass"),
+        ("means", "mean"),
+    ],
+)
+def test_identity_v2_stop_list_keeps_false_positive_pairs_apart(plural, single):
+    assert al.singular(plural) == plural
+    assert al.identity_keys({plural}).isdisjoint(al.identity_keys({single}))
+    term = al.TermInfo("t", plural.title(), "x", [], tables=[{"name": plural}])
+    concept = al.ConceptInfo("c", "개념", "entity", "x", name_en=single.title())
+    verdict, proposal = al.apply_identity_policy(
+        al.ValidatedVerdict("t", "same", 0.97, "ok"), concept, term, min_conf=0.7
+    )
+    assert verdict.relation == "related" and proposal["policy"] == "identity-v2"
+    exact = al.ConceptInfo("c", "개념", "entity", "x", name_en=plural.upper())
+    verdict, _ = al.apply_identity_policy(
+        al.ValidatedVerdict("t", "same", 0.97, "ok"), exact, term, min_conf=0.7
+    )
+    assert verdict.relation == "same"  # the exact word still matches
+
+
+def test_identity_v2_contracts_matches_contract():
+    assert al.identity_keys({al.norm_alias("Contracts")}) & {al.norm_alias("Contract")}
+    term = al.TermInfo("t", "Contracts", "계약 정보", [], tables=[])
+    concept = al.ConceptInfo("c", "계약", "entity", "약정", name_en="Contract")
+    verdict, proposal = al.apply_identity_policy(
+        al.ValidatedVerdict("t", "same", 0.95, "ok"), concept, term, min_conf=0.7
+    )
+    assert verdict.relation == "same" and proposal == {}
+    assert any("contract" in n for n in verdict.notes)
+
+
 def _second_docs_source(store, name, concepts):
     docs = DocumentStore(store)
     src = store.add_source(name=name, kind="documents", locator="{}")

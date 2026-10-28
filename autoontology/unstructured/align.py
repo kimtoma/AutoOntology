@@ -9,6 +9,13 @@
 3. Identity policy (:func:`apply_identity_policy`, versioned): ``same`` needs confidence
    >= max(--min-conf, 0.90) and a normalized full-alias match with the Term's trusted
    aliases (never ones AutoOntology added itself); otherwise ``related`` + a review proposal.
+   ``identity-v2`` rule: aliases are compared after NFKC, case folding and whitespace
+   removal, and an all-Latin alias longer than 3 characters also matches as its English
+   singular (:func:`singular`: ``Contracts`` = ``Contract``, ``categories`` = ``category``,
+   ``boxes`` = ``box``; ``-ss``/``-us``/``-is`` are kept). Plurals that are a different
+   word than their "singular" are on a stop-list (:data:`NO_SINGULAR`: ``goods/good``,
+   ``customs/custom``, ``news/new``, ``arms/arm``, ``glasses/glass``, ``means/mean``) and
+   only match exactly. Whole aliases only, never substrings.
 4. Apply policy for accepted ``same`` verdicts: add the concept's
    name and synonyms to the Term's synonyms (case-insensitive dedupe, never remove), and
    set the description only when the Term has none or upstream's fallback.
@@ -288,12 +295,20 @@ def norm_alias(text: str) -> str:
 
 
 _LATIN_ALIAS = re.compile(r"^[a-z][a-z0-9_-]*[a-z]$")
+#: Plurals whose naive singular is another word (known false-positive pairs): kept as is.
+NO_SINGULAR = frozenset({"goods", "customs", "news", "arms", "glasses", "means"})
 
 
 def singular(alias: str) -> str:
     """The English singular of a normalized all-Latin alias (``contracts`` -> ``contract``,
-    ``categories`` -> ``category``, ``boxes`` -> ``box``); anything else unchanged."""
-    if len(alias) <= 3 or not _LATIN_ALIAS.fullmatch(alias) or not alias.endswith("s"):
+    ``categories`` -> ``category``, ``boxes`` -> ``box``); anything else, and every word of
+    :data:`NO_SINGULAR`, unchanged."""
+    if (
+        len(alias) <= 3
+        or alias in NO_SINGULAR
+        or not _LATIN_ALIAS.fullmatch(alias)
+        or not alias.endswith("s")
+    ):
         return alias
     if alias.endswith("ies"):
         return alias[:-3] + "y"
