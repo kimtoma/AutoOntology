@@ -440,6 +440,44 @@ def test_cli_build_prints_the_kordoc_warning_and_exits_0(env, monkeypatch):
     assert "need kordoc" in res.output and "tools install-kordoc" in res.output
 
 
+def test_database_source_fingerprint_follows_the_live_schema(env, monkeypatch, tmp_path):
+    """A DB-URL source's input fingerprint includes its schema (here read from a sqlite
+    file standing in for the external database); unreachable means never reused."""
+    import sqlite3
+
+    db = tmp_path / "ext.sqlite"
+    sqlite3.connect(db).executescript("CREATE TABLE customers (id INTEGER, name TEXT);")
+
+    def sqlite_columns(conn):
+        with sqlite3.connect(db) as c:
+            tables = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+            return [
+                ("main", t, col[1], col[2])
+                for t in tables
+                for col in c.execute(f"PRAGMA table_info({t})")
+            ]
+
+    monkeypatch.setitem(pipeline.SCHEMA_INTROSPECTORS, "postgres", sqlite_columns)
+    src = pipeline.add_source(env["store"], "postgres://u:p@db.example/crm", name="crm")
+    first = bj.input_fingerprint(src)
+    assert first and bj.input_fingerprint(src) == first
+    with sqlite3.connect(db) as c:
+        c.execute("ALTER TABLE customers ADD COLUMN tier TEXT")
+    changed = bj.input_fingerprint(src)
+    assert changed and changed != first
+    with sqlite3.connect(db) as c:
+        c.execute("CREATE TABLE orders (id INTEGER)")
+    assert bj.input_fingerprint(src) not in ("", changed)
+
+    def unreachable(conn):
+        raise OSError("connection refused")
+
+    monkeypatch.setitem(pipeline.SCHEMA_INTROSPECTORS, "postgres", unreachable)
+    assert bj.input_fingerprint(src) == ""  # never equal to a recorded fingerprint
+    mysql = pipeline.add_source(env["store"], "mysql://u:p@db.example/shop", name="shop")
+    assert bj.input_fingerprint(mysql) == ""  # no introspector: not reused either
+
+
 # --- export from a snapshot ---------------------------------------------------------------
 
 

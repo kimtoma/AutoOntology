@@ -9,8 +9,10 @@ across sources.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -98,6 +100,54 @@ def parse_database_url(url: str) -> dict[str, Any]:
     raise SourceError(
         f"unsupported database URL scheme {scheme!r} (supported: {', '.join(sorted(_URL_SCHEMES))})"
     )
+
+
+#: Seconds to wait for an external database while fingerprinting its schema.
+SCHEMA_CONNECT_TIMEOUT_S = 5
+
+
+def _postgres_columns(conn: dict[str, Any]) -> list[tuple[str, ...]]:
+    """``(schema, table, column, type)`` of every user column of a Postgres database."""
+    import psycopg
+
+    sql = (
+        "SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"
+    )
+    args: list[Any] = []
+    if conn.get("schemas"):
+        sql += " AND table_schema = ANY(%s)"
+        args.append(list(conn["schemas"]))
+    with psycopg.connect(
+        host=conn["host"],
+        port=int(conn.get("port") or 5432),
+        user=conn["user"],
+        password=conn.get("password") or None,
+        dbname=conn["database"],
+        connect_timeout=SCHEMA_CONNECT_TIMEOUT_S,
+    ) as pg_conn:
+        return [tuple(str(v) for v in row) for row in pg_conn.execute(sql, args).fetchall()]
+
+
+#: Schema introspection per connection ``type``; a type without one (mysql, snowflake: no
+#: driver is bundled) has no fingerprint, so ``build --resume`` never reuses its steps.
+SCHEMA_INTROSPECTORS: dict[str, Callable[[dict[str, Any]], list[tuple[str, ...]]]] = {
+    "postgres": _postgres_columns,
+}
+
+
+def schema_fingerprint(source: Source) -> str:
+    """A hash of the sorted table/column names and types of a database source, or ""
+    when it cannot be read (unreachable, or no introspector for its type)."""
+    try:
+        conn = parse_database_url(source.locator)
+        introspect = SCHEMA_INTROSPECTORS.get(conn["type"])
+        if introspect is None:
+            return ""
+        rows = sorted(introspect(conn))
+    except Exception:  # noqa: BLE001 - unreachable/unreadable: do not reuse
+        return ""
+    return hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode()).hexdigest()
 
 
 def redact_url(url: str) -> str:

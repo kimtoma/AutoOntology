@@ -118,9 +118,10 @@ def kordoc_state(home: Path) -> str:
 def input_fingerprint(source: Source, home: Path | None = None) -> str:
     """A hash of what the per-source steps of *source* read: the locator plus, for files
     and documents sources, every input file's path and content hash -- and, for documents
-    sources holding kordoc formats, whether kordoc is available (*home*). "" when the
-    inputs cannot be listed -- never equal to a recorded fingerprint, so the steps run
-    again."""
+    sources holding kordoc formats, whether kordoc is available (*home*); for database
+    sources, the live schema (:func:`autoontology.structured.pipeline.schema_fingerprint`).
+    "" when the inputs cannot be listed or the database cannot be reached -- never equal
+    to a recorded fingerprint, so the steps run again."""
     digest = hashlib.sha256(f"{source.kind}\0{source.locator}\0".encode())
     try:
         if source.kind == "files":
@@ -134,6 +135,10 @@ def input_fingerprint(source: Source, home: Path | None = None) -> str:
                 digest.update(f"kordoc\0{kordoc_state(home)}\0".encode())
         else:
             files = []
+            schema = pipeline.schema_fingerprint(source)
+            if not schema:
+                return ""
+            digest.update(f"schema\0{schema}\0".encode())
         for path in sorted(p.resolve() for p in files):
             digest.update(f"{path}\0{extract_job.sha256_file(path)}\0".encode())
     except Exception:  # noqa: BLE001 - a missing/unreadable input: the step reports it
