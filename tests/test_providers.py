@@ -233,6 +233,22 @@ def test_openai_passthrough_strips_prefix_and_adds_bearer_key(openai_env):
     assert "reasoning_effort" not in body  # only the Ollama passthrough adds it
 
 
+def test_openai_model_id_with_its_own_openai_prefix_survives_routing(openai_env, monkeypatch):
+    """NVIDIA/OpenRouter ids such as ``openai/gpt-oss-120b`` must reach the endpoint intact:
+    upstream sends one extra router prefix and the router strips exactly one."""
+    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "openai/gpt-oss-120b")
+    settings = Settings.from_env()
+    assert settings.upstream_chat_model == "openai/openai/gpt-oss-120b"
+    upstream = Upstream()
+    res = _chat(_client(upstream), settings.upstream_chat_model)
+    assert res.status_code == 200, res.text
+    assert upstream.bodies[0]["model"] == "openai/gpt-oss-120b"
+    # a body without a model falls back to the configured name, unstripped
+    upstream2 = Upstream()
+    _client(upstream2).post("/v1/chat/completions", json={"messages": []})
+    assert upstream2.bodies[0]["model"] == "openai/gpt-oss-120b"
+
+
 def test_openai_passthrough_replaces_the_callers_key(openai_env):
     upstream = Upstream()
     client = _client(upstream)

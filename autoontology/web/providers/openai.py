@@ -40,8 +40,10 @@ class OpenAIProvider(PassthroughProvider):
 
     def payload(self, body: dict[str, Any]) -> dict[str, Any]:
         out = dict(body)
-        model = str(out.get("model") or "") or self.settings.openai_chat_model
-        out["model"] = strip_router_prefix(model)
+        model = str(out.get("model") or "")
+        # Upstream always sends one router prefix; a body without a model gets the
+        # configured name as-is (it was never prefixed, so nothing is stripped).
+        out["model"] = strip_router_prefix(model) if model else self.settings.openai_chat_model
         return out
 
     def headers(self, request: Request | None) -> dict[str, str]:

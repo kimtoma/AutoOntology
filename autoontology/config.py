@@ -371,9 +371,10 @@ class Settings:
     def upstream_chat_model(self) -> str:
         """The model name upstream sends to the router. It must start with ``openai/`` so
         upstream uses its ChatOpenAI client; the Ollama alias already does, the openai
-        provider's model gets the prefix (the router strips it again)."""
+        provider's model always gets one more prefix (the router strips exactly one), so a
+        real id like ``openai/gpt-oss-120b`` reaches the endpoint unchanged."""
         model = self.effective_chat_model
-        if self.chat_provider == "openai" and not model.startswith("openai/"):
+        if self.chat_provider == "openai":
             return f"openai/{model}"
         return model
 
