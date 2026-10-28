@@ -344,10 +344,34 @@ def test_demo_prunes_orphaned_connections_after_up(demo_env, monkeypatch):
     )
     res = runner.invoke(app, ["demo", "--no-open"])
     assert res.exit_code == 0, res.output
-    # quick is not registered yet at that point: unowned, so pruned as well
-    assert fake.deleted == ["autoontology_src_gone", "autoontology_src_quick"]
-    assert "pruning upstream connections" in res.output
+    # only the connection whose database is gone; a live unowned one (another checkout,
+    # a reset data/) is reported and kept
+    assert fake.deleted == ["autoontology_src_gone"]
+    assert "autoontology_src_quick" in fake.names
+    assert "pruning upstream connections whose database is gone" in res.output
+    assert "no source in this checkout (kept" in res.output
     assert demo_env[0] == "up"
+
+
+def test_demo_survives_a_postgres_error_in_the_orphan_check(demo_env, monkeypatch):
+    import psycopg
+
+    from autoontology.engine import client as client_mod
+    from autoontology.structured import remove
+
+    fake = FakeBackend(["autoontology_src_gone"])
+    monkeypatch.setattr(client_mod, "BackendClient", lambda *a, **k: fake)
+    monkeypatch.setattr(remove, "backend_is_ours", lambda settings: True)
+
+    def down(settings, name):
+        raise psycopg.OperationalError("connection refused\nmore")
+
+    monkeypatch.setattr(pg, "database_exists", down)
+    res = runner.invoke(app, ["demo", "--no-open"])
+    assert res.exit_code == 0, res.output
+    assert res.exception is None and fake.deleted == []
+    assert "Postgres is not reachable (connection refused)" in res.output
+    assert "docker compose up -d" in res.output
 
 
 class FakeBackend:
@@ -388,11 +412,18 @@ def test_tools_prune_connections(isolated_env, monkeypatch):
     fake = FakeBackend(names)
     monkeypatch.setattr(client_mod, "BackendClient", lambda *a, **k: fake)
     monkeypatch.setattr(pg, "database_exists", lambda settings, name: True)
-    dry = runner.invoke(app, ["tools", "prune-connections", "--dry-run"])
+    dry = runner.invoke(app, ["tools", "prune-connections", "--dry-run", "--include-unowned"])
     assert dry.exit_code == 0, dry.output
     assert "orphan: autoontology_src_old (no registered source)" in dry.output
     assert "keep" not in dry.output and "crm" not in dry.output and fake.deleted == []
+    # live but unowned: only reported without --include-unowned
     res = runner.invoke(app, ["tools", "prune-connections"])
+    assert res.exit_code == 0, res.output
+    assert fake.deleted == [] and "unowned: autoontology_src_old" in res.output
+    assert "--include-unowned" in res.output
+    bad = runner.invoke(app, ["tools", "prune-connections", "--drop-db"])
+    assert bad.exit_code == 2 and fake.deleted == []
+    res = runner.invoke(app, ["tools", "prune-connections", "--include-unowned"])
     assert res.exit_code == 0, res.output
     assert fake.deleted == ["autoontology_src_old"]
     assert "deleted upstream connection autoontology_src_old" in res.output
@@ -400,6 +431,26 @@ def test_tools_prune_connections(isolated_env, monkeypatch):
     fake.down = True
     down = runner.invoke(app, ["tools", "prune-connections"])
     assert down.exit_code == 1 and "autoontology up" in down.output
+
+
+def test_tools_prune_connections_deletes_dead_ones_by_default(isolated_env, monkeypatch):
+    from autoontology.engine import client as client_mod
+
+    fake = FakeBackend(["autoontology_src_dead", "autoontology_src_live", "autoontology_src_b"])
+    monkeypatch.setattr(client_mod, "BackendClient", lambda *a, **k: fake)
+    monkeypatch.setattr(
+        pg, "database_exists", lambda settings, name: name != "autoontology_src_dead"
+    )
+    res = runner.invoke(app, ["tools", "prune-connections"])
+    assert res.exit_code == 0, res.output
+    assert fake.deleted == ["autoontology_src_dead"]
+    # names limit an --include-unowned run
+    res = runner.invoke(
+        app, ["tools", "prune-connections", "autoontology_src_live", "--include-unowned"]
+    )
+    assert res.exit_code == 0, res.output
+    assert fake.deleted == ["autoontology_src_dead", "autoontology_src_live"]
+    assert fake.names == ["autoontology_src_b"]
 
 
 def test_demo_runs_the_steps_in_order(demo_env):

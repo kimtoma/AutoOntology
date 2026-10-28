@@ -250,7 +250,7 @@ def test_source_rm_backend_down_needs_force(isolated_env, monkeypatch):
     # the connection could not be deleted: dropping its database would orphan it
     assert "may remain" in res.output and fake.events == []
     assert "database autoontology_src_demo kept" in res.output
-    assert "tools prune-connections --drop-db" in res.output
+    assert "--include-unowned --drop-db" in res.output
     assert "removed source demo" in res.output
 
 

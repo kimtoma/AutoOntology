@@ -1114,8 +1114,12 @@ def init(
 
 
 def _demo_prune_orphans(settings, store) -> None:
-    """Right after ``up``: delete upstream connections to dropped per-source databases
-    (one of them makes every ingest time out), with a notice."""
+    """Right after ``up``: delete upstream connections whose per-source database is gone
+    (one of them makes every ingest time out), with a notice. Connections whose database
+    exists but that no source in this checkout owns are only reported: another checkout
+    sharing the catalog (or a reset ``data/``) may still need them."""
+    import psycopg
+
     from autoontology.engine.client import BackendClient, BackendError
     from autoontology.structured import remove
 
@@ -1124,16 +1128,23 @@ def _demo_prune_orphans(settings, store) -> None:
     try:
         with BackendClient(settings.backend_url, timeout=30.0) as client:
             orphans = remove.find_orphan_connections(settings, store, client)
-            if not orphans:
+            dead = [o for o in orphans if o.database_missing]
+            live = [o for o in orphans if not o.database_missing]
+            if live:
+                typer.echo(
+                    "  note  upstream connections with no source in this checkout (kept: "
+                    "another checkout may use them): " + ", ".join(o.name for o in live)
+                )
+            if not dead:
                 return
             typer.echo(
-                "  note  pruning upstream connections no source owns (they would make every "
-                "ingest time out): " + ", ".join(f"{o.name} ({o.reason})" for o in orphans)
+                "  note  pruning upstream connections whose database is gone (they would make "
+                "every ingest time out): " + ", ".join(o.name for o in dead)
             )
             remove.prune_orphan_connections(
                 settings,
                 client,
-                orphans,
+                dead,
                 say=lambda message, warning=False: typer.echo(
                     f"  {'warn' if warning else 'ok'}    {message}"
                 ),
@@ -1143,40 +1154,82 @@ def _demo_prune_orphans(settings, store) -> None:
             f"  warn  could not check the upstream connections ({exc}); if the build times "
             f"out, run `{remove.PRUNE_COMMAND}`"
         )
+    except psycopg.Error as exc:
+        first = (str(exc).splitlines() or [type(exc).__name__])[0][:160]
+        typer.echo(
+            f"  warn  could not check the upstream connections: Postgres is not reachable "
+            f"({first}); start it (`docker compose up -d`), then `uv run autoontology doctor`"
+        )
+    except Exception as exc:  # noqa: BLE001 - a check must never crash demo
+        typer.echo(
+            f"  warn  could not check the upstream connections ({type(exc).__name__}: "
+            f"{(str(exc).splitlines() or [''])[0][:160]}); see `uv run autoontology doctor`"
+        )
 
 
 @tools_app.command("prune-connections")
 def tools_prune_connections(
+    names: list[str] = typer.Argument(
+        None, help="Only these connections (default: every orphan found)."
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Only list the orphaned connections."),
+    include_unowned: bool = typer.Option(
+        False,
+        "--include-unowned",
+        help="Also delete connections whose database exists but that no source in this "
+        "checkout owns (another checkout sharing the catalog may still use them).",
+    ),
     drop_db: bool = typer.Option(
-        False, "--drop-db", help="Also drop the orphans' autoontology_src_* databases."
+        False,
+        "--drop-db",
+        help="With --include-unowned: also drop those connections' autoontology_src_* databases.",
     ),
 ) -> None:
-    """Delete upstream connections whose autoontology_src_* database is gone or that no
-    registered source owns (one of them makes every ingest time out)."""
+    """Delete upstream connections whose autoontology_src_* database is gone (one of them
+    makes every ingest time out). Live connections no source owns need --include-unowned."""
+    import psycopg
+
     from autoontology.engine.client import BackendClient, BackendError, BackendUnavailable
     from autoontology.structured import remove
 
+    if drop_db and not include_unowned:
+        _fail("--drop-db only applies with --include-unowned", code=2)
     settings = _settings()
     store = _store(settings)
     try:
         with BackendClient(settings.backend_url) as client:
             orphans = remove.find_orphan_connections(settings, store, client)
+            if names:
+                orphans = [o for o in orphans if o.name in names]
             if not orphans:
                 typer.echo("no orphaned upstream connections")
                 return
+            chosen = []
             for orphan in orphans:
-                typer.echo(f"orphan: {orphan.name} ({orphan.reason})")
-            if dry_run:
-                typer.echo(f"dry run: nothing deleted; run `{remove.PRUNE_COMMAND}` to delete")
+                if orphan.database_missing or include_unowned:
+                    typer.echo(f"orphan: {orphan.name} ({orphan.reason})")
+                    chosen.append(orphan)
+                else:
+                    typer.echo(
+                        f"unowned: {orphan.name} (database exists; kept, another checkout may "
+                        "use it: pass --include-unowned to delete it)"
+                    )
+            if dry_run or not chosen:
+                typer.echo("nothing deleted" + (" (dry run)" if dry_run else ""))
                 return
             remove.prune_orphan_connections(
                 settings,
                 client,
-                orphans,
+                chosen,
                 drop_db=drop_db,
                 say=lambda message, warning=False: typer.echo(message, err=warning),
             )
+    except psycopg.Error as exc:
+        first = (str(exc).splitlines() or [type(exc).__name__])[0][:160]
+        _fail(
+            f"prune-connections: Postgres is not reachable ({first}); start it "
+            "(`docker compose up -d`) and try again"
+        )
     except BackendUnavailable as exc:
         _fail(f"prune-connections: {exc}; start the services with `uv run autoontology up`")
     except BackendError as exc:

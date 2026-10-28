@@ -191,14 +191,36 @@ def check_upstream_connections(settings: Settings) -> Check:
     name = "upstream connections"
     if not backend_is_ours(settings):
         return Check(name, "SKIP", "services not running (`uv run autoontology up`)")
+    import psycopg
+
     db = Path(settings.home) / "autoontology.db"
     store = Store.for_home(settings.home) if db.is_file() else None
-    with BackendClient(settings.backend_url, timeout=10.0) as client:
-        orphans = find_orphan_connections(settings, store, client)
+    try:
+        with BackendClient(settings.backend_url, timeout=10.0) as client:
+            orphans = find_orphan_connections(settings, store, client)
+    except psycopg.Error as exc:
+        first = (str(exc).splitlines() or [type(exc).__name__])[0][:120]
+        return Check(
+            name,
+            "SKIP",
+            f"Postgres not reachable ({first})",
+            "start Postgres (`docker compose up -d`); see the postgres row",
+        )
     if not orphans:
         return Check(name, "OK", "every autoontology_src_* connection has its source")
-    detail = "; ".join(f"{o.name} ({o.reason})" for o in orphans)
-    return Check(name, "WARN", f"orphaned: {detail}", PRUNE_COMMAND)
+    dead = [o.name for o in orphans if o.database_missing]
+    live = [o.name for o in orphans if not o.database_missing]
+    parts = []
+    if dead:
+        parts.append(f"database gone (breaks every ingest): {', '.join(dead)}")
+    if live:
+        parts.append(f"no source in this checkout: {', '.join(live)}")
+    remedy = PRUNE_COMMAND if dead else ""
+    if live:
+        remedy += ("; " if remedy else "") + (
+            f"if no other checkout uses them: {PRUNE_COMMAND} --include-unowned"
+        )
+    return Check(name, "WARN", "; ".join(parts), remedy)
 
 
 def _pgid(pid: int) -> int | None:

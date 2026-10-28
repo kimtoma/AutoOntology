@@ -78,7 +78,10 @@ def test_forced_drop_keeps_the_database_when_the_connection_stays(
     assert store.get_source("x") is None  # --force: the local row still goes
     text = "\n".join(m for m, _w in said)
     assert "database autoontology_src_x kept" in text
-    assert "uv run autoontology tools prune-connections --drop-db" in text
+    assert (
+        "uv run autoontology tools prune-connections autoontology_src_x "
+        "--include-unowned --drop-db" in text
+    )
     assert "re-adding the source" not in text
 
 
@@ -170,8 +173,33 @@ def test_doctor_warns_about_orphaned_connections(isolated_env, monkeypatch):
     )
     check = doctor.check_upstream_connections(settings)
     assert check.status == "WARN"
-    assert "autoontology_src_gone (database missing, no registered source)" in check.detail
+    assert "database gone (breaks every ingest): autoontology_src_gone" in check.detail
     assert check.remedy == "uv run autoontology tools prune-connections"
+
+
+def test_doctor_reports_live_unowned_connections_without_plain_prune(isolated_env, monkeypatch):
+    settings = _doctor_settings(isolated_env, monkeypatch, ["autoontology_src_other"])
+    check = doctor.check_upstream_connections(settings)
+    assert check.status == "WARN"
+    assert check.detail == "no source in this checkout: autoontology_src_other"
+    assert check.remedy == (
+        "if no other checkout uses them: uv run autoontology tools prune-connections "
+        "--include-unowned"
+    )
+
+
+def test_doctor_skips_when_postgres_is_down(isolated_env, monkeypatch):
+    import psycopg
+
+    settings = _doctor_settings(isolated_env, monkeypatch, ["autoontology_src_a"])
+
+    def down(s, name):
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(pg, "database_exists", down)
+    check = doctor.check_upstream_connections(settings)
+    assert check.status == "SKIP" and "Postgres not reachable" in check.detail
+    assert "prune-connections" not in check.remedy and "docker compose" in check.remedy
 
 
 def test_doctor_upstream_row_ok_and_skip(isolated_env, monkeypatch):

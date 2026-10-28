@@ -191,7 +191,7 @@ def _remove_held(
                 f"warning: database {src.pg_database} kept: its upstream connection could "
                 "not be deleted, and dropping the database under it would break every "
                 "later build. Start the services (`uv run autoontology up`), then run "
-                f"`{PRUNE_COMMAND} --drop-db`",
+                f"`{PRUNE_COMMAND} {src.pg_database} --include-unowned --drop-db`",
                 True,
             )
         else:
