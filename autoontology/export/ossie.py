@@ -331,6 +331,11 @@ class _Rel:
     name: str = ""
 
 
+def _verbal(text: str) -> str:
+    """Free text inside a verbalization: braces would read as role placeholders."""
+    return text.replace("{", "(").replace("}", ")")
+
+
 @dataclass
 class _FK:
     subject: str  # node local
@@ -462,7 +467,7 @@ def build_ontology(
             rel = _Rel(
                 base=relationship_name(p.label),
                 roles=[{"concept": vtype}],
-                verbalize=f"{{S}} has {p.label} {{{vtype}}}",
+                verbalize=f"{{S}} has {_verbal(p.label)} {{{vtype}}}",
                 multiplicity="ManyToOne",
                 description=p.comment,
                 iri=f"ao:{p.local}",
@@ -516,7 +521,7 @@ def build_ontology(
             _Rel(
                 base=base,
                 roles=[{"concept": vtype}],
-                verbalize=f"{{S}} has {target.label} {{{vtype}}}",
+                verbalize=f"{{S}} has {_verbal(target.label)} {{{vtype}}}",
                 multiplicity="ManyToOne",
                 description=describe(list(target.definitions), target.alt_labels),
                 iri=f"ao:{p.local}",
@@ -537,7 +542,7 @@ def build_ontology(
             _Rel(
                 base=relationship_name(p.predicate),
                 roles=[{"concept": names[o]}],
-                verbalize=f"{{S}} {p.predicate.replace('_', ' ')} {{{names[o]}}}",
+                verbalize=f"{{S}} {_verbal(p.predicate.replace('_', ' '))} {{{names[o]}}}",
                 # the model's fallback label is "<subject> <predicate> <object>": no news
                 description="" if f" {p.predicate} " in f" {p.label} " else p.label,
                 iri=f"ao:{p.local}",

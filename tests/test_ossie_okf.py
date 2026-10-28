@@ -497,6 +497,23 @@ def test_self_referencing_fk_names_its_second_role(tmp_path):
     assert result["validation"]["ontology"] == "ok"
 
 
+def test_braces_in_labels_do_not_become_placeholders(tmp_path):
+    snap = structured()
+    snap.terms[1].attributes[1]["name"] = "지역{코드}"
+    m = merged.build("ws", structured=[snap], documents=[documents()])
+    attribute = next(c for c in m.classes.values() if c.label == "계약 상태")
+    attribute.label = "계약 {상태}"
+    zipped = write_zip(tmp_path / "hanbit.ossie.zip", semantic_model())
+    result = ossie.write(m, tmp_path, revision=1, created_at=CREATED, upstream=[("hanbit", zipped)])
+    assert result["validation"]["ontology"] == "ok"
+    comps = _concepts(_load(tmp_path / "ossie/ontology.yaml"))
+    verbal = [
+        v for c in comps.values() for r in c.get("relationships", []) for v in r["verbalizes"]
+    ]
+    assert "{Customers} has 지역(코드) {String}" in verbal
+    assert "{Contracts} has 계약 (상태) {String}" in verbal
+
+
 def test_structural_checks_catch_what_the_schema_cannot():
     doc = {
         "ontology": [
