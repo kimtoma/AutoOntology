@@ -194,6 +194,8 @@ class Api:
         self._store: Store | None = None
         #: parsed models by (revision, snapshot run): a recreated store reuses revisions
         self._models: dict[tuple[int, str], Any] = {}
+        #: the concept routes' :class:`~autoontology.web.concepts.ConceptIndex`, same keys
+        self._concepts: dict[tuple[int, str], Any] = {}
         self._model_lock = threading.Lock()
         self._status: tuple[float, dict[str, Any]] | None = None
         #: One probe round at a time: concurrent cache misses wait for it and share it.
@@ -342,6 +344,23 @@ class Api:
                     self._models.pop(next(iter(self._models)))
                 self._models[key] = model
         return head, model
+
+    def concepts(self, revision: int | None = None) -> tuple[Any, Any, Any]:
+        """``(head, model, ConceptIndex)`` of *revision* (default: the latest); the index
+        is computed once per snapshot."""
+        from autoontology.web.concepts import concept_index
+
+        head, model = self.snapshot(revision)
+        key = (head.revision, head.run_id)
+        with self._model_lock:
+            index = self._concepts.get(key)
+        if index is None:
+            index = concept_index(model)
+            with self._model_lock:
+                if len(self._concepts) >= MODEL_CACHE_SIZE:
+                    self._concepts.pop(next(iter(self._concepts)))
+                self._concepts[key] = index
+        return head, model, index
 
     def latest_model(self) -> tuple[int, Any]:
         """``(revision, model)`` of the latest snapshot (the playground's scope)."""
@@ -616,13 +635,12 @@ def build_router(api: Api) -> APIRouter:
         source: str = Query("", max_length=80),
         page: int = Query(1, ge=1),
         size: int = Query(50, ge=1, le=200),
+        revision: int | None = Query(None, ge=1),
     ) -> dict[str, Any]:
-        from autoontology.web.concepts import concept_items
-
         if origin and origin not in ORIGINS:
             raise ApiError(400, "invalid_origin", f"origin must be one of {', '.join(ORIGINS)}")
-        head, model = api.snapshot()
-        items = concept_items(model)
+        head, _, index = api.concepts(revision)
+        items = index.items
         needle = q.strip().casefold()
         if needle:
             items = [i for i in items if needle in i["_text"]]
@@ -644,13 +662,15 @@ def build_router(api: Api) -> APIRouter:
         }
 
     @router.get("/ontology/concepts/{concept_id}")
-    def ontology_concept(concept_id: str) -> dict[str, Any]:
+    def ontology_concept(
+        concept_id: str, revision: int | None = Query(None, ge=1)
+    ) -> dict[str, Any]:
         from autoontology.web.concepts import concept_detail
 
         if not CONCEPT_ID_RE.fullmatch(concept_id):
             raise ApiError(400, "invalid_concept_id", f"invalid concept id {concept_id!r}")
-        head, model = api.snapshot()
-        detail = concept_detail(model, concept_id)
+        head, model, index = api.concepts(revision)
+        detail = concept_detail(model, concept_id, index)
         if detail is None:
             raise ApiError(404, "unknown_concept", f"unknown concept {concept_id!r}")
         return {"revision": head.revision, **detail}

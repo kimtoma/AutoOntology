@@ -8,6 +8,7 @@ the graph's: ``structured`` | ``document`` | ``aligned`` (a Term joined to docum
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from autoontology.ontology.model import MergedOntology
@@ -76,11 +77,30 @@ def _summary(links: list[dict[str, Any]]) -> dict[str, Any]:
     return {"counts": counts, "best": best}
 
 
-def concept_items(model: MergedOntology) -> list[dict[str, Any]]:
+@dataclass(frozen=True)
+class ConceptIndex:
+    """What the concept routes read of one model, computed once per snapshot (the API
+    memoizes it next to the parsed model): the sorted items, by id, and the alignment
+    links per node."""
+
+    items: list[dict[str, Any]]
+    by_id: dict[str, dict[str, Any]]
+    links: dict[str, list[dict[str, Any]]]
+
+
+def concept_index(model: MergedOntology) -> ConceptIndex:
+    links = _alignments(model)
+    items = concept_items(model, links)
+    return ConceptIndex(items=items, by_id={i["id"]: i for i in items}, links=links)
+
+
+def concept_items(
+    model: MergedOntology, links: dict[str, list[dict[str, Any]]] | None = None
+) -> list[dict[str, Any]]:
     """Every Term class and document concept of *model*, Terms first, then by name. Keys
     starting with ``_`` are internal (``_text``: the search haystack)."""
     aligned = model.aligned_terms()
-    links = _alignments(model)
+    links = _alignments(model) if links is None else links
     folded: dict[str, list[str]] = {}
     for m in model.merges:
         folded.setdefault(m.term_local, []).append(m.concept_name)
@@ -145,8 +165,11 @@ def concept_items(model: MergedOntology) -> list[dict[str, Any]]:
     return items
 
 
-def concept_detail(model: MergedOntology, local: str) -> dict[str, Any] | None:
-    item = next((i for i in concept_items(model) if i["id"] == local), None)
+def concept_detail(
+    model: MergedOntology, local: str, index: ConceptIndex | None = None
+) -> dict[str, Any] | None:
+    index = concept_index(model) if index is None else index
+    item = index.by_id.get(local)
     if item is None:
         return None
     item = {k: v for k, v in item.items() if not k.startswith("_")}
@@ -234,6 +257,6 @@ def concept_detail(model: MergedOntology, local: str) -> dict[str, Any] | None:
         "individual_type": ind.type if ind else None,
         "attributes": attributes,
         "relations": relations,
-        "alignments": _alignments(model).get(local, []),
+        "alignments": index.links.get(local, []),
         "evidence": evidence,
     }

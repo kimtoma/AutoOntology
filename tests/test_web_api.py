@@ -531,6 +531,43 @@ def test_ontology_concepts_search_and_detail(env):
         assert c.get(f"{API}{gone}").status_code == 404
 
 
+def test_concept_index_is_memoized_and_detail_aligns_once(env, monkeypatch):
+    from autoontology.web import concepts
+
+    c, settings, _, _ = env
+    _, model = _seed_snapshot(settings)
+    built = []
+    real_index = concepts.concept_index
+    monkeypatch.setattr(concepts, "concept_index", lambda m: built.append(1) or real_index(m))
+    first = c.get(f"{API}/ontology/concepts").json()
+    assert c.get(f"{API}/ontology/concepts", params={"q": "계약"}).json()["revision"] == 1
+    detail = c.get(f"{API}/ontology/concepts/{first['items'][0]['id']}")
+    assert detail.status_code == 200 and len(built) == 1  # once per snapshot
+    calls = []
+    real_alignments = concepts._alignments
+    monkeypatch.setattr(concepts, "_alignments", lambda m: calls.append(1) or real_alignments(m))
+    assert concepts.concept_detail(model, "term-t-c")["alignments"]
+    assert len(calls) == 1
+
+
+def test_concepts_take_a_revision(env):
+    from autoontology.ontology import model as merged
+
+    c, settings, _, _ = env
+    _seed_snapshot(settings)
+    _store(settings).save_snapshot("r2", merged.build(settings.workspace, structured=[_snapshot()]))
+    assert c.get(f"{API}/ontology/concepts").json()["total"] == 2  # latest: Terms only
+    old = c.get(f"{API}/ontology/concepts", params={"revision": 1}).json()
+    assert old["revision"] == 1 and old["total"] == 6
+    folded = next(i for i in old["items"] if i["name"] == "계약")
+    assert c.get(f"{API}/ontology/concepts/{folded['id']}").status_code == 404  # not in r2
+    one = c.get(f"{API}/ontology/concepts/{folded['id']}", params={"revision": 1}).json()
+    assert one["revision"] == 1 and one["folded_into"]["id"] == "term-t-c"
+    for path in ("/ontology/concepts", f"/ontology/concepts/{folded['id']}"):
+        gone = c.get(f"{API}{path}", params={"revision": 9})
+        assert gone.status_code == 404 and gone.json()["error"] == "unknown_revision"
+
+
 def test_folded_concepts_keep_their_own_documents_source():
     from autoontology.ontology import model as merged
     from autoontology.web.concepts import concept_items
