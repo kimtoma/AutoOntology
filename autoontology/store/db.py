@@ -347,6 +347,29 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE term_alias_additions ADD COLUMN source_id TEXT
         """,
     ),
+    (
+        4,
+        # Schema v4: term_legacy_descriptions = Terms whose description an older apply set
+        # without recording the text. The judge step confirms each one's baseline (the
+        # description its first judge call saw); apply never writes this table, so the
+        # state survives an apply that replaces the old record's applied_json.
+        """
+        CREATE TABLE IF NOT EXISTS term_legacy_descriptions (
+            term_id TEXT PRIMARY KEY,
+            noted_at TEXT NOT NULL,
+            baseline TEXT,
+            confirmed_at TEXT
+        );
+        INSERT INTO term_legacy_descriptions (term_id, noted_at)
+            SELECT DISTINCT json_extract(applied_json, '$.term_id'), datetime('now')
+            FROM alignments
+            WHERE json_valid(applied_json)
+              AND json_extract(applied_json, '$.description_set')
+              AND json_extract(applied_json, '$.term_id') IS NOT NULL
+              AND trim(COALESCE(json_extract(applied_json, '$.description'), '')) = ''
+        ON CONFLICT (term_id) DO NOTHING
+        """,
+    ),
 ]
 
 #: Seconds a lease stays valid without a heartbeat (the holder refreshes it every third).

@@ -230,41 +230,44 @@ class AlignmentStore:
                 )
 
     def settle_legacy_descriptions(self, current: dict[str, str]) -> int:
-        """A ``description_set`` record from before the text was kept gets a concrete
-        baseline: the description its Term had when a judge call saw it (*current*: term
-        id -> description; called only after that call succeeded), so :func:`auto_descriptions` stops answering
-        ``ANY_DESCRIPTION`` for it and a later change of the description re-judges.
-        Returns the number of records settled."""
+        """Confirm the baseline of a Term with a legacy description record (see
+        :func:`auto_descriptions`): the description it had when a judge call saw it
+        (*current*: term id -> description; called only after that call succeeded), so a
+        later change of the description re-judges. Kept in ``term_legacy_descriptions``,
+        which apply never writes. Returns the number of Terms confirmed."""
         settled = 0
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT id, applied_json FROM alignments WHERE applied_json LIKE "
-                "'%description_set%'"
-            ).fetchall()
-            for row_id, raw in rows:
-                applied = json.loads(raw or "{}")
-                term_id = applied.get("term_id")
-                if (
-                    not applied.get("description_set")
-                    or applied.get("description_baseline")  # settled once, never again
-                    or str(applied.get("description") or "").strip()
-                    or term_id not in current
-                ):
-                    continue
-                applied["description"] = str(current[term_id] or "").strip()
-                applied["description_baseline"] = True  # observed at the re-judge, not written
-                conn.execute(
-                    "UPDATE alignments SET applied_json = ? WHERE id = ?",
-                    (_dumps(applied), row_id),
-                )
-                settled += 1
+            for term_id, description in current.items():
+                settled += conn.execute(
+                    "UPDATE term_legacy_descriptions SET baseline = ?, confirmed_at = ? "
+                    "WHERE term_id = ? AND confirmed_at IS NULL",
+                    (str(description or "").strip(), now_iso(), term_id),
+                ).rowcount
         return settled
 
+    def _note_legacy_descriptions(self, conn: Any, rows: list[Any]) -> None:
+        """Every Term with a ``description_set`` record that lacks the text gets a
+        ``term_legacy_descriptions`` row (once; migration v4 notes the ones present at
+        upgrade), so the state outlives the record when apply replaces its ``applied``."""
+        for (raw,) in rows:
+            applied = json.loads(raw or "{}")
+            term_id = applied.get("term_id")
+            if not applied.get("description_set") or not term_id:
+                continue
+            if str(applied.get("description") or "").strip():
+                continue
+            conn.execute(
+                "INSERT INTO term_legacy_descriptions (term_id, noted_at) VALUES (?, ?) "
+                "ON CONFLICT (term_id) DO NOTHING",
+                (term_id, now_iso()),
+            )
+
     def auto_descriptions(self) -> dict[str, set[str]]:
-        """term id -> the descriptions apply set on it (``applied.description``, or the
-        baseline :func:`settle_legacy_descriptions` recorded, plus ``LEGACY_BASELINE``);
-        only a record from before the text was kept and not settled yet yields
-        ``ANY_DESCRIPTION`` for its Term."""
+        """term id -> the descriptions apply set on it (``applied.description``). A Term
+        with a legacy description record (``term_legacy_descriptions``) also yields
+        ``ANY_DESCRIPTION`` until a judge call confirmed its baseline, then
+        ``LEGACY_BASELINE`` and the baseline text, for good: the judge key marks it, so
+        every verdict stored before the upgrade is judged once more."""
         from autoontology.unstructured.align import ANY_DESCRIPTION, LEGACY_BASELINE
 
         out: dict[str, set[str]] = {}
@@ -272,18 +275,23 @@ class AlignmentStore:
             rows = conn.execute(
                 "SELECT applied_json FROM alignments WHERE applied_json LIKE '%description_set%'"
             ).fetchall()
+            self._note_legacy_descriptions(conn, rows)
+            legacy = conn.execute(
+                "SELECT term_id, baseline, confirmed_at FROM term_legacy_descriptions"
+            ).fetchall()
         for (raw,) in rows:
             applied = json.loads(raw or "{}")
-            if not applied.get("description_set") or not applied.get("term_id"):
-                continue
             text = str(applied.get("description") or "").strip()
-            texts = out.setdefault(applied["term_id"], set())
-            if applied.get("description_baseline"):
-                texts.add(LEGACY_BASELINE)  # keeps pre-upgrade verdicts' keys apart
-                if text:  # (settled on an empty description: nothing of apply's to hide)
-                    texts.add(text)
+            if applied.get("description_set") and applied.get("term_id") and text:
+                out.setdefault(applied["term_id"], set()).add(text)
+        for term_id, baseline, confirmed_at in legacy:
+            texts = out.setdefault(term_id, set())
+            if confirmed_at is None:
+                texts.add(ANY_DESCRIPTION)
                 continue
-            texts.add(text or ANY_DESCRIPTION)
+            texts.add(LEGACY_BASELINE)
+            if (baseline or "").strip():  # (an empty baseline: nothing of apply's to hide)
+                texts.add(baseline.strip())
         return out
 
     def reassign_alias_source(self, term_id: str, alias: str, source_id: str) -> None:

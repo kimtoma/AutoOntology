@@ -156,6 +156,7 @@ def test_schema_has_every_table_and_no_playground_tests(store):
         "alignment_previews",
         "term_alias_additions",
         "term_refresh_pending",
+        "term_legacy_descriptions",
         "playground_index",
         "playground_index_meta",
         "playground_conversations",
@@ -165,7 +166,7 @@ def test_schema_has_every_table_and_no_playground_tests(store):
     assert not {"playground_tests", "playground_test_runs", "ontology_revision"} & tables
     assert {"dry_run", "proposal_json"} <= cols and "incomplete" in msg_cols
     assert "scope" in conv_cols and "source_id" not in conv_cols  # v2: workspace-scoped
-    assert store.schema_version() == 3
+    assert store.schema_version() == 4
 
 
 def _hold_write_lock(path):
@@ -208,3 +209,34 @@ def test_lock_wait_succeeds_after_release(tmp_path, monkeypatch):
 
     threading.Timer(0.3, release).start()
     assert store.acquire_leases(["demo"], "build")
+
+
+def test_migration_v4_notes_the_legacy_description_records(tmp_path):
+    """Round 6: the Terms whose description an older apply set without the text are noted
+    at upgrade in ``term_legacy_descriptions`` (which apply never writes)."""
+    import json
+
+    path = tmp_path / "autoontology.db"
+    Store(path)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("DROP TABLE term_legacy_descriptions")
+    conn.execute("DELETE FROM schema_version WHERE version = 4")
+    for i, applied in enumerate(
+        [
+            {"term_id": "t-old", "description_set": True},
+            {"term_id": "t-new", "description_set": True, "description": "정의"},
+            {"term_id": "t-none", "description_set": False},
+        ]
+    ):
+        conn.execute(
+            "INSERT INTO alignments (source_id, concept_id, concept_name, term_id, relation, "
+            "applied_json, run_id, created_at) VALUES ('s', ?, 'c', ?, 'same', ?, 'r', 'x')",
+            (f"c{i}", applied["term_id"], json.dumps(applied)),
+        )
+    conn.commit()
+    conn.close()
+    assert Store(path).schema_version() == 4
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute("SELECT term_id, confirmed_at FROM term_legacy_descriptions").fetchall()
+    assert rows == [("t-old", None)]

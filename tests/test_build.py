@@ -598,6 +598,30 @@ def test_upgrade_rejudges_every_documents_source_of_a_legacy_term(env, tmp_path)
     assert "align:hanbit-docs" not in kept.details and "align:b-docs" not in kept.details
 
 
+def test_upgrade_rejudges_the_second_source_after_the_first_rewrites_the_description(env, tmp_path):
+    """Round 6: the first documents source's judge call confirms the legacy baseline and
+    its apply rewrites the (fallback again) Term description, replacing that record's
+    ``applied``; the invalidation must survive it, so the second source is still judged,
+    and a further resume with no change reuses both."""
+    add_structured(env)
+    add_documents(env)
+    other = tmp_path / "docs-b"
+    shutil.copytree(env["docs"], other)
+    ex.ensure_documents_source(env["store"], "b-docs", other)
+    store, client = env["store"], env["client"]
+    first = run(env)
+    assert first.status == "succeeded", first.problems
+    assert _forget_description_texts(store) >= 1
+    client.terms["t-customer"]["description"] = ""  # a fallback again: apply rewrites it
+    upgraded = run(env, resume=True)
+    assert upgraded.status == "succeeded", upgraded.problems
+    assert client.terms["t-customer"]["description"]  # the first source's apply wrote it
+    for name in ("align:hanbit-docs", "align:b-docs"):
+        assert upgraded.details[name]["judged"] >= 1, name
+    kept = run(env, resume=True)
+    assert "align:hanbit-docs" not in kept.details and "align:b-docs" not in kept.details
+
+
 def test_resume_runs_align_again_when_an_upstream_term_changed(env):
     """Follow-up of recheck #2: with unchanged inputs `--resume` used to keep the whole
     align step, so an edited upstream Term was never re-judged. The step records a
