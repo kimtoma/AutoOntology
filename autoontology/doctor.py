@@ -36,12 +36,17 @@ class Check:
 
 
 def format_checks(checks: list[Check]) -> str:
-    header = ("CHECK", "STATUS", "DETAIL", "REMEDY")
-    rows = [(c.name, c.status, c.detail, c.remedy) for c in checks]
-    widths = [max(len(r[i]) for r in [header, *rows]) for i in range(3)]
+    """The doctor table in the CLI language (headers and remedy descriptions; check
+    names, statuses, details and commands stay as they are)."""
+    from autoontology.i18n import ljust, msg, width
+    from autoontology.i18n import remedy as translate_remedy
+
+    header = tuple(msg(f"doctor.header.{c}") for c in ("check", "status", "detail", "remedy"))
+    rows = [(c.name, c.status, c.detail, translate_remedy(c.remedy)) for c in checks]
+    widths = [max(width(r[i]) for r in [header, *rows]) for i in range(3)]
     lines = []
     for row in [header, *rows]:
-        cells = [row[i].ljust(widths[i]) for i in range(3)] + [row[3]]
+        cells = [ljust(row[i], widths[i]) for i in range(3)] + [row[3]]
         lines.append("  ".join(cells).rstrip())
     return "\n".join(lines)
 

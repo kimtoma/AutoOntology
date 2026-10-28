@@ -186,7 +186,13 @@ def test_unit_tests_never_see_the_developer_env():
         or k in {"BACKEND_PORT", "INGESTION_SERVICE_URL", "APP_URL"}
         or (
             k.startswith("AUTOONTOLOGY_")
-            and k not in {"AUTOONTOLOGY_HOME", "AUTOONTOLOGY_EXPORTS_DIR", "AUTOONTOLOGY_ENV_FILE"}
+            and k
+            not in {
+                "AUTOONTOLOGY_HOME",
+                "AUTOONTOLOGY_EXPORTS_DIR",
+                "AUTOONTOLOGY_ENV_FILE",
+                "AUTOONTOLOGY_LANG",  # pinned to en by conftest
+            }
             and k != "AUTOONTOLOGY_INTEGRATION"
         )
     ]

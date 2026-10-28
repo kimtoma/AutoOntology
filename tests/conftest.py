@@ -40,6 +40,11 @@ _SCRUBBED_PREFIXES = ("AUTOONTOLOGY_", "KORDOC_", "POSTGRES_", "LLM_", "SEMANTIC
 _SCRUBBED_NAMES = {"BACKEND_PORT", "INGESTION_SERVICE_URL", "APP_URL", *_ISOLATED_VARS}
 _KEPT = {"AUTOONTOLOGY_INTEGRATION"}
 
+#: CLI messages follow the locale (``LANG=ko_KR...`` means Korean): tests assert the
+#: English texts unless they set AUTOONTOLOGY_LANG themselves. Set at import so the
+#: typer help texts (built when ``autoontology.cli`` is imported) are English too.
+os.environ.setdefault("AUTOONTOLOGY_LANG", "en")
+
 
 def _scrub_env(monkeypatch) -> None:
     for name in list(os.environ):
@@ -47,6 +52,7 @@ def _scrub_env(monkeypatch) -> None:
             continue
         if name in _SCRUBBED_NAMES or name.startswith(_SCRUBBED_PREFIXES):
             monkeypatch.delenv(name)
+    monkeypatch.setenv("AUTOONTOLOGY_LANG", "en")
 
 
 def pytest_collection_modifyitems(config, items):

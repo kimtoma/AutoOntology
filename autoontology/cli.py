@@ -6,6 +6,7 @@ from __future__ import annotations
 import typer
 
 from autoontology import __version__
+from autoontology.i18n import msg
 
 app = typer.Typer(
     name="autoontology",
@@ -103,21 +104,21 @@ def setup(
     try:
         typer.echo(f"postgres: {setup_database(settings)}")
     except SetupError as exc:
-        _fail(f"postgres: {exc}\nstart Postgres first, e.g. `docker compose up -d`")
+        _fail(msg("setup.postgres_failed", error=exc))
     try:
         run_migrations(settings)
     except MigrationError as exc:
         _fail(f"migrations: {exc}")
-    typer.echo(f"migrations: database at {current_revision(settings)} (head {head_revision()})")
+    typer.echo(msg("setup.migrations", current=current_revision(settings), head=head_revision()))
     if skip_models:
-        typer.echo("models: skipped (--skip-models)")
+        typer.echo(msg("setup.models_skipped"))
     elif settings.chat_provider != "ollama" and settings.embed_provider == "openai":
         roles = (
-            "chat and embeddings use the openai provider"
+            msg("setup.roles_openai")
             if settings.chat_provider == "openai"
-            else f"chat uses the {settings.chat_provider} provider, embeddings the openai one"
+            else msg("setup.roles_mixed", provider=settings.chat_provider)
         )
-        typer.echo(f"models: skipped ({roles}; `uv run autoontology doctor` checks the endpoint)")
+        typer.echo(msg("setup.models_skipped_roles", roles=roles))
     else:
         from autoontology.config import OLLAMA_DEFAULT_CHAT_MODEL
         from autoontology.engine.ollama import (
@@ -141,8 +142,8 @@ def setup(
             except OllamaSetupError as exc:
                 _fail(f"models: {exc}")
             typer.echo(
-                f"models: {', '.join(wanted)} present"
-                + (f" (pulled {', '.join(pulled)})" if pulled else "")
+                msg("setup.models_present", models=", ".join(wanted))
+                + (msg("setup.models_pulled", models=", ".join(pulled)) if pulled else "")
             )
         else:
             try:
@@ -156,9 +157,13 @@ def setup(
             except (OllamaSetupError, TemplatePatchError) as exc:
                 _fail(f"models: {exc}")
             typer.echo(
-                f"models: {result.alias} answers {result.answer!r} with "
-                f"completion_tokens {result.completion_tokens} (thinking off); "
-                f"embeddings {settings.ollama_embed_model}"
+                msg(
+                    "setup.models_alias",
+                    alias=result.alias,
+                    answer=repr(result.answer),
+                    tokens=result.completion_tokens,
+                    embed=settings.ollama_embed_model,
+                )
             )
     if settings.vision_model and not skip_models:
         from autoontology.engine.ollama import OllamaSetupError, pull_models
@@ -168,10 +173,11 @@ def setup(
         except OllamaSetupError as exc:
             _fail(f"vision model: {exc}")
         typer.echo(
-            f"vision model: {settings.vision_model} present" + (" (pulled)" if pulled else "")
+            msg("setup.vision_present", model=settings.vision_model)
+            + (msg("setup.vision_pulled") if pulled else "")
         )
     elif settings.vision_model:
-        typer.echo(f"vision model: {settings.vision_model} skipped (--skip-models)")
+        typer.echo(msg("setup.vision_skipped", model=settings.vision_model))
     if docs:
         _install_kordoc(
             settings,
@@ -181,14 +187,11 @@ def setup(
             skip_ocr_models=skip_ocr_models,
         )
     elif in_init:
-        typer.echo(
-            "kordoc: skipped (answer yes to document support or run "
-            "`uv run autoontology tools install-kordoc` later)"
-        )
+        typer.echo(msg("setup.kordoc_skipped_init"))
     else:
-        typer.echo("kordoc: skipped (pass --docs for HWP/PDF/DOCX/PPTX documents)")
+        typer.echo(msg("setup.kordoc_skipped"))
     if not in_init:
-        typer.echo("next: uv run autoontology up")
+        typer.echo(msg("setup.next"))
 
 
 def _install_kordoc(
@@ -357,9 +360,11 @@ def _store(settings):
 
 
 def _table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
-    widths = [max(len(str(r[i])) for r in [header, *rows]) for i in range(len(header))]
+    from autoontology.i18n import ljust, width
+
+    widths = [max(width(str(r[i])) for r in [header, *rows]) for i in range(len(header))]
     return "\n".join(
-        "  ".join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)).rstrip()
+        "  ".join(ljust(str(cell), widths[i]) for i, cell in enumerate(row)).rstrip()
         for row in [header, *rows]
     )
 
@@ -387,31 +392,37 @@ def source_add(
 
         path = Path(target).expanduser()
         if not path.exists():
-            _fail(f"source add failed: no such file or directory: {path}")
+            _fail(msg("source.no_such_path", path=path))
         if store.get_source(name):
-            _fail(
-                f"source add failed: source {name!r} already exists "
-                f"(remove it with `source rm {name}`)"
-            )
+            _fail(msg("source.exists", name=name))
         try:
             src = ensure_documents_source(store, name, path, recursive)
         except (JobError, ValueError) as exc:
-            _fail(f"source add failed: {exc}")
-        typer.echo(f"added source {src.name} (documents)")
-        typer.echo(f"  locator: {pipeline.display_locator(src)}")
+            _fail(msg("source.add_failed", error=exc))
+        typer.echo(msg("source.added_documents", name=src.name))
+        typer.echo(msg("source.locator", locator=pipeline.display_locator(src)))
     elif kind == "structured":
         try:
             src = pipeline.add_source(store, target, name=name, recursive=recursive)
         except (LoadError, ValueError) as exc:
-            _fail(f"source add failed: {exc}")
-        typer.echo(f"added source {src.name} ({src.kind}) -> {pipeline.catalog_database_name(src)}")
-        typer.echo(f"  locator: {pipeline.display_locator(src)}")
+            _fail(msg("source.add_failed", error=exc))
+        typer.echo(
+            msg(
+                "source.added",
+                name=src.name,
+                kind=src.kind,
+                database=pipeline.catalog_database_name(src),
+            )
+        )
+        typer.echo(msg("source.locator", locator=pipeline.display_locator(src)))
         if src.kind == "files":
             files = pipeline.files_locator(src).files()
-            typer.echo(f"  files ({len(files)}): " + ", ".join(f.name for f in files))
+            typer.echo(
+                msg("source.files", count=len(files), names=", ".join(f.name for f in files))
+            )
     else:
-        _fail(f"unknown --kind {kind!r} (structured | documents)", code=2)
-    typer.echo("next: uv run autoontology build")
+        _fail(msg("source.unknown_kind", kind=kind), code=2)
+    typer.echo(msg("source.next_build"))
 
 
 @source_app.command("list")
@@ -460,7 +471,9 @@ def source_rm(
     store = _store(settings)
     src = store.get_source(name)
     if src is None:
-        _fail(f"unknown source {name!r}")
+        _fail(msg("source.unknown", name=name))
+    from autoontology.i18n import notice
+
     try:
         remove_source(
             settings,
@@ -468,7 +481,7 @@ def source_rm(
             src,
             drop_db=drop_db,
             force=force,
-            notify=lambda message, warning: typer.echo(message, err=warning),
+            notify=lambda message, warning: typer.echo(notice(message), err=warning),
         )
     except RemoveError as exc:
         _fail(str(exc))
@@ -719,7 +732,7 @@ def export(
 
 # --- onboarding: init / demo / provider ---------------------------------------------------
 
-provider_app = typer.Typer(help="Show, test and switch the chat provider.", no_args_is_help=True)
+provider_app = typer.Typer(help=msg("help.provider_app"), no_args_is_help=True)
 app.add_typer(provider_app, name="provider")
 
 INIT_STEPS = 7
@@ -732,7 +745,7 @@ def _step(n: int, total: int, title: str) -> None:
 
 
 def _yn(value: bool) -> str:
-    return "yes" if value else "no"
+    return msg("word.yes") if value else msg("word.no")
 
 
 def _model_for(settings, provider: str) -> str:
@@ -748,10 +761,7 @@ def _shell_override_warnings(keys) -> list[str]:
     for key, value in keys:
         shell = shell_value(key)
         if shell is not None and shell != value:
-            out.append(
-                f"your shell sets {key}={shell}, which wins over .env: "
-                f"run `unset {key}` (and remove it from your shell profile)"
-            )
+            out.append(msg("init.shell_override", key=key, value=shell))
     return out
 
 
@@ -765,33 +775,16 @@ def _init_postgres(yes: bool, docker: bool, env_path) -> str:
             return pg.setup_database(settings)
         except pg.SetupError as exc:
             typer.echo(f"  FAIL  {exc}")
-        if docker:
-            typer.echo("  fix:  start the bundled Postgres in this folder: `docker compose up -d`")
-        else:
-            typer.echo(
-                "  fix:  install Docker (https://docs.docker.com/get-docker/) and run "
-                "`docker compose up -d` in this folder"
-            )
-        typer.echo(
-            f"        or set POSTGRES_HOST / POSTGRES_PORT / POSTGRES_USER / POSTGRES_PASSWORD in "
-            f"{env_path} to your own Postgres 17 with pgvector"
-        )
+        typer.echo(msg("init.pg_fix_docker" if docker else "init.pg_fix_install"))
+        typer.echo(msg("init.pg_fix_own", env_path=env_path))
         tries += 1
         where = f"{settings.postgres_host}:{settings.postgres_port}"
         if (
             yes
             or tries > POSTGRES_RETRIES
-            or not typer.confirm(
-                f"  Postgres is not reachable at {where}. Start it (docker compose up -d) and "
-                "press Enter to retry, or n to stop",
-                default=True,
-            )
+            or not typer.confirm(msg("init.pg_retry", where=where), default=True)
         ):
-            _fail(
-                "init stopped: Postgres is not reachable. Apply the fix above, then run "
-                "`uv run autoontology init` again.",
-                code=2,
-            )
+            _fail(msg("init.pg_stopped"), code=2)
         if not yes:
             from autoontology.config import unload_env
 
@@ -801,28 +794,20 @@ def _init_postgres(yes: bool, docker: bool, env_path) -> str:
 def _init_login(settings, name: str, info, yes: bool):
     from autoontology import onboarding
 
-    typer.echo(f"  {name}: {info.note or 'not ready'}")
-    typer.echo(f"  fix:  {info.remedy or onboarding.LOGIN_COMMANDS[name]}")
+    command = onboarding.LOGIN_COMMANDS[name]
+    typer.echo(f"  {name}: {info.note or msg('init.not_ready')}")
+    typer.echo(msg("init.fix", remedy=info.remedy or command))
     if yes:
-        _fail(
-            f"init stopped: the {name} CLI is not logged in. Run "
-            f"`{onboarding.LOGIN_COMMANDS[name]}` in a terminal, then run init again "
-            "(or pick another provider with --provider).",
-            code=2,
-        )
+        _fail(msg("init.login_stopped_yes", name=name, command=command), code=2)
     for _ in range(LOGIN_RETRIES):
-        if not typer.confirm(f"  Retry after `{onboarding.LOGIN_COMMANDS[name]}`?", default=True):
+        if not typer.confirm(msg("init.login_retry", command=command), default=True):
             break
         info = onboarding.provider_info(settings, name)
         if info.ready:
             typer.echo(f"  ok    {name}: {info.note}")
             return info
-        typer.echo(f"  still not ready: {info.note}")
-    _fail(
-        f"init stopped: {name} is not logged in. Run `{onboarding.LOGIN_COMMANDS[name]}`, "
-        "then `uv run autoontology init` again (or choose another provider).",
-        code=2,
-    )
+        typer.echo(msg("init.still_not_ready", note=info.note))
+    _fail(msg("init.login_stopped", name=name, command=command), code=2)
 
 
 def _init_setup(docs: bool) -> None:
@@ -830,26 +815,14 @@ def _init_setup(docs: bool) -> None:
     setup(docs=docs, skip_models=False, force_alias=False, skip_ocr_models=False, in_init=True)
 
 
-@app.command()
+@app.command(help=msg("help.init"))
 def init(
-    provider: str = typer.Option(
-        None,
-        "--provider",
-        help="Chat provider: ollama | claude | codex | openai (default: detected).",
-    ),
-    chat_model: str = typer.Option(None, "--chat-model", help="Chat model for that provider."),
-    docs: bool = typer.Option(
-        None,
-        "--docs/--no-docs",
-        help="Install the kordoc document engine and OCR models (default: yes with Node.js 20+).",
-    ),
-    vision_model: str = typer.Option(
-        None, "--vision-model", help="Optional Ollama vision model that describes images."
-    ),
-    yes: bool = typer.Option(
-        False, "--yes", "-y", help="Ask nothing: take the detected defaults (scripts, CI)."
-    ),
-    env: str = typer.Option(None, "--env", help="The .env file to write (default: <repo>/.env)."),
+    provider: str = typer.Option(None, "--provider", help=msg("help.init.provider")),
+    chat_model: str = typer.Option(None, "--chat-model", help=msg("help.init.chat_model")),
+    docs: bool = typer.Option(None, "--docs/--no-docs", help=msg("help.init.docs")),
+    vision_model: str = typer.Option(None, "--vision-model", help=msg("help.init.vision_model")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=msg("help.init.yes")),
+    env: str = typer.Option(None, "--env", help=msg("help.init.env")),
 ) -> None:
     """Set everything up step by step: Postgres, chat provider, embeddings, documents,
     .env, then `setup`. Safe to run again."""
@@ -868,25 +841,27 @@ def init(
         env_file_path,
         unload_env,
     )
+    from autoontology.i18n import other_lang_hint
 
+    typer.echo(other_lang_hint())
     if provider is not None and provider not in CHAT_PROVIDERS:
-        _fail(f"--provider must be one of {', '.join(CHAT_PROVIDERS)}, got {provider!r}", code=2)
+        _fail(msg("init.bad_provider", choices=", ".join(CHAT_PROVIDERS), value=provider), code=2)
     for flag, value in (("--chat-model", chat_model), ("--vision-model", vision_model)):
         if value is not None and not CHAT_MODEL_RE.fullmatch(value):
-            _fail(f"{flag} {value!r} is not a valid model name", code=2)
+            _fail(msg("init.bad_model", flag=flag, value=value), code=2)
     if env:
         os.environ["AUTOONTOLOGY_ENV_FILE"] = str(Path(env).expanduser().resolve())
         unload_env()
     env_path = env_file_path()
     import shutil
 
-    _step(1, INIT_STEPS, "Postgres")
+    _step(1, INIT_STEPS, msg("init.step.postgres"))
     typer.echo(f"  ok    {_init_postgres(yes, shutil.which('docker') is not None, env_path)}")
     settings = _settings()
     det = onboarding.detect_environment(settings, env_path)
 
     # 2. chat provider
-    _step(2, INIT_STEPS, "Chat provider")
+    _step(2, INIT_STEPS, msg("init.step.provider"))
     rows = []
     for name in CHAT_PROVIDERS:
         info = det.providers[name]
@@ -901,7 +876,10 @@ def init(
     typer.echo(
         "\n".join(
             "  " + line
-            for line in _table(("PROVIDER", "FOUND", "LOGGED IN", "NOTE"), rows).splitlines()
+            for line in _table(
+                tuple(msg(f"init.col.{c}") for c in ("provider", "found", "logged_in", "note")),
+                rows,
+            ).splitlines()
         )
     )
     recommended = onboarding.recommend_provider(det)
@@ -913,25 +891,25 @@ def init(
     )
     default_choice = current or recommended
     if current and current != recommended:
-        typer.echo(f"  note  current: {current}; recommended: {recommended}")
+        typer.echo(msg("init.current_vs_recommended", current=current, recommended=recommended))
     if provider:
         choice = provider
     elif yes:
         choice = default_choice
         if current:
             typer.echo(
-                f"  ok    keeping the current provider {current}"
+                msg("init.keeping", current=current)
                 + (
-                    f" (recommended: {recommended}; pass --provider {recommended} to switch)"
+                    msg("init.keeping_switch", recommended=recommended)
                     if current != recommended
                     else ""
                 )
             )
     else:
         label = (
-            f"  Chat provider (current: {current}; recommended: {recommended})"
+            msg("init.prompt_provider_current", current=current, recommended=recommended)
             if current and current != recommended
-            else "  Chat provider"
+            else msg("init.prompt_provider")
         )
         choice = typer.prompt(
             label, default=default_choice, type=click.Choice(list(CHAT_PROVIDERS))
@@ -940,24 +918,16 @@ def init(
     if choice in CLI_PROVIDERS and not info.ready:
         info = _init_login(settings, choice, info, yes)
     if choice == "ollama" and not info.found:
-        typer.echo(
-            f"  warn  Ollama is not answering ({info.note}): install it from https://ollama.com "
-            "and start it (`ollama serve`); setup pulls the models"
-        )
+        typer.echo(msg("init.ollama_missing", note=info.note))
     keys: dict[str, str] = {"AUTOONTOLOGY_CHAT_PROVIDER": choice}
     default_model = _model_for(settings, choice)
     if choice == "openai":
         base = settings.openai_base_url
         if not yes:
-            base = typer.prompt("  Base URL (including /v1)", default=base or None)
+            base = typer.prompt(msg("init.prompt_base_url"), default=base or None)
         base = (base or "").strip().rstrip("/")
         if not base.startswith(("http://", "https://")):
-            _fail(
-                "init stopped: the openai provider needs a base URL such as "
-                "https://api.openai.com/v1 (set AUTOONTOLOGY_OPENAI_BASE_URL in .env, or run "
-                "init without --yes)",
-                code=2,
-            )
+            _fail(msg("init.openai_base_needed"), code=2)
         keys["AUTOONTOLOGY_OPENAI_BASE_URL"] = base
     model = chat_model
     if model is None:
@@ -965,24 +935,19 @@ def init(
             model = default_model
         else:
             hint = f" ({', '.join(CLI_KNOWN_MODELS[choice])})" if choice in CLI_KNOWN_MODELS else ""
-            model = typer.prompt(f"  Chat model{hint}", default=default_model or None)
+            model = typer.prompt(
+                msg("init.prompt_chat_model", hint=hint), default=default_model or None
+            )
     model = (model or "").strip()
     if not model or not CHAT_MODEL_RE.fullmatch(model):
-        _fail(
-            f"init stopped: the {choice} provider needs a chat model name "
-            "(pass --chat-model, or run init without --yes)",
-            code=2,
-        )
+        _fail(msg("init.model_needed", provider=choice), code=2)
     keys[onboarding.CHAT_MODEL_VARS[choice]] = model
-    typer.echo(f"  ok    chat: {choice} {model}")
+    typer.echo(msg("init.chat_ok", provider=choice, model=model))
     if choice == "openai":
-        typer.echo(
-            "  note  Add AUTOONTOLOGY_OPENAI_API_KEY=… to .env yourself "
-            f"({env_path}; never paste keys into chats or shells with history)"
-        )
+        typer.echo(msg("init.openai_key_note", env_path=env_path))
 
     # 3. embeddings
-    _step(3, INIT_STEPS, "Embeddings")
+    _step(3, INIT_STEPS, msg("init.step.embeddings"))
     current_embed = (
         settings.embed_provider
         if settings.selection_origin.get("embed_provider") in (".env", "shell")
@@ -995,7 +960,7 @@ def init(
             default_embed
             if yes
             else typer.prompt(
-                "  Embeddings provider",
+                msg("init.prompt_embed_provider"),
                 default=default_embed,
                 type=click.Choice(["ollama", "openai"]),
             )
@@ -1006,61 +971,53 @@ def init(
         keys["AUTOONTOLOGY_EMBED_PROVIDER"] = embed
     if embed == "openai" and keep_embed:
         typer.echo(
-            f"  ok    embeddings: openai {settings.openai_embed_model or '(model not set)'} "
-            "(current, kept)"
+            msg("init.embed_kept", model=settings.openai_embed_model or msg("init.model_not_set"))
         )
     elif embed == "openai":
         embed_model = settings.openai_embed_model
         if not yes:
-            embed_model = typer.prompt("  Embedding model", default=embed_model or None)
+            embed_model = typer.prompt(msg("init.prompt_embed_model"), default=embed_model or None)
         embed_model = (embed_model or "").strip()
         if not embed_model or not CHAT_MODEL_RE.fullmatch(embed_model):
-            _fail(
-                "init stopped: openai embeddings need a model name "
-                "(set AUTOONTOLOGY_OPENAI_EMBED_MODEL in .env, or run init without --yes)",
-                code=2,
-            )
+            _fail(msg("init.embed_model_needed"), code=2)
         keys["AUTOONTOLOGY_OPENAI_EMBED_MODEL"] = embed_model
         typer.echo(
-            f"  ok    embeddings: openai {embed_model} at {keys.get('AUTOONTOLOGY_OPENAI_BASE_URL')}"
+            msg(
+                "init.embed_openai",
+                model=embed_model,
+                base=keys.get("AUTOONTOLOGY_OPENAI_BASE_URL"),
+            )
         )
     else:
-        state = (
-            "present"
+        state = msg(
+            "init.embed_present"
             if det.ollama_models
-            else "pulled by setup"
+            else "init.embed_pulled_by_setup"
             if det.ollama_reachable
-            else "needs Ollama running (https://ollama.com, `ollama serve`)"
+            else "init.embed_needs_ollama"
         )
-        typer.echo(f"  ok    embeddings: ollama {settings.ollama_embed_model} ({state})")
+        typer.echo(msg("init.embed_ollama", model=settings.ollama_embed_model, state=state))
 
     # 4. documents
-    _step(4, INIT_STEPS, "Documents (kordoc: HWP/PDF/DOCX/PPTX/XLSX and image OCR)")
+    _step(4, INIT_STEPS, msg("init.step.documents"))
     if not det.node_ok:
         if docs:
-            typer.echo("  warn  --docs needs Node.js 20 or newer")
-        typer.echo(
-            f"  skip  {det.node_detail or 'Node.js 20+ not found'}. Markdown, text, HTML, CSV and "
-            ".doc documents still work. For the others install Node.js 20+ (https://nodejs.org), "
-            "then run `uv run autoontology tools install-kordoc`"
-        )
+            typer.echo(msg("init.docs_need_node"))
+        typer.echo(msg("init.docs_skip", detail=det.node_detail or msg("init.node_not_found")))
         want_docs = False
     elif docs is not None:
         want_docs = docs
     elif yes:
         want_docs = True
     else:
-        want_docs = typer.confirm("  Install kordoc and its OCR models (~18 MB) now?", default=True)
+        want_docs = typer.confirm(msg("init.prompt_docs"), default=True)
     if det.node_ok:
-        typer.echo(
-            f"  ok    documents: {'kordoc + OCR models via setup' if want_docs else 'skipped'}"
-            + ("" if want_docs else " (later: `uv run autoontology tools install-kordoc`)")
-        )
+        typer.echo(msg("init.docs_yes" if want_docs else "init.docs_no"))
     if vision_model:
         keys["AUTOONTOLOGY_VISION_MODEL"] = vision_model
 
     # 5. .env
-    _step(5, INIT_STEPS, f"Write {env_path}")
+    _step(5, INIT_STEPS, msg("init.step.env", path=env_path))
     env_file = onboarding.EnvFile.load(env_path, template=REPO_ROOT / ".env.example")
     created = not env_file.existed
     for key, value in keys.items():
@@ -1068,34 +1025,28 @@ def init(
     changed = [c for c in env_file.changes() if c[0] in keys]
     backup = env_file.write(env_path)
     if created:
-        typer.echo(f"  ok    created {env_path} from .env.example")
+        typer.echo(msg("init.env_created", path=env_path))
     for key, old, new in changed:
-        typer.echo(f"  set   {onboarding.describe_change(key, old, new)}")
+        typer.echo(msg("init.env_set", change=onboarding.describe_change(key, old, new)))
     if not changed:
-        typer.echo("  ok    no changes (already set)")
+        typer.echo(msg("init.env_unchanged"))
     if backup:
-        typer.echo(f"  ok    backup of the previous file: {backup}")
+        typer.echo(msg("init.env_backup", path=backup))
     for warning in _shell_override_warnings(keys.items()):
-        typer.echo(f"  warn  {warning}")
+        typer.echo(msg("init.warn", warning=warning))
     unload_env()
 
     # 6. setup
-    _step(
-        6, INIT_STEPS, "Setup (database, migrations, models" + (", kordoc)" if want_docs else ")")
-    )
+    _step(6, INIT_STEPS, msg("init.step.setup_docs" if want_docs else "init.step.setup"))
     try:
         _init_setup(want_docs)
     except typer.Exit as exc:
         if exc.exit_code:
-            typer.echo(
-                "init stopped during setup (see the line above): fix it, then run "
-                "`uv run autoontology init` again (it is safe to repeat)",
-                err=True,
-            )
+            typer.echo(msg("init.setup_stopped"), err=True)
         raise
 
     # 7. summary
-    _step(7, INIT_STEPS, "Summary")
+    _step(7, INIT_STEPS, msg("init.step.summary"))
     settings = _settings()
     summary = [
         (
@@ -1104,13 +1055,17 @@ def init(
         ),
         ("chat", f"{settings.chat_provider} {settings.effective_chat_model}"),
         ("embeddings", f"{settings.embed_provider} {settings.effective_embed_model}"),
-        ("documents", "kordoc + OCR" if want_docs else "native formats only"),
-        ("vision", settings.vision_model or "off (images: OCR text only)"),
+        (
+            "documents",
+            msg("init.sum.documents_kordoc" if want_docs else "init.sum.documents_native"),
+        ),
+        ("vision", settings.vision_model or msg("init.sum.vision_off")),
         (".env", str(env_path)),
     ]
-    typer.echo("\n".join("  " + line for line in _table(("ITEM", "VALUE"), summary).splitlines()))
+    header = (msg("init.col.item"), msg("init.col.value"))
+    typer.echo("\n".join("  " + line for line in _table(header, summary).splitlines()))
     nxt = "uv run autoontology demo" + (" --set hanbit" if choice != "ollama" else "")
-    typer.echo(f"\nnext: {nxt}")
+    typer.echo(msg("init.next", command=nxt))
 
 
 def _demo_prune_orphans(settings, store) -> None:
@@ -1131,16 +1086,10 @@ def _demo_prune_orphans(settings, store) -> None:
             dead = [o for o in orphans if o.database_missing]
             live = [o for o in orphans if not o.database_missing]
             if live:
-                typer.echo(
-                    "  note  upstream connections with no source in this checkout (kept: "
-                    "another checkout may use them): " + ", ".join(o.name for o in live)
-                )
+                typer.echo(msg("demo.live_connections", names=", ".join(o.name for o in live)))
             if not dead:
                 return
-            typer.echo(
-                "  note  pruning upstream connections whose database is gone (they would make "
-                "every ingest time out): " + ", ".join(o.name for o in dead)
-            )
+            typer.echo(msg("demo.pruning", names=", ".join(o.name for o in dead)))
             remove.prune_orphan_connections(
                 settings,
                 client,
@@ -1150,21 +1099,13 @@ def _demo_prune_orphans(settings, store) -> None:
                 ),
             )
     except BackendError as exc:
-        typer.echo(
-            f"  warn  could not check the upstream connections ({exc}); if the build times "
-            f"out, run `{remove.PRUNE_COMMAND}`"
-        )
+        typer.echo(msg("demo.prune_backend", error=exc, command=remove.PRUNE_COMMAND))
     except psycopg.Error as exc:
         first = (str(exc).splitlines() or [type(exc).__name__])[0][:160]
-        typer.echo(
-            f"  warn  could not check the upstream connections: Postgres is not reachable "
-            f"({first}); start it (`docker compose up -d`), then `uv run autoontology doctor`"
-        )
+        typer.echo(msg("demo.prune_postgres", error=first))
     except Exception as exc:  # noqa: BLE001 - a check must never crash demo
-        typer.echo(
-            f"  warn  could not check the upstream connections ({type(exc).__name__}: "
-            f"{(str(exc).splitlines() or [''])[0][:160]}); see `uv run autoontology doctor`"
-        )
+        first = (str(exc).splitlines() or [""])[0][:160]
+        typer.echo(msg("demo.prune_other", error=f"{type(exc).__name__}: {first}"))
 
 
 @tools_app.command("prune-connections")
@@ -1249,26 +1190,16 @@ def _print_step_times(store, since: str) -> None:
         if is_top_step(s.name)
     ]
     if rows:
-        typer.echo(
-            "\n".join("  " + line for line in _table(("STEP", "STATUS", "TIME"), rows).splitlines())
-        )
+        header = tuple(msg(f"demo.col.{c}") for c in ("step", "status", "time"))
+        typer.echo("\n".join("  " + line for line in _table(header, rows).splitlines()))
 
 
-@app.command()
+@app.command(help=msg("help.demo"))
 def demo(
-    set_name: str = typer.Option(
-        "quickstart", "--set", help="Sample set: quickstart (small) | hanbit (full company)."
-    ),
-    no_open: bool = typer.Option(False, "--no-open", help="Do not open the web UI."),
-    resume: bool = typer.Option(
-        False, "--resume", help="Continue the latest build, keeping its succeeded steps."
-    ),
-    replace: bool = typer.Option(
-        False,
-        "--replace",
-        help="Replace sources that use a sample name with other data (deletes their "
-        "database and extracted concepts) without asking.",
-    ),
+    set_name: str = typer.Option("quickstart", "--set", help=msg("help.demo.set")),
+    no_open: bool = typer.Option(False, "--no-open", help=msg("help.demo.no_open")),
+    resume: bool = typer.Option(False, "--resume", help=msg("help.demo.resume")),
+    replace: bool = typer.Option(False, "--replace", help=msg("help.demo.replace")),
 ) -> None:
     """Run the whole pipeline on a sample set: start the services, register the sample
     sources, build, export and open the web UI."""
@@ -1286,57 +1217,44 @@ def demo(
     try:
         samples = onboarding.sample_sources(settings, set_name)
     except onboarding.SampleSetError as exc:
-        _fail(f"demo: {exc}", code=2)
+        _fail(msg("demo.bad_set", error=exc), code=2)
     started = time.monotonic()
     total = 5
 
-    _step(1, total, "Services")
+    _step(1, total, msg("demo.step.services"))
     up()
     store = _store(settings)
     _demo_prune_orphans(settings, store)
 
-    _step(2, total, f"Sample sources ({set_name})")
+    _step(2, total, msg("demo.step.samples", set=set_name))
     for conflict in onboarding.sample_conflicts(settings, store, set_name):
-        typer.echo(
-            f"  {conflict['name']}: registered for {conflict['registered']} "
-            f"({conflict['kind']}), the sample is {conflict['sample']}"
-        )
+        typer.echo(msg("demo.conflict", **conflict))
         if replace:
             continue
         try:
-            ok = typer.confirm(
-                f"  Replace source {conflict['name']} (its database and extracted concepts "
-                "will be deleted)?",
-                default=False,
-            )
+            ok = typer.confirm(msg("demo.confirm_replace", name=conflict["name"]), default=False)
         except (typer.Abort, click.exceptions.Abort):  # no stdin: a script
             ok = False
         if not ok:
-            _fail(
-                f"demo stopped: source {conflict['name']!r} was kept. Re-run with --replace "
-                "to replace it, or remove it yourself (`uv run autoontology source list`)",
-                code=2,
-            )
+            _fail(msg("demo.kept_stop", name=conflict["name"]), code=2)
     try:
         onboarding.register_sample_set(
             settings, store, set_name, notify=lambda m: typer.echo(f"  {m}"), replace=True
         )
     except (onboarding.SampleSetError, RemoveError, LoadError, JobError, ValueError) as exc:
-        _fail(
-            f"demo: could not register the sample sources: {exc}\n"
-            "see `uv run autoontology source list`; remove a conflicting source with "
-            "`uv run autoontology source rm <name>`"
-        )
+        _fail(msg("demo.register_failed", error=exc))
 
-    _step(3, total, "Build")
+    _step(3, total, msg("demo.step.build"))
     rows = onboarding.duration_rows(set_name, settings.chat_provider)
-    typer.echo(f"  expected time for the first build of {set_name} (later builds reuse results):")
+    typer.echo(msg("demo.expected", set=set_name))
+    header = tuple(msg(f"demo.col.{c}") for c in ("provider", "time", "note"))
+    typer.echo("\n".join("    " + line for line in _table(header, rows).splitlines()))
     typer.echo(
-        "\n".join("    " + line for line in _table(("PROVIDER", "TIME", "NOTE"), rows).splitlines())
-    )
-    typer.echo(
-        f"  chat provider: {settings.chat_provider} {settings.effective_chat_model} "
-        "(switch with `uv run autoontology provider use <name>`)"
+        msg(
+            "demo.chat_provider",
+            provider=settings.chat_provider,
+            model=settings.effective_chat_model,
+        )
     )
     build_since = now_iso()
     build_started = time.monotonic()
@@ -1345,21 +1263,21 @@ def demo(
     except typer.Exit as exc:
         _print_step_times(store, build_since)
         if exc.exit_code:
-            typer.echo("demo stopped: continue with `uv run autoontology demo --resume`", err=True)
+            typer.echo(msg("demo.resume"), err=True)
         raise
     _print_step_times(store, build_since)
-    typer.echo(f"  build total: {time.monotonic() - build_started:.1f}s")
+    typer.echo(msg("demo.build_total", seconds=time.monotonic() - build_started))
 
-    _step(4, total, "Export")
+    _step(4, total, msg("demo.step.export"))
     export(revision=None, out=None, format="all")
 
-    _step(5, total, "Web UI")
+    _step(5, total, msg("demo.step.ui"))
     ui(no_browser=no_open)
-    typer.echo(f"\ndemo finished in {time.monotonic() - started:.1f}s")
-    typer.echo("What to look at next: Ontology → Graph → Playground")
+    typer.echo(msg("demo.finished", seconds=time.monotonic() - started))
+    typer.echo(msg("demo.look_next"))
 
 
-@provider_app.command("status")
+@provider_app.command("status", help=msg("help.provider.status"))
 def provider_status() -> None:
     """Every chat provider: available, logged in, model, last test, and what to do."""
     from autoontology import onboarding
@@ -1372,7 +1290,8 @@ def provider_status() -> None:
         info = onboarding.provider_info(settings, name)
         last = probe.last_test(settings, name)
         last_text = (
-            f"{'ok' if last.get('ok') else 'failed'} {last.get('seconds', '?')}s "
+            f"{msg('provider.last_ok') if last.get('ok') else msg('provider.last_failed')} "
+            f"{last.get('seconds', '?')}s "
             f"({str(last.get('at', ''))[:16]})"
             if last
             else "-"
@@ -1387,16 +1306,15 @@ def provider_status() -> None:
                 info.remedy or "-",
             )
         )
-    typer.echo(_table(("PROVIDER", "AVAILABLE", "LOGGED IN", "MODEL", "LAST TEST", "REMEDY"), rows))
+    columns = ("provider", "available", "logged_in", "model", "last_test", "remedy")
+    typer.echo(_table(tuple(msg(f"provider.col.{c}") for c in columns), rows))
     origin = settings.selection_origin.get("chat_provider", "?")
-    typer.echo(f"* = active chat provider ({settings.chat_provider}, from {origin})")
+    typer.echo(msg("provider.active", provider=settings.chat_provider, origin=origin))
 
 
-@provider_app.command("test")
+@provider_app.command("test", help=msg("help.provider.test"))
 def provider_test(
-    provider: str = typer.Option(
-        None, "--provider", help="ollama | openai | claude | codex (default: the active one)."
-    ),
+    provider: str = typer.Option(None, "--provider", help=msg("help.provider.test.provider")),
 ) -> None:
     """One structured test call ("pong") through the chat router."""
     from autoontology.web.providers import probe
@@ -1409,30 +1327,42 @@ def provider_test(
     name = provider or settings.chat_provider
     if result.get("ok"):
         typer.echo(
-            f"{name} ok: {result.get('model')} answered {result.get('answer')!r} in "
-            f"{result.get('seconds')}s (via {result.get('via')})"
+            msg(
+                "provider.test_ok",
+                name=name,
+                model=result.get("model"),
+                answer=result.get("answer"),
+                seconds=result.get("seconds"),
+                via=result.get("via"),
+            )
         )
         return
-    remedy = result.get("remedy") or "see `uv run autoontology provider status`"
+    remedy = result.get("remedy") or msg("provider.see_status")
+    error = result.get("error") or result.get("answer") or msg("provider.no_answer")
     _fail(
-        f"{name} failed: {result.get('error') or result.get('answer') or 'no answer'}"
-        f" ({result.get('seconds')}s)\nfix: {remedy}"
+        msg(
+            "provider.test_failed",
+            name=name,
+            error=error,
+            seconds=result.get("seconds"),
+            remedy=remedy,
+        )
     )
 
 
-@provider_app.command("use")
+@provider_app.command("use", help=msg("help.provider.use"))
 def provider_use(
     name: str = typer.Argument(..., help="ollama | claude | codex | openai"),
-    chat_model: str = typer.Option(None, "--chat-model", help="Chat model for that provider."),
+    chat_model: str = typer.Option(None, "--chat-model", help=msg("help.provider.use.chat_model")),
 ) -> None:
     """Switch the chat provider in .env (comments and other lines are kept)."""
     from autoontology import onboarding
     from autoontology.config import CHAT_MODEL_RE, CHAT_PROVIDERS, CLI_PROVIDERS, env_file_path
 
     if name not in CHAT_PROVIDERS:
-        _fail(f"unknown provider {name!r}: choose one of {', '.join(CHAT_PROVIDERS)}", code=2)
+        _fail(msg("provider.unknown", name=name, choices=", ".join(CHAT_PROVIDERS)), code=2)
     if chat_model is not None and not CHAT_MODEL_RE.fullmatch(chat_model):
-        _fail(f"--chat-model {chat_model!r} is not a valid model name", code=2)
+        _fail(msg("init.bad_model", flag="--chat-model", value=chat_model), code=2)
     settings = _settings()
     path = env_file_path()
     env_file = onboarding.EnvFile.load(path)
@@ -1444,23 +1374,21 @@ def provider_use(
     changed = env_file.changes()
     backup = env_file.write(path)
     for key, old, new in changed:
-        typer.echo(f"set {onboarding.describe_change(key, old, new)} in {path}")
+        typer.echo(msg("provider.set", change=onboarding.describe_change(key, old, new), path=path))
     if not changed:
-        typer.echo(f"{path} already selects {name}; nothing changed")
+        typer.echo(msg("provider.unchanged", path=path, name=name))
     if backup:
-        typer.echo(f"backup: {backup}")
+        typer.echo(msg("provider.backup", path=backup))
     for warning in _shell_override_warnings(keys.items()):
-        typer.echo(f"warning: {warning}", err=True)
+        typer.echo(msg("provider.warning", warning=warning), err=True)
     if name == "openai" and not (
         env_file.get("AUTOONTOLOGY_OPENAI_BASE_URL") or settings.openai_base_url
     ):
-        typer.echo(
-            "warning: set AUTOONTOLOGY_OPENAI_BASE_URL, AUTOONTOLOGY_OPENAI_CHAT_MODEL and "
-            f"AUTOONTOLOGY_OPENAI_API_KEY in {path} (type the key yourself)",
-            err=True,
-        )
+        typer.echo(msg("provider.openai_warning", path=path), err=True)
     elif name in CLI_PROVIDERS or name == "ollama":
         info = onboarding.provider_info(settings, name)
         if not info.ready:
-            typer.echo(f"warning: {name} is not ready ({info.note}): {info.remedy}", err=True)
-    typer.echo(f"restart: {onboarding.RESTART_HINT}")
+            typer.echo(
+                msg("provider.not_ready", name=name, note=info.note, remedy=info.remedy), err=True
+            )
+    typer.echo(msg("provider.restart", command=onboarding.RESTART_HINT))
