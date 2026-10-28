@@ -343,6 +343,11 @@ class _FK:
     rel: _Rel
     table: str  # schema.table of the referencing column ("" when from a dataset)
     column: str = ""
+    #: declared: the referenced dataset and fields ("" / []: a semantic FK, which
+    #: references the Term's key attribute); declared before ``field``, which shadows
+    #: :func:`dataclasses.field` in the class body
+    to_dataset: str = ""
+    to_fields: list[str] = field(default_factory=list)
     dataset: str = ""  # declared: the referencing dataset and its field
     field: str = ""
 
@@ -505,7 +510,16 @@ def build_ontology(
                 )
                 rels[a].append(fk)
                 result.fks.append(
-                    _FK(a, b, fk, "", dataset=src.name, field=cols[0] if len(cols) == 1 else "")
+                    _FK(
+                        a,
+                        b,
+                        fk,
+                        "",
+                        dataset=src.name,
+                        field=cols[0] if len(cols) == 1 else "",
+                        to_dataset=dst.name,
+                        to_fields=list(r.get("to_columns") or []),
+                    )
                 )
 
     # document attributes/metrics attached to a subject -> value relationships
@@ -728,6 +742,14 @@ def build_mapping(
             )
             continue
         ds_name, key = simple[fk.subject]
+        target_ds, target_key = simple[fk.target]
+        if fk.to_dataset and (fk.to_dataset, fk.to_fields) != (target_ds, [target_key]):
+            warnings.append(
+                f"mapping: {a}.{fk.rel.name} -> {b}: references "
+                f"{fk.to_dataset}({', '.join(fk.to_fields)}), not {b}'s key "
+                f"{target_ds}.{target_key}, no link mapping"
+            )
+            continue
         field_name = fk.field if fk.dataset == ds_name else ""
         if not field_name and fk.column:
             ds = next(d for d in datasets if d.name == ds_name)

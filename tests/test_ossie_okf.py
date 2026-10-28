@@ -456,6 +456,36 @@ def test_mapping_keys_compound_keys_and_links(bundle):
     assert ossie.mapping_errors(mapping, _load(out / "ossie/ontology.yaml")) == []
 
 
+def test_link_mappings_need_the_fk_to_reference_the_target_key(model, tmp_path):
+    doc = semantic_model()
+    doc["datasets"][0]["fields"].append(dict(doc["datasets"][0]["fields"][0], name="추천고객"))
+    doc["datasets"][1]["unique_keys"].append(["지역"])
+    for name, to in (("by_key", "고객id"), ("by_other_key", "지역")):
+        doc["relationships"].append(
+            {
+                "name": name,
+                "from": "contracts",
+                "to": "customers",
+                "from_columns": ["추천고객"],
+                "to_columns": [to],
+            }
+        )
+    zipped = write_zip(tmp_path / "hanbit.ossie.zip", doc)
+    result = ossie.write(
+        model, tmp_path, revision=1, created_at=CREATED, upstream=[("hanbit", zipped)]
+    )
+    mapping = _load(tmp_path / "ossie/mapping.yaml")
+    links = {m["concept"]: m for m in mapping["concept_mappings"]}["Contracts"]["link_mappings"]
+    expressions = [c["object_mapping"]["expression"] for c in links[0]["children"]]
+    # the semantic FK and the declared one over the key; not the one over 지역
+    assert expressions == ["contracts.고객id", "contracts.추천고객"]
+    assert any(
+        "references customers(지역), not Customers's key customers.고객id" in w
+        for w in result["validation"]["warnings"]
+    )
+    assert result["validation"]["mapping"] == "ok"
+
+
 def test_ossie_is_deterministic_and_fails_with_the_path(model, tmp_path, monkeypatch):
     zipped = write_zip(tmp_path / "hanbit.ossie.zip", semantic_model())
     a, b = tmp_path / "a", tmp_path / "b"
