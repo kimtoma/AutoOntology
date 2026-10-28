@@ -210,6 +210,16 @@ def load_env(env_file: Path | None = None, *, override: bool = False) -> Path | 
     return None
 
 
+def unload_env() -> None:
+    """Forget the values :func:`load_env` copied from ``.env`` into ``os.environ`` (those
+    still unchanged), so the next :meth:`Settings.from_env` reads a rewritten ``.env``
+    afresh. Shell values are kept."""
+    for key, value in list(_DOTENV_LOADED.items()):
+        if os.environ.get(key) == value:
+            del os.environ[key]
+        del _DOTENV_LOADED[key]
+
+
 def derived_env_keys(env: dict[str, str] | None = None) -> set[str]:
     raw = (os.environ if env is None else env).get(DERIVED_ENV_VAR, "")
     return {k for k in raw.split(",") if k}
@@ -395,6 +405,8 @@ class Settings:
     vision_model: str = ""
     #: Largest file the native document readers accept (AUTOONTOLOGY_DOC_MAX_BYTES).
     doc_max_bytes: int = 50 * 1024 * 1024
+    #: Folder holding the sample sets (``quickstart``, ``hanbit``; AUTOONTOLOGY_SAMPLES_DIR).
+    samples_dir: Path = REPO_ROOT / "samples"
 
     def __post_init__(self) -> None:
         validate_catalog_database_name(self.postgres_database)
@@ -446,6 +458,9 @@ class Settings:
             doc_table_max_rows=max(1, _int_env("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", 200)),
             vision_model=env.get("AUTOONTOLOGY_VISION_MODEL", "").strip(),
             doc_max_bytes=max(1, _int_env("AUTOONTOLOGY_DOC_MAX_BYTES", 50 * 1024 * 1024)),
+            samples_dir=Path(env["AUTOONTOLOGY_SAMPLES_DIR"].strip()).expanduser()
+            if env.get("AUTOONTOLOGY_SAMPLES_DIR", "").strip()
+            else REPO_ROOT / "samples",
         )
 
     @property
