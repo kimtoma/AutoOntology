@@ -62,7 +62,7 @@ def _alignments(model: MergedOntology) -> dict[str, list[dict[str, Any]]]:
                     "with": other,
                     "label": other_node.label if other_node else "",
                     "confidence": a.confidence,
-                    "accepted": True,
+                    "accepted": a.accepted,
                 },
             )
     return out

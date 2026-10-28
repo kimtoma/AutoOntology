@@ -531,6 +531,51 @@ def test_ontology_concepts_search_and_detail(env):
         assert c.get(f"{API}{gone}").status_code == 404
 
 
+def test_a_proposal_below_the_accept_threshold_changes_no_origin(env):
+    """A judge ``related`` at 0.3 is exported as an axiom but is not an accepted edge: the
+    Term stays ``structured`` and the link says ``accepted: False``."""
+    from autoontology.ontology import model as merged
+    from autoontology.web.concepts import concept_items
+
+    c, settings, _, _ = env
+    src = _seed_documents(settings)
+    store = _store(settings)
+    AlignmentStore(store).put(
+        AlignmentRecord(
+            src.id,
+            concept_id(src.id, "entity", "담당자"),
+            "담당자",
+            "related",
+            "r",
+            "hanbit",
+            "t-k",
+            "Customers",
+            0.6,
+            0.3,
+            "weak",
+        )
+    )
+    model = merged.build(
+        settings.workspace,
+        structured=[_snapshot()],
+        documents=export_job.documents_inputs(store, [src]),
+        base=settings.base_iri,
+    )
+    weak = [
+        a for a in model.axioms if a.source == "alignment" and "term-t-k" in (a.subject, a.object)
+    ]
+    assert len(weak) == 1 and weak[0].accepted is False  # still exported
+    assert "term-t-k" not in model.aligned_terms()
+    assert model.origin("term-t-k") == "structured"
+    assert model.origin("term-t-c") == "aligned"  # folded 계약 (accepted same)
+    items = {i["name"]: i for i in concept_items(model)}
+    assert items["Customers"]["origin"] == "structured"
+    best = items["Customers"]["alignment"]["best"]
+    assert best["relation"] == "related" and best["accepted"] is False
+    again = merged.MergedOntology.from_dict(model.to_dict())
+    assert again.origin("term-t-k") == "structured"
+
+
 def test_ontology_graph_from_the_snapshot(env):
     c, settings, _, _ = env
     _, model = _seed_snapshot(settings)

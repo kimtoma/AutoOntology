@@ -164,6 +164,9 @@ class OAxiom:
     derived_from: list[str] = field(default_factory=list)
     confidence: float | None = None
     rationale: str = ""
+    #: an alignment axiom from a judge verdict that passed the accept threshold (the
+    #: persisted ``accepted``); a mere proposal is still exported but changes no origin
+    accepted: bool = False
 
 
 @dataclass
@@ -244,11 +247,12 @@ class MergedOntology:
     # --- origins -----------------------------------------------------------------------
 
     def aligned_terms(self) -> set[str]:
-        """Term classes joined to documents: a folded (``same``) concept, or an alignment
-        axiom (broader/narrower/related) touching them."""
+        """Term classes joined to documents: a folded (``same``) concept, or an *accepted*
+        alignment axiom (broader/narrower/related) touching them. A verdict below the
+        accept threshold is only a proposal and leaves the Term ``structured``."""
         out = {c.local for c in self.classes.values() if c.source == "structured" and c.concept_ids}
         for a in self.axioms:
-            if a.source == "alignment":
+            if a.source == "alignment" and a.accepted:
                 for end in (a.subject, a.object):
                     cls = self.classes.get(end)
                     if cls is not None and cls.source == "structured":
@@ -501,6 +505,7 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput, term_class: dict
                         derived_from=list(evidence),
                         confidence=a.confidence,
                         rationale=a.rationale,
+                        accepted=bool(a.accepted),
                     )
                 )
             else:
