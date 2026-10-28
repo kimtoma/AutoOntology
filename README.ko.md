@@ -173,16 +173,16 @@ AUTOONTOLOGY_EMBED_PROVIDER=ollama
 
 | 명령 | 하는 일 |
 |---|---|
-| `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | 단계별 설정: Postgres 확인(`docker compose up -d` 후 재시도), 채팅 제공자·임베딩·문서 감지와 선택, `.env` 작성(다른 줄은 유지, 기존 파일은 백업), `setup` 실행. `--yes`는 아무것도 묻지 않으며, Postgres가 꺼져 있거나 고른 CLI가 로그인되지 않았으면 해결 방법과 함께 종료 코드 2로 끝납니다. |
-| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume]` | 서비스 시작, 샘플 세트 소스 등록(이미 등록된 것은 유지, 경로가 다른 소스는 교체), 제공자별 예상 빌드 시간 출력, 단계별 시간과 함께 빌드, 내보내기, 웹 UI 열기. |
+| `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | 단계별 설정: Postgres 확인(`docker compose up -d` 후 재시도), 채팅 제공자·임베딩·문서 감지와 선택, `.env` 작성(다른 줄은 유지, 기존 파일은 백업), `setup` 실행. `.env`에 이미 있는 제공자·임베딩 선택은 유지합니다(추천은 힌트로만 표시). `--yes`는 아무것도 묻지 않으며, Postgres가 꺼져 있거나 고른 CLI가 로그인되지 않았으면 해결 방법과 함께 종료 코드 2로 끝납니다. |
+| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | 서비스 시작(어떤 소스에도 속하지 않는 업스트림 연결은 정리), 샘플 세트 소스 등록(이미 등록된 것은 유지, 같은 이름에 다른 데이터를 가진 소스는 데이터베이스와 추출된 개념이 삭제되므로 확인을 받거나 `--replace`일 때만 교체), 제공자별 예상 빌드 시간 출력, 단계별 시간과 함께 빌드, 내보내기, 웹 UI 열기. |
 | `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M]` | 모든 채팅 제공자 표시(사용 가능, 로그인, 모델, 마지막 테스트, 해결 방법), 테스트 호출 한 번, 또는 `.env`의 제공자 전환(셸 변수가 파일보다 우선하면 경고). |
 | `autoontology setup [--docs] [--skip-models] [--force-alias]` | 멱등 준비 작업: 카탈로그 데이터베이스와 `vector`, `pg_trgm` 확장을 만들고, 마이그레이션을 실행하고, Ollama 모델을 받아 `openai/qwen3:8b` 별칭을 만들며, `--docs`를 주면 kordoc을 설치합니다. |
-| `autoontology doctor [--skip-models]` | Postgres, pgvector, 마이그레이션, 모델 엔드포인트, 벡터 테이블, 포트를 점검합니다. |
+| `autoontology doctor [--skip-models]` | Postgres, pgvector, 마이그레이션, 모델 엔드포인트, 벡터 테이블, 포트, (서비스가 켜져 있으면) 고아 업스트림 연결을 점검합니다. |
 | `autoontology up` / `down` / `status` | 엔진 백엔드와 서비스를 시작, 중지하거나 상태를 보여 줍니다. |
 | `autoontology ui [--no-browser]` | 웹 UI URL을 출력하고 엽니다. |
 | `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | 소스를 등록합니다. 정형 소스는 `autoontology_src_<name>`에 적재됩니다. |
 | `autoontology source list` | 소스 목록을 보여 줍니다. |
-| `autoontology source rm N [--drop-db] [--force]` | 소스를 제거합니다. `--drop-db`는 그 데이터베이스도 삭제합니다. 문서 소스라면 먼저 그 소스의 정렬이 업스트림 Term에 추가한 동의어를 지웁니다(수동 별칭, 다른 소스의 별칭, 다른 소스의 수락된 `same` 정렬이 여전히 덮는 별칭은 유지). 이 작업에는 엔진 데이터베이스가 필요하며, 실패하면 `--force`를 주지 않는 한 소스를 유지합니다. |
+| `autoontology source rm N [--drop-db] [--force]` | 소스를 제거합니다. `--drop-db`는 그 데이터베이스도 삭제합니다. 문서 소스라면 먼저 그 소스의 정렬이 업스트림 Term에 추가한 동의어를 지웁니다(수동 별칭, 다른 소스의 별칭, 다른 소스의 수락된 `same` 정렬이 여전히 덮는 별칭은 유지). 이 작업에는 엔진 데이터베이스가 필요하며, 실패하면 `--force`를 주지 않는 한 소스를 유지합니다. `--force`로도 업스트림 연결을 지우지 못하면(백엔드 꺼짐) `--drop-db`는 데이터베이스를 남기고, 나중에 `tools prune-connections --drop-db`를 실행하라고 안내합니다. |
 | `autoontology build [--source N ...] [--resume]` | 모든 소스를 스냅샷 하나로 빌드합니다. `--source`는 지정한 소스만 다시 빌드합니다(정렬, 병합, 스냅샷은 여전히 전체를 대상으로 합니다). `--resume`은 최근 빌드를 이어 가며, 입력이 바뀌지 않은 단계는 유지합니다([빌드 이어 가기](#빌드-이어-가기) 참고). |
 | `autoontology ontology` | 최신 스냅샷의 리비전, 소스, 개수를 보여 줍니다. |
 | `autoontology runs [--limit N]` | 최근 run과 그 단계들을 보여 줍니다. |
@@ -190,6 +190,7 @@ AUTOONTOLOGY_EMBED_PROVIDER=ollama
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force]` | npm으로 kordoc을 `<home>/kordoc`에 설치합니다. |
 | `autoontology tools build-ui` | 웹 UI를 `autoontology/web/static/dist`로 다시 빌드합니다(pnpm 필요). |
 | `autoontology tools status` | 사용 중인 kordoc 엔진과 Node 바이너리를 보여 줍니다. |
+| `autoontology tools prune-connections [--dry-run] [--drop-db]` | 데이터베이스가 사라졌거나 등록된 소스가 없는 `autoontology_src_*` 업스트림 연결을 지웁니다. `--drop-db`는 주인 없는 데이터베이스도 삭제합니다. |
 | `autoontology version` | 버전을 출력합니다. |
 
 run이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 청크 추출이 실패한 경우) `build`는
@@ -217,7 +218,7 @@ kordoc이 설치되지 않아 건너뛴 문서는 실패가 아니라 경고입�
 |---|---|
 | `GET /api/status` | 버전, 백엔드와 Postgres 상태, Ollama 모델, `kordoc_available`, 제공자 요약(키는 절대 포함하지 않음). |
 | `GET /api/samples` | `samples/`의 샘플 세트(`quickstart`, `hanbit`): `[{set, path, sources: [{name, kind, path, files, bytes}], registered}]`. |
-| `POST /api/samples/load` | `{"set": "quickstart"}`: 그 세트의 소스를 `autoontology demo`와 똑같이 등록합니다(`action`: `created`, `kept`, `replaced`와 함께 반환). 모르는 세트는 400, run이 진행 중이면 409. |
+| `POST /api/samples/load` | `{"set": "quickstart"}`: 그 세트의 소스를 `autoontology demo`와 똑같이 등록합니다(`action`: `created`, `kept`, `replaced`와 함께 반환). 모르는 세트나 JSON 객체가 아닌 본문은 400, run이 진행 중이면 409, 샘플 이름의 소스가 다른 데이터를 가지고 있으면 본문에 `"replace": true`가 없는 한 409 `sample_conflict`(`conflicts`에 서로 다른 위치). |
 | `GET /api/sources` | 소스 목록. |
 | `POST /api/sources` | 소스 추가: JSON `{name, kind: files\|database\|documents, locator, recursive?}` 또는 multipart 업로드. |
 | `DELETE /api/sources/{name}` | 소스 제거(`?drop_db=true`는 데이터베이스도 삭제, `&force=true`는 `source rm --force`처럼 엔진의 그래프 삭제나 별칭 정리가 실패하거나 끝나지 않아도 로컬에서 제거). 문서 소스는 `source rm`과 마찬가지로 먼저 업스트림 Term에서 그 소스가 추가한 별칭을 지웁니다. |
@@ -449,6 +450,7 @@ run은 그다음에야 `succeeded`가 됩니다(지우지 못한 백업은 경�
 | `doctor`의 "vector tables" FAIL: 임베더가 N차원을 출력 | ingest 후에 임베딩 모델을 바꿨습니다. 이전 `*_EMBED_MODEL`로 되돌리거나, 벡터 테이블이 비도록 모든 소스를 제거(`source rm`)하세요. 빈 테이블은 자동으로 다시 만들어집니다. |
 | `build`가 "N document(s) need kordoc and were skipped" 경고 | run은 그 문서 없이 성공했습니다. kordoc을 설치하고(`uv run autoontology tools install-kordoc`, Node 20 이상) `build` 또는 `build --resume`으로 읽으세요. |
 | `/ui/`가 503 `ui_not_built`를 반환 | 커밋된 UI가 없습니다(예: 소스 아카이브). `uv run autoontology tools build-ui`를 실행하세요(Node와 pnpm 필요). |
+| ingest가 `PoolTimeout: couldn't get a connection after 30.00 sec`로 실패 | 업스트림 연결이 삭제된 `autoontology_src_*` 데이터베이스를 가리킵니다. 서비스를 켠 상태에서 `uv run autoontology tools prune-connections`를 실행하세요(`doctor`의 "upstream connections" 행에 나옵니다). |
 | 빌드가 멈춘 것 같음 | `uv run autoontology runs`를 실행하고 `data/logs/`를 읽어 보세요. `qwen3:8b`로는 청크 하나에 1~2분이 걸립니다. |
 
 ## 개발

@@ -231,16 +231,16 @@ What to know:
 
 | Command | What it does |
 |---|---|
-| `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | Step-by-step setup: checks Postgres (retry after `docker compose up -d`), detects and picks the chat provider, embeddings and documents, writes `.env` (other lines kept, previous file backed up) and runs `setup`. `--yes` asks nothing; exits 2 with the fix when Postgres is down or the chosen CLI is not logged in. |
-| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume]` | Starts the services, registers the sample set's sources (already registered ones are kept, a source with another path is replaced), prints the expected build time per provider, builds with per-step times, exports and opens the web UI. |
+| `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | Step-by-step setup: checks Postgres (retry after `docker compose up -d`), detects and picks the chat provider, embeddings and documents, writes `.env` (other lines kept, previous file backed up) and runs `setup`. A provider and embeddings choice already in `.env` is kept (the recommendation is shown as a hint). `--yes` asks nothing; exits 2 with the fix when Postgres is down or the chosen CLI is not logged in. |
+| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | Starts the services (and prunes upstream connections no source owns), registers the sample set's sources (already registered ones are kept; a source with the same name but other data is replaced only after you confirm, or with `--replace`, because its database and extracted concepts are deleted), prints the expected build time per provider, builds with per-step times, exports and opens the web UI. |
 | `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M]` | Shows every chat provider (available, logged in, model, last test, remedy), runs one test call, or switches the provider in `.env` (warns when a shell variable overrides the file). |
 | `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | Idempotent preparation: creates the catalog database and the `vector` and `pg_trgm` extensions, runs the migrations, pulls the Ollama models (and `AUTOONTOLOGY_VISION_MODEL` when set) and builds the `openai/qwen3:8b` alias, and with `--docs` installs kordoc and its OCR models (`--skip-ocr-models` leaves the models out). |
-| `autoontology doctor [--skip-models]` | Checks Postgres, pgvector, migrations, model endpoints, the vector tables and the ports. |
+| `autoontology doctor [--skip-models]` | Checks Postgres, pgvector, migrations, model endpoints, the vector tables, the ports and (with the services up) orphaned upstream connections. |
 | `autoontology up` / `down` / `status` | Starts, stops or shows the engine backend and the service. |
 | `autoontology ui [--no-browser]` | Prints the web UI URL and opens it. |
 | `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | Registers a source. Structured sources are loaded into `autoontology_src_<name>`. |
 | `autoontology source list` | Lists the sources. |
-| `autoontology source rm N [--drop-db] [--force]` | Removes a source; `--drop-db` also drops its database. For a documents source it first removes, from the upstream Terms, the synonyms that source's alignments added (manual aliases, other sources' aliases and aliases still covered by another source's accepted `same` alignment are kept). This needs the engine database; if it fails, the source is kept unless `--force` is given. |
+| `autoontology source rm N [--drop-db] [--force]` | Removes a source; `--drop-db` also drops its database. For a documents source it first removes, from the upstream Terms, the synonyms that source's alignments added (manual aliases, other sources' aliases and aliases still covered by another source's accepted `same` alignment are kept). This needs the engine database; if it fails, the source is kept unless `--force` is given. When `--force` cannot delete the upstream connection (backend down), `--drop-db` keeps the database and tells you to run `tools prune-connections --drop-db` later. |
 | `autoontology build [--source N ...] [--resume]` | Builds every source into one snapshot. `--source` rebuilds only the named sources (align, merge and snapshot still cover all of them). `--resume` continues the latest build and keeps steps whose inputs did not change (see [Resuming a build](#resuming-a-build)). |
 | `autoontology ontology` | Shows the latest snapshot: revision, sources and counts. |
 | `autoontology runs [--limit N]` | Shows recent runs and their steps. |
@@ -248,6 +248,7 @@ What to know:
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
 | `autoontology tools build-ui` | Rebuilds the web UI into `autoontology/web/static/dist` (needs pnpm). |
 | `autoontology tools status` | Shows the kordoc engine and the Node binary in use. |
+| `autoontology tools prune-connections [--dry-run] [--drop-db]` | Deletes upstream connections named `autoontology_src_*` whose database is gone or that no registered source owns; `--drop-db` also drops an unowned database. |
 | `autoontology version` | Prints the version. |
 
 `build` exits 1 when a run is partial (for example a document failed to read or a chunk
@@ -301,7 +302,7 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 | `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, `ocr_ready`, `vision_model`, `formats` (every supported extension by source kind, with its engine) and a provider summary (never the key): `providers.chat` (`name`, `model`, `available`, `logged_in`, `detail`, `remedy`, `last_test`) and `providers.embed`. |
 | `POST /api/providers/test` | One test call (`{"answer": "pong"}`) through the active chat provider; 409 while another test runs. The result is kept as `last_test`. |
 | `GET /api/samples` | The sample sets in `samples/` (`quickstart`, `hanbit`): `[{set, path, sources: [{name, kind, path, files, bytes}], registered}]`. |
-| `POST /api/samples/load` | `{"set": "quickstart"}` registers that set's sources like `autoontology demo` (returns them with `action`: `created`, `kept` or `replaced`); 400 for an unknown set, 409 while a run is active. |
+| `POST /api/samples/load` | `{"set": "quickstart"}` registers that set's sources like `autoontology demo` (returns them with `action`: `created`, `kept` or `replaced`); 400 for an unknown set or a body that is not a JSON object, 409 while a run is active, and 409 `sample_conflict` (with `conflicts`: the differing locators) when a source with a sample name holds other data, unless the body has `"replace": true`. |
 | `GET /api/sources` | Lists the sources. |
 | `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
 | `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion or the alias cleanup fails or does not finish, like `source rm --force`). A documents source's alias additions are removed from the upstream Terms first, as with `source rm`. |
@@ -562,6 +563,7 @@ See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 | `/ui/` returns 503 `ui_not_built` | The committed UI is missing (for example in a source archive). Run `uv run autoontology tools build-ui` (needs Node and pnpm). |
 | `doctor` FAIL "chat provider": claude/codex not logged in | Log in as the user that runs AutoOntology (`claude auth login`, or `codex login`), then `down` / `up`. If the CLI on PATH is a shim, set `AUTOONTOLOGY_CLAUDE_BIN` / `AUTOONTOLOGY_CODEX_BIN`. |
 | Build calls fail with 429 `usage_limit` | Your Claude or ChatGPT plan limit is reached. Wait for the reset and run `build --resume`, or switch `AUTOONTOLOGY_CHAT_PROVIDER`. |
+| Ingest fails with `PoolTimeout: couldn't get a connection after 30.00 sec` | An upstream connection points at a dropped `autoontology_src_*` database. Run `uv run autoontology tools prune-connections` with the services up (`doctor` lists them under "upstream connections"). |
 | A build seems stuck | Run `uv run autoontology runs` and read `data/logs/`. Each chunk takes one to two minutes with `qwen3:8b`. |
 
 ## Development
