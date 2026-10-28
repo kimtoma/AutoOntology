@@ -452,6 +452,14 @@ class Api:
             kordoc_ok = True
         except Exception:  # noqa: BLE001 - optional component (KordocUnavailable, OSError)
             kordoc_ok = False
+        ocr_ready = False
+        if kordoc_ok:
+            try:
+                ocr_ready = bool(kordoc.ocr_models_status(s.home)["ready"])
+            except Exception:  # noqa: BLE001 - optional component
+                ocr_ready = False
+        from autoontology import formats
+
         overall = "error" if any(c["status"] == "error" for c in checks.values()) else "ok"
         result = {
             "status": overall,
@@ -466,6 +474,9 @@ class Api:
                 else "",
             },
             "kordoc_available": kordoc_ok,
+            "ocr_ready": ocr_ready,
+            "vision_model": s.vision_model or None,
+            "formats": formats.describe(),
             "service_url": s.service_url,
             "checks": checks,
             "doctor": "uv run autoontology doctor",

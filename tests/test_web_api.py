@@ -1325,3 +1325,31 @@ def test_startup_recovery_continues_after_one_folder_fails(isolated_env, monkeyp
     assert restored == [finals[1]]
     assert (finals[1] / export_job.EXPORT_MARKER).is_file()
     assert str(finals[0]) in caplog.text and "injected rename failure" in caplog.text
+
+
+def test_status_lists_formats_ocr_and_vision(env, monkeypatch):
+    c, _, _, _ = env
+    import httpx
+
+    from autoontology import formats
+    from autoontology.engine import pg
+    from autoontology.unstructured import kordoc
+
+    def refused(*a, **k):
+        raise httpx.ConnectError("refused")
+
+    def no_postgres(*a, **k):
+        raise pg.psycopg.OperationalError("refused")
+
+    monkeypatch.setattr(web_api.httpx, "get", refused)
+    monkeypatch.setattr(pg, "connect", no_postgres)
+    monkeypatch.setattr(kordoc, "resolve_engine", lambda home, env=None: object())
+    monkeypatch.setattr(
+        kordoc, "ocr_models_status", lambda home, engine=None: {"ready": True, "detail": "ok"}
+    )
+    body = c.get(f"{API}/status").json()
+    assert body["formats"] == formats.describe()
+    assert body["formats"]["documents"][".doc"]["engine"] == "native"
+    assert body["formats"]["structured"][".xls"]["kind"] == "structured"
+    assert body["kordoc_available"] is True and body["ocr_ready"] is True
+    assert body["vision_model"] is None

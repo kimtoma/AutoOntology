@@ -2,10 +2,11 @@
 
 **English** | [한국어](README.ko.md)
 
-AutoOntology turns structured data (CSV, TSV, XLSX, JSON, Parquet, SQLite, or a
-Postgres/MySQL/Snowflake database) and unstructured documents (Markdown, text, HTML, and
-with the optional kordoc engine HWP/HWPX/HWPML, PDF, DOCX, PPTX, XLS/XLSX and PNG/JPEG/WebP
-images) into **one ontology**. It is built
+AutoOntology turns structured data (CSV, TSV, XLSX, XLS, JSON, Parquet, SQLite, or a
+Postgres/MySQL/Snowflake database) and unstructured documents (Markdown, text, HTML,
+CSV/TSV and legacy Word `.doc`, and with the optional kordoc engine HWP/HWPX/HWPML, PDF,
+DOCX, PPTX, XLS/XLSX and OCR of scanned PDFs and PNG/JPEG/WebP images) into **one
+ontology** (see [Supported formats](#supported-formats)). It is built
 on [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology), which compiles tables
 into business Terms. AutoOntology adds document concept extraction, aligns the document
 concepts to those Terms, and merges both into a single versioned snapshot. It exports the
@@ -81,7 +82,8 @@ Prerequisites:
   extension available.
 - [Ollama](https://ollama.com) running locally. `setup` pulls `qwen3:8b` (about 5 GB) and
   `bge-m3`. To use a hosted API instead, see the next section.
-- Optional: Node.js 20 or newer, for HWP/PDF/DOCX/PPTX documents through kordoc.
+- Optional: Node.js 20 or newer, for HWP/PDF/DOCX/PPTX documents and image OCR through
+  kordoc.
 
 ```
 git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git
@@ -149,7 +151,7 @@ source has been ingested (see Troubleshooting).
 
 | Command | What it does |
 |---|---|
-| `autoontology setup [--docs] [--skip-models] [--force-alias]` | Idempotent preparation: creates the catalog database and the `vector` and `pg_trgm` extensions, runs the migrations, pulls the Ollama models and builds the `openai/qwen3:8b` alias, and with `--docs` installs kordoc. |
+| `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | Idempotent preparation: creates the catalog database and the `vector` and `pg_trgm` extensions, runs the migrations, pulls the Ollama models (and `AUTOONTOLOGY_VISION_MODEL` when set) and builds the `openai/qwen3:8b` alias, and with `--docs` installs kordoc and its OCR models (`--skip-ocr-models` leaves the models out). |
 | `autoontology doctor [--skip-models]` | Checks Postgres, pgvector, migrations, model endpoints, the vector tables and the ports. |
 | `autoontology up` / `down` / `status` | Starts, stops or shows the engine backend and the service. |
 | `autoontology ui [--no-browser]` | Prints the web UI URL and opens it. |
@@ -160,7 +162,7 @@ source has been ingested (see Troubleshooting).
 | `autoontology ontology` | Shows the latest snapshot: revision, sources and counts. |
 | `autoontology runs [--limit N]` | Shows recent runs and their steps. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
-| `autoontology tools install-kordoc [--version V] [--omit-optional] [--force]` | Installs kordoc into `<home>/kordoc` with npm. |
+| `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
 | `autoontology tools build-ui` | Rebuilds the web UI into `autoontology/web/static/dist` (needs pnpm). |
 | `autoontology tools status` | Shows the kordoc engine and the Node binary in use. |
 | `autoontology version` | Prints the version. |
@@ -175,7 +177,7 @@ run succeeds and exits 0.
 `build --resume` keeps a step only while its inputs are unchanged:
 
 - Files and documents are hashed. A documents source's fingerprint also includes whether
-  kordoc is available.
+  kordoc is available and, when it holds images or PDFs, whether the OCR models are ready.
 - A database-URL source's fingerprint includes its live schema, read from
   `information_schema` for Postgres. If the database cannot be read, or it is MySQL or
   Snowflake (no bundled driver), its steps always run again.
@@ -184,6 +186,26 @@ run succeeds and exits 0.
   edited, or a Term added or removed; its own synonym and description writes do not count),
   and judges again only the concepts whose candidate Terms changed.
 
+### Supported formats
+
+The kind of the source decides how a file is read, not its extension: a `.csv` in a
+structured source is a table; in a documents source it is a document. `GET /api/status`
+returns the same list as `formats`.
+
+| Source kind | Extensions | Read by | Notes |
+|---|---|---|---|
+| structured | `.csv` `.tsv` `.parquet` `.pq` `.json` `.jsonl` `.ndjson` `.sqlite` `.sqlite3` `.db` | DuckDB / sqlite3 | One table per file (SQLite: per table). |
+| structured | `.xlsx` `.xlsm` `.xls` | openpyxl / python-calamine | One table per sheet (`<file>_<sheet>`, or `<file>` for a single sheet); the first row is the header. |
+| documents | `.md` `.markdown` `.txt` `.html` `.htm` | native | Heading tree; text as UTF-8 or CP949. |
+| documents | `.csv` `.tsv` | native | One table section; the first row is the header; at most `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS` rows, then a "… N more rows (M total)" line. |
+| documents | `.doc` | native (olefile) | Word 97-2003 text and tables, no images. Encrypted or unreadable files fail with a remedy: save as `.docx`. |
+| documents | `.hwp` `.hwpx` `.hml` `.hwpml` `.pdf` `.docx` `.pptx` `.xls` `.xlsx` | kordoc | Needs Node.js 20+ and `tools install-kordoc`. PDFs run with `--ocr`: scanned pages are recognised. |
+| documents | `.png` `.jpg` `.jpeg` `.webp` | kordoc OCR | Needs the OCR models (`tools install-kordoc`). With `AUTOONTOLOGY_VISION_MODEL` set, an Ollama vision model adds an "Image description" section before the OCR text. |
+
+Images skipped because the OCR models are missing are a warning, like documents that need
+kordoc: the build succeeds, and the next build after `uv run autoontology tools
+install-kordoc` reads them.
+
 ## HTTP API
 
 The service listens on `http://127.0.0.1:7800`. All JSON routes live under `/api`. Every
@@ -191,7 +213,7 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, and a provider summary (never the key). |
+| `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, `ocr_ready`, `vision_model`, `formats` (every supported extension by source kind, with its engine) and a provider summary (never the key). |
 | `GET /api/sources` | Lists the sources. |
 | `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
 | `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion or the alias cleanup fails or does not finish, like `source rm --force`). A documents source's alias additions are removed from the upstream Terms first, as with `source rm`. |
@@ -349,6 +371,8 @@ then `.env`, then the built-in default.
 | `KORDOC_CLI` | unset | Use another kordoc install (path to `dist/cli.js`). |
 | `KORDOC_NODE` | `node` on PATH | Node binary for kordoc. |
 | `AUTOONTOLOGY_KORDOC_TIMEOUT` | `300` | Seconds per document (kordoc always runs offline). |
+| `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS` | `200` | Rows a CSV/TSV document keeps. |
+| `AUTOONTOLOGY_VISION_MODEL` | unset | Ollama vision model (for example `gemma4:e4b`) that describes image documents before their OCR text; `setup` pulls it. Unset: OCR text only. |
 | `AUTOONTOLOGY_CHUNK_TOKENS` / `_CHUNK_OVERLAP_TOKENS` / `_CHUNK_PACK_TOKENS` | `1200` / `100` / `400` | Chunk size, overlap when a section is split, and how far small neighbouring sections are packed together (tiktoken `cl100k_base` tokens). |
 | `AUTOONTOLOGY_LLM_WORKERS` | `1` with ollama, else `3` | Parallel chunk extraction calls. |
 | `AUTOONTOLOGY_EXTRACT_MODE` | `auto` | `auto`, `structured` or `json` extraction output. |
@@ -370,8 +394,12 @@ are overridden.
 - **Small local models merge conservatively.** With `qwen3:8b`, extraction is slow (one to
   two minutes per chunk), and the identity policy deliberately prefers `related` over a wrong
   `same`. Expect review proposals rather than many folded concepts.
-- **OCR is untested.** Scanned PDFs and images go through kordoc's OCR path, which this
-  project has not tested.
+- **OCR is tested on rendered pages only.** kordoc's built-in OCR (PP-OCRv5 korean) is
+  covered by an integration test on a page of the HWP fixture rendered to PNG, and was
+  checked by hand on the same kind of page embedded in an image-only PDF. Photos, skewed
+  or low-resolution scans and handwriting have not been tested.
+- **Legacy `.doc` support is text-only.** Images, text boxes, headers, footers and
+  footnotes are not read, and an empty table cell can split a table row in two.
 - **Ossie and OKF are pre-1.0 specifications** (Ossie 0.2.0.dev0, OKF v0.2) and may change;
   the vendored schemas are pinned in `third_party/ossie/`.
 - **Mappings need keys.** Ossie object and link mappings are written only for datasets
@@ -433,6 +461,7 @@ See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 | Chat model `openai/qwen3:8b` not found | Run `uv run autoontology setup` (or `setup --force-alias`). The `openai/` prefix is part of the Ollama alias name; `ollama list` should show it. |
 | `doctor` FAIL "vector tables": the embedder emits N dimensions | You switched embedding models after ingesting. Restore the old `*_EMBED_MODEL`, or remove every source (`source rm`) so that the vector tables are empty. An empty table is recreated automatically. |
 | `build` warns "N document(s) need kordoc and were skipped" | The run succeeded without those documents. Install kordoc (`uv run autoontology tools install-kordoc`, Node 20 or newer), then `build` or `build --resume` to read them. |
+| `build` warns "N image(s) need the OCR models and were skipped" | Run `uv run autoontology tools install-kordoc` (it downloads the models, about 18 MB), then `build` or `build --resume`. `doctor` shows the `ocr models` row. |
 | `/ui/` returns 503 `ui_not_built` | The committed UI is missing (for example in a source archive). Run `uv run autoontology tools build-ui` (needs Node and pnpm). |
 | A build seems stuck | Run `uv run autoontology runs` and read `data/logs/`. Each chunk takes one to two minutes with `qwen3:8b`. |
 

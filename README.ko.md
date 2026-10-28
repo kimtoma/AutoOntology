@@ -2,9 +2,9 @@
 
 [English](README.md) | **한국어**
 
-AutoOntology는 정형 데이터(CSV, TSV, XLSX, JSON, Parquet, SQLite, 또는 Postgres/MySQL/Snowflake
-데이터베이스)와 비정형 문서(Markdown, 텍스트, HTML, 그리고 선택 구성요소인 kordoc 엔진을 쓰면
-HWP/HWPX/HWPML, PDF, DOCX, PPTX, XLS/XLSX, PNG/JPEG/WebP 이미지)를 **하나의 온톨로지**로 만듭니다. 테이블을 비즈니스 Term으로 컴파일하는
+AutoOntology는 정형 데이터(CSV, TSV, XLSX, XLS, JSON, Parquet, SQLite, 또는 Postgres/MySQL/Snowflake
+데이터베이스)와 비정형 문서(Markdown, 텍스트, HTML, CSV/TSV, 구형 Word `.doc`, 그리고 선택 구성요소인
+kordoc 엔진을 쓰면 HWP/HWPX/HWPML, PDF, DOCX, PPTX, XLS/XLSX와 스캔 PDF·PNG/JPEG/WebP 이미지의 OCR)를 **하나의 온톨로지**로 만듭니다. 테이블을 비즈니스 Term으로 컴파일하는
 [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology) 위에 만들어졌습니다.
 AutoOntology는 여기에 문서 개념 추출을 더하고, 문서 개념을 그 Term들에 정렬(align)한 뒤, 둘을
 버전이 매겨진 스냅샷 하나로 병합합니다. 스냅샷은 RDF/OWL(Turtle, JSON-LD), GraphML,
@@ -346,8 +346,12 @@ run은 그다음에야 `succeeded`가 됩니다(지우지 못한 백업은 경�
 - **작은 로컬 모델은 보수적으로 병합합니다.** `qwen3:8b`로는 추출이 느리고(청크당 1~2분),
   동일성 정책은 잘못된 `same`보다 `related`를 의도적으로 선호합니다. 접히는 개념이 많기보다는
   검토 제안이 많을 것으로 예상하세요.
-- **OCR은 검증되지 않았습니다.** 스캔한 PDF와 이미지는 kordoc의 OCR 경로를 거치는데, 이
-  프로젝트는 그 경로를 테스트하지 않았습니다.
+- **OCR은 렌더링한 페이지로만 검증했습니다.** kordoc 내장 OCR(PP-OCRv5 korean)은 HWP 픽스처의
+  한 페이지를 PNG로 렌더링한 이미지로 통합 테스트하고, 같은 페이지를 이미지만 담은 PDF로도 수동
+  확인했습니다. 사진, 기울거나 저해상도인 스캔, 손글씨는 테스트하지 않았습니다. OCR 모델(약 18 MB)은
+  `uv run autoontology tools install-kordoc`가 내려받습니다.
+- **구형 `.doc`는 텍스트만 읽습니다.** 이미지, 텍스트 상자, 머리글·바닥글, 각주는 읽지 않으며, 빈
+  표 셀이 있으면 표의 한 행이 둘로 나뉠 수 있습니다.
 - **Ossie와 OKF는 1.0 이전 규격**(Ossie 0.2.0.dev0, OKF v0.2)이라 바뀔 수 있습니다. 벤더링한
   스키마는 `third_party/ossie/`에 고정되어 있습니다.
 - **매핑에는 키가 필요합니다.** Ossie object/link mapping은 업스트림 시맨틱 모델이 키를 선언한
