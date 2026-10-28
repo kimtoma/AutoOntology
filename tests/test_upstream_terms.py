@@ -373,6 +373,35 @@ def test_remove_synonyms_keeps_a_manual_spacing_variant(upstream_env, monkeypatc
         },
     )
     out = ut.remove_term_synonyms(upstream_env, "t1", ["계약서", "contract  doc"])
-    # the same key as the addition's dedupe: case-folded, whitespace runs collapsed
-    assert out["synonyms"] == ["계약 서"]
-    assert out["removed"] == ["계약서", "CONTRACT DOC"]
+    # exact recorded strings only: "contract  doc" is not the Term's "CONTRACT DOC"
+    assert out["synonyms"] == ["계약 서", "CONTRACT DOC"]
+    assert out["removed"] == ["계약서"]
+
+
+def test_remove_synonyms_keeps_a_legacy_manual_whitespace_variant(upstream_env, monkeypatch):
+    """Round 3 #1: the pre-fix addition kept manual ``계약  서`` (two spaces) next to the
+    automatic ``계약 서`` it recorded; removing the recorded string takes only that one."""
+    from contextlib import contextmanager
+
+    from autoontology.engine import upstream_terms as ut
+
+    real = ut.require_internals()
+    fake = _FakeStore([], ["계약  서", "계약 서"])
+
+    @contextmanager
+    def tx():
+        yield
+
+    monkeypatch.setattr(
+        ut,
+        "require_internals",
+        lambda: {
+            **real,
+            "store": lambda: fake,
+            "write_transaction": tx,
+            "refresh_term_embeddings": lambda term_id, refresh_dependent_attrs: None,
+        },
+    )
+    out = ut.remove_term_synonyms(upstream_env, "t1", ["계약 서"])
+    assert out["synonyms"] == ["계약  서"]
+    assert out["removed"] == ["계약 서"]

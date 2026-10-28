@@ -194,7 +194,7 @@ def _judged_term(
     """A candidate payload as the judge cache sees it: id, name, columns, description and
     synonyms minus what ``apply`` wrote (see :func:`judge_key`)."""
     tid = c.get("id")
-    mine = {alias_key(a) for a in (auto_added or {}).get(tid, ())}
+    mine = set((auto_added or {}).get(tid, ()))  # the exact strings apply wrote
     description = str(c.get("description") or "").strip()
     auto = (auto_descriptions or {}).get(tid, set())
     if (
@@ -206,7 +206,7 @@ def _judged_term(
     return {
         **{k: c.get(k) for k in ("id", "name", "columns")},
         "description": description,
-        "synonyms": [x for x in c.get("synonyms") or [] if alias_key(x) not in mine],
+        "synonyms": [x for x in c.get("synonyms") or [] if x not in mine],
     }
 
 
@@ -245,7 +245,7 @@ def judge_key(
     """Cache key of one judge call: same concept, same candidate Terms (id, name, columns,
     description, synonyms), model and prompt version = same verdict. Only what ``apply``
     itself wrote is left out, by recorded provenance: the synonyms AutoOntology added
-    (*auto_added*: term id -> aliases, compared by :func:`alias_key`) and a description it
+    (*auto_added*: term id -> the exact strings written) and a description it
     set (*auto_descriptions*: term id -> texts; :data:`ANY_DESCRIPTION` when the text was
     not recorded) or the upstream fallback it replaces, so a re-run does not re-judge because of its own writes but a manual
     or upstream change of either re-judges."""
@@ -354,10 +354,11 @@ IDENTITY_MIN_CONF = 0.90
 
 
 def alias_key(text: str) -> str:
-    """Synonym *ownership* key, shared by the addition dedupe (:func:`merge_synonyms`),
-    the provenance match and the removal (``remove_term_synonyms``): case-folded,
+    """Synonym dedupe key of the addition (:func:`merge_synonyms`): case-folded,
     whitespace runs collapsed, no NFKC and no space stripping, so a manual ``계약 서``
-    and an automatic ``계약서`` stay two synonyms and removing one never takes the other."""
+    and an automatic ``계약서`` stay two synonyms. Ownership (provenance match, removal)
+    never uses it: only the exact strings recorded as added are AutoOntology's, so a
+    legacy manual ``계약  서`` kept next to a recorded ``계약 서`` is never taken."""
     return " ".join(str(text).split()).casefold()
 
 
@@ -548,13 +549,13 @@ def stale_auto_aliases(
         if term is None:
             continue  # a Term of another structured source (or rebuilt away)
         by_alias: dict[str, list[dict[str, Any]]] = {}
-        for rec in records:
-            by_alias.setdefault(alias_key(rec["alias"]), []).append(rec)
+        for rec in records:  # exact recorded strings: ownership is never normalised
+            by_alias.setdefault(rec["alias"], []).append(rec)
         own = {norm_alias(n) for n in [term.name, *(t.get("name") or "" for t in term.tables)]}
         safe = protected.get(term_id, set())
         for synonym in term.synonyms:
             n = norm_alias(synonym)
-            recs = by_alias.get(alias_key(synonym))
+            recs = by_alias.get(synonym)
             if not recs or n in own or n in safe:
                 continue
             sources = {r.get("source_id") for r in recs}

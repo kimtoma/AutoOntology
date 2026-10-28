@@ -967,12 +967,21 @@ def test_stale_auto_aliases_plan():
 
 
 def test_stale_auto_aliases_never_claims_a_manual_spacing_variant():
-    """Recheck #1: ownership uses the addition's key; manual ``계약 서`` is not ``계약서``."""
+    """Recheck #1: ownership is the exact recorded string; manual ``계약 서`` is not ``계약서``."""
     term = al.TermInfo("t", "Contract", "", ["계약 서", "계약서"], tables=[])
     prov = {"t": [{"alias": "계약서", "source_id": "A", "concepts": ["계약서"]}]}
     stale, kept = al.stale_auto_aliases({"t": term}, prov, {}, "A")
     assert [x.alias for x in stale] == ["계약서"]
     assert kept == []
+
+
+def test_stale_auto_aliases_claims_only_the_exact_recorded_string():
+    """Round 3 #1: a legacy manual ``계약  서`` (two spaces) next to the recorded automatic
+    ``계약 서`` is never in the repair plan (exact recorded strings only)."""
+    term = al.TermInfo("t", "Contract", "", ["계약  서", "계약 서"], tables=[])
+    prov = {"t": [{"alias": "계약 서", "source_id": "A", "concepts": ["계약"]}]}
+    stale, _ = al.stale_auto_aliases({"t": term}, prov, {}, "A")
+    assert [x.alias for x in stale] == ["계약 서"]
 
 
 @pytest.mark.parametrize(
