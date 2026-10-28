@@ -28,6 +28,14 @@ DEFAULT_TABLE_MAX_ROWS = 200
 #: Largest file the native readers (CSV/TSV, text, Markdown, HTML, .doc) accept
 #: (``AUTOONTOLOGY_DOC_MAX_BYTES``).
 DEFAULT_DOC_MAX_BYTES = 50 * 1024 * 1024
+#: Most characters of text one native document yields (a CSV/TSV table section is cut
+#: there with a note; a .doc beyond it fails).
+DOC_MAX_CHARS = 5_000_000
+#: Columns a CSV/TSV document keeps; the header names how many more there were.
+DOC_TABLE_MAX_COLS = 100
+#: A physical CSV/TSV line longer than this (characters) is cut before parsing; the
+#: delimiters in the cut part are only counted as further columns.
+_CSV_LINE_MAX = 1 << 20
 
 MIME_TYPES: dict[str, str] = {
     ".md": "text/markdown",
@@ -211,44 +219,85 @@ def _cell(value: str) -> str:
     return " ".join(value.replace("|", "\\|").split())
 
 
-def gfm_table(rows: list[list[str]], *, max_rows: int, total: int | None = None) -> str:
+def gfm_table(
+    rows: list[list[str]],
+    *,
+    max_rows: int,
+    total: int | None = None,
+    more_columns: int = 0,
+) -> str:
     """*rows* (first = header) as a GFM table, keeping *max_rows* body rows and a closing
     "… N more rows (M total)" line when it cut some (*total* = body rows in the source
     when *rows* holds only the first ones). Body rows are padded or cut to the header
-    width."""
+    width; *more_columns* > 0 adds a last "… N more columns" header cell. The text is cut
+    at :data:`DOC_MAX_CHARS` with a closing note."""
     header, body = rows[0], rows[1:]
     total = len(body) if total is None else total
-    lines = [
-        "| " + " | ".join(_cell(c) for c in header) + " |",
-        "| " + " | ".join("---" for _ in header) + " |",
-    ]
     width = len(header)
+    head = [_cell(c) for c in header]
+    if more_columns:
+        head.append(f"… {more_columns} more columns")
+    lines = ["| " + " | ".join(head) + " |", "| " + " | ".join("---" for _ in head) + " |"]
+    pad = [""] * (len(head) - width)
     for row in body[:max_rows]:
-        cells = [_cell(c) for c in row[:width]] + [""] * (width - len(row))
+        cells = [_cell(c) for c in row[:width]] + [""] * (width - len(row)) + pad
         lines.append("| " + " | ".join(cells) + " |")
     if total > max_rows:
         lines.append(f"… {total - max_rows} more rows ({total} total)")
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    if len(text) > DOC_MAX_CHARS:
+        note = f"\n… table truncated at {DOC_MAX_CHARS:,} characters"
+        text = text[: max(0, DOC_MAX_CHARS - len(note))].rsplit("\n", 1)[0] + note
+    return text
+
+
+def _bounded_lines(fh, delimiter: str, extra: list[int]):
+    """The physical lines of *fh*, each cut at :data:`_CSV_LINE_MAX` characters; the
+    delimiters of a cut remainder are added to ``extra[0]`` when it is the first line."""
+    first = True
+    while True:
+        line = fh.readline(_CSV_LINE_MAX)
+        if not line:
+            return
+        if len(line) == _CSV_LINE_MAX and not line.endswith("\n"):
+            dropped = 0
+            while True:
+                rest = fh.readline(_CSV_LINE_MAX)
+                dropped += rest.count(delimiter)
+                if not rest or rest.endswith("\n"):
+                    break
+            if first:
+                extra[0] += dropped
+            line += "\n"
+        first = False
+        yield line
 
 
 def _scan_delimited(
     path: Path, encoding: str, delimiter: str, max_rows: int
-) -> tuple[list[list[str]], int]:
-    """``(header + first *max_rows* body rows, total body rows)``, streaming the file
-    row by row (only the kept rows are held in memory)."""
+) -> tuple[list[list[str]], int, int]:
+    """``(header + first *max_rows* body rows, total body rows, columns beyond
+    DOC_TABLE_MAX_COLS)``, streaming the file row by row: only the kept rows (each cut to
+    DOC_TABLE_MAX_COLS cells) are held in memory, and no physical line is parsed past
+    _CSV_LINE_MAX characters."""
     kept: list[list[str]] = []
     total = 0
+    extra = [0]
+    more_columns = 0
     with path.open(encoding=encoding, newline="") as fh:
-        for row in csv.reader(fh, delimiter=delimiter):
+        for row in csv.reader(_bounded_lines(fh, delimiter, extra), delimiter=delimiter):
             if not any(c.strip() for c in row):
                 continue
             if not kept:
-                kept.append(row)
+                more_columns = max(0, len(row) - DOC_TABLE_MAX_COLS)
+                kept.append(row[:DOC_TABLE_MAX_COLS])
                 continue
             total += 1
             if total <= max_rows:
-                kept.append(row)
-    return kept, total
+                kept.append(row[:DOC_TABLE_MAX_COLS])
+    if kept:
+        more_columns += extra[0]
+    return kept, total, more_columns
 
 
 def read_delimited(
@@ -263,7 +312,7 @@ def read_delimited(
     delimiter = "\t" if ext == ".tsv" else ","
     for encoding in ("utf-8-sig", "cp949"):
         try:
-            rows, total = _scan_delimited(path, encoding, delimiter, max_rows)
+            rows, total, more_columns = _scan_delimited(path, encoding, delimiter, max_rows)
             break
         except UnicodeDecodeError:
             continue  # restart the scan with the next encoding
@@ -274,7 +323,15 @@ def read_delimited(
     else:
         raise ReadError(f"{path.name}: not UTF-8 or CP949 text", code="BAD_ENCODING")
     sections = (
-        [Section("", None, gfm_table(rows, max_rows=max_rows, total=total), 0, "table")]
+        [
+            Section(
+                "",
+                None,
+                gfm_table(rows, max_rows=max_rows, total=total, more_columns=more_columns),
+                0,
+                "table",
+            )
+        ]
         if rows
         else []
     )

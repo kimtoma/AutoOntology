@@ -289,3 +289,38 @@ def test_bad_env_values_are_read_errors(tmp_path, monkeypatch, var):
     with pytest.raises(readers.ReadError) as err:
         readers.read_document(path)
     assert err.value.code == "BAD_CONFIG" and var in str(err.value)
+
+
+def test_wide_csv_header_is_capped(tmp_path):
+    import time
+    import tracemalloc
+
+    path = tmp_path / "wide.csv"
+    cols = 20_000_000  # a 40 MB header, within the 50 MB byte cap
+    path.write_text("h," * cols + "end\n" + "1,2,3\n", encoding="utf-8")
+    started = time.perf_counter()
+    tracemalloc.start()
+    try:
+        doc = readers.read_document(path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert time.perf_counter() - started < 5
+    assert peak < 100 * 1024 * 1024, peak
+    (section,) = doc.sections
+    header, sep, row = section.text.split("\n")
+    width = readers.DOC_TABLE_MAX_COLS
+    assert header.startswith("| h | h |")
+    assert header.endswith(f"| … {cols + 1 - width} more columns |")
+    assert sep.count("---") == width + 1
+    assert row.startswith("| 1 | 2 | 3 |") and row.count("|") == width + 2
+    assert len(section.text) < 10_000
+
+
+def test_csv_section_text_is_capped(tmp_path, monkeypatch):
+    path = tmp_path / "long.csv"
+    path.write_text("a,b\n" + "".join(f"{'가' * 50},{i}\n" for i in range(300)), encoding="utf-8")
+    monkeypatch.setattr(readers, "DOC_MAX_CHARS", 2_000)
+    text = readers.read_document(path).sections[0].text
+    assert len(text) <= 2_000
+    assert text.endswith("… table truncated at 2,000 characters")

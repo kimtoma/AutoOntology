@@ -298,11 +298,13 @@ def test_output_never_exceeds_the_stream(tmp_path, monkeypatch):
 def test_unbalanced_field_marks_are_linear():
     import time
 
-    raw = "\x13\x14" * 40_000 + "끝"
+    # 40k open fields in their result part, then 40k characters: the old any(stack)
+    # scanned the whole stack once per character (quadratic)
+    raw = "\x13\x14" * 40_000 + "x" * 40_000 + "끝"
     started = time.perf_counter()
     out = doc_word97.normalize(raw)
     assert time.perf_counter() - started < 0.5
-    assert out == "끝"
+    assert out == "x" * 40_000 + "끝"
     deep = "\x13" * 40_000 + "code" + "\x14" + "x" + "\x15" * 40_000 + "끝"
     started = time.perf_counter()
     doc_word97.normalize(deep)

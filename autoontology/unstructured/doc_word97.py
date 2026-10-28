@@ -26,6 +26,7 @@ import struct
 from pathlib import Path
 
 from autoontology.unstructured.readers import (
+    DOC_MAX_CHARS,
     MIME_TYPES,
     Document,
     ReadError,
@@ -43,10 +44,9 @@ CCP_TEXT_INDEX = 3
 REMEDY = "Save the file as .docx and add it again"
 HEADING_MAX_CHARS = 40
 #: Hard limits of the parser (hostile input must fail fast, never loop or blow up):
-#: pieces in the piece table, characters of the main text, a Prc's cbGrpprl ([MS-DOC]
+#: pieces in the piece table, characters of the main text (readers.DOC_MAX_CHARS), a Prc's cbGrpprl ([MS-DOC]
 #: 2.9.209: > 0 and <= 0x3FA2) and the field nesting tracked exactly.
 MAX_PIECES = 10_000
-DOC_MAX_CHARS = 5_000_000
 PRC_MAX_CB = 0x3FA2
 MAX_FIELD_DEPTH = 256
 
