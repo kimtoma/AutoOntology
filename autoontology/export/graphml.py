@@ -15,6 +15,7 @@ that was never added creates a bare node.
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
@@ -26,6 +27,15 @@ GRAPHML_NS = "http://graphml.graphdrawing.org/xmlns"
 _SCHEMA_LOCATION = (
     "http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd"
 )
+
+#: Characters XML 1.0 cannot carry even escaped (C0 controls but tab/LF/CR, lone
+#: surrogates, U+FFFE/U+FFFF); PDF/HWP text can contain them.
+_XML_INVALID_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+
+
+def xml_safe(value: str) -> str:
+    """*value* without the characters XML 1.0 forbids (ElementTree writes them raw)."""
+    return _XML_INVALID_RE.sub("", value)
 
 
 class Graph:
@@ -179,15 +189,17 @@ def to_xml(g: Graph) -> ET.ElementTree:
         for name, value in attrs.items():
             ET.SubElement(
                 parent, f"{{{GRAPHML_NS}}}data", {"key": keys[(domain, name)]}
-            ).text = value
+            ).text = xml_safe(value)
 
     data(graph, "graph", graph_attrs)
     for node, attrs in g.nodes.items():
-        data(ET.SubElement(graph, f"{{{GRAPHML_NS}}}node", {"id": node}), "node", attrs)
+        data(ET.SubElement(graph, f"{{{GRAPHML_NS}}}node", {"id": xml_safe(node)}), "node", attrs)
     for u, v, key, attrs in g.edges:
         data(
             ET.SubElement(
-                graph, f"{{{GRAPHML_NS}}}edge", {"source": u, "target": v, "id": str(key)}
+                graph,
+                f"{{{GRAPHML_NS}}}edge",
+                {"source": xml_safe(u), "target": xml_safe(v), "id": str(key)},
             ),
             "edge",
             attrs,

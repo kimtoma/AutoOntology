@@ -411,3 +411,15 @@ def test_graph_keeps_relations_between_individuals_and_classes():
     assert ("concept-c5", "term-t-c") in edges  # process -> entity folded into a Term
     prop = m.properties["rel-r5"]
     assert prop.domain == "Process" and prop.subject_node == "concept-c5"
+
+
+def test_graphml_drops_xml_invalid_control_characters(tmp_path):
+    """Review M-3: document text can carry C0 controls that XML 1.0 forbids."""
+    g = graphml.Graph(name="x\x0c")
+    g.add_node("a\x00", type="class", label="Con\x01tract\x0b", source="document")
+    g.add_edge("a\x00", "b", type="related", label="tab\tkept\x1f")
+    path = tmp_path / "g.graphml"
+    graphml.to_xml(g).write(path, encoding="utf-8", xml_declaration=True)
+    nodes, edges = graphml.read(path)  # parses: the file is well-formed
+    assert nodes["a"]["label"] == "Contract"
+    assert edges == [("a", "b", {"type": "related", "label": "tab\tkept"})]
