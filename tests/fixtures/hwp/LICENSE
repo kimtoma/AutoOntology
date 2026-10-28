@@ -1,0 +1,31 @@
+The HWP sample in this directory (사업수행계획서.hwp / biz_plan.hwp, a fictitious
+"OO대학교 OXX사업단 홈페이지 구축 사업 사업수행계획서" template with placeholder names) is
+copied unchanged from the rhwp project:
+
+  https://github.com/edwardkim/rhwp  samples/biz_plan.hwp
+  (commit 1a76570e833917d15817415a53c09ad61ab3203f, 33,792 bytes,
+   sha256 8b786d6824622afae2220b203beeef6e5592157e1896fea055ebc602817113c1)
+
+rhwp is distributed under the MIT License, reproduced below.
+
+MIT License
+
+Copyright (c) 2025-2026 Edward Kim
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
