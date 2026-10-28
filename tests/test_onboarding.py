@@ -160,9 +160,9 @@ def test_unset_and_crlf_preserved():
     text = "# c\r\nA=1\r\nexport B=2\r\n"
     env = EnvFile(text, existed=True)
     env.set("B", "3")
-    assert env.render() == "# c\r\nA=1\r\nB=3\r\n"
+    assert env.render() == "# c\r\nA=1\r\nexport B=3\r\n"
     env.unset("A")
-    assert env.render() == "# c\r\nB=3\r\n"
+    assert env.render() == "# c\r\nexport B=3\r\n"
     assert ("A", "1", None) in env.changes()
 
 
@@ -279,8 +279,20 @@ def test_register_sample_set_is_idempotent_and_replaces_moved_paths(isolated_env
     (moved / "documents").rename(Path(settings.samples_dir) / "quickstart" / "documents")
     store.set_locator(store.get_source("quick").id, '{"path": "/old/place", "recursive": false}')
     said.clear()
+    # without consent nothing is removed: the conflict names both paths
+    with pytest.raises(onboarding.SampleConflict) as conflict:
+        onboarding.register_sample_set(settings, store, "quickstart", remove=remove)
+    assert removed == []
+    assert conflict.value.conflicts == [
+        {
+            "name": "quick",
+            "kind": "files",
+            "registered": str(Path("/old/place").resolve()),
+            "sample": str((Path(settings.samples_dir) / "quickstart" / "structured").resolve()),
+        }
+    ]
     third = onboarding.register_sample_set(
-        settings, store, "quickstart", notify=said.append, remove=remove
+        settings, store, "quickstart", notify=said.append, remove=remove, replace=True
     )
     assert [a for _s, a in third] == ["replaced", "kept"]
     assert removed == [("quick", True)]
@@ -300,3 +312,20 @@ def test_duration_rows_mark_estimates_and_the_current_provider():
     assert [r[0] for r in rows] == ["ollama", "claude", "codex", "openai"]
     assert any("your provider" in r[2] for r in rows if r[0] == "claude")
     assert all(("estimate" in r[2]) or ("measured" in r[2]) for r in rows)
+
+
+def test_set_keeps_an_export_prefix():
+    env = EnvFile("export AUTOONTOLOGY_CHAT_PROVIDER=ollama\n  export  A=1\n", existed=True)
+    env.set("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
+    env.set("A", "2")
+    assert env.render() == "export AUTOONTOLOGY_CHAT_PROVIDER=claude\nexport A=2\n"
+    assert env.values() == {"AUTOONTOLOGY_CHAT_PROVIDER": "claude", "A": "2"}
+
+
+def test_duration_comment_and_hanbit_counts_are_current():
+    import inspect
+
+    src = inspect.getsource(onboarding)
+    assert "Measured on" not in src
+    assert "measured values are filled by the maintainers' rehearsal" in src
+    assert "141 chunks" in onboarding.DEMO_DURATIONS["hanbit"]["ollama"][0]

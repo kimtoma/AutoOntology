@@ -339,6 +339,15 @@ class RunManager:
                 raise RunStartError(f"source {source!r} is busy ({busy.kind})", status=409)
             self._by_source[source] = _Active(source=source, kind=kind, thread_name="")
 
+    def claim_idle(self, source: str, kind: str) -> None:
+        """Like :meth:`claim`, but only when nothing at all (no run, no other claim) is
+        active: the whole workspace is held until :meth:`release`."""
+        with self._lock:
+            busy = next(iter(self._by_source.values()), None)
+            if busy is not None:
+                raise RunStartError(f"the workspace is busy ({busy.kind})", status=409)
+            self._by_source[source] = _Active(source=source, kind=kind, thread_name="")
+
     def release(self, source: str) -> None:
         with self._lock:
             active = self._by_source.get(source)

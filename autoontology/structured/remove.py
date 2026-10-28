@@ -10,8 +10,10 @@ off first (:func:`remove_added_aliases`; manual and other sources' synonyms stay
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from autoontology.config import Settings
@@ -23,6 +25,12 @@ RM_POLL_S = 1.0
 
 #: ``notify(message, is_warning)``
 Notify = Callable[[str, bool], None]
+
+
+#: What a user types to delete upstream connections no registered source owns.
+PRUNE_COMMAND = "uv run autoontology tools prune-connections"
+#: Only connections AutoOntology itself created (files sources) are ever pruned.
+ORPHAN_CONNECTION_RE = re.compile(r"^autoontology_src_[a-z0-9_]+$")
 
 
 class RemoveError(RuntimeError):
@@ -133,9 +141,9 @@ def _remove_held(
     database = pipeline.catalog_database_name(src)
     leftover = (
         f"the upstream connection/catalog entry for {database} may remain; remove it "
-        f"later by re-adding the source as {name!r} and running `source rm {name}` "
-        "with the services up"
+        f"later with `{PRUNE_COMMAND}` with the services up"
     )
+    connection_gone = False
     with BackendClient(settings.backend_url) as client:
         try:
             try:
@@ -148,6 +156,7 @@ def _remove_held(
                 if exc.status != 404:
                     raise
                 say(f"no upstream connection {database} (already gone)")
+            connection_gone = True
             if wait_catalog_gone(client, database, timeout=timeout, poll=poll):
                 say(f"ingested graph of {database} deleted")
             elif force:
@@ -176,6 +185,15 @@ def _remove_held(
     if drop_db:
         if src.kind != "files" or not src.pg_database:
             say("--drop-db ignored: only files sources own a local database")
+        elif not connection_gone:
+            # a connection to a dropped database makes every later ingest time out
+            say(
+                f"warning: database {src.pg_database} kept: its upstream connection could "
+                "not be deleted, and dropping the database under it would break every "
+                "later build. Start the services (`uv run autoontology up`), then run "
+                f"`{PRUNE_COMMAND} --drop-db`",
+                True,
+            )
         else:
             # never DROP a truncated name, nor the catalog database itself
             assert_source_database(settings, src.pg_database)
@@ -186,6 +204,137 @@ def _remove_held(
             say(f"dropped database {src.pg_database}")
     store.delete_source(src.id)
     say(f"removed source {name}")
+
+
+@dataclass(frozen=True)
+class OrphanConnection:
+    """An upstream connection to a per-source database that no registered source owns,
+    or whose database is gone."""
+
+    name: str
+    database_missing: bool
+    owned: bool
+
+    @property
+    def reason(self) -> str:
+        parts = []
+        if self.database_missing:
+            parts.append("database missing")
+        if not self.owned:
+            parts.append("no registered source")
+        return ", ".join(parts)
+
+
+def backend_is_ours(settings: Settings) -> bool:
+    """The backend port answers and every listener is a process AutoOntology started
+    (never query or prune another app's backend)."""
+    from autoontology.engine.supervisor import Supervisor, listening_pids, port_in_use
+
+    if not port_in_use(settings.backend_port):
+        return False
+    owned = Supervisor.from_settings(settings).owned_pids()
+    holders = listening_pids(settings.backend_port)
+
+    def pgid(pid: int) -> int | None:
+        import os
+
+        try:
+            return os.getpgid(pid)
+        except OSError:
+            return None
+
+    return bool(holders) and all(p in owned or pgid(p) in owned for p in holders)
+
+
+def find_orphan_connections(
+    settings: Settings,
+    store: Store | None,
+    client: Any,
+    *,
+    database_exists: Callable[[str], bool] | None = None,
+) -> list[OrphanConnection]:
+    """Upstream connections named ``autoontology_src_<name>`` whose database no longer
+    exists in Postgres or that no registered source owns (sorted by name)."""
+    from autoontology.structured import pipeline
+
+    if database_exists is None:
+        from autoontology.engine import pg
+
+        def database_exists(name: str) -> bool:
+            return pg.database_exists(settings, name)
+
+    owned: set[str] = set()
+    for src in store.list_sources() if store is not None else []:
+        if src.kind in ("files", "database"):
+            try:
+                owned.add(pipeline.catalog_database_name(src).casefold())
+            except Exception:  # noqa: BLE001 - an unparsable locator owns nothing
+                continue
+    out: dict[str, OrphanConnection] = {}
+    for conn in client.list_connections():
+        name = str(conn.get("database_name") or "")
+        if not ORPHAN_CONNECTION_RE.fullmatch(name):
+            continue
+        missing = not database_exists(name)
+        is_owned = name.casefold() in owned
+        if missing or not is_owned:
+            out[name] = OrphanConnection(name, missing, is_owned)
+    return [out[k] for k in sorted(out)]
+
+
+def prune_orphan_connections(
+    settings: Settings,
+    client: Any,
+    orphans: list[OrphanConnection],
+    *,
+    drop_db: bool = False,
+    say: Callable[..., None] | None = None,
+    timeout: float | None = None,
+    poll: float | None = None,
+    database_exists: Callable[[str], bool] | None = None,
+) -> list[str]:
+    """Delete each orphan's upstream connection (and wait for its graph teardown); with
+    *drop_db*, then drop its database when it still exists and no source owns it.
+    Returns the deleted connection names."""
+    from autoontology.config import PG_MAINTENANCE_DB, assert_source_database
+    from autoontology.engine import pg
+    from autoontology.engine.client import BackendError
+    from autoontology.structured.loaders import quote_ident
+
+    tell = say or (lambda _m, _w=False: None)
+    exists = database_exists or (lambda name: pg.database_exists(settings, name))
+    deleted = []
+    for orphan in orphans:
+        name = orphan.name
+        if not ORPHAN_CONNECTION_RE.fullmatch(name):  # never anything AutoOntology did not make
+            tell(f"skipped {name}: not an AutoOntology connection", True)
+            continue
+        try:
+            client.delete_connection(name)
+        except BackendError as exc:
+            if exc.status != 404:
+                tell(f"warning: could not delete upstream connection {name}: {exc}", True)
+                continue
+        deleted.append(name)
+        if wait_catalog_gone(client, name, timeout=timeout, poll=poll):
+            tell(f"deleted upstream connection {name} ({orphan.reason})")
+        else:
+            tell(
+                f"deleted upstream connection {name}; its graph is still being torn down "
+                f"(see {settings.logs_dir / 'service.log'})",
+                True,
+            )
+            continue
+        if drop_db and orphan.owned is False and exists(name):
+            try:
+                assert_source_database(settings, name)
+            except ValueError as exc:
+                tell(f"database {name} kept: {exc}", True)
+                continue
+            with pg.connect(settings, PG_MAINTENANCE_DB) as conn:
+                conn.execute(f"DROP DATABASE IF EXISTS {quote_ident(name)} WITH (FORCE)")
+            tell(f"dropped database {name}")
+    return deleted
 
 
 def _other_support(store: Store, src: Source) -> dict[str, dict[str, list[str]]]:

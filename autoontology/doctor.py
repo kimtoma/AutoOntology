@@ -7,6 +7,7 @@ import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 import httpx
@@ -174,6 +175,30 @@ def check_ports(settings: Settings) -> list[Check]:
                 )
             )
     return out
+
+
+def check_upstream_connections(settings: Settings) -> Check:
+    """Upstream connections to a dropped ``autoontology_src_*`` database (or that no
+    registered source owns): one dead connection makes every ingest time out."""
+    from autoontology.engine.client import BackendClient
+    from autoontology.store.db import Store
+    from autoontology.structured.remove import (
+        PRUNE_COMMAND,
+        backend_is_ours,
+        find_orphan_connections,
+    )
+
+    name = "upstream connections"
+    if not backend_is_ours(settings):
+        return Check(name, "SKIP", "services not running (`uv run autoontology up`)")
+    db = Path(settings.home) / "autoontology.db"
+    store = Store.for_home(settings.home) if db.is_file() else None
+    with BackendClient(settings.backend_url, timeout=10.0) as client:
+        orphans = find_orphan_connections(settings, store, client)
+    if not orphans:
+        return Check(name, "OK", "every autoontology_src_* connection has its source")
+    detail = "; ".join(f"{o.name} ({o.reason})" for o in orphans)
+    return Check(name, "WARN", f"orphaned: {detail}", PRUNE_COMMAND)
 
 
 def _pgid(pid: int) -> int | None:
@@ -554,6 +579,13 @@ def run_checks(settings: Settings, *, skip_models: bool = False) -> list[Check]:
     checks = [check_env_file()]
     checks += check_postgres(settings)
     checks += check_ports(settings)
+    checks.append(
+        _guard(
+            "upstream connections",
+            lambda: check_upstream_connections(settings),
+            "uv run autoontology tools prune-connections",
+        )
+    )
     checks.append(_guard("node", check_node, NODE_REMEDY))
     checks.append(
         _guard("kordoc", lambda: check_kordoc(settings), "uv run autoontology tools install-kordoc")

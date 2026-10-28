@@ -141,6 +141,7 @@ def recommend_provider(detection: Detection) -> str:
 
 _KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _BARE_VALUE_RE = re.compile(r"^[A-Za-z0-9_./:@+,=~%-]*$")
+_EXPORT_RE = re.compile(r"^\s*export\s+")
 
 
 def _active_re(key: str) -> re.Pattern[str]:
@@ -221,9 +222,13 @@ class EnvFile:
         if not hits:
             commented = _commented_re(key)
             hits = [i for i, line in enumerate(self.lines) if commented.match(line)][:1]
+        if hits and all(_parse(self.lines[i]).get(key) == str(value) for i in hits):
+            return  # already set: the line stays byte-for-byte
         if hits:
             for i in hits:
-                self.lines[i] = new + _newline(self.lines[i])
+                line = self.lines[i]
+                keep = "export " if _EXPORT_RE.match(line) and active.match(line) else ""
+                self.lines[i] = keep + new + _newline(line)
             return
         self._append(new + "\n")
 
@@ -433,6 +438,39 @@ def list_sample_sets(settings: Settings, store: Any) -> list[dict[str, Any]]:
 Notify = Callable[[str], None]
 
 
+class SampleConflict(ValueError):
+    """Sources with a sample source's name exist with another path or kind; replacing
+    them deletes their database and extracted concepts, so it needs consent."""
+
+    def __init__(self, conflicts: list[dict[str, Any]]):
+        self.conflicts = conflicts
+        names = ", ".join(c["name"] for c in conflicts)
+        super().__init__(
+            f"source(s) {names} already exist with other data; replacing them deletes their "
+            "database and extracted concepts"
+        )
+
+
+def sample_conflicts(settings: Settings, store: Any, set_name: str) -> list[dict[str, Any]]:
+    """``[{name, kind, registered, sample}]`` for every source of *set_name* whose name is
+    taken by a source with another path or kind (``registered`` = its current locator)."""
+    out = []
+    for sample in sample_sources(settings, set_name):
+        current = store.get_source(sample.name)
+        if current is None or is_registered(store, sample):
+            continue
+        old = _registered_path(current)
+        out.append(
+            {
+                "name": sample.name,
+                "kind": current.kind,
+                "registered": str(old) if old is not None else current.locator,
+                "sample": str(sample.path),
+            }
+        )
+    return out
+
+
 def register_sample_set(
     settings: Settings,
     store: Any,
@@ -440,14 +478,19 @@ def register_sample_set(
     *,
     notify: Notify | None = None,
     remove: Callable[..., None] | None = None,
+    replace: bool = False,
 ) -> list[tuple[Any, str]]:
     """Register the sources of *set_name* idempotently. A source that already exists with
     the same kind and path is kept; one with another path (or kind) is removed (with its
-    database) and added again. Returns ``[(source, "created" | "kept" | "replaced")]``."""
+    database and extracted concepts) and added again, but only with *replace*: otherwise
+    :class:`SampleConflict` is raised before anything changes. Returns
+    ``[(source, "created" | "kept" | "replaced")]``."""
     from autoontology.engine.extract import ensure_documents_source
     from autoontology.structured import pipeline
 
     say = notify or (lambda _m: None)
+    if not replace and (conflicts := sample_conflicts(settings, store, set_name)):
+        raise SampleConflict(conflicts)
     if remove is None:
         from autoontology.structured.remove import remove_source as remove
     out: list[tuple[Any, str]] = []
@@ -461,8 +504,8 @@ def register_sample_set(
                 continue
             old = _registered_path(current) or current.locator
             say(
-                f"{sample.name}: registered for {old} ({current.kind}); "
-                f"replacing it with {sample.path}"
+                f"{sample.name}: registered for {old} ({current.kind}); replacing it with "
+                f"{sample.path} (its database and extracted concepts are deleted)"
             )
             remove(
                 settings,
@@ -484,9 +527,9 @@ def register_sample_set(
 # --- demo durations --------------------------------------------------------------------
 
 #: Expected first-build duration per sample set and chat provider: (text, measured).
-#: Measured on an Apple-silicon Mac (2026-10); the rest are estimates from chunk counts
+#: Estimates from chunk counts; measured values are filled by the maintainers' rehearsal
 #: (quickstart: 3 tables, 28 document chunks with kordoc / 9 without; hanbit: 11 tables,
-#: 120 document chunks + 8 image chunks).
+#: 132 document chunks + 9 image chunks = 141).
 DEMO_DURATIONS: dict[str, dict[str, tuple[str, bool]]] = {
     "quickstart": {
         "ollama": ("20-50 min (qwen3:8b, 1-2 min per chunk)", False),
@@ -495,7 +538,7 @@ DEMO_DURATIONS: dict[str, dict[str, tuple[str, bool]]] = {
         "openai": ("5-15 min (depends on the endpoint)", False),
     },
     "hanbit": {
-        "ollama": ("3-4 h (qwen3:8b, 128 chunks)", False),
+        "ollama": ("3-4 h (qwen3:8b, 141 chunks)", False),
         "claude": ("~20-30 min", False),
         "codex": ("~40-60 min", False),
         "openai": ("20-60 min (depends on the endpoint)", False),

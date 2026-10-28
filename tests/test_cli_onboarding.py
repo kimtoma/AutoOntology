@@ -14,6 +14,8 @@ from autoontology.onboarding import Detection, ProviderInfo
 from autoontology.store.db import Store
 
 runner = CliRunner()
+#: The real init step 6 (the ``fakes`` fixture replaces it).
+REAL_INIT_SETUP = cli._init_setup
 
 
 def _det(env_path, *, claude=False, codex=False, ollama=True, node=True) -> Detection:
@@ -103,7 +105,8 @@ def test_init_postgres_retry_interactively(fakes):
     state["pg_ok"] = False
     res = runner.invoke(app, ["init", "--env", str(env)], input="y\ny\ny\n")
     assert res.exit_code == 2 and calls["pg"] == 4  # first try + 3 retries
-    assert res.output.count("Retry?") == 3
+    assert res.output.count("press Enter to retry, or n to stop [Y/n]") == 3
+    assert "Postgres is not reachable at localhost:5432" in res.output
 
 
 def test_init_claude_not_logged_in_retries_after_login(fakes, monkeypatch):
@@ -161,17 +164,93 @@ def test_init_merges_an_existing_env_with_a_backup(fakes):
     res = runner.invoke(app, ["init", "--yes", "--no-docs", "--env", str(env)])
     assert res.exit_code == 0, res.output
     text = env.read_text(encoding="utf-8")
+    # the provider the file already selects is kept; the recommendation is only a hint
     assert text.startswith(
-        "# my settings\nAUTOONTOLOGY_PORT=7810\nAUTOONTOLOGY_CHAT_PROVIDER=codex\nPOSTGRES_USER=me\n"
+        "# my settings\nAUTOONTOLOGY_PORT=7810\nAUTOONTOLOGY_CHAT_PROVIDER=ollama  \n"
+        "POSTGRES_USER=me\n"
     )
-    assert "# --- Set by autoontology init ---\n" in text and "AUTOONTOLOGY_CODEX_MODEL=" in text
+    assert "# --- Set by autoontology init ---\n" in text
+    assert "AUTOONTOLOGY_OLLAMA_CHAT_MODEL=" in text and "AUTOONTOLOGY_CODEX_MODEL" not in text
     backups = list(env.parent.glob(".env.bak-*"))
     assert len(backups) == 1 and backups[0].read_text(encoding="utf-8") == original
-    assert "AUTOONTOLOGY_CHAT_PROVIDER: ollama -> codex" in res.output
+    assert "AUTOONTOLOGY_CHAT_PROVIDER:" not in res.output
+    assert "keeping the current provider ollama" in res.output
+    assert "recommended: codex" in res.output
     # running it again changes nothing and makes no new backup
     again = runner.invoke(app, ["init", "--yes", "--no-docs", "--env", str(env)])
     assert again.exit_code == 0 and "no changes" in again.output
     assert len(list(env.parent.glob(".env.bak-*"))) == 1
+
+
+def test_init_keeps_claude_chat_with_openai_embeddings(fakes):
+    calls, state, env = fakes
+    env.parent.mkdir(parents=True)
+    original = (
+        "AUTOONTOLOGY_CHAT_PROVIDER=claude\nAUTOONTOLOGY_EMBED_PROVIDER=openai\n"
+        "AUTOONTOLOGY_OPENAI_BASE_URL=https://api.example.com/v1\n"
+        "AUTOONTOLOGY_OPENAI_EMBED_MODEL=text-embed-x\n"
+    )
+    env.write_text(original, encoding="utf-8")
+    state["det"] = {"claude": True, "codex": True}
+    res = runner.invoke(app, ["init", "--yes", "--no-docs", "--env", str(env)])
+    assert res.exit_code == 0, res.output
+    text = env.read_text(encoding="utf-8")
+    assert text.startswith(original)
+    assert "AUTOONTOLOGY_EMBED_PROVIDER=ollama" not in text
+    assert "embeddings: openai text-embed-x (current, kept)" in res.output
+
+
+def test_init_interactive_default_is_the_current_provider(fakes):
+    calls, state, env = fakes
+    env.parent.mkdir(parents=True)
+    env.write_text("AUTOONTOLOGY_CHAT_PROVIDER=ollama\n", encoding="utf-8")
+    state["det"] = {"claude": True}
+    # Enter at the provider prompt -> the current one; model default; no docs
+    res = runner.invoke(app, ["init", "--env", str(env)], input="\n\nn\n")
+    assert res.exit_code == 0, res.output
+    assert "Chat provider (current: ollama; recommended: claude)" in res.output
+    assert "[ollama]" in res.output
+    assert "AUTOONTOLOGY_CHAT_PROVIDER=ollama\n" in env.read_text(encoding="utf-8")
+    # choosing the recommended (non-default) provider switches it
+    res = runner.invoke(app, ["init", "--env", str(env)], input="claude\n\nn\n")
+    assert res.exit_code == 0, res.output
+    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude\n" in env.read_text(encoding="utf-8")
+
+
+def test_init_without_env_selection_takes_the_recommendation(fakes):
+    _calls, state, env = fakes
+    state["det"] = {"codex": True}
+    res = runner.invoke(app, ["init", "--yes", "--no-docs", "--env", str(env)])
+    assert res.exit_code == 0, res.output
+    text = env.read_text(encoding="utf-8")
+    assert "AUTOONTOLOGY_CHAT_PROVIDER=codex\n" in text
+    assert "AUTOONTOLOGY_EMBED_PROVIDER=ollama\n" in text
+
+
+def test_init_setup_prints_no_competing_next_line(fakes, monkeypatch):
+    """The real setup body inside init: no `next: up` line, and the kordoc skip names
+    what to do in init terms."""
+    from autoontology.engine import migrate
+
+    calls, _state, env = fakes
+    monkeypatch.setattr(cli, "_init_setup", REAL_INIT_SETUP)
+    monkeypatch.setattr(migrate, "run_migrations", lambda s: None)
+    monkeypatch.setattr(migrate, "current_revision", lambda s: "abc")
+    monkeypatch.setattr(migrate, "head_revision", lambda: "abc")
+    monkeypatch.setattr(cli, "setup", _setup_skipping_models(cli.setup))
+    res = runner.invoke(app, ["init", "--yes", "--no-docs", "--env", str(env)])
+    assert res.exit_code == 0, res.output
+    assert "next: uv run autoontology up" not in res.output
+    assert "answer yes to document support or run" in res.output
+    assert "uv run autoontology tools install-kordoc` later" in res.output
+    assert res.output.count("next:") == 1
+
+
+def _setup_skipping_models(real):
+    def setup(**kw):
+        return real(**{**kw, "skip_models": True})
+
+    return setup
 
 
 # --- demo -----------------------------------------------------------------------------
@@ -192,7 +271,135 @@ def demo_env(isolated_env, monkeypatch):
     )
     monkeypatch.setattr(cli, "export", lambda **kw: calls.append("export"))
     monkeypatch.setattr(cli, "ui", lambda no_browser: calls.append(("ui", no_browser)))
+    from autoontology.structured import remove
+
+    monkeypatch.setattr(remove, "backend_is_ours", lambda settings: False)
     return calls
+
+
+def _move_quick(isolated_env):
+    from autoontology.config import Settings
+
+    store = Store.for_home(Settings.from_env().home)
+    store.set_locator(store.get_source("quick").id, '{"path": "/old/place", "recursive": false}')
+    return store
+
+
+def test_demo_asks_before_replacing_a_source(demo_env, isolated_env, monkeypatch):
+    from autoontology.structured import remove
+
+    removed = []
+
+    def fake_remove(settings, store, src, **kw):
+        removed.append(src.name)
+        store.delete_source(src.id)
+
+    monkeypatch.setattr(remove, "remove_source", fake_remove)
+    assert runner.invoke(app, ["demo", "--no-open"]).exit_code == 0
+    store = _move_quick(isolated_env)
+    # no stdin (scripts) and no --replace: stop with the hint, nothing deleted
+    res = runner.invoke(app, ["demo", "--no-open"])
+    assert res.exit_code == 2, res.output
+    assert "Replace source quick (its database and extracted concepts will be deleted)?" in (
+        res.output
+    )
+    assert "[y/N]" in res.output and "--replace" in res.output and removed == []
+    # an explicit "n" keeps it too
+    res = runner.invoke(app, ["demo", "--no-open"], input="n\n")
+    assert res.exit_code == 2 and removed == []
+    assert store.get_source("quick").locator.startswith('{"path": "/old/place"')
+    # "y" replaces
+    res = runner.invoke(app, ["demo", "--no-open"], input="y\n")
+    assert res.exit_code == 0, res.output
+    assert removed == ["quick"]
+
+
+def test_demo_replace_flag_skips_the_question(demo_env, isolated_env, monkeypatch):
+    from autoontology.structured import remove
+
+    removed = []
+
+    def fake_remove(settings, store, src, **kw):
+        removed.append(src.name)
+        store.delete_source(src.id)
+
+    monkeypatch.setattr(remove, "remove_source", fake_remove)
+    assert runner.invoke(app, ["demo", "--no-open"]).exit_code == 0
+    _move_quick(isolated_env)
+    res = runner.invoke(app, ["demo", "--no-open", "--replace"])
+    assert res.exit_code == 0, res.output
+    assert removed == ["quick"] and "Replace source" not in res.output
+    assert "extracted concepts are deleted" in res.output
+
+
+def test_demo_prunes_orphaned_connections_after_up(demo_env, monkeypatch):
+    from autoontology.engine import client as client_mod
+    from autoontology.structured import remove
+
+    fake = FakeBackend(["autoontology_src_gone", "autoontology_src_quick", "userdb"])
+    monkeypatch.setattr(client_mod, "BackendClient", lambda *a, **k: fake)
+    monkeypatch.setattr(remove, "backend_is_ours", lambda settings: True)
+    monkeypatch.setattr(
+        pg, "database_exists", lambda settings, name: name != "autoontology_src_gone"
+    )
+    res = runner.invoke(app, ["demo", "--no-open"])
+    assert res.exit_code == 0, res.output
+    # quick is not registered yet at that point: unowned, so pruned as well
+    assert fake.deleted == ["autoontology_src_gone", "autoontology_src_quick"]
+    assert "pruning upstream connections" in res.output
+    assert demo_env[0] == "up"
+
+
+class FakeBackend:
+    def __init__(self, names, down=False):
+        self.names = list(names)
+        self.deleted: list[str] = []
+        self.down = down
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def list_connections(self):
+        from autoontology.engine.client import BackendUnavailable
+
+        if self.down:
+            raise BackendUnavailable("upstream backend not reachable")
+        return [{"database_name": n} for n in self.names]
+
+    def delete_connection(self, name):
+        self.names.remove(name)
+        self.deleted.append(name)
+        return {}
+
+    def database_id_by_name(self, name):
+        return None
+
+
+def test_tools_prune_connections(isolated_env, monkeypatch):
+    from autoontology.config import Settings
+    from autoontology.engine import client as client_mod
+
+    store = Store.for_home(Settings.from_env().home)
+    store.add_source(name="keep", kind="files", locator="{}", pg_database="autoontology_src_keep")
+    names = ["autoontology_src_keep", "autoontology_src_old", "Autoontology_src_x", "crm"]
+    fake = FakeBackend(names)
+    monkeypatch.setattr(client_mod, "BackendClient", lambda *a, **k: fake)
+    monkeypatch.setattr(pg, "database_exists", lambda settings, name: True)
+    dry = runner.invoke(app, ["tools", "prune-connections", "--dry-run"])
+    assert dry.exit_code == 0, dry.output
+    assert "orphan: autoontology_src_old (no registered source)" in dry.output
+    assert "keep" not in dry.output and "crm" not in dry.output and fake.deleted == []
+    res = runner.invoke(app, ["tools", "prune-connections"])
+    assert res.exit_code == 0, res.output
+    assert fake.deleted == ["autoontology_src_old"]
+    assert "deleted upstream connection autoontology_src_old" in res.output
+    assert "no orphaned" in runner.invoke(app, ["tools", "prune-connections"]).output
+    fake.down = True
+    down = runner.invoke(app, ["tools", "prune-connections"])
+    assert down.exit_code == 1 and "autoontology up" in down.output
 
 
 def test_demo_runs_the_steps_in_order(demo_env):

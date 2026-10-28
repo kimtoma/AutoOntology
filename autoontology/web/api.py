@@ -91,9 +91,11 @@ STATUS_CACHE_S = 15.0
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, error: str, detail: str) -> None:
+    def __init__(self, status: int, error: str, detail: str, **extra: Any) -> None:
         super().__init__(detail)
         self.status, self.error, self.detail = status, error, detail
+        #: Additional top-level fields of the error body (e.g. ``conflicts``).
+        self.extra = extra
 
 
 def mask(value: Any) -> Any:
@@ -840,7 +842,13 @@ def build_router(api: Api) -> APIRouter:
         return onboarding.list_sample_sets(api.settings, api.store)
 
     @router.post("/samples/load")
-    async def load_samples(body: dict[str, Any]) -> dict[str, Any]:
+    async def load_samples(request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except ValueError as exc:
+            raise ApiError(400, "invalid_body", "the body must be a JSON object") from exc
+        if not isinstance(body, dict):
+            raise ApiError(400, "invalid_body", "the body must be a JSON object")
         return await anyio.to_thread.run_sync(_load_samples, api, body)
 
     return router
@@ -860,22 +868,39 @@ def _load_samples(api: Api, body: dict[str, Any]) -> dict[str, Any]:
             "unknown_sample_set",
             f"unknown sample set {name!r} (choose one of: {', '.join(onboarding.SAMPLE_SETS)})",
         )
-    busy = api.runs.busy()
-    if busy is not None or api.store.active_runs():
-        raise ApiError(
-            409,
-            "run_active",
-            "a build or export is running: load the samples when it has finished",
-        )
-    messages: list[str] = []
+    replace = body.get("replace", False)
+    if not isinstance(replace, bool):
+        raise ApiError(400, "invalid_body", "'replace' must be true or false")
+    busy_text = "a build or export is running: load the samples when it has finished"
+    try:  # held while registering: no run may start in between
+        api.runs.claim_idle(WORKSPACE, "samples")
+    except RunStartError as exc:
+        raise ApiError(409, "run_active", busy_text) from exc
     try:
-        registered = onboarding.register_sample_set(
-            api.settings, api.store, name, notify=lambda m: messages.append(mask(m))
-        )
-    except onboarding.SampleSetError as exc:
-        raise ApiError(400, "unknown_sample_set", mask(str(exc))) from exc
-    except (RemoveError, LoadError, JobError, ValueError) as exc:
-        raise ApiError(409, "samples_not_loaded", mask(str(exc))) from exc
+        if api.store.active_runs():  # a CLI run
+            raise ApiError(409, "run_active", busy_text)
+        messages: list[str] = []
+        try:
+            registered = onboarding.register_sample_set(
+                api.settings,
+                api.store,
+                name,
+                notify=lambda m: messages.append(mask(m)),
+                replace=replace,
+            )
+        except onboarding.SampleConflict as exc:
+            raise ApiError(
+                409,
+                "sample_conflict",
+                mask(f'{exc}; send "replace": true to replace them'),
+                conflicts=[{k: mask(str(v)) for k, v in c.items()} for c in exc.conflicts],
+            ) from exc
+        except onboarding.SampleSetError as exc:
+            raise ApiError(400, "unknown_sample_set", mask(str(exc))) from exc
+        except (RemoveError, LoadError, JobError, ValueError) as exc:
+            raise ApiError(409, "samples_not_loaded", mask(str(exc))) from exc
+    finally:
+        api.runs.release(WORKSPACE)
     return {
         "set": name,
         "sources": [{**api.source_dict(src), "action": action} for src, action in registered],
@@ -1171,7 +1196,9 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
 
     @app.exception_handler(ApiError)
     async def _api_error(_request: Request, exc: ApiError) -> JSONResponse:
-        return JSONResponse({"error": exc.error, "detail": exc.detail}, status_code=exc.status)
+        return JSONResponse(
+            {"error": exc.error, "detail": exc.detail, **exc.extra}, status_code=exc.status
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, exc: RequestValidationError) -> Response:

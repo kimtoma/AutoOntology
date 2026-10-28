@@ -86,6 +86,9 @@ def setup(
         "--skip-ocr-models",
         help="With --docs: do not download kordoc's OCR models (images/scans then skipped).",
     ),
+    in_init: bool = typer.Option(
+        False, "--in-init", hidden=True, help="Called by init: init prints the next step."
+    ),
 ) -> None:
     """Prepare everything (idempotent): database + extensions -> migrations -> models -> kordoc."""
     from autoontology.engine.migrate import (
@@ -177,9 +180,15 @@ def setup(
             force=False,
             skip_ocr_models=skip_ocr_models,
         )
+    elif in_init:
+        typer.echo(
+            "kordoc: skipped (answer yes to document support or run "
+            "`uv run autoontology tools install-kordoc` later)"
+        )
     else:
         typer.echo("kordoc: skipped (pass --docs for HWP/PDF/DOCX/PPTX documents)")
-    typer.echo("next: uv run autoontology up")
+    if not in_init:
+        typer.echo("next: uv run autoontology up")
 
 
 def _install_kordoc(
@@ -768,7 +777,16 @@ def _init_postgres(yes: bool, docker: bool, env_path) -> str:
             f"{env_path} to your own Postgres 17 with pgvector"
         )
         tries += 1
-        if yes or tries > POSTGRES_RETRIES or not typer.confirm("  Retry?", default=True):
+        where = f"{settings.postgres_host}:{settings.postgres_port}"
+        if (
+            yes
+            or tries > POSTGRES_RETRIES
+            or not typer.confirm(
+                f"  Postgres is not reachable at {where}. Start it (docker compose up -d) and "
+                "press Enter to retry, or n to stop",
+                default=True,
+            )
+        ):
             _fail(
                 "init stopped: Postgres is not reachable. Apply the fix above, then run "
                 "`uv run autoontology init` again.",
@@ -809,7 +827,7 @@ def _init_login(settings, name: str, info, yes: bool):
 
 def _init_setup(docs: bool) -> None:
     """Step 6: the ``setup`` command itself (same code path)."""
-    setup(docs=docs, skip_models=False, force_alias=False, skip_ocr_models=False)
+    setup(docs=docs, skip_models=False, force_alias=False, skip_ocr_models=False, in_init=True)
 
 
 @app.command()
@@ -887,13 +905,36 @@ def init(
         )
     )
     recommended = onboarding.recommend_provider(det)
+    # an explicit choice in .env (or the shell) is kept; the recommendation is a hint
+    current = (
+        settings.chat_provider
+        if settings.selection_origin.get("chat_provider") in (".env", "shell")
+        else None
+    )
+    default_choice = current or recommended
+    if current and current != recommended:
+        typer.echo(f"  note  current: {current}; recommended: {recommended}")
     if provider:
         choice = provider
     elif yes:
-        choice = recommended
+        choice = default_choice
+        if current:
+            typer.echo(
+                f"  ok    keeping the current provider {current}"
+                + (
+                    f" (recommended: {recommended}; pass --provider {recommended} to switch)"
+                    if current != recommended
+                    else ""
+                )
+            )
     else:
+        label = (
+            f"  Chat provider (current: {current}; recommended: {recommended})"
+            if current and current != recommended
+            else "  Chat provider"
+        )
         choice = typer.prompt(
-            "  Chat provider", default=recommended, type=click.Choice(list(CHAT_PROVIDERS))
+            label, default=default_choice, type=click.Choice(list(CHAT_PROVIDERS))
         )
     info = det.providers[choice]
     if choice in CLI_PROVIDERS and not info.ready:
@@ -942,9 +983,14 @@ def init(
 
     # 3. embeddings
     _step(3, INIT_STEPS, "Embeddings")
-    embed = "ollama"
+    current_embed = (
+        settings.embed_provider
+        if settings.selection_origin.get("embed_provider") in (".env", "shell")
+        else None
+    )
+    embed = current_embed or "ollama"
     if choice == "openai":
-        default_embed = "ollama" if det.ollama_reachable else "openai"
+        default_embed = current_embed or ("ollama" if det.ollama_reachable else "openai")
         embed = (
             default_embed
             if yes
@@ -954,8 +1000,16 @@ def init(
                 type=click.Choice(["ollama", "openai"]),
             )
         )
-    keys["AUTOONTOLOGY_EMBED_PROVIDER"] = embed
-    if embed == "openai":
+    # written when chosen here or not set yet; an existing choice is kept as it is
+    keep_embed = current_embed is not None and choice != "openai"
+    if not keep_embed:
+        keys["AUTOONTOLOGY_EMBED_PROVIDER"] = embed
+    if embed == "openai" and keep_embed:
+        typer.echo(
+            f"  ok    embeddings: openai {settings.openai_embed_model or '(model not set)'} "
+            "(current, kept)"
+        )
+    elif embed == "openai":
         embed_model = settings.openai_embed_model
         if not yes:
             embed_model = typer.prompt("  Embedding model", default=embed_model or None)
@@ -1059,6 +1113,76 @@ def init(
     typer.echo(f"\nnext: {nxt}")
 
 
+def _demo_prune_orphans(settings, store) -> None:
+    """Right after ``up``: delete upstream connections to dropped per-source databases
+    (one of them makes every ingest time out), with a notice."""
+    from autoontology.engine.client import BackendClient, BackendError
+    from autoontology.structured import remove
+
+    if not remove.backend_is_ours(settings):
+        return
+    try:
+        with BackendClient(settings.backend_url, timeout=30.0) as client:
+            orphans = remove.find_orphan_connections(settings, store, client)
+            if not orphans:
+                return
+            typer.echo(
+                "  note  pruning upstream connections no source owns (they would make every "
+                "ingest time out): " + ", ".join(f"{o.name} ({o.reason})" for o in orphans)
+            )
+            remove.prune_orphan_connections(
+                settings,
+                client,
+                orphans,
+                say=lambda message, warning=False: typer.echo(
+                    f"  {'warn' if warning else 'ok'}    {message}"
+                ),
+            )
+    except BackendError as exc:
+        typer.echo(
+            f"  warn  could not check the upstream connections ({exc}); if the build times "
+            f"out, run `{remove.PRUNE_COMMAND}`"
+        )
+
+
+@tools_app.command("prune-connections")
+def tools_prune_connections(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Only list the orphaned connections."),
+    drop_db: bool = typer.Option(
+        False, "--drop-db", help="Also drop the orphans' autoontology_src_* databases."
+    ),
+) -> None:
+    """Delete upstream connections whose autoontology_src_* database is gone or that no
+    registered source owns (one of them makes every ingest time out)."""
+    from autoontology.engine.client import BackendClient, BackendError, BackendUnavailable
+    from autoontology.structured import remove
+
+    settings = _settings()
+    store = _store(settings)
+    try:
+        with BackendClient(settings.backend_url) as client:
+            orphans = remove.find_orphan_connections(settings, store, client)
+            if not orphans:
+                typer.echo("no orphaned upstream connections")
+                return
+            for orphan in orphans:
+                typer.echo(f"orphan: {orphan.name} ({orphan.reason})")
+            if dry_run:
+                typer.echo(f"dry run: nothing deleted; run `{remove.PRUNE_COMMAND}` to delete")
+                return
+            remove.prune_orphan_connections(
+                settings,
+                client,
+                orphans,
+                drop_db=drop_db,
+                say=lambda message, warning=False: typer.echo(message, err=warning),
+            )
+    except BackendUnavailable as exc:
+        _fail(f"prune-connections: {exc}; start the services with `uv run autoontology up`")
+    except BackendError as exc:
+        _fail(f"prune-connections: {exc}")
+
+
 def _print_step_times(store, since: str) -> None:
     """Elapsed time per top-level step of the build run started at/after *since*."""
     from autoontology.engine.build import is_top_step
@@ -1086,10 +1210,18 @@ def demo(
     resume: bool = typer.Option(
         False, "--resume", help="Continue the latest build, keeping its succeeded steps."
     ),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help="Replace sources that use a sample name with other data (deletes their "
+        "database and extracted concepts) without asking.",
+    ),
 ) -> None:
     """Run the whole pipeline on a sample set: start the services, register the sample
     sources, build, export and open the web UI."""
     import time
+
+    import click
 
     from autoontology import onboarding
     from autoontology.engine.jobs import JobError
@@ -1107,12 +1239,34 @@ def demo(
 
     _step(1, total, "Services")
     up()
+    store = _store(settings)
+    _demo_prune_orphans(settings, store)
 
     _step(2, total, f"Sample sources ({set_name})")
-    store = _store(settings)
+    for conflict in onboarding.sample_conflicts(settings, store, set_name):
+        typer.echo(
+            f"  {conflict['name']}: registered for {conflict['registered']} "
+            f"({conflict['kind']}), the sample is {conflict['sample']}"
+        )
+        if replace:
+            continue
+        try:
+            ok = typer.confirm(
+                f"  Replace source {conflict['name']} (its database and extracted concepts "
+                "will be deleted)?",
+                default=False,
+            )
+        except (typer.Abort, click.exceptions.Abort):  # no stdin: a script
+            ok = False
+        if not ok:
+            _fail(
+                f"demo stopped: source {conflict['name']!r} was kept. Re-run with --replace "
+                "to replace it, or remove it yourself (`uv run autoontology source list`)",
+                code=2,
+            )
     try:
         onboarding.register_sample_set(
-            settings, store, set_name, notify=lambda m: typer.echo(f"  {m}")
+            settings, store, set_name, notify=lambda m: typer.echo(f"  {m}"), replace=True
         )
     except (onboarding.SampleSetError, RemoveError, LoadError, JobError, ValueError) as exc:
         _fail(

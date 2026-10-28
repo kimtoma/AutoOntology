@@ -247,7 +247,10 @@ def test_source_rm_backend_down_needs_force(isolated_env, monkeypatch):
     assert res.exit_code == 1 and "--force" in res.output and "drop" not in fake.events
     res = runner.invoke(app, ["source", "rm", "demo", "--drop-db", "--force"])
     assert res.exit_code == 0, res.output
-    assert "may remain" in res.output and fake.events == ["drop"]
+    # the connection could not be deleted: dropping its database would orphan it
+    assert "may remain" in res.output and fake.events == []
+    assert "database autoontology_src_demo kept" in res.output
+    assert "tools prune-connections --drop-db" in res.output
     assert "removed source demo" in res.output
 
 

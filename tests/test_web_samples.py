@@ -82,3 +82,67 @@ def test_load_while_a_run_is_active_is_409(client):
     assert c.post(f"{API}/samples/load", json={"set": "quickstart"}).status_code == 409
     store.update_run(run.id, status="succeeded")
     assert c.post(f"{API}/samples/load", json={"set": "quickstart"}).status_code == 200
+
+
+@pytest.mark.parametrize("raw", ["[1, 2]", '"quickstart"', "3", "{not json"])
+def test_load_needs_a_json_object(client, raw):
+    c, *_ = client
+    resp = c.post(f"{API}/samples/load", content=raw, headers={"content-type": "application/json"})
+    assert resp.status_code == 400 and resp.json()["error"] == "invalid_body"
+
+
+@pytest.mark.parametrize("name", ["../quickstart", "quickstart/..", "quickstart/structured"])
+def test_load_rejects_path_shaped_names(client, name):
+    c, *_ = client
+    resp = c.post(f"{API}/samples/load", json={"set": name})
+    assert resp.status_code == 400 and resp.json()["error"] == "unknown_sample_set"
+
+
+def test_replacing_a_source_needs_replace_true(client, monkeypatch):
+    from autoontology.structured import remove
+
+    c, settings, _ = client
+    removed = []
+
+    def fake_remove(settings, store, src, **kw):
+        removed.append(src.name)
+        store.delete_source(src.id)
+
+    monkeypatch.setattr(remove, "remove_source", fake_remove)
+    assert c.post(f"{API}/samples/load", json={"set": "quickstart"}).status_code == 200
+    store = Store.for_home(settings.home)
+    store.set_locator(store.get_source("quick").id, '{"path": "/old/place", "recursive": false}')
+    resp = c.post(f"{API}/samples/load", json={"set": "quickstart"})
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["error"] == "sample_conflict" and removed == []
+    assert [(x["name"], x["registered"]) for x in body["conflicts"]] == [
+        ("quick", str(Path("/old/place").resolve()))
+    ]
+    assert body["conflicts"][0]["sample"].endswith("quickstart/structured")
+    bad = c.post(f"{API}/samples/load", json={"set": "quickstart", "replace": "yes"})
+    assert bad.status_code == 400 and bad.json()["error"] == "invalid_body"
+    ok = c.post(f"{API}/samples/load", json={"set": "quickstart", "replace": True})
+    assert ok.status_code == 200, ok.text
+    assert [s["action"] for s in ok.json()["sources"]] == ["replaced", "kept"]
+    assert removed == ["quick"]
+
+
+def test_load_holds_the_workspace_while_registering(client, monkeypatch):
+    """No run can start between the run-active check and the registration."""
+    from autoontology import onboarding
+    from autoontology.web.runs import RunStartError
+
+    c, _settings, manager = client
+    seen = []
+    real = onboarding.register_sample_set
+
+    def register(*a, **kw):
+        with pytest.raises(RunStartError):
+            manager.claim("*workspace*", "build")
+        seen.append(manager.busy().kind)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(onboarding, "register_sample_set", register)
+    assert c.post(f"{API}/samples/load", json={"set": "quickstart"}).status_code == 200
+    assert seen == ["samples"] and manager.busy() is None
