@@ -262,9 +262,10 @@ class AlignmentStore:
 
     def auto_descriptions(self) -> dict[str, set[str]]:
         """term id -> the descriptions apply set on it (``applied.description``, or the
-        baseline :func:`settle_legacy_descriptions` recorded); only a record from before
-        the text was kept and not settled yet yields ``ANY_DESCRIPTION`` for its Term."""
-        from autoontology.unstructured.align import ANY_DESCRIPTION
+        baseline :func:`settle_legacy_descriptions` recorded, plus ``LEGACY_BASELINE``);
+        only a record from before the text was kept and not settled yet yields
+        ``ANY_DESCRIPTION`` for its Term."""
+        from autoontology.unstructured.align import ANY_DESCRIPTION, LEGACY_BASELINE
 
         out: dict[str, set[str]] = {}
         with self._conn() as conn:
@@ -276,9 +277,13 @@ class AlignmentStore:
             if not applied.get("description_set") or not applied.get("term_id"):
                 continue
             text = str(applied.get("description") or "").strip()
-            if not text and applied.get("description_baseline"):
-                continue  # settled on an empty description: nothing of apply's to hide
-            out.setdefault(applied["term_id"], set()).add(text or ANY_DESCRIPTION)
+            texts = out.setdefault(applied["term_id"], set())
+            if applied.get("description_baseline"):
+                texts.add(LEGACY_BASELINE)  # keeps pre-upgrade verdicts' keys apart
+                if text:  # (settled on an empty description: nothing of apply's to hide)
+                    texts.add(text)
+                continue
+            texts.add(text or ANY_DESCRIPTION)
         return out
 
     def reassign_alias_source(self, term_id: str, alias: str, source_id: str) -> None:

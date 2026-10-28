@@ -203,11 +203,17 @@ def _judged_term(
         or description.startswith(FALLBACK_TERM_PREFIX)  # what apply may replace
     ):
         description = ""
-    return {
+    out = {
         **{k: c.get(k) for k in ("id", "name", "columns")},
         "description": description,
         "synonyms": [x for x in c.get("synonyms") or [] if x not in mine],
     }
+    if ANY_DESCRIPTION in auto or LEGACY_BASELINE in auto:
+        # a legacy description record (confirmed or not): every verdict stored before
+        # the upgrade has another key, so each concept of each documents source is judged
+        # once more, not only the one whose judge call confirmed the baseline
+        out["legacy_description"] = True
+    return out
 
 
 def terms_fingerprint(
@@ -267,6 +273,9 @@ def judge_key(
 #: until a successful judge call against that Term records the description it saw
 #: (:meth:`~autoontology.store.alignments.AlignmentStore.settle_legacy_descriptions`).
 ANY_DESCRIPTION = "\0any"
+#: :func:`judge_key`: a Term whose legacy description record got its baseline
+#: (:meth:`~autoontology.store.alignments.AlignmentStore.auto_descriptions`).
+LEGACY_BASELINE = "\0baseline"
 
 Judge = Callable[[dict[str, Any], list[dict[str, Any]]], AlignmentVerdict]
 

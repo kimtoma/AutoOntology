@@ -576,6 +576,28 @@ def test_resume_right_after_the_upgrade_rejudges_a_legacy_description(env):
     assert again.details["align:hanbit-docs"]["judged"] >= 1
 
 
+def test_upgrade_rejudges_every_documents_source_of_a_legacy_term(env, tmp_path):
+    """Round 5: two documents sources share a Term with an unconfirmed legacy description
+    record. The first source's judge call confirms the baseline, but the second source's
+    stored verdict was never re-validated: after the upgrade `--resume` both are judged,
+    and a further resume with no change reuses both."""
+    add_structured(env)
+    add_documents(env)
+    other = tmp_path / "docs-b"
+    shutil.copytree(env["docs"], other)
+    ex.ensure_documents_source(env["store"], "b-docs", other)
+    store = env["store"]
+    first = run(env)
+    assert first.status == "succeeded", first.problems
+    assert _forget_description_texts(store) >= 1
+    upgraded = run(env, resume=True)
+    assert upgraded.run_id == first.run_id and upgraded.status == "succeeded"
+    for name in ("align:hanbit-docs", "align:b-docs"):
+        assert upgraded.details[name]["judged"] >= 1, name
+    kept = run(env, resume=True)
+    assert "align:hanbit-docs" not in kept.details and "align:b-docs" not in kept.details
+
+
 def test_resume_runs_align_again_when_an_upstream_term_changed(env):
     """Follow-up of recheck #2: with unchanged inputs `--resume` used to keep the whole
     align step, so an edited upstream Term was never re-judged. The step records a
