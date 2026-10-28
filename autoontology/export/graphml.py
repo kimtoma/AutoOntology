@@ -24,6 +24,7 @@ from typing import Any
 from autoontology.ontology.model import THING, MergedOntology
 
 GRAPHML_NS = "http://graphml.graphdrawing.org/xmlns"
+_XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
 _SCHEMA_LOCATION = (
     "http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd"
 )
@@ -155,10 +156,11 @@ def to_graph(model: MergedOntology) -> Graph:
 
 
 def to_xml(g: Graph) -> ET.ElementTree:
-    ET.register_namespace("", GRAPHML_NS)
+    # Unqualified tags with literal xmlns attributes: the output is GraphML-namespaced
+    # without ET.register_namespace (a process-wide registry) or ns0: prefixes.
     root = ET.Element(
-        f"{{{GRAPHML_NS}}}graphml",
-        {"{http://www.w3.org/2001/XMLSchema-instance}schemaLocation": _SCHEMA_LOCATION},
+        "graphml",
+        {"xmlns": GRAPHML_NS, "xmlns:xsi": _XSI_NS, "xsi:schemaLocation": _SCHEMA_LOCATION},
     )
     keys: dict[tuple[str, str], str] = {}
 
@@ -180,25 +182,23 @@ def to_xml(g: Graph) -> ET.ElementTree:
     for (domain, name), kid in keys.items():
         ET.SubElement(
             root,
-            f"{{{GRAPHML_NS}}}key",
+            "key",
             {"id": kid, "for": domain, "attr.name": name, "attr.type": "string"},
         )
-    graph = ET.SubElement(root, f"{{{GRAPHML_NS}}}graph", {"edgedefault": "directed"})
+    graph = ET.SubElement(root, "graph", {"edgedefault": "directed"})
 
     def data(parent: ET.Element, domain: str, attrs: dict[str, str]) -> None:
         for name, value in attrs.items():
-            ET.SubElement(
-                parent, f"{{{GRAPHML_NS}}}data", {"key": keys[(domain, name)]}
-            ).text = xml_safe(value)
+            ET.SubElement(parent, "data", {"key": keys[(domain, name)]}).text = xml_safe(value)
 
     data(graph, "graph", graph_attrs)
     for node, attrs in g.nodes.items():
-        data(ET.SubElement(graph, f"{{{GRAPHML_NS}}}node", {"id": xml_safe(node)}), "node", attrs)
+        data(ET.SubElement(graph, "node", {"id": xml_safe(node)}), "node", attrs)
     for u, v, key, attrs in g.edges:
         data(
             ET.SubElement(
                 graph,
-                f"{{{GRAPHML_NS}}}edge",
+                "edge",
                 {"source": xml_safe(u), "target": xml_safe(v), "id": str(key)},
             ),
             "edge",

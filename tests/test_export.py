@@ -423,3 +423,16 @@ def test_graphml_drops_xml_invalid_control_characters(tmp_path):
     nodes, edges = graphml.read(path)  # parses: the file is well-formed
     assert nodes["a"]["label"] == "Contract"
     assert edges == [("a", "b", {"type": "related", "label": "tab\tkept"})]
+
+
+def test_graphml_leaves_the_global_namespace_registry_alone(model, tmp_path):
+    """Review M-4: the GraphML default namespace must not leak into other ElementTree use."""
+    import xml.etree.ElementTree as ET
+
+    before = dict(ET._namespace_map)
+    path = graphml.write(model, tmp_path)
+    assert dict(ET._namespace_map) == before
+    text = path.read_text(encoding="utf-8")
+    assert '<graphml xmlns="http://graphml.graphdrawing.org/xmlns"' in text
+    assert "ns0:" not in text
+    assert ET.tostring(ET.Element(f"{{{graphml.GRAPHML_NS}}}x")).startswith(b"<ns0:x")
