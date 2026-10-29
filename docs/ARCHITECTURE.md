@@ -110,7 +110,7 @@ later steps of its own source and every global step. Failed chunks or documents 
 run `failed` with a `partial` note, but the snapshot is still saved.
 
 Concurrency: a build holds a store lease on the workspace and on every source, reaps runs
-left by dead processes, and refuses to start while another build or export is active.
+left by dead processes, and refuses to start while another build, export or apply is active.
 
 ### Export (`engine/export_job.py`)
 
@@ -144,6 +144,48 @@ across the file.
 over from the previous export of the same revision. A validation failure writes
 `validation.json`, keeps the previous folder untouched and fails the run.
 
+### Operations: review, apply, diff, freshness
+
+A person's decisions on what the build proposed are stored in `review_decisions`
+(`store/decisions.py`), one per subject: an alignment (`subject_key` = concept id:
+`accept` with `same`, `related`, `narrower` or `broader`, or `reject`), an alias
+(`<term id>|<alias>`: `accept` or `reject`) or an unaligned concept (`acknowledge`).
+
+- **Overlay** (`engine/overlay.py`). A decided concept's `alignments` row carries the
+  decision: relation and Term from the decision, `accepted` for an accept, `none` for a
+  reject, rationale `human decision: <note>`. The judge's verdict moves to the row's
+  `judged_json` and comes back when the decision is removed. The align judge step checks
+  for a decision before the resume and cache paths, so a decided concept is never judged
+  again (its Term must still exist; otherwise it is judged as usual). The align apply step
+  writes the synonyms of a person's accepted `same` to the Term whatever its confidence.
+  In the model, an accepted `related`/`narrower`/`broader` row becomes an
+  `OAxiom(accepted=True)`; RDF and Ossie serialise it exactly like a proposal, but it
+  makes the Term `aligned`. An accepted alias moves from `rejected_aliases` to the Term's
+  `alt_labels`. `MergedOntology.decisions` lists the reflected decisions, and OKF marks
+  those concepts `stable`.
+- **Apply** (`engine/apply.py`, run kind `apply`): `decisions -> merge -> snapshot`. It
+  writes the decided rows and restores the rows whose decision was removed, adds the
+  synonyms of accepted `same` decisions upstream, then merges and saves a revision. It
+  needs the backend but never a model or the LLM proxy. It holds the workspace lease, and
+  build, export and apply refuse to start while another of them is active. Every snapshot
+  step (build or apply) sets `applied_revision` on the pending decisions the model
+  reflects.
+- **Review inbox** (`web/review.py`, `/api/review`). Items are built from the alignment
+  rows (`al:` refused `same` proposals, `ax:` judge axioms with confidence >= 0.6), the
+  latest model (`un:` unaligned document classes, new since the previous revision first;
+  `alias:` rejected aliases) and freshness (`src:` stale sources). Ids are stable. A
+  decided item that is no longer current is rebuilt from the copy its decision stored.
+- **Diff** (`web/revisions.py`, `/api/ontology/diff`). Nodes are keyed by model local.
+  A node counts as changed when its label, kind, definitions, synonyms, tables or
+  relation/property counts differ. Axioms and merges are diffed by their ends. Each list
+  holds at most 500 entries; `totals` counts all of them.
+- **Freshness** (`web/freshness.py`, `/api/sources/freshness`, 60 s cache). For each
+  source, the current `input_fingerprint` is compared with the `inputs_sha` of its newest
+  succeeded build step. When they differ, the reasons say what changed: files compared
+  with the stored documents (path, sha256) or the load manifest, the database schema, or
+  the reader settings. A source with no recorded build is `never_built`. Unreadable
+  inputs or an unreachable database give `unknown` with the error class.
+
 ### Playground (`autoontology/playground`)
 
 The scope is always the latest snapshot. The retrieval index (`elements.py`, `index.py`)
@@ -163,10 +205,10 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 
 | Table | Holds |
 |---|---|
-| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground, v3: `term_alias_additions.source_id`). |
+| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground, v3: `term_alias_additions.source_id`, v4: `term_legacy_descriptions`, v5: `documents.reader_fingerprint`, v6: `review_decisions` and `alignments.judged_json`). |
 | `sources` | Registered sources: name, kind (`files`, `database`, `documents`), locator, catalog database id. |
 | `source_leases` | Leases that keep builds, exports and deletes from overlapping. |
-| `runs`, `steps` | Build and export runs and their steps, with details, timings and `inputs_sha`. |
+| `runs`, `steps` | Build, export and apply runs and their steps, with details, timings and `inputs_sha`. |
 | `file_manifests`, `semantic_baselines` | Input manifests and the catalog schema a semantic layer was compiled from. |
 | `documents`, `chunks` | Read documents (sha256, reader) and their chunks. |
 | `concepts`, `relations`, `evidence` | Extracted and consolidated document knowledge. |
@@ -174,6 +216,7 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 | `alignments`, `alignment_previews` | Judge verdicts with the identity policy version, and dry-run proposals. |
 | `term_alias_additions`, `term_refresh_pending` | Synonyms AutoOntology added to Terms (with `source_id`, the documents source whose alignment added them, since v3; NULL on older rows), and Terms awaiting a refresh. `source rm` of a documents source removes that source's additions from the upstream Terms first. |
 | `ontology_snapshots` | One row per revision: the run, sources, counts and the full model JSON. |
+| `review_decisions` | A person's decision per review subject (alignment, alias, concept), who made it, and the revision that first reflected it (`applied_revision`). |
 | `playground_index`, `playground_index_meta` | The element vectors and the snapshot they were built from. |
 | `playground_conversations`, `playground_messages` | Stored chats, keyed by workspace. |
 

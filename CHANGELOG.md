@@ -36,6 +36,25 @@ behaviour).
   (`tailscale_identity_required` otherwise, so Funnel traffic is refused);
   `AUTOONTOLOGY_TAILSCALE_LOGINS` optionally limits the logins (`access_denied`).
   `/api/status` reports `remote`. See README "Remote access over Tailscale".
+- **Review decisions** (store schema v6, `review_decisions`). You can accept or reject an
+  alignment proposal or a judge axiom (`same`, `related`, `narrower`, `broader`), accept
+  or reject a rejected alias, or acknowledge an unaligned concept. A decision overrides
+  the align judge on every later pass; the judge's verdict is kept and comes back when
+  the decision is removed. Accepted `related`/`narrower`/`broader` verdicts are the first
+  accepted alignment axioms. OKF marks decided concepts `stable`.
+- **`autoontology apply`** and `POST /api/runs {"kind": "apply"}`: a run of three steps,
+  `decisions`, `merge` and `snapshot`. It reflects the decisions in a new revision with
+  no model call.
+- **Review inbox API**: `GET /api/review?category=&status=&page=&size=`,
+  `GET /api/review/pending-count`, `POST`/`DELETE /api/review/{item_id}/decision`.
+  `decided_by` is the tailnet login when the request comes through Tailscale Serve. CLI:
+  `autoontology review list|accept|reject|acknowledge|undo`.
+- **Revisions and diff**: `GET /api/ontology/revisions` and
+  `GET /api/ontology/diff?from=&to=`, which lists added, removed and changed classes,
+  axioms, merges and sources, plus the change in counts.
+- **Source freshness**: `GET /api/sources/freshness[?refresh=1]` shows, per source,
+  whether its inputs changed since the last build: files added, changed or removed, a
+  schema change, a reader change, `never_built` or `unknown`.
 
 ## 0.2.0 - 2026-10-29
 
