@@ -1024,6 +1024,8 @@ def init(
     for key, value in keys.items():
         env_file.set(key, value)
     changed = [c for c in env_file.changes() if c[0] in keys]
+    # before the write: afterwards a value loaded from the old .env looks like a shell one
+    overrides = _shell_override_warnings(keys.items())
     backup = env_file.write(env_path)
     if created:
         typer.echo(msg("init.env_created", path=env_path))
@@ -1033,7 +1035,7 @@ def init(
         typer.echo(msg("init.env_unchanged"))
     if backup:
         typer.echo(msg("init.env_backup", path=backup))
-    for warning in _shell_override_warnings(keys.items()):
+    for warning in overrides:
         typer.echo(msg("init.warn", warning=warning))
     unload_env()
 
@@ -1373,6 +1375,7 @@ def provider_use(
     for key, value in keys.items():
         env_file.set(key, value)
     changed = env_file.changes()
+    overrides = _shell_override_warnings(keys.items())  # before the write, as in init
     backup = env_file.write(path)
     for key, old, new in changed:
         typer.echo(msg("provider.set", change=onboarding.describe_change(key, old, new), path=path))
@@ -1380,7 +1383,7 @@ def provider_use(
         typer.echo(msg("provider.unchanged", path=path, name=name))
     if backup:
         typer.echo(msg("provider.backup", path=backup))
-    for warning in _shell_override_warnings(keys.items()):
+    for warning in overrides:
         typer.echo(msg("provider.warning", warning=warning), err=True)
     if name == "openai" and not (
         env_file.get("AUTOONTOLOGY_OPENAI_BASE_URL") or settings.openai_base_url

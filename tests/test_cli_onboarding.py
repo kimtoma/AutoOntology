@@ -571,6 +571,24 @@ def test_provider_use_warns_about_a_shell_override(isolated_env, monkeypatch):
     assert "unset AUTOONTOLOGY_CHAT_PROVIDER" in res.output
 
 
+def test_provider_use_does_not_mistake_the_old_env_value_for_a_shell_override(
+    isolated_env, monkeypatch
+):
+    """The value this process loaded from .env (now rewritten) is not a shell variable."""
+    from autoontology import config
+
+    env = Path(isolated_env) / ".env"
+    env.write_text("AUTOONTOLOGY_CHAT_PROVIDER=ollama\n")
+    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env))
+    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "ollama")  # as load_env copied it
+    monkeypatch.setitem(config._DOTENV_LOADED, "AUTOONTOLOGY_CHAT_PROVIDER", "ollama")
+    monkeypatch.setattr(onboarding, "provider_info", lambda s, n: ProviderInfo(n, True, True))
+    res = runner.invoke(app, ["provider", "use", "codex"])
+    assert res.exit_code == 0, res.output
+    assert "AUTOONTOLOGY_CHAT_PROVIDER: ollama -> codex" in res.output
+    assert "your shell sets" not in res.output
+
+
 def test_setup_names_the_vision_model_even_when_models_are_skipped(isolated_env, monkeypatch):
     from autoontology.engine import migrate
 
