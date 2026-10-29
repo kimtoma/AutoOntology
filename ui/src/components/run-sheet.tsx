@@ -169,7 +169,7 @@ function useRunStream(runId: string, logEl: HTMLPreElement | null) {
 function runScope(run: Run): string {
   const p = run.params
   if (run.kind === "export") {
-    return `${p.revision ? t("runSheet.scope.revision", { revision: String(p.revision) }) : ""}${p.format ? ` · ${p.format}` : ""}`
+    return `${p.revision ? t("runSheet.scope.revision", { revision: String(p.revision) }) : ""}${p.format ? ` · ${p.format === "all" ? t("runSheet.scope.allFormats") : p.format}` : ""}`
   }
   const sources = Array.isArray(p.sources) && p.sources.length ? ` · ${p.sources.join(", ")}` : t("runSheet.scope.all")
   return `${sources}${p.resume ? t("runSheet.scope.resume") : ""}`

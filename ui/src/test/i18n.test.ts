@@ -3,9 +3,9 @@ import { ko } from "@/i18n/ko"
 import {
   fmtSecs, getLang, initLang, LANG_STORAGE_KEY, resolveLang, setLang, t, tn, type MessageKey,
 } from "@/i18n/core"
-import { expectedTime } from "@/lib/checklist"
+import { expectedTime, localDuration } from "@/lib/checklist"
 import { classifyFile, type Formats } from "@/lib/formats"
-import { humanStep, STATUS_LABEL } from "@/lib/labels"
+import { humanStep, progressText, STATUS_LABEL } from "@/lib/labels"
 import FORMATS_JSON from "@/test/fixtures/formats.json"
 
 const FORMATS = FORMATS_JSON as Formats
@@ -81,10 +81,17 @@ describe("t()", () => {
     expect(STATUS_LABEL.failed).toBe("실패")
     expect(humanStep("structured:quick:compile")).toBe("quick · 비즈니스 개념 컴파일 (LLM)")
     const doc = classifyFile("규정.doc", 10, "structured", FORMATS, { kordoc: true, ocr: true })
-    expect(doc.alternative).toBe("문서 소스로 추가하세요 (그쪽에서 .doc를 바로 읽습니다)")
+    expect(doc.alternative).toBe("문서 소스로 추가하세요 (그쪽에서 .doc 파일을 바로 읽습니다)")
     const set = { set: "q", path: "", registered: false, sources: [],
                   durations: { ollama: { text: "20-50 min", measured: false } } }
     expect(expectedTime(set, "ollama")).toBe("20-50분 (추정)")
+    // a note from the service after the duration stays verbatim
+    expect(localDuration("20-50 min (qwen3:8b, 1-2 min per chunk)")).toBe("20-50분 (qwen3:8b, 1-2 min per chunk)")
+    expect(localDuration("about an hour")).toBe("about an hour")
+    // progress counters are named in Korean
+    expect(progressText({ chunks: { succeeded: 28 }, concepts: { succeeded: 2, failed: 1 } }))
+      .toBe("청크 28/28 · 개념 2/3, 실패 1")
+    expect(progressText({ chunks: { succeeded: 1 } })).not.toMatch(/chunks/)
   })
 })
 

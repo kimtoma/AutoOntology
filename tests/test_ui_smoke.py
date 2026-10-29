@@ -11,6 +11,7 @@ last test also rewrites ``docs/screenshots/{home,ontology,graph,exports}.png`` a
 
 import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -562,6 +563,74 @@ def test_korean_pages_fit(live, browser, name):
     # the choice is remembered: a reload without ?lang= stays Korean
     page.goto(f"{url}/ui/sources")
     page.locator("main h1", has_text="소스").wait_for()
+    assert page.errors == []
+    page.close()
+
+
+#: English UI labels that must not appear on a Korean page (visible text, aria-label, title,
+#: placeholder). Backend text (details, remedies, data) is not checked: only the UI's own words.
+KO_FORBIDDEN = (
+    "Toggle sidebar",
+    "Toggle menu",
+    "Close",
+    "Notifications",
+    "chunks",
+    "Get started",
+    "Try again",
+    "Cancel",
+    "No results",
+    "Checking",
+    "What is this",
+    "Load sample data",
+    "Add source",
+    "Build ontology",
+    "Open exports",
+    "Service status",
+    "Change theme",
+    "Main menu",
+    "running for",
+    "Started",
+)
+UI_TEXT = """() => {
+  // the run log is the service's own output, not UI text
+  const log = document.getElementById('live-log');
+  const out = [log ? document.body.innerText.replace(log.innerText, '') : document.body.innerText];
+  for (const el of document.querySelectorAll('[aria-label],[title],[placeholder]')) {
+    for (const a of ['aria-label', 'title', 'placeholder']) {
+      const v = el.getAttribute(a);
+      if (v) out.push(v);
+    }
+  }
+  return out.join('\\n');
+}"""
+
+
+def test_korean_pages_have_no_english_ui_labels(live, browser):
+    url, _, _ = live
+    page = new_page(browser, VIEWPORTS["desktop"], locale="ko-KR")
+    checks = {
+        "": "[data-step=export]:not([data-state=checking])",
+        "sources": "#sources-table",
+        "build": "#runs-table",
+        "ontology": "#concept-list [data-concept]",
+        "playground": "main h1",
+        "exports": "main h1",
+        "status": "main h1",
+    }
+    found = []
+    for path, ready in checks.items():
+        page.goto(f"{url}/ui/{path}?lang=ko")
+        page.locator(ready).first.wait_for(timeout=30000)
+        page.wait_for_timeout(300)
+        text = page.evaluate(UI_TEXT)
+        found += [f"/{path}: {w}" for w in KO_FORBIDDEN if re.search(rf"\b{re.escape(w)}\b", text)]
+    # a dialog and the live run sheet (their close buttons are labelled too)
+    page.goto(f"{url}/ui/build?lang=ko")
+    page.locator("#runs-table tbody tr[data-kind=build]").first.click()
+    page.locator("#live-status[data-ended=true]").wait_for(timeout=30000)
+    text = page.evaluate(UI_TEXT)
+    found += [f"run sheet: {w}" for w in KO_FORBIDDEN if re.search(rf"\b{re.escape(w)}\b", text)]
+    assert found == []
     assert page.errors == []
     page.close()
 

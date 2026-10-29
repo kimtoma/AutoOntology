@@ -24,7 +24,7 @@ import {
   type ServiceStatus, type Source,
 } from "@/lib/api"
 import { guideUrl, stepCopy } from "@/lib/home-copy"
-import { fmtNumber, tx, useT } from "@/i18n"
+import { fmtNumber, tx, useT, type MessageKey } from "@/i18n"
 import {
   allDone, checklist, expectedTime, isActiveRun, latestExport, latestRun, sampleSetFor, sampleSetsTouched,
   STEP_ORDER, type StepId,
@@ -124,18 +124,18 @@ function useRunEvents(runId: string | undefined) {
 }
 
 function Counts({ ontology }: { ontology: OntologySummary }) {
-  const t = useT()
+  useT()
   const c = ontology.counts as Record<string, number>
-  const items: [string, number | undefined][] = [
-    [t("home.counts.structured"), c.classes_structured],
-    [t("home.counts.document"), c.classes_document],
-    [t("home.counts.merged"), c.merged_concepts],
-    [t("home.counts.links"), c.object_properties],
+  const items: [MessageKey, number | undefined][] = [
+    ["home.counts.structured", c.classes_structured],
+    ["home.counts.document", c.classes_document],
+    ["home.counts.merged", c.merged_concepts],
+    ["home.counts.links", c.object_properties],
   ]
   return (
     <ul className="grid gap-1 text-sm sm:grid-cols-2" id="explore-counts">
       {items.filter(([, v]) => typeof v === "number").map(([label, v]) => (
-        <li key={label}><b className="tabular-nums">{fmtNumber(v!)}</b> {label}</li>
+        <li key={label}>{tx(label, { n: <b key="n" className="tabular-nums">{fmtNumber(v!)}</b> })}</li>
       ))}
     </ul>
   )

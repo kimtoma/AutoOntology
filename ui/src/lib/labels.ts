@@ -184,13 +184,19 @@ export function fmtDuration(start: string | null, end: string | null): string {
   return fmtSecs(s)
 }
 
+const PROGRESS_LABEL = labelTable({
+  chunks: "progress.chunks", concepts: "progress.concepts", documents: "progress.documents", files: "progress.files",
+})
+/** A progress counter's name ("chunks") in the UI language; unknown names as they are. */
+const progressLabel = (label: string) => PROGRESS_LABEL[label] ?? label
+
 export function progressText(progress: Progress | undefined, withFailed = true): string {
   return Object.entries(progress || {})
     .map(([label, counts]) => {
       const total = Object.values(counts).reduce((a, b) => a + (b || 0), 0)
       const done = counts.succeeded || 0
       const failed = withFailed && counts.failed ? t("progress.failed", { n: counts.failed }) : ""
-      return `${label} ${done}/${total}${failed}`
+      return `${progressLabel(label)} ${done}/${total}${failed}`
     })
     .join(" · ")
 }

@@ -117,11 +117,14 @@ export function expectedTime(set: SampleSet | undefined, provider: string | unde
   return d.measured ? text : t("eta.estimate", { text })
 }
 
-/** The service's duration text ("~8 min", "~20-30 min", "~1 h") in the UI language. */
+/** The service's duration text ("~8 min", "20-50 min (qwen3:8b, 1-2 min per chunk)") in the
+    UI language: only the leading duration the UI shows is localised; any note after it is
+    the service's own text and stays verbatim. */
 export function localDuration(text: string): string {
   if (getLang() !== "ko") return text
-  return text.replace(/\s*\bmin\b/g, t("unit.min")).replace(/\s*\bh\b/g, t("unit.h"))
-    .replace(/\s*\bs\b/g, t("unit.s"))
+  const unit = { min: "unit.min", h: "unit.h", s: "unit.s" } as const
+  return text.replace(/^(~?\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)\s*(min|h|s)\b/,
+                      (_, n: string, u: keyof typeof unit) => `${n}${t(unit[u])}`)
 }
 
 const sampleKind = (kind: string) => (kind === "documents" ? "documents" : "files")
