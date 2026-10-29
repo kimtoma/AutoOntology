@@ -48,7 +48,7 @@ Korean interface.
 
 - The README starts with a five-line quickstart (`init` + `demo`), a provider comparison
   and the sample sets with measured build times; the reference sections follow.
-- The previous `samples/structured` and `samples/unstructured` moved to
+- The 0.1.0 samples (the tables and the documents folder) moved to
   `samples/quickstart/structured` and `samples/quickstart/documents`; the demo source names
   are `quick` and `quick-docs`.
 - With a non-Ollama chat provider, `setup` pulls only the embedding model.
