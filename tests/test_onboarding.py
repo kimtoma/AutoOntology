@@ -175,7 +175,7 @@ def test_round_trip_keeps_every_byte(tmp_path):
     assert sorted(p.name for p in tmp_path.iterdir()) == [".env"]
 
 
-def test_write_is_atomic_with_backup_and_keeps_mode(tmp_path):
+def test_write_is_atomic_with_backup_and_never_widens_the_mode(tmp_path):
     path = tmp_path / ".env"
     path.write_text(TEMPLATE, encoding="utf-8")
     os.chmod(path, 0o640)
@@ -183,9 +183,10 @@ def test_write_is_atomic_with_backup_and_keeps_mode(tmp_path):
     env.set("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
     backup = env.write(path)
     assert backup is not None and backup.name.startswith(".env.bak-")
-    assert backup.read_text(encoding="utf-8") == TEMPLATE
+    # secret values are scrubbed from backups (AUTOONTOLOGY_ENV_BACKUP_SECRETS=1 keeps them)
+    assert backup.read_text(encoding="utf-8") == onboarding.scrub_secrets(TEMPLATE)
     assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in path.read_text(encoding="utf-8")
-    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600  # 0640 narrowed to owner-only
     assert not [p for p in tmp_path.iterdir() if ".tmp-" in p.name]
     # a second write of the same content changes nothing
     assert env.changes() == [] and env.write(path) is None
@@ -363,7 +364,8 @@ def test_env_backup_is_0600_from_creation(tmp_path, monkeypatch):
     assert backup is not None
     assert seen and all(mode & 0o077 == 0 for _n, mode in seen)
     assert stat.S_IMODE(backup.stat().st_mode) == 0o600
-    assert "sk-secret" in backup.read_text(encoding="utf-8")
+    assert "sk-secret" not in backup.read_text(encoding="utf-8")
+    assert "AUTOONTOLOGY_OPENAI_API_KEY=***" in backup.read_text(encoding="utf-8")
 
 
 def test_failed_env_backup_leaves_no_partial_file(tmp_path, monkeypatch):
@@ -415,3 +417,56 @@ def test_sample_load_never_removes_a_source_registered_after_the_preflight(
     assert removed == []
     assert [c["name"] for c in conflict.value.conflicts] == ["quick-docs"]
     assert store.get_source("quick-docs") is not None
+
+
+def _mode(path):
+    import stat as _stat
+
+    return _stat.S_IMODE(os.stat(path).st_mode)
+
+
+def test_env_write_is_never_more_open_than_0600_at_any_step(tmp_path, monkeypatch):
+    """The temp file, the backup and the result are owner-only, even for a 0644 .env."""
+    from autoontology import onboarding as ob
+
+    path = tmp_path / ".env"
+    path.write_text("A=1\nAUTOONTOLOGY_OPENAI_API_KEY=sk-oldsecret123\n")
+    path.chmod(0o644)
+    seen = []
+    real_replace = os.replace
+
+    def replace(src, dst):
+        seen.append(("tmp", _mode(src)))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(ob.os, "replace", replace)
+    env = ob.EnvFile.load(path)
+    env.set("AUTOONTOLOGY_OPENAI_API_KEY", "sk-newsecret456")
+    backup = env.write(path)
+    assert seen == [("tmp", 0o600)]
+    assert _mode(path) == 0o600 and _mode(backup) == 0o600
+    # a new file is private from its creation too
+    fresh = tmp_path / "new.env"
+    env2 = ob.EnvFile.load(fresh)
+    env2.set("X", "1")
+    env2.write(fresh)
+    assert _mode(fresh) == 0o600 and seen[-1] == ("tmp", 0o600)
+
+
+def test_env_backups_hold_no_secret_values_unless_asked(tmp_path, monkeypatch):
+    from autoontology import onboarding as ob
+
+    path = tmp_path / ".env"
+    path.write_text(
+        "# keep\nA=1\nAUTOONTOLOGY_OPENAI_API_KEY=sk-oldsecret123\nPOSTGRES_PASSWORD=pw\n"
+    )
+    env = ob.EnvFile.load(path)
+    env.unset("AUTOONTOLOGY_OPENAI_API_KEY")
+    backup = env.write(path)
+    text = backup.read_text()
+    assert "sk-oldsecret123" not in text and "pw\n" not in text
+    assert "AUTOONTOLOGY_OPENAI_API_KEY=***" in text and "# keep\nA=1\n" in text
+    monkeypatch.setenv("AUTOONTOLOGY_ENV_BACKUP_SECRETS", "1")
+    env.set("A", "2")
+    kept = env.write(path)
+    assert "POSTGRES_PASSWORD=pw" in kept.read_text()

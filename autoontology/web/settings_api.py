@@ -489,10 +489,6 @@ class SettingsApi:
             written = [key for key, _old, _new in env_file.changes()]
             backup = env_file.write(path) if written else None
             if written:
-                # .env holds the API key (and the Postgres password): owner-only, even when
-                # the file was created more open
-                os.chmod(path, 0o600)
-            if written:
                 logger.info("settings: wrote %s to %s", ", ".join(written), path.name)
             new_pending, _ = pending_settings(self.running)
             self.api._status = None

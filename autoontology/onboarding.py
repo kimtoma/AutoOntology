@@ -264,14 +264,15 @@ class EnvFile:
         if target.is_file():
             if target.read_text(encoding="utf-8") == text:
                 return None
-            mode = target.stat().st_mode & 0o777
+            # the file's own mode, but never more than owner read/write: .env holds keys
+            mode = target.stat().st_mode & 0o777 & 0o600
             stamp = time.strftime("%Y%m%d-%H%M%S")
             backup = target.with_name(f"{target.name}.bak-{stamp}")
             n = 1
             while backup.exists():
                 n += 1
                 backup = target.with_name(f"{target.name}.bak-{stamp}-{n}")
-            _private_copy(target, backup)
+            _private_copy(target, backup, scrub=not _keep_backup_secrets())
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.tmp-")
         try:
@@ -292,11 +293,37 @@ class EnvFile:
         return backup
 
 
-def _private_copy(src: Path, dest: Path) -> None:
+#: ``AUTOONTOLOGY_ENV_BACKUP_SECRETS=1`` keeps secret values in ``.env`` backups.
+BACKUP_SECRETS_VAR = "AUTOONTOLOGY_ENV_BACKUP_SECRETS"
+
+
+def _keep_backup_secrets() -> bool:
+    return os.environ.get(BACKUP_SECRETS_VAR, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+_ASSIGN_RE = re.compile(r"^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*)(.*?)(\r?\n?)$")
+
+
+def scrub_secrets(text: str) -> str:
+    """*text* (``.env`` content) with every non-empty secret value (a key name containing
+    KEY, PASSWORD, TOKEN or SECRET) replaced by ``***``; every other line unchanged."""
+    out = []
+    for line in text.splitlines(keepends=True):
+        m = _ASSIGN_RE.match(line)
+        if m and SECRET_KEY_RE.search(m.group(2)) and m.group(4).strip() not in ("", '""', "''"):
+            line = f"{m.group(1)}{m.group(2)}{m.group(3)}***{m.group(5)}"
+        out.append(line)
+    return "".join(out)
+
+
+def _private_copy(src: Path, dest: Path, *, scrub: bool = False) -> None:
     """Copy *src* to a new file *dest* that is 0600 from its creation (exclusive create,
     so the umask never makes the credentials readable by others while they are written),
-    then copy *src*'s timestamps; a failed copy removes the partial file."""
+    then copy *src*'s timestamps; a failed copy removes the partial file. With *scrub*,
+    secret values are written as ``***`` (:func:`scrub_secrets`)."""
     data = src.read_bytes()
+    if scrub:
+        data = scrub_secrets(data.decode("utf-8")).encode("utf-8")
     fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         view = memoryview(data)

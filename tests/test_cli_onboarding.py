@@ -676,3 +676,17 @@ def test_restart_runs_the_helper_in_the_foreground(isolated_env, monkeypatch):
     monkeypatch.setattr(subprocess, "call", lambda argv, env: 1)
     res = runner.invoke(app, ["restart"])
     assert res.exit_code == 1 and "restart failed" in res.output
+
+
+def test_provider_use_leaves_a_private_env(isolated_env, monkeypatch):
+    import stat
+
+    env = Path(isolated_env) / ".env"
+    env.write_text("AUTOONTOLOGY_CHAT_PROVIDER=claude\nAUTOONTOLOGY_OPENAI_API_KEY=sk-x1234567\n")
+    env.chmod(0o644)
+    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env))
+    monkeypatch.setattr(onboarding, "provider_info", lambda s, n: ProviderInfo(n, True, True))
+    assert runner.invoke(app, ["provider", "use", "codex"]).exit_code == 0
+    assert stat.S_IMODE(env.stat().st_mode) == 0o600
+    (backup,) = Path(isolated_env).glob(".env.bak-*")
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o600 and "sk-x1234567" not in backup.read_text()
