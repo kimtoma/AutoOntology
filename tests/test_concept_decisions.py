@@ -32,3 +32,31 @@ def test_concept_detail_lists_its_decisions(ops):  # noqa: F811
     # a Term lists the alias decisions on its labels (none here) and never a concept's
     term = c.get(f"{API}/ontology/concepts/term-t-customer").json()
     assert term["decisions"] == []
+
+
+def test_diff_names_the_ends_of_axioms_and_merges():
+    from autoontology.ontology import model as merged
+    from autoontology.store.alignments import AlignmentRecord
+    from autoontology.web import revisions
+    from tests import test_ossie_okf as fx
+
+    docs = fx.documents()
+    old = merged.build("ws", structured=[fx.structured()], documents=[docs])
+    accepted = merged.DocumentsInput(
+        docs.source,
+        docs.documents,
+        docs.concepts,
+        docs.relations,
+        docs.evidence,
+        [
+            AlignmentRecord(**{**a.__dict__, "accepted": True}) if a.concept_id == "c3" else a
+            for a in docs.alignments
+        ],
+    )
+    new = merged.build("ws", structured=[fx.structured()], documents=[accepted])
+    changed = revisions.diff(old, new)["axioms"]["changed"][0]
+    labels = {local: node["label"] for local, node in revisions._nodes(new).items()}
+    assert changed["subject_name"] == labels[changed["subject"]]
+    assert changed["object_name"] == labels["term-t-i"] != ""
+    for m in revisions.diff(None, new)["merges"]["added"]:
+        assert m["term_name"] == labels[m["term"]]

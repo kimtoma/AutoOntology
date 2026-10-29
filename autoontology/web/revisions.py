@@ -120,6 +120,10 @@ def diff(old: Any | None, new: Any, *, old_sources=(), new_sources=()) -> dict[s
 
     ax_a, ax_b = axioms(old), axioms(new)
 
+    def label(local: str) -> str:
+        node = b.get(local) or a.get(local)
+        return node["label"] if node else ""
+
     def ax_ref(key: tuple[str, str, str, str], accepted: bool) -> dict[str, Any]:
         return {
             "subject": key[0],
@@ -127,6 +131,8 @@ def diff(old: Any | None, new: Any, *, old_sources=(), new_sources=()) -> dict[s
             "object": key[2],
             "source": key[3],
             "accepted": accepted,
+            "subject_name": label(key[0]),
+            "object_name": label(key[2]),
         }
 
     ax_added = [ax_ref(k, ax_b[k]) for k in sorted(set(ax_b) - set(ax_a))]
@@ -145,7 +151,12 @@ def diff(old: Any | None, new: Any, *, old_sources=(), new_sources=()) -> dict[s
     mg_a, mg_b = merges(old), merges(new)
 
     def mg_ref(key: tuple[str, str], names: dict[tuple[str, str], str]) -> dict[str, Any]:
-        return {"concept": key[0], "concept_name": names[key], "term": key[1]}
+        return {
+            "concept": key[0],
+            "concept_name": names[key],
+            "term": key[1],
+            "term_name": label(key[1]),
+        }
 
     mg_added = [mg_ref(k, mg_b) for k in sorted(set(mg_b) - set(mg_a))]
     mg_removed = [mg_ref(k, mg_a) for k in sorted(set(mg_a) - set(mg_b))]
