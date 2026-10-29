@@ -183,7 +183,8 @@ uv run autoontology demo
 
 ![데이터를 넣기 전의 시작하기 페이지](screenshots/home-start.ko.png)
 
-빌드하는 동안 3단계에 경과 시간과 내 제공자 기준 예상 시간이 표시됩니다.
+빌드하는 동안 3단계에 경과 시간과 진행 상황이 표시됩니다(아래는 hanbit 샘플을 다시 빌드하며
+매칭 단계를 진행 중인 화면입니다). 샘플 세트의 첫 빌드라면 내 제공자 기준 예상 시간도 함께 나옵니다.
 
 ![빌드 중인 시작하기 페이지](screenshots/home-building.ko.png)
 

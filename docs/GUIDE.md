@@ -186,8 +186,9 @@ is done and step 2 waits for data:
 
 ![Get started before any data](screenshots/home-start.png)
 
-While the build runs, step 3 shows the live elapsed time and the expected time for your
-provider:
+While a build runs, step 3 shows how long it has been running and its progress (here a
+rebuild of the hanbit sample, in its matching step). On the first build of a sample
+set it also shows the expected time for your provider:
 
 ![Get started during the build](screenshots/home-building.png)
 
