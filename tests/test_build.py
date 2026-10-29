@@ -1645,3 +1645,74 @@ def test_unexpected_vision_errors_only_warn(monkeypatch, tmp_path, caplog):
     ctx = types.SimpleNamespace(settings=settings)
     assert ex._with_caption(ctx, tmp_path / "x.png", doc) is doc
     assert "no image description" in caplog.text
+
+
+def test_build_keeps_instance_like_names_off_the_terms(env, monkeypatch):
+    """identity-v2.2 through a whole build: a company-named concept and an ID alias never
+    reach a Term, while an ordinary concept with identity evidence still folds."""
+    from autoontology.store.alignments import AlignmentStore
+    from autoontology.unstructured.schemas import ExtractedConcept
+    from tests.test_align import _v
+
+    (env["docs"] / "거래처.md").write_text(
+        "# 거래처규정\n\n거래처 S037은 주식회사 마루솔솔루션이다.\n", encoding="utf-8"
+    )
+    extra = {
+        "거래처": ExtractedConcept(
+            name="거래처",
+            name_en="Customer",
+            kind="entity",
+            definition="물품을 사는 상대방",
+            synonyms=["S037"],
+            evidence="거래처 S037",
+        ),
+        "주식회사 마루솔솔루션": ExtractedConcept(
+            name="주식회사 마루솔솔루션",
+            name_en="Customer",
+            kind="entity",
+            definition="거래처 회사",
+            evidence="주식회사 마루솔솔루션",
+        ),
+    }
+
+    class LLM(FakeLLM):
+        def structured(self, system, human, schema):
+            out = super().structured(system, human, schema)
+            if schema is not MergeDecision and "거래처 S037" in human:
+                out.concepts = [c for c in out.concepts if c.name not in extra]
+                out.concepts += list(extra.values())
+            return out
+
+    class Judge(FakeJudge):
+        def structured(self, system, human, schema):
+            concept = human.split("\n", 2)[1]
+            if '"거래처"' in concept or "마루솔솔루션" in concept:
+                self.calls += 1
+                return _v("t-customer", "same", 0.97, "같은 고객")
+            return super().structured(system, human, schema)
+
+    monkeypatch.setitem(VECTORS, "거래처", [0.05, 0.95, 0.0])
+    monkeypatch.setitem(VECTORS, "주식회사 마루솔솔루션", [0.05, 0.95, 0.0])
+    add_structured(env)
+    add_documents(env)
+    result = run(env, llm=LLM(), judge=Judge())
+    assert result.status == "succeeded", result.problems
+    store = env["store"]
+    src = store.get_source("hanbit-docs")
+    rows = {a.concept_name: a for a in AlignmentStore(store).list(src.id)}
+    assert rows["거래처"].relation == "same" and rows["거래처"].accepted
+    company = rows["주식회사 마루솔솔루션"]
+    assert company.relation == "related" and not company.accepted
+    assert company.proposal["reason"].startswith("instance_like (organisation name)")
+    synonyms = env["client"].terms["t-customer"]["synonyms"]
+    assert "거래처" in synonyms
+    assert "S037" not in synonyms and "주식회사 마루솔솔루션" not in synonyms
+    assert {"alias": "S037", "reason": "identifier", "concept": "거래처"} in rows["거래처"].applied[
+        "rejected_aliases"
+    ]
+    model = MergedOntology.from_dict(store.latest_snapshot().model)
+    customer = model.classes["term-t-customer"]
+    assert "거래처" in customer.alt_labels and "S037" not in customer.alt_labels
+    assert "주식회사 마루솔솔루션" not in customer.alt_labels
+    assert {m.concept_name for m in model.merges} >= {"거래처"}
+    assert "주식회사 마루솔솔루션" not in {m.concept_name for m in model.merges}

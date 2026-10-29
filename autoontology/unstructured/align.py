@@ -10,7 +10,8 @@
 3. Identity policy (:func:`apply_identity_policy`, versioned): ``same`` needs confidence
    >= max(--min-conf, 0.90) and a normalized full-alias match with the Term's trusted
    aliases (never ones AutoOntology added itself); otherwise ``related`` + a review proposal.
-   ``identity-v2.1`` rule: aliases are compared after NFKC, case folding and whitespace
+   The current policy is ``identity-v2.2``. Alias comparison (since ``identity-v2.1``,
+   unchanged): aliases are compared after NFKC, case folding and whitespace
    removal, and an all-Latin alias longer than 3 characters also matches as its English
    singular (:func:`singular`: ``Contracts`` = ``Contract``, ``categories`` = ``category``,
    ``boxes`` = ``box``; ``-ss``/``-us``/``-is`` are kept). Plurals that are a different
@@ -18,9 +19,10 @@
    ``customs/custom``, ``news/new``, ``arms/arm``, ``glasses/glass``, ``means/mean``) and
    only match exactly, also as the last word of a longer alias (``Trade Goods`` is not
    ``Trade Good``; :func:`last_word`). Whole aliases only, never substrings.
-   ``identity-v2.2``: instance-like names (record IDs such as ``S037``, numbers/dates,
-   company names such as ``주식회사 …``; :func:`instance_like`) are never evidence, and a
-   concept named like one is never ``same`` (reason ``instance_like``).
+   ``identity-v2.2`` adds the exclusion of instance-like names (record IDs such as ``S037``,
+   numbers/dates, company names with a legal-form marker such as ``주식회사``/``Inc.``;
+   :func:`instance_like`): they are never evidence, and a concept named like one is never
+   ``same`` (reason ``instance_like``).
 4. Apply policy for accepted ``same`` verdicts: add the concept's
    name and synonyms to the Term's synonyms (case-insensitive dedupe, never remove; never
    an instance-like name: those are recorded as ``rejected_aliases``), and
@@ -466,40 +468,60 @@ def trusted_term_aliases(term: TermInfo, auto_added: Sequence[str] = ()) -> set[
 
 # --- instance-like aliases (identity-v2.2) -----------------------------------------------
 
-#: A record identifier: ``S037``, ``C248``, ``K2025-105``, ``INV-20190001``, ``P-1018``.
-_IDENTIFIER = re.compile(r"^[A-Za-z]{1,4}-?\d{2,}[A-Za-z0-9-]*$")
-#: A pure number or date: ``2025``, ``12,000``, ``2025-03-01``, ``2025.03``, ``2025년 3월``.
+#: Standard / period / product prefixes whose letter+digit names are concepts, not record
+#: IDs: ``ISO9001``, ``ISO 9001``, ``FY2025``, ``Q4``, ``Top10``, ``M365``, ``KS``, ``IEC``, ``EN``.
+_NOT_AN_ID = re.compile(r"^(iso|fy|q|top|m|ks|iec|en)[\s-]?\d+[a-z0-9-]*$", re.IGNORECASE)
+#: A record identifier: ``S037``, ``C248``, ``K2025-105``, ``INV-20190001``, ``P-1018``,
+#: ``ORDER-2025-001``, ``2025-INV-001``, ``제2025-105호``. Letters directly followed by digits
+#: need >= 3 digits (``Win10``, ``GPT4`` stay concepts); a longer prefix needs a hyphen and
+#: >= 3 digits (``COVID-19`` stays a concept).
+_IDENTIFIER = re.compile(
+    r"^(?:[a-z]{1,4}\d{3,}[a-z0-9-]*"
+    r"|[a-z]{1,4}-\d+[a-z0-9-]*"
+    r"|[a-z]{5,6}-\d{3,}[a-z0-9-]*"
+    r"|\d{2,}-[a-z]+-\d+"
+    r"|제?\s*\d[\d-]*\s*호)$",
+    re.IGNORECASE,
+)
+#: A pure number or date: ``2025``, ``12,000``, ``2025-03-01``, ``2025.03``, ``2025년 3월``,
+#: ``2025년도``.
 _NUMBER_OR_DATE = re.compile(
     r"^(?=.*\d)[\d\s.,/:\-]+$"
-    r"|^\d{2,4}\s*년(\s*\d{1,2}\s*월)?(\s*\d{1,2}\s*일)?$"
+    r"|^\d{2,4}\s*년도?(\s*\d{1,2}\s*월)?(\s*\d{1,2}\s*일)?$"
     r"|^\d{1,2}\s*월(\s*\d{1,2}\s*일)?$"
 )
-#: A legal-form marker of a company name (the only organisation signal: generic concepts
-#: such as 협력기업, 중소기업 or 물류시스템 stay eligible).
+#: Legal-form markers of a company name, the only organisation signal (generic concepts such
+#: as 협력기업, 중소기업 or 물류시스템 stay eligible). Korean forms match as affixes anywhere;
+#: Latin forms as whole words (a Korean letter next to one counts: ``한빛Inc.``), and the
+#: everyday words ``Limited``/``AG`` only as the last word (``Limited Warranty`` is a concept).
 _ORG_MARKER = re.compile(
-    r"주식회사|유한회사|합자회사|\(주\)|\bco\.,?\s*ltd\b|\bltd\.|\binc\.|\bcorp\.|\bllc\b"
-    r"|\bgmbh\b",
+    r"주식회사|유한회사|합자회사|합명회사|재단법인|사단법인|\((?:주|유|재|사)\)"
+    r"|(?<![a-z])(?:co\.,?\s*ltd|ltd|corp|corporation|inc|llc|gmbh|plc)\.?(?![a-z])"
+    r"|(?<![a-z])s\.a\.(?![a-z])"
+    r"|(?<![a-z])(?:limited|ag)\.?$",
     re.IGNORECASE,
 )
 
 
 def instance_like(alias: str) -> str:
     """Why *alias* names an instance rather than a business concept (``""``: it does not):
-    ``identifier`` (``S037``, ``INV-20190001``), ``number/date`` or ``organisation name``
-    (a legal-form marker: ``주식회사``, ``㈜``, ``(주)``, ``유한회사``, ``합자회사``,
-    ``Co., Ltd``, ``Ltd.``, ``Inc.``, ``Corp.``, ``LLC``, ``GmbH``).
+    ``identifier`` (``S037``, ``INV-20190001``, ``제2025-105호``; not ``ISO9001``/``FY2025``),
+    ``number/date`` or ``organisation name`` (a legal-form marker: ``주식회사``, ``㈜``/``(주)``,
+    ``(유)``, ``(재)``, ``(사)``, ``유한회사``, ``합자회사``, ``합명회사``, ``재단법인``, ``사단법인``,
+    ``Co., Ltd``, ``Ltd``, ``Limited``, ``Inc.``, ``Corp``, ``LLC``, ``GmbH``, ``AG``, ``S.A.``).
+    A name that is only a legal-form word (``주식회사``, ``LLC``) is a generic concept.
     Such an alias never becomes a Term synonym and is never identity evidence."""
     import unicodedata
 
-    text = " ".join(unicodedata.normalize("NFKC", str(alias)).split())
+    text = " ".join(unicodedata.normalize("NFKC", str(alias)).split())  # ㈜ -> (주)
     if not text:
         return ""
-    if _IDENTIFIER.fullmatch(text):
+    if not _NOT_AN_ID.fullmatch(text) and _IDENTIFIER.fullmatch(text):
         return "identifier"
     if _NUMBER_OR_DATE.fullmatch(text):
         return "number/date"
-    if _ORG_MARKER.search(text) or "㈜" in str(alias):
-        return "organisation name"
+    if _ORG_MARKER.search(text) and re.sub(r"[\W_]+", "", _ORG_MARKER.sub("", text)):
+        return "organisation name"  # a marker plus a name (only the marker: generic)
     return ""
 
 

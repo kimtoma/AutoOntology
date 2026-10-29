@@ -1123,6 +1123,23 @@ def test_identity_policy_matches_english_plurals_only_as_whole_aliases():
         ("Bar Corp.", "organisation name"),
         ("Baz LLC", "organisation name"),
         ("Qux GmbH", "organisation name"),
+        ("ORDER-2025-001", "identifier"),
+        ("2025-INV-001", "identifier"),
+        ("제2025-105호", "identifier"),
+        ("PO-1", "identifier"),
+        ("2025년도", "number/date"),
+        ("Acme Ltd", "organisation name"),
+        ("Acme Limited", "organisation name"),
+        ("Acme Corp", "organisation name"),
+        ("Acme AG", "organisation name"),
+        ("Acme S.A.", "organisation name"),
+        ("한빛Inc.", "organisation name"),
+        ("합명회사 한빛", "organisation name"),
+        ("재단법인 한빛", "organisation name"),
+        ("사단법인 한빛", "organisation name"),
+        ("(유)한빛", "organisation name"),
+        ("(재)한빛", "organisation name"),
+        ("(사)한빛", "organisation name"),
     ],
 )
 def test_instance_like_names_are_recognised(alias, reason):
@@ -1133,7 +1150,9 @@ def test_instance_like_names_are_recognised(alias, reason):
     "alias",
     ["고객", "거래처", "Customer", "Customers", "공급사", "공급업체", "Supplier", "계약서"]
     + ["시스템", "기업", "협력기업", "중소기업", "물류시스템", "한빛상사", "마루솔솔루션"]
-    + ["B2B", "Q4", "Incident", "LLCs", "Ltd", "Purchase Order"],
+    + ["B2B", "Q4", "Incident", "LLCs", "Ltd", "Purchase Order"]
+    + ["ISO9001", "ISO 9001", "ISO-9001", "FY2025", "Top10", "M365", "COVID-19", "Win10"]
+    + ["주식회사", "유한회사", "LLC", "Co., Ltd", "(주)", "Limited Warranty", "Agent"],
 )
 def test_ordinary_synonyms_are_not_instance_like(alias):
     assert al.instance_like(alias) == ""
