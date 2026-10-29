@@ -91,8 +91,9 @@ def child_env(settings: Settings, base: dict[str, str] | None = None) -> dict[st
 
     The provider selection keys reach the child only when they came from the shell (the
     child re-reads ``.env`` itself, so a ``.env`` value must not look like a shell value
-    there), and the expansion keys are listed in ``AUTOONTOLOGY_DERIVED_ENV`` so a child
-    re-derives them instead of mistaking them for user settings.
+    there), and the expansion keys and every value copied from ``.env`` are listed in
+    ``AUTOONTOLOGY_DERIVED_ENV`` so a child re-derives (re-reads) them instead of mistaking
+    them for shell values: a child started after ``.env`` was rewritten sees the new file.
     """
     if base is None:
         env = user_env()  # minus what a parent AutoOntology process derived
@@ -102,14 +103,24 @@ def child_env(settings: Settings, base: dict[str, str] | None = None) -> dict[st
     else:
         env = dict(base)
     path = env_file_path()
+    #: keys copied from .env: listed as derived, so the child (a restarted service, the
+    #: restart helper) re-reads them from .env instead of taking them for shell values
+    copied: set[str] = set()
     if path.is_file():
         for key, value in dotenv_values(path).items():
-            if value is not None and key not in SELECTION_VARS.values():
-                env.setdefault(key, value)
+            if value is None or key in SELECTION_VARS.values():
+                continue
+            if base is None:
+                if shell_value(key) is None:
+                    env[key] = value
+                    copied.add(key)
+            elif key not in env:
+                env[key] = value
+                copied.add(key)
     env.update(postgres_env(settings))
     env["INGESTION_SERVICE_URL"] = settings.service_url
     models = expand_model_profile(settings)
-    derived = sorted(k for k, v in models.items() if env.get(k) != v)
+    derived = sorted(copied | {k for k, v in models.items() if env.get(k) != v})
     env.update(models)
     env[DERIVED_ENV_VAR] = ",".join(derived)
     env["PYTHONUNBUFFERED"] = "1"
