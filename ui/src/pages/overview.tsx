@@ -309,11 +309,18 @@ export function OverviewDashboard({ ontology }: { ontology: OntologySummary }) {
   )
 }
 
-/** `/`: the first-run checklist while nothing is built, the operations dashboard after. */
+/** `/`: the first-run checklist while nothing is built, the operations dashboard after.
+    A refetch without data goes back to "pending" (the checklist's own queries refetch the
+    snapshot on mount): the last settled answer decides meanwhile, so the page never flips
+    to a skeleton and back. */
 export default function IndexPage() {
   const ontology = useOntology()
-  if (ontology.data) return <OverviewDashboard ontology={ontology.data} />
-  if (ontology.isPending) return <Skeleton className="h-[60svh]" id="index-loading" />
+  const settled = ontology.data ? "overview" : ontology.isError ? "setup" : null
+  const [mode, setMode] = useState<"overview" | "setup" | null>(settled)
+  if (settled && settled !== mode) setMode(settled)
+  const shown = settled ?? mode
+  if (shown === "overview" && ontology.data) return <OverviewDashboard ontology={ontology.data} />
   // no snapshot yet, or the service is unreachable: the checklist explains what to do
-  return <HomePage />
+  if (shown === "setup") return <HomePage />
+  return <Skeleton className="h-[60svh]" id="index-loading" />
 }
