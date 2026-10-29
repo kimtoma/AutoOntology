@@ -62,7 +62,28 @@ def record_path(run_dir: Path, restart_id: str) -> Path:
     return Path(run_dir) / f"restart-{restart_id}.json"
 
 
+RECORDS_LOCK = "restart-records.lock"
+
+
+@contextlib.contextmanager
+def _records_lock(run_dir: Path):
+    """Serialises every read-modify-write of the restart records (the helper, the service
+    and the CLI may all touch one); not reentrant."""
+    Path(run_dir).mkdir(parents=True, exist_ok=True)
+    with open(Path(run_dir) / RECORDS_LOCK, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def write_record(run_dir: Path, record: dict[str, Any]) -> None:
+    with _records_lock(run_dir):
+        _write_record(run_dir, record)
+
+
+def _write_record(run_dir: Path, record: dict[str, Any]) -> None:
     path = record_path(run_dir, record["id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
@@ -92,14 +113,41 @@ def _age_s(record: dict[str, Any]) -> float:
     return (datetime.now(timezone.utc) - started).total_seconds()
 
 
-def _helper_alive(record: dict[str, Any]) -> bool:
-    from autoontology.engine.supervisor import pid_alive
+def pid_state(pid: int) -> bool | None:
+    """True = running, False = gone (or a zombie), None = could not tell (the probe
+    itself failed)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return None
+    try:
+        proc = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    stat = proc.stdout.strip()
+    if stat:
+        return not stat.startswith("Z")
+    # no row: gone between kill() and ps (ps exits 1); anything else is a failed probe
+    return False if proc.returncode == 1 else None
 
+
+def _helper_alive(record: dict[str, Any]) -> bool:
     if _age_s(record) >= STALE_AFTER_S:
         return False
     pid = record.get("helper_pid")
     if isinstance(pid, int) and pid > 0:
-        return pid_alive(pid)
+        # a failed probe is not proof of death: count it as alive (the 600 s cap still holds)
+        return pid_state(pid) is not False
     return _age_s(record) < SPAWN_GRACE_S
 
 
@@ -118,13 +166,17 @@ def running_restart(run_dir: Path) -> dict[str, Any] | None:
         if _helper_alive(record):
             found = found or record
             continue
-        record.update(
-            state="failed",
-            finished_at=_now(),
-            error="interrupted: the restart helper exited without finishing",
-        )
-        with contextlib.suppress(OSError):
-            write_record(run_dir, record)
+        with contextlib.suppress(OSError), _records_lock(run_dir):
+            # re-read under the lock: the helper may have finished meanwhile (never
+            # overwrite its done/failed)
+            current = read_record(run_dir, restart_id)
+            if current and current.get("state") == "running" and not _helper_alive(current):
+                current.update(
+                    state="failed",
+                    finished_at=_now(),
+                    error="interrupted: the restart helper exited without finishing",
+                )
+                _write_record(run_dir, current)
     return found
 
 
@@ -247,10 +299,11 @@ def spawn(
         raise
     pid = getattr(proc, "pid", None)
     if isinstance(pid, int):
-        current = read_record(settings.run_dir, restart_id) or record
-        if current.get("state") == "running" and not current.get("helper_pid"):
-            current["helper_pid"] = pid
-            write_record(settings.run_dir, current)
+        with _records_lock(settings.run_dir):
+            current = read_record(settings.run_dir, restart_id) or record
+            if current.get("state") == "running" and not current.get("helper_pid"):
+                current["helper_pid"] = pid
+                _write_record(settings.run_dir, current)
         record["helper_pid"] = pid
     return record
 

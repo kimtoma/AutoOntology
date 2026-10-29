@@ -470,3 +470,16 @@ def test_env_backups_hold_no_secret_values_unless_asked(tmp_path, monkeypatch):
     env.set("A", "2")
     kept = env.write(path)
     assert "POSTGRES_PASSWORD=pw" in kept.read_text()
+
+
+def test_commented_out_secrets_are_scrubbed_from_backups_too():
+    from autoontology.onboarding import scrub_secrets
+
+    text = (
+        "# AUTOONTOLOGY_OPENAI_API_KEY=sk-oldcomment123\n#POSTGRES_PASSWORD=pw\n"
+        "# a plain comment = fine\n# AUTOONTOLOGY_CHAT_PROVIDER=claude\n"
+    )
+    out = scrub_secrets(text)
+    assert "sk-oldcomment123" not in out and "=pw" not in out
+    assert "# AUTOONTOLOGY_OPENAI_API_KEY=***\n#POSTGRES_PASSWORD=***\n" in out
+    assert "# a plain comment = fine\n# AUTOONTOLOGY_CHAT_PROVIDER=claude\n" in out

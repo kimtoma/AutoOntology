@@ -691,3 +691,46 @@ def test_old_restart_records_are_pruned(isolated_env):
     left = sorted(settings.run_dir.glob("restart-*.json"))
     assert len(left) == restart_mod.KEEP_RECORDS
     assert (settings.run_dir / f"restart-{record['id']}.json") in left
+
+
+def test_a_record_finished_meanwhile_is_never_overwritten(isolated_env, monkeypatch):
+    run_dir = Settings.from_env().run_dir
+    rec = {"id": "aaaabbbbcccc", "state": "running", "started_at": restart_mod._now(),
+           "helper_pid": 999999}  # fmt: skip
+    restart_mod.write_record(run_dir, rec)
+    calls = []
+
+    def alive(record):
+        calls.append(record["state"])
+        if len(calls) == 1:  # the helper finishes right after the first look
+            restart_mod.write_record(run_dir, {**rec, "state": "done", "new_pid": 7})
+        return False
+
+    monkeypatch.setattr(restart_mod, "_helper_alive", alive)
+    assert restart_mod.running_restart(run_dir) is None
+    assert restart_mod.read_record(run_dir, "aaaabbbbcccc")["state"] == "done"
+    assert calls == ["running"]  # the re-read under the lock saw "done" and stopped
+
+
+def test_a_failed_pid_probe_counts_as_alive_until_the_cap(isolated_env, monkeypatch):
+    import subprocess
+
+    def broken(*a, **k):
+        raise OSError("ps unavailable")
+
+    monkeypatch.setattr(restart_mod.subprocess, "run", broken)
+    assert restart_mod.pid_state(os.getpid()) is None
+    run_dir = Settings.from_env().run_dir
+    rec = {"id": "aaaabbbbdddd", "state": "running", "started_at": restart_mod._now(),
+           "helper_pid": os.getpid()}  # fmt: skip
+    restart_mod.write_record(run_dir, rec)
+    assert restart_mod.running_restart(run_dir)["id"] == "aaaabbbbdddd"
+    old = {**rec, "started_at": "2000-01-01T00:00:00+00:00"}
+    restart_mod.write_record(run_dir, old)
+    assert restart_mod.running_restart(run_dir) is None
+    assert restart_mod.read_record(run_dir, "aaaabbbbdddd")["state"] == "failed"
+    monkeypatch.undo()
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    assert restart_mod.pid_state(dead.pid) is False
+    assert restart_mod.pid_state(os.getpid()) is True

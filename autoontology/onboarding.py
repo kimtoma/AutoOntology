@@ -301,12 +301,15 @@ def _keep_backup_secrets() -> bool:
     return os.environ.get(BACKUP_SECRETS_VAR, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-_ASSIGN_RE = re.compile(r"^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*)(.*?)(\r?\n?)$")
+_ASSIGN_RE = re.compile(
+    r"^(\s*(?:#\s*)?(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*)(.*?)(\r?\n?)$"
+)
 
 
 def scrub_secrets(text: str) -> str:
     """*text* (``.env`` content) with every non-empty secret value (a key name containing
-    KEY, PASSWORD, TOKEN or SECRET) replaced by ``***``; every other line unchanged."""
+    KEY, PASSWORD, TOKEN or SECRET), commented-out ``# KEY=value`` lines included, replaced
+    by ``***``; every other line unchanged."""
     out = []
     for line in text.splitlines(keepends=True):
         m = _ASSIGN_RE.match(line)
