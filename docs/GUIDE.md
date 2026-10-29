@@ -1,5 +1,10 @@
 # AutoOntology guide for domain experts
 
+If you received a password-protected sample-demo link, open it and enter the shared
+password; no installation is needed. That viewer supports sample exploration, questions
+and existing exports. The setup below is for running your own full local workspace.
+Owners can follow the [Cloudflare deployment instructions](../deploy/cloudflare/README.md).
+
 **English** | [한국어](GUIDE.ko.md)
 
 This guide is for people who know their business data (contracts, invoices, customers,

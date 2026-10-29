@@ -1,5 +1,9 @@
 # AutoOntology
 
+기존 서버의 샘플을 설치 없이 체험하도록 공유하려면
+[비밀번호를 사용하는 Cloudflare 체험 배포 안내](deploy/cloudflare/README.md)를 참고하세요.
+앱은 기존 서버에서 실행하며, 방문자는 샘플을 탐색하고 질문할 수 있습니다. 관리 기능은 공개하지 않습니다.
+
 [English](README.md) | **한국어**
 
 AutoOntology는 표와 문서를 함께 읽어 **하나의 온톨로지**를 만듭니다. 스프레드시트, 데이터베이스

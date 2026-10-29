@@ -20,6 +20,8 @@ const koCore = {
   "shell.toggleMenu": "메뉴 열기/닫기",
   "shell.notFound": "찾을 수 없음",
   "shell.localOnly": "로컬 전용",
+  "shell.demo.hint": "샘플 체험 · 개념과 관계를 살펴보고, 플레이그라운드에서 질문해 보세요.",
+  "shell.demo.logout": "나가기",
   "shell.status.title": "서비스 상태",
   "shell.status.aria": "서비스 상태: {label}",
   "shell.status.checking": "확인 중…",

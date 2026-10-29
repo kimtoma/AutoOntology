@@ -14,6 +14,7 @@ import {
 import { isCurrent, NAV } from "@/components/nav"
 import { useStatus } from "@/hooks/queries"
 import { cn } from "@/lib/utils"
+import { SHARED_DEMO } from "@/lib/demo"
 import { useT } from "@/i18n"
 
 function StatusBadge() {
@@ -97,7 +98,7 @@ function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <ServiceFooter />
+        {!SHARED_DEMO && <ServiceFooter />}
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -138,11 +139,17 @@ export function AppShell() {
           <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
           <Crumbs />
           <div className="ml-auto flex items-center gap-1">
-            <StatusBadge />
+            {!SHARED_DEMO && <StatusBadge />}
             <LangToggle />
             <ThemeToggle />
           </div>
         </header>
+        {SHARED_DEMO && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/40 px-4 py-2 text-sm" role="note">
+            <span>{t("shell.demo.hint")}</span>
+            <form action="/__demo/logout" method="post"><button className="underline underline-offset-4" type="submit">{t("shell.demo.logout")}</button></form>
+          </div>
+        )}
         <main id="main" className={cn("mx-auto w-full min-w-0 flex-1",
                                       fullBleed ? "p-0" : "max-w-6xl px-4 py-6 sm:px-6")}>
           <Outlet />

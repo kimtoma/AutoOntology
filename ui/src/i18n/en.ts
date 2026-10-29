@@ -21,6 +21,8 @@ const enCore = {
   "shell.toggleMenu": "Toggle menu",
   "shell.notFound": "Not found",
   "shell.localOnly": "local only",
+  "shell.demo.hint": "Sample demo · Explore concepts and relationships, then ask a question in Playground.",
+  "shell.demo.logout": "Sign out",
   "shell.status.title": "Service status",
   "shell.status.aria": "Service status: {label}",
   "shell.status.checking": "Checking…",

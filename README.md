@@ -18,6 +18,10 @@ OpenAI-compatible API.
 written for domain experts with no data-engineering background: words explained, a
 checklist, the 10-minute path, how to prepare your own files, and a troubleshooting table.
 
+For owners sharing an existing sample workspace, see the [password-protected Cloudflare
+demo deployment](deploy/cloudflare/README.md). The app stays on its original server;
+visitors can explore and query samples without installing it. Administration stays private.
+
 ![Get started page](docs/screenshots/home.png)
 
 ## Quickstart

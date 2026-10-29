@@ -23,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useOntology, useSources, useStatus } from "@/hooks/queries"
 import { t, useT } from "@/i18n"
 import { isNoSnapshot } from "@/lib/api"
+import { SHARED_DEMO } from "@/lib/demo"
 
 const TABS = [
   { key: "chat", label: () => t("playground.tab.chat"), icon: MessagesSquare },
@@ -71,7 +72,7 @@ export default function PlaygroundPage() {
     <ConceptOpener.Provider value={openConcept}>
       <PageHeader title={t("playground.title")}
                   description={t("playground.description")}
-                  actions={<ProviderBadge />} />
+                  actions={SHARED_DEMO ? undefined : <ProviderBadge />} />
       {isNoSnapshot(ontology.error) ? (
         <EmptyState icon={FlaskConical} title={t("ontology.empty.title")}
                     hint={t("playground.empty.hint")}
