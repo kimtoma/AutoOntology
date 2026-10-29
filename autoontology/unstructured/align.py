@@ -474,31 +474,20 @@ _NUMBER_OR_DATE = re.compile(
     r"|^\d{2,4}\s*년(\s*\d{1,2}\s*월)?(\s*\d{1,2}\s*일)?$"
     r"|^\d{1,2}\s*월(\s*\d{1,2}\s*일)?$"
 )
+#: A legal-form marker of a company name (the only organisation signal: generic concepts
+#: such as 협력기업, 중소기업 or 물류시스템 stay eligible).
 _ORG_MARKER = re.compile(
-    r"주식회사|유한회사|\(주\)|\bco\.,?\s*ltd\b|\binc\.|\bcorp\.|\bllc\b|\bgmbh\b",
+    r"주식회사|유한회사|합자회사|\(주\)|\bco\.,?\s*ltd\b|\bltd\.|\binc\.|\bcorp\.|\bllc\b"
+    r"|\bgmbh\b",
     re.IGNORECASE,
-)
-_ORG_SUFFIXES = (
-    "상사",
-    "물산",
-    "건설",
-    "산업",
-    "테크",
-    "솔루션",
-    "시스템",
-    "전자",
-    "제약",
-    "식품",
-    "유통",
-    "기업",
 )
 
 
 def instance_like(alias: str) -> str:
     """Why *alias* names an instance rather than a business concept (``""``: it does not):
     ``identifier`` (``S037``, ``INV-20190001``), ``number/date`` or ``organisation name``
-    (a legal-form marker such as ``주식회사``/``㈜``/``Inc.``/``GmbH``, or a Korean company
-    suffix such as ``…솔루션``/``…상사``; the bare suffix word itself, ``시스템``, is not one).
+    (a legal-form marker: ``주식회사``, ``㈜``, ``(주)``, ``유한회사``, ``합자회사``,
+    ``Co., Ltd``, ``Ltd.``, ``Inc.``, ``Corp.``, ``LLC``, ``GmbH``).
     Such an alias never becomes a Term synonym and is never identity evidence."""
     import unicodedata
 
@@ -510,9 +499,6 @@ def instance_like(alias: str) -> str:
     if _NUMBER_OR_DATE.fullmatch(text):
         return "number/date"
     if _ORG_MARKER.search(text) or "㈜" in str(alias):
-        return "organisation name"
-    compact = text.replace(" ", "")
-    if any(compact.endswith(sfx) and len(compact) > len(sfx) for sfx in _ORG_SUFFIXES):
         return "organisation name"
     return ""
 

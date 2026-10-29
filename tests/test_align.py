@@ -1116,8 +1116,8 @@ def test_identity_policy_matches_english_plurals_only_as_whole_aliases():
         ("㈜한빛", "organisation name"),
         ("(주)한빛", "organisation name"),
         ("한빛유한회사", "organisation name"),
-        ("한빛상사", "organisation name"),
-        ("마루솔솔루션", "organisation name"),
+        ("한빛합자회사", "organisation name"),
+        ("Acme Ltd.", "organisation name"),
         ("ACME Inc.", "organisation name"),
         ("Foo Co., Ltd", "organisation name"),
         ("Bar Corp.", "organisation name"),
@@ -1132,7 +1132,8 @@ def test_instance_like_names_are_recognised(alias, reason):
 @pytest.mark.parametrize(
     "alias",
     ["고객", "거래처", "Customer", "Customers", "공급사", "공급업체", "Supplier", "계약서"]
-    + ["시스템", "기업", "B2B", "Q4", "Incident", "LLCs", "Purchase Order"],
+    + ["시스템", "기업", "협력기업", "중소기업", "물류시스템", "한빛상사", "마루솔솔루션"]
+    + ["B2B", "Q4", "Incident", "LLCs", "Ltd", "Purchase Order"],
 )
 def test_ordinary_synonyms_are_not_instance_like(alias):
     assert al.instance_like(alias) == ""
@@ -1249,3 +1250,22 @@ def test_run_align_never_writes_instance_like_synonyms(env):
     steps = {s.name: s for s in store.get_steps(result.run_id)}
     detail = steps[aj.CONCEPT_STEP_PREFIX + rows["고객"].concept_id].detail
     assert [r["alias"] for r in detail["rejected_aliases"]] == ["주식회사 마루솔솔루션", "C248"]
+    report = (result.export_dir / "align-report.md").read_text(encoding="utf-8")
+    assert "## Rejected synonyms (2)" in report
+    assert "| Customer | 주식회사 마루솔솔루션 | organisation name | 고객 |" in report
+    assert "| Customer | C248 | identifier | 고객 |" in report
+
+
+def test_generic_concepts_with_company_like_suffixes_still_fold():
+    term = al.TermInfo("t", "Partners", "x", ["협력기업"])
+    concept = al.ConceptInfo("c", "협력기업", "entity", "x", synonyms=["중소기업", "물류시스템"])
+    verdict, proposal = al.apply_identity_policy(
+        al.ValidatedVerdict("t", "same", 0.97, "ok"), concept, term, min_conf=0.7
+    )
+    assert verdict.relation == "same" and proposal == {}
+    patch = al.plan_patches(
+        {"t": [al.SameMatch(1, "협력기업", ["중소기업", "물류시스템", "㈜한빛"], "", 0.97)]},
+        {"t": term},
+    )[0]
+    assert patch.synonyms_added == ["중소기업", "물류시스템"]
+    assert [r["alias"] for r in patch.rejected_aliases] == ["㈜한빛"]
