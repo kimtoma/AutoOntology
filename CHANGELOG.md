@@ -5,6 +5,16 @@ All notable changes to AutoOntology. The format follows
 [Semantic Versioning](https://semver.org/) (before 1.0, a minor version may change
 behaviour).
 
+## Unreleased
+
+### Added
+
+- **Remote access over Tailscale Serve**: `AUTOONTOLOGY_TAILSCALE_HOSTS` lists tailnet
+  hostnames the Host guard accepts, only with the `Tailscale-User-Login` identity header
+  (`tailscale_identity_required` otherwise, so Funnel traffic is refused);
+  `AUTOONTOLOGY_TAILSCALE_LOGINS` optionally limits the logins (`access_denied`).
+  `/api/status` reports `remote`. See README "Remote access over Tailscale".
+
 ## 0.2.0 - 2026-10-29
 
 Onboarding for domain experts, many more input formats, subscription model providers and a

@@ -624,6 +624,40 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
   `psql`에서 `ALTER USER ... PASSWORD ...`를 실행하거나, `docker compose down -v`로 볼륨을 다시
   만드세요(데이터가 삭제됩니다).
 
+### Tailscale로 원격 접속
+
+내 [Tailscale](https://tailscale.com) 네트워크(tailnet)의 다른 기기에서 UI를 열려면,
+`tailscale serve`가 HTTPS를 로컬 서비스로 전달하게 합니다(기본 포트 7800, `AUTOONTOLOGY_PORT`를
+바꿨다면 그 값):
+
+```bash
+tailscale serve --bg --https=8444 http://127.0.0.1:7800
+tailscale serve status          # https://<machine>.<tailnet>.ts.net:8444 -> 127.0.0.1:7800 이 보입니다
+```
+
+그다음 `.env`에 호스트 이름(그리고 필요하면 허용할 로그인)을 넣고 다시 시작합니다:
+
+```bash
+AUTOONTOLOGY_TAILSCALE_HOSTS=box.example.ts.net
+AUTOONTOLOGY_TAILSCALE_LOGINS=you@example.com   # 선택; 비우면 tailnet의 누구나
+```
+
+```bash
+uv run autoontology down && uv run autoontology up
+```
+
+다른 기기에서 `https://box.example.ts.net:8444/ui/`를 엽니다. 공유를 멈추려면
+`tailscale serve --https=8444 off`를 실행하세요.
+
+안전한 이유: 서비스는 여전히 `127.0.0.1`에 바인딩되므로 이 컴퓨터의 프로세스만 접근할 수 있고,
+tailnet `Host`로 요청을 전달하는 것은 tailscaled뿐입니다. 그 호스트 이름의 요청은
+`Tailscale-User-Login` 신원 헤더가 있을 때만 받습니다. `tailscale serve`는 이 헤더를 tailnet
+클라이언트에만 붙이고 공개 Funnel 트래픽에는 붙이지 않으므로, 인터넷에 노출된 요청은 거부됩니다
+(`tailscale_identity_required`). `AUTOONTOLOGY_TAILSCALE_LOGINS`에 없는 로그인은
+`access_denied`를 받습니다. 그 호스트 이름에서도 교차 출처 쓰기는 계속 거부됩니다.
+`/api/status`의 `remote`에 호스트 이름이 나옵니다(로그인은 나오지 않습니다).
+**AutoOntology에는 `tailscale funnel`을 절대 쓰지 마세요.** 자체 인증이 없습니다.
+
 취약점 신고 방법은 [SECURITY.md](SECURITY.md)를 보세요.
 
 ## 문제 해결

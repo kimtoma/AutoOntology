@@ -506,6 +506,13 @@ text) go to that provider under your account's terms. AutoOntology never sends o
 login tokens (for codex it only links your `auth.json` into a private folder and copies a
 refreshed token back).
 
+**Can I open it from my laptop?** Yes, from devices on your own Tailscale network: run
+`tailscale serve --bg --https=8444 http://127.0.0.1:7800` on the computer that runs
+AutoOntology, set `AUTOONTOLOGY_TAILSCALE_HOSTS` (and optionally
+`AUTOONTOLOGY_TAILSCALE_LOGINS`) in `.env`, and restart with `down && up`. The README's
+"Remote access over Tailscale" section has the details. Never use `tailscale funnel`, which
+would put it on the public internet.
+
 **What does it cost?** The software is free (MIT licence). Ollama is free. A subscription
 build counts against your plan's usage limits; the full hanbit sample makes
 about 520 model calls. An API is billed by your provider.

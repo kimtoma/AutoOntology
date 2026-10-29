@@ -19,7 +19,9 @@ overview is in the [README](../README.md).
 `autoontology up` starts both servers as background processes (`engine/supervisor.py`),
 binds them to 127.0.0.1, writes PID files under `<home>/run/` and logs under
 `<home>/logs/`, and waits for their health endpoints. The service rejects requests whose
-`Host` is not local or whose `Origin` is cross-site.
+`Host` is not local or whose `Origin` is cross-site. A tailnet hostname listed in
+`AUTOONTOLOGY_TAILSCALE_HOSTS` (forwarded by `tailscale serve`) is accepted only with the
+`Tailscale-User-Login` identity header, optionally limited to `AUTOONTOLOGY_TAILSCALE_LOGINS`.
 
 ## How the engine is embedded
 

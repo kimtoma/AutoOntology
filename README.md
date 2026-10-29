@@ -652,6 +652,41 @@ are overridden.
   created: on an existing volume, run `ALTER USER ... PASSWORD ...` in `psql`, or recreate
   the volume with `docker compose down -v` (this deletes the data).
 
+### Remote access over Tailscale
+
+To open the UI from another device on your own [Tailscale](https://tailscale.com) network
+(tailnet), let `tailscale serve` forward HTTPS to the local service (default port 7800;
+use your `AUTOONTOLOGY_PORT`):
+
+```bash
+tailscale serve --bg --https=8444 http://127.0.0.1:7800
+tailscale serve status          # shows https://<machine>.<tailnet>.ts.net:8444 -> 127.0.0.1:7800
+```
+
+Then add the hostname (and, optionally, the logins allowed) to `.env` and restart:
+
+```bash
+AUTOONTOLOGY_TAILSCALE_HOSTS=box.example.ts.net
+AUTOONTOLOGY_TAILSCALE_LOGINS=you@example.com   # optional; empty = anyone on the tailnet
+```
+
+```bash
+uv run autoontology down && uv run autoontology up
+```
+
+Open `https://box.example.ts.net:8444/ui/` on the other device. To stop sharing, run
+`tailscale serve --https=8444 off`.
+
+Why this is safe: the service still binds to `127.0.0.1`, so only processes on this
+machine reach it, and only tailscaled delivers requests with the tailnet `Host`. A request
+on that hostname is accepted only with the `Tailscale-User-Login` identity header, which
+`tailscale serve` adds for tailnet clients and leaves out for public Funnel traffic, so
+anything exposed to the internet is refused (`tailscale_identity_required`); a login
+outside `AUTOONTOLOGY_TAILSCALE_LOGINS` gets `access_denied`. Cross-origin writes stay
+refused on that hostname too. `/api/status` lists the hostnames under `remote` (never the
+logins). **Never use `tailscale funnel`** for AutoOntology: it has no authentication of
+its own.
+
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
 ## Troubleshooting

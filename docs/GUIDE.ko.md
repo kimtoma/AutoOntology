@@ -481,6 +481,12 @@ API를 쓰면 프롬프트(표와 컬럼 이름, 몇 개의 샘플 값, 문서 �
 제공자에게 갑니다. AutoOntology는 로그인 토큰을 보내거나 기록하지 않습니다(codex는
 `auth.json`을 전용 폴더에 링크하고, 갱신된 토큰을 다시 복사해 둘 뿐입니다).
 
+**노트북에서 열 수 있나요?** 네, 내 Tailscale 네트워크의 기기라면 됩니다. AutoOntology를 실행하는
+컴퓨터에서 `tailscale serve --bg --https=8444 http://127.0.0.1:7800`을 실행하고, `.env`에
+`AUTOONTOLOGY_TAILSCALE_HOSTS`(필요하면 `AUTOONTOLOGY_TAILSCALE_LOGINS`도)를 설정한 뒤
+`down && up`으로 다시 시작하세요. 자세한 내용은 README의 "Tailscale로 원격 접속"을 보세요.
+`tailscale funnel`은 공개 인터넷에 노출하므로 절대 쓰지 마세요.
+
 **비용은요?** 소프트웨어는 무료(MIT 라이선스)이고 Ollama도 무료입니다. 구독으로 빌드하면 요금제
 사용량 한도에서 차감되며, hanbit 전체 샘플은 모델 호출 약 520번이 들었습니다. API는
 제공자가 과금합니다.
