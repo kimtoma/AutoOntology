@@ -1483,3 +1483,42 @@ def test_status_reports_remote_access_without_logins(isolated_env, monkeypatch):
     body = c.get(f"{API}/status").json()
     assert body["remote"] == {"tailscale_hosts": [TS_HOST], "logins_restricted": True}
     assert "alice" not in json.dumps(body)
+
+
+@pytest.mark.parametrize("local", ["localhost", "127.0.0.1:7800", "[::1]", "LocalHost"])
+def test_tailscale_hosts_refuse_local_hosts(isolated_env, monkeypatch, local):
+    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_HOSTS", f"box.example.ts.net,{local}")
+    with pytest.raises(ValueError, match="AUTOONTOLOGY_TAILSCALE_HOSTS.*local"):
+        Settings.from_env()
+
+
+def test_tailscale_hosts_parse_ipv6(isolated_env, monkeypatch):
+    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_HOSTS", "[FD7A::1]:8444, fd7a::2, [fd7a::3]")
+    s = Settings.from_env()
+    assert s.tailscale_hosts == ("[fd7a::1]", "[fd7a::2]", "[fd7a::3]")
+    c, _ = _ts_client(monkeypatch, hosts="[fd7a::1]:8444")
+    assert (
+        c.get(f"{API}/sources", headers={"host": "[fd7a::1]:8444", **TS_LOGIN}).status_code == 200
+    )
+
+
+def test_funnel_requests_are_refused_even_with_a_login(isolated_env, monkeypatch):
+    c, _ = _ts_client(monkeypatch)
+    resp = c.get(
+        f"{API}/sources",
+        headers={"host": TS_HOST, **TS_LOGIN, "tailscale-funnel-request": "?1"},
+    )
+    assert resp.status_code == 403 and resp.json()["error"] == "tailscale_identity_required"
+
+
+def test_tailnet_host_with_port_same_origin_rule(isolated_env, monkeypatch):
+    c, _ = _ts_client(monkeypatch)
+    d = _docs_dir(isolated_env)
+    body = {"name": "docs", "kind": "documents", "locator": str(d)}
+    headers = {"host": f"{TS_HOST}:8444", **TS_LOGIN}
+    resp = c.post(f"{API}/sources", json=body, headers={**headers, "origin": f"https://{TS_HOST}"})
+    assert resp.status_code == 403 and resp.json()["error"] == "cross_origin"
+    resp = c.post(
+        f"{API}/sources", json=body, headers={**headers, "origin": f"https://{TS_HOST}:8444"}
+    )
+    assert resp.status_code == 201, resp.text

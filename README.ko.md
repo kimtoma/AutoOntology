@@ -650,11 +650,13 @@ uv run autoontology down && uv run autoontology up
 `tailscale serve --https=8444 off`를 실행하세요.
 
 안전한 이유: 서비스는 여전히 `127.0.0.1`에 바인딩되므로 이 컴퓨터의 프로세스만 접근할 수 있고,
-tailnet `Host`로 요청을 전달하는 것은 tailscaled뿐입니다. 그 호스트 이름의 요청은
+네트워크에서 tailnet `Host`로 요청을 전달할 수 있는 것은 tailscaled뿐입니다. 그 호스트 이름의 요청은
 `Tailscale-User-Login` 신원 헤더가 있을 때만 받습니다. `tailscale serve`는 이 헤더를 tailnet
 클라이언트에만 붙이고 공개 Funnel 트래픽에는 붙이지 않으므로, 인터넷에 노출된 요청은 거부됩니다
-(`tailscale_identity_required`). `AUTOONTOLOGY_TAILSCALE_LOGINS`에 없는 로그인은
-`access_denied`를 받습니다. 그 호스트 이름에서도 교차 출처 쓰기는 계속 거부됩니다.
+(`tailscale_identity_required`, tailscaled가 Funnel 트래픽으로 표시한 요청도 마찬가지).
+`AUTOONTOLOGY_TAILSCALE_LOGINS`에 없는 로그인은 `access_denied`를 받습니다. 태그 기기(사용자 대신
+ACL 태그로 로그인한 서버)는 신원 헤더가 없으므로 같은 방식으로 거부됩니다. 사용자 계정으로 로그인한
+기기에서 UI를 여세요. 그 호스트 이름에서도 교차 출처 쓰기는 계속 거부됩니다.
 `/api/status`의 `remote`에 호스트 이름이 나옵니다(로그인은 나오지 않습니다).
 **AutoOntology에는 `tailscale funnel`을 절대 쓰지 마세요.** 자체 인증이 없습니다.
 

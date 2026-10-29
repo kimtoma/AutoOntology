@@ -355,16 +355,46 @@ def _bool_env(name: str, default: bool) -> bool:
     raise ValueError(f"{name} must be a boolean (1/0, true/false), got {raw!r}")
 
 
-def _csv_env(raw: str, *, strip_port: bool = False) -> tuple[str, ...]:
-    """Comma-separated values, lower-cased, blanks dropped; ``strip_port`` keeps the host of
-    ``name:port`` (AUTOONTOLOGY_TAILSCALE_HOSTS)."""
+#: Host names the service always answers on (the guard needs no identity header for them).
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "testserver"})
+
+
+def host_name(header: str) -> str:
+    """The host part of a Host header: ``[::1]:7800`` / ``[::1]`` -> ``[::1]``,
+    ``localhost:7800`` -> ``localhost``."""
+    header = header.strip().lower()
+    if header.startswith("["):
+        end = header.find("]")
+        return header[: end + 1] if end > 0 else header
+    return header.rsplit(":", 1)[0] if ":" in header else header
+
+
+def _csv_env(raw: str) -> tuple[str, ...]:
+    """Comma-separated values, lower-cased, blanks and duplicates dropped."""
     out: list[str] = []
     for item in raw.split(","):
         item = item.strip().lower()
-        if strip_port and ":" in item and not item.startswith("["):
-            item = item.rsplit(":", 1)[0]
         if item and item not in out:
             out.append(item)
+    return tuple(out)
+
+
+def _tailscale_hosts(raw: str) -> tuple[str, ...]:
+    """AUTOONTOLOGY_TAILSCALE_HOSTS as host names (port dropped, bare IPv6 bracketed, like
+    ``host_name`` reads a Host header). Local hosts are refused: they never need the
+    Tailscale identity header, so listing one would lock out the CLI and the engine."""
+    out: list[str] = []
+    for item in _csv_env(raw):
+        if item.count(":") > 1 and not item.startswith("["):
+            item = f"[{item}]"
+        host = host_name(item)
+        if host in LOCAL_HOSTS:
+            raise ValueError(
+                f"AUTOONTOLOGY_TAILSCALE_HOSTS must list tailnet hostnames, not the local host "
+                f"{host!r} (127.0.0.1/localhost are always served)"
+            )
+        if host and host not in out:
+            out.append(host)
     return tuple(out)
 
 
@@ -479,7 +509,7 @@ class Settings:
             samples_dir=Path(env["AUTOONTOLOGY_SAMPLES_DIR"].strip()).expanduser()
             if env.get("AUTOONTOLOGY_SAMPLES_DIR", "").strip()
             else REPO_ROOT / "samples",
-            tailscale_hosts=_csv_env(env.get("AUTOONTOLOGY_TAILSCALE_HOSTS", ""), strip_port=True),
+            tailscale_hosts=_tailscale_hosts(env.get("AUTOONTOLOGY_TAILSCALE_HOSTS", "")),
             tailscale_logins=_csv_env(env.get("AUTOONTOLOGY_TAILSCALE_LOGINS", "")),
         )
 

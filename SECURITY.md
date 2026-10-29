@@ -7,7 +7,11 @@ backend (port 3101) bind to `127.0.0.1` and have **no authentication**. The serv
 requests with a non-local `Host` header or a cross-site `Origin`, which guards against DNS
 rebinding and cross-site requests from a browser. Do not expose these ports to a network,
 and do not put them behind a reverse proxy or tunnel. Doing so is outside the supported
-configuration.
+configuration. The one exception is opt-in: tailnet hostnames listed in
+`AUTOONTOLOGY_TAILSCALE_HOSTS` (forwarded by `tailscale serve` on the same machine) are
+accepted only with Tailscale's `Tailscale-User-Login` identity header, optionally limited to
+`AUTOONTOLOGY_TAILSCALE_LOGINS`, and never for Funnel traffic (see the README section
+"Remote access over Tailscale"). Public exposure with `tailscale funnel` is not supported.
 
 Treat ingested documents as untrusted input. AutoOntology quotes document text inside
 delimited prompt blocks, validates model output fail-closed, and escapes Markdown and HTML

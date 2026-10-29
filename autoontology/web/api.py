@@ -32,7 +32,7 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.datastructures import UploadFile
 
 from autoontology import __version__
-from autoontology.config import Settings
+from autoontology.config import LOCAL_HOSTS, Settings, host_name
 from autoontology.store.db import ACTIVE_RUN_STATUSES, Run, Source, Store
 from autoontology.web.runs import (
     RUN_ID_RE,
@@ -45,7 +45,6 @@ from autoontology.web.runs import (
 
 PREFIX = "/api"
 #: Host header names the API answers to (DNS-rebinding guard); "testserver" = TestClient.
-LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "testserver"})
 STRUCTURED_KINDS = ("files", "database")
 #: Upload cap per request (all files together), ``AUTOONTOLOGY_UPLOAD_MAX_MB``.
 DEFAULT_UPLOAD_MAX_MB = 200
@@ -161,25 +160,19 @@ def _any_name(name: str) -> str:
     return name
 
 
-def host_name(header: str) -> str:
-    """The host part of a Host header: ``[::1]:7800`` / ``[::1]`` -> ``[::1]``,
-    ``localhost:7800`` -> ``localhost``."""
-    header = header.strip().lower()
-    if header.startswith("["):
-        end = header.find("]")
-        return header[: end + 1] if end > 0 else header
-    return header.rsplit(":", 1)[0] if ":" in header else header
-
-
 #: Header ``tailscale serve`` adds for tailnet clients (absent on public Funnel traffic).
 TAILSCALE_LOGIN_HEADER = "tailscale-user-login"
+#: Header tailscaled sets on public Funnel traffic.
+TAILSCALE_FUNNEL_HEADER = "tailscale-funnel-request"
 
 
-def tailscale_refusal(settings: Settings, login: str | None) -> tuple[str, str] | None:
+def tailscale_refusal(
+    settings: Settings, login: str | None, *, funnel: bool = False
+) -> tuple[str, str] | None:
     """Why a request on a configured tailnet hostname is refused, or None to let it through.
     The login itself is never part of the answer."""
     login = (login or "").strip().lower()
-    if not login:
+    if funnel or not login:
         return ("tailscale_identity_required", "this hostname is served to tailnet clients only")
     if settings.tailscale_logins and login not in settings.tailscale_logins:
         return ("access_denied", "this tailnet login is not allowed")
@@ -1205,7 +1198,11 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
             if host in settings.tailscale_hosts:
                 # Only tailscaled (`tailscale serve`) delivers this Host to 127.0.0.1, and it
                 # adds the identity header for tailnet clients only -- never for Funnel.
-                refusal = tailscale_refusal(settings, request.headers.get(TAILSCALE_LOGIN_HEADER))
+                refusal = tailscale_refusal(
+                    settings,
+                    request.headers.get(TAILSCALE_LOGIN_HEADER),
+                    funnel=TAILSCALE_FUNNEL_HEADER in request.headers,
+                )
                 if refusal:
                     return JSONResponse(
                         {"error": refusal[0], "detail": refusal[1]}, status_code=403

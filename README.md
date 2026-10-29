@@ -678,11 +678,15 @@ Open `https://box.example.ts.net:8444/ui/` on the other device. To stop sharing,
 `tailscale serve --https=8444 off`.
 
 Why this is safe: the service still binds to `127.0.0.1`, so only processes on this
-machine reach it, and only tailscaled delivers requests with the tailnet `Host`. A request
+machine reach it; from the network, only tailscaled can deliver a request with the tailnet
+`Host`. A request
 on that hostname is accepted only with the `Tailscale-User-Login` identity header, which
 `tailscale serve` adds for tailnet clients and leaves out for public Funnel traffic, so
-anything exposed to the internet is refused (`tailscale_identity_required`); a login
-outside `AUTOONTOLOGY_TAILSCALE_LOGINS` gets `access_denied`. Cross-origin writes stay
+anything exposed to the internet is refused (`tailscale_identity_required`, also whenever
+tailscaled marks a request as Funnel traffic); a login outside
+`AUTOONTOLOGY_TAILSCALE_LOGINS` gets `access_denied`. Tagged devices (servers with an ACL
+tag instead of a user) get no identity header and are refused the same way; open the UI
+from a device logged in as a user. Cross-origin writes stay
 refused on that hostname too. `/api/status` lists the hostnames under `remote` (never the
 logins). **Never use `tailscale funnel`** for AutoOntology: it has no authentication of
 its own.
