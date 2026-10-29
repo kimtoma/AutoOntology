@@ -13,7 +13,7 @@ MESSAGES: dict[str, str] = {
         "Postgres, 채팅 제공자, 임베딩, 문서 엔진, .env를 차례로 설정하고 `setup`까지 "
         "실행합니다. 여러 번 실행해도 안전합니다."
     ),
-    "help.init.provider": "채팅 제공자 ollama, claude, codex, openai 중 하나 (기본값: 자동 감지).",
+    "help.init.provider": "채팅 제공자: ollama, claude, codex, openai 중 하나 (기본값: 자동 감지).",
     "help.init.chat_model": "해당 제공자의 채팅 모델.",
     "help.init.docs": "kordoc 문서 엔진과 OCR 모델 설치 (기본값: Node.js 20+가 있으면 설치).",
     "help.init.vision_model": "이미지 설명용 Ollama 비전 모델 (선택).",
