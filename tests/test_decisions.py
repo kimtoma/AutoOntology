@@ -657,3 +657,18 @@ def test_an_undone_same_on_a_never_judged_concept_still_unfolds(ops):
         run_apply(ops["store"], ops["settings"], client=ops["client"], writer=writer)
     run_apply(ops["store"], ops["settings"], client=ops["client"], writer=writer)
     _check_unfolded(ops, "청구서", "t-customer", "term-t-customer")
+
+
+def test_a_v6_store_without_the_review_index_gets_it_on_open(tmp_path):
+    path = tmp_path / "autoontology.db"
+    Store(path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP INDEX alignments_review_idx")
+
+    def indexes():
+        with sqlite3.connect(path) as conn:
+            return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+
+    assert "alignments_review_idx" not in indexes()
+    assert Store(path).schema_version() == 6
+    assert "alignments_review_idx" in indexes()

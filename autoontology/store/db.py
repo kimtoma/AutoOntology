@@ -422,6 +422,23 @@ MIGRATIONS: list[tuple[int, str]] = [
     ),
 ]
 
+#: Indexes a store may lack although it reached their schema version (added to a migration
+#: before it was released): created on open, ``(min version, statement)``.
+ENSURED_INDEXES: list[tuple[int, str]] = [
+    (
+        6,
+        "CREATE INDEX IF NOT EXISTS alignments_review_idx ON alignments (concept_id) "
+        "WHERE judged_json != '{}' OR applied_json != '{}'",
+    ),
+]
+
+
+def _ensure_indexes(conn: sqlite3.Connection, version: int) -> None:
+    for since, statement in ENSURED_INDEXES:
+        if version >= since:
+            conn.execute(statement)
+
+
 #: Seconds a lease stays valid without a heartbeat (the holder refreshes it every third).
 LEASE_TTL_S = 120.0
 
@@ -709,6 +726,7 @@ class Store:
                     )
                     pending = [(v, sql) for v, sql in MIGRATIONS if v > current]
                     if not pending:
+                        _ensure_indexes(conn, current)
                         conn.execute("COMMIT")
                         return current
                     version, sql = pending[0]
