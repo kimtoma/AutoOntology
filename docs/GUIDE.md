@@ -287,7 +287,9 @@ One searchable list of every concept. Each row has an **origin** badge:
 Click a concept to see its definition, its **synonyms** (names from the documents that
 were folded into it, such as 고객 for Customers), its table columns, its **alignments**
 (which document concepts point at it, with the verdict and the model's confidence), its
-relations, and its **evidence**: the exact sentences, with the document and page. Search
+relations, and its **evidence**: the exact sentences, with the document and page. Record
+IDs, numbers/dates and company names (주식회사 …, Inc.) never become synonyms; they are
+listed under the synonyms as rejected. Search
 looks at names, synonyms and definitions; filters narrow by origin and kind.
 
 ![Ontology page](screenshots/ontology.png)
