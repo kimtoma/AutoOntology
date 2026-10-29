@@ -25,7 +25,9 @@
    ``same`` (reason ``instance_like``).
 4. Apply policy for accepted ``same`` verdicts: add the concept's
    name and synonyms to the Term's synonyms (case-insensitive dedupe, never remove; never
-   an instance-like name: those are recorded as ``rejected_aliases``), and
+   an instance-like name, nor one equal to a column attribute of any registered table
+   (:func:`column_names`, reason ``column_name``: ``계약ID``, ``부서명``): those are recorded
+   as ``rejected_aliases``), and
    set the description only when the Term has none or upstream's fallback.
 
 The pieces here are pure (no store, no HTTP): ``engine/align.py`` wires them.
@@ -38,7 +40,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -525,15 +527,37 @@ def instance_like(alias: str) -> str:
     return ""
 
 
+def column_names(terms: Iterable[TermInfo]) -> set[str]:
+    """Normalized (:func:`norm_alias`) names of every column attribute of *terms* (name,
+    source column and physical column), the compiled Terms of every registered structured
+    source. A column that carries an entity's own name (a Term or table name, also as its
+    English singular: a ``customer`` FK column) is left out, so it never turns that name
+    into a column-style alias."""
+    columns: set[str] = set()
+    entities: set[str] = set()
+    for term in terms:
+        entities |= identity_keys_of([term.name, *(t.get("name") or "" for t in term.tables)])
+        for a in term.attributes:
+            for key in ("name", "source_column", "column"):
+                n = norm_alias(a.get(key) or "")
+                if n:
+                    columns.add(n)
+    return {c for c in columns if c not in entities and singular(c) not in entities}
+
+
 def split_aliases(
-    names: Sequence[str], concept: str = ""
+    names: Sequence[str], concept: str = "", columns: Collection[str] = ()
 ) -> tuple[list[str], list[dict[str, str]]]:
-    """(*names* that may become Term synonyms, rejected ones as ``{alias, reason[, concept]}``)
-    (:func:`instance_like`)."""
+    """(*names* that may become Term synonyms, rejected ones as ``{alias, reason[, concept]}``):
+    instance-like names (:func:`instance_like`), and names equal to a column attribute
+    (*columns*: :func:`column_names`; reason ``column_name``: ``계약ID``, ``부서명``) after the
+    alias normalisation. A name that only contains a column name is kept."""
     kept: list[str] = []
     rejected: list[dict[str, str]] = []
     for name in names:
         reason = instance_like(name)
+        if not reason and columns and norm_alias(name) in columns:
+            reason = "column_name"
         if not reason:
             kept.append(name)
             continue
@@ -545,10 +569,12 @@ def split_aliases(
     return kept, rejected
 
 
-def concept_rejected_aliases(concept: ConceptInfo) -> list[dict[str, str]]:
+def concept_rejected_aliases(
+    concept: ConceptInfo, columns: Collection[str] = ()
+) -> list[dict[str, str]]:
     """The concept's names (name, English name, synonyms) an accepted ``same`` would not put
-    on its Term."""
-    return split_aliases(concept_names(concept))[1]
+    on its Term (*columns*: :func:`column_names`)."""
+    return split_aliases(concept_names(concept), columns=columns)[1]
 
 
 def identity_bar(min_conf: float) -> float:
@@ -771,7 +797,9 @@ def plan_patches(
 ) -> list[TermPatch]:
     """One patch per Term with accepted ``same`` matches, from the Term's *current* state
     (so a re-run plans nothing for a Term that already has everything). Instance-like names
-    are not added; they are listed in ``rejected_aliases``."""
+    and column names of any of *terms* (:func:`column_names`) are not added; they are listed
+    in ``rejected_aliases``."""
+    columns = column_names(terms.values())
     patches = []
     for term_id in sorted(matches, key=lambda t: terms[t].name if t in terms else t):
         term = terms.get(term_id)
@@ -781,7 +809,7 @@ def plan_patches(
         additions: list[str] = []
         rejected: list[dict[str, str]] = []
         for m in group:
-            kept, dropped = split_aliases([m.concept_name, *m.synonyms], m.concept_name)
+            kept, dropped = split_aliases([m.concept_name, *m.synonyms], m.concept_name, columns)
             additions += kept
             rejected += [r for r in dropped if r not in rejected]
         patch = TermPatch(

@@ -1182,6 +1182,91 @@ def test_plan_patches_rejects_instance_like_synonyms_and_records_them():
     assert result["rejected_aliases"] == by["t-s"].rejected_aliases
 
 
+def _column_terms():
+    """Contract and Supplier carry their key columns; Department has no columns of its own,
+    its name column lives in the employees table (another Term's)."""
+    return {
+        "t-k": al.TermInfo(
+            "t-k",
+            "Contract",
+            "계약 정보",
+            [],
+            attributes=[{"name": "계약ID", "source_column": "계약id"}, {"name": "계약금액"}],
+            tables=[{"id": "tb-k", "name": "contracts"}],
+        ),
+        "t-s": al.TermInfo(
+            "t-s",
+            "Supplier",
+            "공급사 정보",
+            [],
+            attributes=[{"name": "공급사ID", "source_column": "supplier_id"}],
+        ),
+        "t-d": al.TermInfo("t-d", "Department", "부서 정보", []),
+        "t-e": al.TermInfo(
+            "t-e", "Employee", "직원 정보", [], attributes=[{"name": "부서명", "column": "부서명"}]
+        ),
+        "t-c": al.TermInfo("t-c", "Customer", "고객 정보", [], attributes=[{"name": "고객ID"}]),
+    }
+
+
+def test_plan_patches_rejects_column_names_of_any_registered_table():
+    """Column names (계약ID, 공급사ID, 부서명) are attributes, never a Term's synonyms; a name
+    that merely contains a column name, and ordinary synonyms, still fold."""
+    terms = _column_terms()
+    matches = {
+        "t-k": [al.SameMatch(1, "계약", ["계약 id", "Contract"], "", 0.97)],
+        "t-s": [al.SameMatch(2, "공급사", ["공급사ID", "공급업체"], "", 0.97)],
+        "t-d": [al.SameMatch(3, "부서", ["부서명", "Department"], "", 0.97)],
+        "t-c": [al.SameMatch(4, "고객", ["거래처", "고객ID 체계"], "", 0.97)],
+    }
+    by = {p.term_id: p for p in al.plan_patches(matches, terms)}
+    assert by["t-k"].synonyms_added == ["계약"]  # (Contract is the Term's own name)
+    assert by["t-s"].synonyms_added == ["공급사", "공급업체"]
+    assert by["t-d"].synonyms_added == ["부서"]
+    assert by["t-c"].synonyms_added == ["고객", "거래처", "고객ID 체계"]
+    assert by["t-k"].rejected_aliases == [
+        {"alias": "계약 id", "reason": "column_name", "concept": "계약"}
+    ]
+    assert by["t-s"].rejected_aliases == [
+        {"alias": "공급사ID", "reason": "column_name", "concept": "공급사"}
+    ]
+    assert by["t-d"].rejected_aliases == [
+        {"alias": "부서명", "reason": "column_name", "concept": "부서"}
+    ]
+    assert by["t-c"].rejected_aliases == []
+
+
+def test_column_names_use_the_alias_normalisation():
+    columns = al.column_names(_column_terms().values())
+    assert {"계약id", "공급사id", "supplier_id", "부서명", "계약금액", "고객id"} <= columns
+    kept, rejected = al.split_aliases(["계약ＩＤ", "부서 명", "고객", "거래처"], columns=columns)
+    assert kept == ["고객", "거래처"]
+    assert [r["reason"] for r in rejected] == ["column_name", "column_name"]
+    # no column data: nothing is a column name
+    assert al.split_aliases(["계약ID"])[0] == ["계약ID"]
+
+
+def test_a_column_named_like_a_term_or_table_is_not_a_column_name():
+    """A column that carries an entity's own name (a ``customer`` FK column) does not make
+    that name a column-style synonym."""
+    terms = {
+        "t-c": al.TermInfo("t-c", "Customer", "x", [], tables=[{"name": "customers"}]),
+        "t-o": al.TermInfo(
+            "t-o", "Order", "x", [], attributes=[{"name": "customer"}, {"name": "customers"}]
+        ),
+    }
+    assert al.column_names(terms.values()) == set()
+
+
+def test_judge_step_lists_column_names_as_rejected():
+    concept = al.ConceptInfo("c1", "계약", "entity", synonyms=["계약ID", "S037"])
+    columns = al.column_names(_column_terms().values())
+    assert al.concept_rejected_aliases(concept, columns) == [
+        {"alias": "계약ID", "reason": "column_name"},
+        {"alias": "S037", "reason": "identifier"},
+    ]
+
+
 @pytest.mark.parametrize(
     ("name", "term"),
     [

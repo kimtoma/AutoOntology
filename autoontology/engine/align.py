@@ -299,6 +299,7 @@ def _accepts(ctx: _AlignCtx, relation: str, confidence: float | None) -> bool:
 def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
     snap = ctx.snapshot()
     terms = snap.term_map()
+    columns = al.column_names(snap.terms)  # every registered table's columns
     steps = {s.name: s for s in ctx.store.get_steps(ctx.run.id)}
     if "candidates" in ctx.details:
         candidates = ctx.details["candidates"].get("candidates", {})
@@ -507,8 +508,10 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
         if unconfirmed and path == "judged":  # after the put, which may carry the old record
             ctx.aligns.settle_legacy_descriptions({t.id: t.description for t in unconfirmed})
         counts[verdict.relation] += 1
-        # instance-like names an accepted fold would leave off the Term (identity-v2.2)
-        rejected = al.concept_rejected_aliases(concept) if verdict.relation == "same" else []
+        # instance-like and column names an accepted fold would leave off the Term
+        rejected = (
+            al.concept_rejected_aliases(concept, columns) if verdict.relation == "same" else []
+        )
         seconds = round(time.monotonic() - started, 1)
         ctx.store.finish_step(
             ctx.run.id,
@@ -528,7 +531,7 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
         )
         if rejected:
             logger.info(
-                "  %s: instance-like names never become synonyms: %s",
+                "  %s: instance-like or column names never become synonyms: %s",
                 concept.name,
                 ", ".join(f"{r['alias']} ({r['reason']})" for r in rejected),
             )
@@ -612,7 +615,7 @@ def _step_apply(ctx: _AlignCtx) -> dict[str, Any]:
         if patch.rejected_aliases:
             rejected_total += len(patch.rejected_aliases)
             logger.info(
-                "  %s: rejected instance-like synonyms %s",
+                "  %s: rejected instance-like or column-name synonyms %s",
                 patch.term_name,
                 ", ".join(f"{r['alias']} ({r['reason']})" for r in patch.rejected_aliases),
             )

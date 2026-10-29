@@ -27,7 +27,7 @@ Modelling (README "Ontology modelling"):
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
@@ -406,7 +406,12 @@ def _add_structured(model: MergedOntology, snap: StructuredSnapshot) -> dict[str
     return term_class
 
 
-def _add_documents(model: MergedOntology, docs: DocumentsInput, term_class: dict[str, str]) -> None:
+def _add_documents(
+    model: MergedOntology,
+    docs: DocumentsInput,
+    term_class: dict[str, str],
+    columns: Collection[str] = (),
+) -> None:
     for d in sorted(docs.documents, key=lambda d: d.path):
         model.documents[f"doc-{slug(d.id)}"] = ODocument(
             local=f"doc-{slug(d.id)}",
@@ -455,8 +460,9 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput, term_class: dict
         term_local = term_class.get(a.term_id) if a and a.term_id else None
         if a and a.accepted and a.relation == "same" and term_local:
             cls = model.classes[term_local]
-            # never an instance-like name (record ID, company name) on the Term's class
-            kept, rejected = split_aliases([c.name, *c.synonyms, c.name_en], c.name)
+            # never an instance-like name (record ID, company name) or a column name on the
+            # Term's class
+            kept, rejected = split_aliases([c.name, *c.synonyms, c.name_en], c.name, columns)
             _add_unique(cls.alt_labels, *kept)
             cls.rejected_aliases += [r for r in rejected if r not in cls.rejected_aliases]
             if c.definition:
@@ -655,7 +661,10 @@ def build(
     term_class: dict[str, str] = {}
     for snap in structured:
         term_class.update(_add_structured(model, snap))
+    from autoontology.unstructured.align import column_names
+
+    columns = column_names(t for snap in structured for t in snap.terms)
     for docs in documents:
-        _add_documents(model, docs, term_class)
+        _add_documents(model, docs, term_class, columns)
     model.expected_classes = expected_class_count(structured, documents)
     return model
