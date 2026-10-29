@@ -93,6 +93,23 @@ def render(
             )
     else:
         lines.append("No same alignments to apply.")
+    rejected = [(p, r) for p in patches for r in p.get("rejected_aliases") or []]
+    if rejected:
+        lines += [
+            "",
+            f"## Rejected synonyms ({len(rejected)})",
+            "",
+            "Instance-like names (record IDs, numbers/dates, company names) of accepted "
+            "concepts. They are never written to the Term.",
+            "",
+            "| Term | Name | Reason | Concept |",
+            "|---|---|---|---|",
+        ]
+        for p, r in rejected:
+            lines.append(
+                f"| {_cell(p['term_name'])} | {_cell(r.get('alias'))} | "
+                f"{_cell(r.get('reason'))} | {_cell(r.get('concept', ''))} |"
+            )
     lines += [
         "",
         "## Aligned concepts (excluding none and skipped)",

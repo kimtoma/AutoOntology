@@ -102,6 +102,8 @@ class OClass:
     kind: str = ""  # concept kind (document classes)
     structured_source: str = ""
     documents_source: str = ""
+    #: instance-like names of folded concepts left off alt_labels: {alias, reason, concept}
+    rejected_aliases: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -454,7 +456,9 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput, term_class: dict
         if a and a.accepted and a.relation == "same" and term_local:
             cls = model.classes[term_local]
             # never an instance-like name (record ID, company name) on the Term's class
-            _add_unique(cls.alt_labels, *split_aliases([c.name, *c.synonyms, c.name_en])[0])
+            kept, rejected = split_aliases([c.name, *c.synonyms, c.name_en], c.name)
+            _add_unique(cls.alt_labels, *kept)
+            cls.rejected_aliases += [r for r in rejected if r not in cls.rejected_aliases]
             if c.definition:
                 _add_unique(cls.definitions, c.definition)
             cls.derived_from += evidence

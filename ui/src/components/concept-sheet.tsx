@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/table"
 import { keys, retryServerErrors } from "@/hooks/queries"
 import { api, type ConceptDetail, type Origin } from "@/lib/api"
-import { t, tx, useT } from "@/i18n"
+import { type MessageKey, t, tx, useT } from "@/i18n"
 import { CKIND_LABEL, ORIGIN_LABEL, REL_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 
@@ -93,7 +93,18 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
             : <p className="text-sm text-muted-foreground">-</p>}
         </Section>
       )}
-      {!omitBasics && c.synonyms.length > 0 && <Section title={t("concept.synonyms")} id="synonyms"><Chips items={c.synonyms} /></Section>}
+      {!omitBasics && (c.synonyms.length > 0 || !!c.rejected_aliases?.length) && (
+        <Section title={t("concept.synonyms")} id="synonyms">
+          {c.synonyms.length > 0 && <Chips items={c.synonyms} />}
+          {!!c.rejected_aliases?.length && (
+            <p className="text-xs text-muted-foreground" data-testid="rejected-aliases">
+              {t("concept.rejected", {
+                list: c.rejected_aliases.map((r) => `${r.alias} (${t(`concept.rejected.${r.reason}` as MessageKey)})`).join(", "),
+              })}
+            </p>
+          )}
+        </Section>
+      )}
       <Section title={t("concept.source")} id="source">
         <p className="text-sm">
           {c.source || "-"}

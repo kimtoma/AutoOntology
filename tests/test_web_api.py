@@ -384,7 +384,16 @@ def _seed_documents(settings, name="hanbit-docs"):
     docs.replace_ontology(
         src.id,
         [
-            ConceptRecord("계약", "entity", "고객과 맺는 약정", "Contract", ["계약서"], [], [], ev),
+            ConceptRecord(
+                "계약",
+                "entity",
+                "고객과 맺는 약정",
+                "Contract",
+                ["계약서", "K2025-105"],
+                [],
+                [],
+                ev,
+            ),
             ConceptRecord("계약금액", "metric", "계약의 총 금액 (100% 기준)", evidence=ev),
             ConceptRecord("담당자", "entity", "업무 담당자", evidence=ev),
             ConceptRecord("승인 기준", "rule", "3억 이상은 대표이사 승인"),
@@ -538,6 +547,14 @@ def test_ontology_concepts_search_and_detail(env):
     assert {a["relation"] for a in detail["alignments"]} == {"same", "related"}
     folded_detail = c.get(f"{API}/ontology/concepts/{folded['id']}").json()
     assert folded_detail["folded_into"]["id"] == contracts["id"]
+    # an instance-like synonym is listed as rejected, never as a synonym (identity-v2.2)
+    rejected = [{"alias": "K2025-105", "reason": "identifier", "concept": "계약"}]
+    assert "K2025-105" not in detail["synonyms"] and detail["rejected_aliases"] == rejected
+    assert folded_detail["rejected_aliases"] == rejected
+    assert (
+        c.get(f"{API}/ontology/concepts/{items['Customers']['id']}").json()["rejected_aliases"]
+        == []
+    )
     assert c.get(f"{API}/ontology/concepts/concept-{'0' * 32}").status_code == 404
     assert c.get(f"{API}/ontology/concepts/xyz").status_code == 400
     for gone in ("/concepts", "/relations", "/graph"):

@@ -124,6 +124,8 @@ export interface ConceptItem {
   source: string
   definition: string
   synonyms: string[]
+  /** instance-like names kept off the synonyms (record IDs, numbers/dates, company names) */
+  rejected_aliases?: { alias: string; reason: string; concept?: string }[]
   merged_concepts: string[]
   folded_into: { id: string; name: string } | null
   enriched_by: string

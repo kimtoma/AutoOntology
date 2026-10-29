@@ -117,6 +117,8 @@ def concept_items(
                 "source": c.structured_source if term else c.documents_source,
                 "definition": ((c.definitions[0] if c.definitions else "") or c.comment)[:300],
                 "synonyms": c.alt_labels,
+                # instance-like names kept off the synonyms (identity-v2.2)
+                "rejected_aliases": list(c.rejected_aliases),
                 "merged_concepts": sorted(folded.get(c.local, [])) if term else [],
                 "folded_into": None,
                 "enriched_by": c.documents_source if term else "",
@@ -135,6 +137,7 @@ def concept_items(
                 "source": i.documents_source,
                 "definition": i.comment[:300],
                 "synonyms": i.alt_labels,
+                "rejected_aliases": [],
                 "merged_concepts": [],
                 "folded_into": None,
                 "enriched_by": "",
@@ -154,6 +157,11 @@ def concept_items(
                 "source": m.documents_source or (term.documents_source if term else ""),
                 "definition": "",
                 "synonyms": [],
+                "rejected_aliases": [
+                    r
+                    for r in (term.rejected_aliases if term else [])
+                    if r.get("concept") == m.concept_name
+                ],
                 "merged_concepts": [],
                 "folded_into": {"id": m.term_local, "name": term.label if term else ""},
                 "enriched_by": "",
