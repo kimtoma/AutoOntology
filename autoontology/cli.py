@@ -7,6 +7,7 @@ import typer
 
 from autoontology import __version__
 from autoontology.i18n import msg
+from autoontology.i18n import remedy as localized_remedy
 
 app = typer.Typer(
     name="autoontology",
@@ -57,9 +58,9 @@ def version() -> None:
     typer.echo(__version__)
 
 
-@app.command()
+@app.command(help=msg("help.doctor"))
 def doctor(
-    skip_models: bool = typer.Option(False, "--skip-models", help="Skip chat/embedding calls."),
+    skip_models: bool = typer.Option(False, "--skip-models", help=msg("help.doctor.skip_models")),
 ) -> None:
     """Check Postgres, pgvector, migrations, model endpoints and ports."""
     from autoontology.doctor import exit_code, format_checks, run_checks
@@ -1291,7 +1292,7 @@ def provider_status() -> None:
         last = probe.last_test(settings, name)
         last_text = (
             f"{msg('provider.last_ok') if last.get('ok') else msg('provider.last_failed')} "
-            f"{last.get('seconds', '?')}s "
+            f"{msg('provider.seconds', seconds=last.get('seconds', '?'))} "
             f"({str(last.get('at', ''))[:16]})"
             if last
             else "-"
@@ -1303,7 +1304,7 @@ def provider_status() -> None:
                 _yn(info.logged_in),
                 _model_for(settings, name) or "-",
                 last_text,
-                info.remedy or "-",
+                localized_remedy(info.remedy) if info.remedy else "-",
             )
         )
     columns = ("provider", "available", "logged_in", "model", "last_test", "remedy")

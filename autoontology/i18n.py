@@ -120,6 +120,10 @@ def notice(message: str, lang: str | None = None) -> str:
 # --- doctor remedies (the Check objects, and the web API, keep the English text) ----
 
 
+#: A CLI provider that is not installed (``base.CliProvider.status``).
+_INSTALL_CLI = re.compile(r"^install the (?P<bin>[\w-]+) CLI and log in \((?P<login>.*)\)$")
+
+
 def remedy(text: str, lang: str | None = None) -> str:
     """Translate a doctor remedy: each ``; ``-separated part that is a known English
     remedy description becomes the catalogue text; commands and unknown parts stay."""
@@ -129,6 +133,9 @@ def remedy(text: str, lang: str | None = None) -> str:
     reverse = {v: k for k, v in CATALOGS["en"].items() if k.startswith("remedy.")}
     if text in reverse:
         return msg(reverse[text], lang)
+    m = _INSTALL_CLI.match(text)
+    if m:
+        return msg("remedy.install_cli", lang, bin=m["bin"], login=remedy(m["login"], lang))
     return "; ".join(
         msg(reverse[part], lang) if part in reverse else part for part in text.split("; ")
     )

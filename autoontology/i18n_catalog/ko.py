@@ -6,15 +6,17 @@ MESSAGES: dict[str, str] = {
     "word.yes": "예",
     "word.no": "아니요",
     # --- help texts -------------------------------------------------------------------
-    "help.provider_app": "채팅 공급자를 확인, 테스트, 전환합니다.",
+    "help.doctor": "Postgres, pgvector, 마이그레이션, 모델 엔드포인트, 포트를 점검합니다.",
+    "help.doctor.skip_models": "채팅/임베딩 호출을 건너뜁니다.",
+    "help.provider_app": "채팅 제공자를 확인, 테스트, 전환합니다.",
     "help.init": (
-        "Postgres, 채팅 공급자, 임베딩, 문서 엔진, .env를 차례로 설정하고 `setup`까지 "
+        "Postgres, 채팅 제공자, 임베딩, 문서 엔진, .env를 차례로 설정하고 `setup`까지 "
         "실행합니다. 여러 번 실행해도 안전합니다."
     ),
-    "help.init.provider": "채팅 공급자: ollama | claude | codex | openai (기본값: 자동 감지).",
-    "help.init.chat_model": "해당 공급자의 채팅 모델.",
+    "help.init.provider": "채팅 제공자 ollama, claude, codex, openai 중 하나 (기본값: 자동 감지).",
+    "help.init.chat_model": "해당 제공자의 채팅 모델.",
     "help.init.docs": "kordoc 문서 엔진과 OCR 모델 설치 (기본값: Node.js 20+가 있으면 설치).",
-    "help.init.vision_model": "이미지를 설명하는 선택형 Ollama 비전 모델.",
+    "help.init.vision_model": "이미지 설명용 Ollama 비전 모델 (선택).",
     "help.init.yes": "묻지 않고 감지된 기본값으로 진행 (스크립트, CI용).",
     "help.init.env": "작성할 .env 파일 (기본값: <repo>/.env).",
     "help.demo": (
@@ -25,20 +27,19 @@ MESSAGES: dict[str, str] = {
     "help.demo.no_open": "웹 UI를 열지 않음.",
     "help.demo.resume": "가장 최근 빌드를 이어서 실행 (성공한 단계는 유지).",
     "help.demo.replace": (
-        "샘플 이름을 쓰는 다른 데이터의 소스를 묻지 않고 교체 (해당 데이터베이스와 "
-        "추출된 개념이 삭제됨)."
+        "같은 이름의 다른 소스를 묻지 않고 교체합니다. 그 데이터베이스와 추출된 개념은 삭제됩니다."
     ),
-    "help.provider.status": "모든 채팅 공급자의 사용 가능 여부, 로그인, 모델, 최근 테스트, 조치.",
+    "help.provider.status": "모든 채팅 제공자의 사용 가능 여부, 로그인, 모델, 최근 테스트, 조치.",
     "help.provider.test": '채팅 라우터를 거쳐 구조화된 테스트 호출("pong")을 1회 보냅니다.',
-    "help.provider.test.provider": "ollama | openai | claude | codex (기본값: 현재 공급자).",
-    "help.provider.use": ".env의 채팅 공급자를 전환합니다 (주석과 다른 줄은 그대로 유지).",
-    "help.provider.use.chat_model": "해당 공급자의 채팅 모델.",
+    "help.provider.test.provider": "ollama | openai | claude | codex (기본값: 현재 제공자).",
+    "help.provider.use": ".env의 채팅 제공자를 전환합니다 (주석과 다른 줄은 그대로 유지).",
+    "help.provider.use.chat_model": "해당 제공자의 채팅 모델.",
     # --- setup ------------------------------------------------------------------------
     "setup.postgres_failed": "postgres: {error}\n먼저 Postgres를 시작하세요. 예: `docker compose up -d`",
     "setup.migrations": "migrations: 데이터베이스 리비전 {current} (최신 {head})",
     "setup.models_skipped": "models: 건너뜀 (--skip-models)",
-    "setup.roles_openai": "채팅과 임베딩 모두 openai 공급자 사용",
-    "setup.roles_mixed": "채팅은 {provider} 공급자, 임베딩은 openai 공급자 사용",
+    "setup.roles_openai": "채팅과 임베딩 모두 openai 제공자 사용",
+    "setup.roles_mixed": "채팅은 {provider} 제공자, 임베딩은 openai 제공자 사용",
     "setup.models_skipped_roles": (
         "models: 건너뜀 ({roles}; 엔드포인트 확인은 `uv run autoontology doctor`)"
     ),
@@ -75,14 +76,18 @@ MESSAGES: dict[str, str] = {
     "notice.graph_deleted": "{name}의 수집 그래프 삭제됨",
     "notice.no_connection": "업스트림 연결 {name} 없음 (이미 삭제됨)",
     "notice.connection_deleted": (
-        "업스트림 연결 {name} 삭제됨; 서비스가 수집 그래프를 지우는 중 ..."
+        "업스트림 연결 {name} 삭제됨. 서비스가 수집 그래프를 지우는 중 ..."
     ),
     "notice.drop_db_ignored": "--drop-db 무시됨: 로컬 데이터베이스는 files 소스만 가집니다",
     # --- doctor -------------------------------------------------------------------------
     "doctor.header.check": "점검",
     "doctor.header.status": "상태",
-    "doctor.header.detail": "세부",
+    "doctor.header.detail": "상세",
     "doctor.header.remedy": "조치",
+    "remedy.openai_base_url": ".env에 AUTOONTOLOGY_OPENAI_BASE_URL을 설정하세요",
+    "remedy.claude_login": "이 사용자로 `claude auth login` 실행 (또는 `claude` 실행 후 /login)",
+    "remedy.codex_login": "이 사용자로 `codex login` 실행 (ChatGPT 계정)",
+    "remedy.install_cli": "{bin} CLI를 설치하고 로그인하세요 ({login})",
     "remedy.env_missing": "uv run autoontology init (.env 작성; 또는 cp .env.example .env)",
     "remedy.start_postgres": "Postgres 시작. 예: `docker compose up -d`",
     "remedy.pgvector": (
@@ -123,7 +128,7 @@ MESSAGES: dict[str, str] = {
     "remedy.check_embed_up": ".env의 EMBED_* 확인 / 모델 서버 실행 여부 확인",
     # --- init ---------------------------------------------------------------------------
     "init.step.postgres": "Postgres",
-    "init.step.provider": "채팅 공급자",
+    "init.step.provider": "채팅 제공자",
     "init.step.embeddings": "임베딩",
     "init.step.documents": "문서 (kordoc: HWP/PDF/DOCX/PPTX/XLSX 및 이미지 OCR)",
     "init.step.env": "{path} 작성",
@@ -153,35 +158,35 @@ MESSAGES: dict[str, str] = {
     "init.fix": "  조치: {remedy}",
     "init.login_stopped_yes": (
         "init 중단: {name} CLI에 로그인되어 있지 않습니다. 터미널에서 `{command}`을(를) "
-        "실행한 뒤 init을 다시 실행하세요 (또는 --provider로 다른 공급자 선택)."
+        "실행한 뒤 init을 다시 실행하세요 (또는 --provider로 다른 제공자 선택)."
     ),
     "init.login_retry": "  `{command}` 실행 후 다시 시도할까요?",
     "init.still_not_ready": "  아직 준비 안 됨: {note}",
     "init.login_stopped": (
         "init 중단: {name}에 로그인되어 있지 않습니다. `{command}` 실행 후 "
-        "`uv run autoontology init`을 다시 실행하세요 (또는 다른 공급자 선택)."
+        "`uv run autoontology init`을 다시 실행하세요 (또는 다른 제공자 선택)."
     ),
-    "init.col.provider": "공급자",
+    "init.col.provider": "제공자",
     "init.col.found": "설치됨",
     "init.col.logged_in": "로그인",
     "init.col.note": "비고",
     "init.current_vs_recommended": "  note  현재: {current}; 권장: {recommended}",
-    "init.keeping": "  ok    현재 공급자 {current} 유지",
+    "init.keeping": "  ok    현재 제공자 {current} 유지",
     "init.keeping_switch": " (권장: {recommended}; 전환하려면 --provider {recommended})",
-    "init.prompt_provider": "  채팅 공급자",
-    "init.prompt_provider_current": "  채팅 공급자 (현재: {current}; 권장: {recommended})",
+    "init.prompt_provider": "  채팅 제공자",
+    "init.prompt_provider_current": "  채팅 제공자 (현재: {current}; 권장: {recommended})",
     "init.ollama_missing": (
         "  warn  Ollama가 응답하지 않습니다 ({note}): https://ollama.com에서 설치하고 "
         "시작하세요 (`ollama serve`). 모델은 setup이 내려받습니다"
     ),
     "init.prompt_base_url": "  Base URL (/v1 포함)",
     "init.openai_base_needed": (
-        "init 중단: openai 공급자에는 https://api.openai.com/v1 같은 base URL이 필요합니다 "
+        "init 중단: openai 제공자에는 https://api.openai.com/v1 같은 base URL이 필요합니다 "
         "(.env에 AUTOONTOLOGY_OPENAI_BASE_URL을 설정하거나 --yes 없이 init 실행)"
     ),
     "init.prompt_chat_model": "  채팅 모델{hint}",
     "init.model_needed": (
-        "init 중단: {provider} 공급자에는 채팅 모델 이름이 필요합니다 "
+        "init 중단: {provider} 제공자에는 채팅 모델 이름이 필요합니다 "
         "(--chat-model 지정 또는 --yes 없이 init 실행)"
     ),
     "init.chat_ok": "  ok    채팅: {provider} {model}",
@@ -189,7 +194,7 @@ MESSAGES: dict[str, str] = {
         "  note  AUTOONTOLOGY_OPENAI_API_KEY=… 는 직접 .env에 추가하세요 "
         "({env_path}; 키를 채팅이나 기록이 남는 셸에 붙여 넣지 마세요)"
     ),
-    "init.prompt_embed_provider": "  임베딩 공급자",
+    "init.prompt_embed_provider": "  임베딩 제공자",
     "init.embed_kept": "  ok    임베딩: openai {model} (현재 설정 유지)",
     "init.model_not_set": "(모델 미설정)",
     "init.prompt_embed_model": "  임베딩 모델",
@@ -270,33 +275,34 @@ MESSAGES: dict[str, str] = {
         "`uv run autoontology source rm <name>`로 제거하세요"
     ),
     "demo.expected": "  {set} 첫 빌드 예상 시간 (이후 빌드는 결과를 재사용):",
-    "demo.col.provider": "공급자",
+    "demo.col.provider": "제공자",
     "demo.col.time": "시간",
     "demo.col.note": "비고",
     "demo.col.step": "단계",
     "demo.col.status": "상태",
     "demo.chat_provider": (
-        "  채팅 공급자: {provider} {model} (전환: `uv run autoontology provider use <name>`)"
+        "  채팅 제공자: {provider} {model} (전환: `uv run autoontology provider use <name>`)"
     ),
     "demo.resume": "demo 중단: `uv run autoontology demo --resume`으로 이어서 실행",
     "demo.build_total": "  빌드 합계: {seconds:.1f}초",
     "demo.finished": "\ndemo 완료: {seconds:.1f}초",
-    "demo.look_next": "다음에 볼 곳: Ontology → Graph → Playground",
+    "demo.look_next": "다음에 볼 곳: 온톨로지 → 그래프 → 플레이그라운드",
     # --- provider -----------------------------------------------------------------------
-    "provider.col.provider": "공급자",
+    "provider.col.provider": "제공자",
     "provider.col.available": "사용 가능",
     "provider.col.logged_in": "로그인",
     "provider.col.model": "모델",
     "provider.col.last_test": "최근 테스트",
     "provider.col.remedy": "조치",
     "provider.last_ok": "성공",
+    "provider.seconds": "{seconds}초",
     "provider.last_failed": "실패",
-    "provider.active": "* = 현재 채팅 공급자 ({provider}, 출처: {origin})",
+    "provider.active": "* = 현재 채팅 제공자 ({provider}, 출처: {origin})",
     "provider.test_ok": "{name} 성공: {model}이(가) {seconds}초 만에 {answer!r} 응답 (경로: {via})",
     "provider.test_failed": "{name} 실패: {error} ({seconds}초)\n조치: {remedy}",
     "provider.no_answer": "응답 없음",
     "provider.see_status": "`uv run autoontology provider status` 참고",
-    "provider.unknown": "알 수 없는 공급자 {name!r}: {choices} 중에서 선택",
+    "provider.unknown": "알 수 없는 제공자 {name!r}: {choices} 중에서 선택",
     "provider.set": "{path}에 {change} 설정",
     "provider.unchanged": "{path}에서 이미 {name}을(를) 선택 중입니다. 변경 없음",
     "provider.backup": "백업: {path}",

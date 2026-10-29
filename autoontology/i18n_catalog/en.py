@@ -8,6 +8,8 @@ MESSAGES: dict[str, str] = {
     "word.yes": "yes",
     "word.no": "no",
     # --- help texts -------------------------------------------------------------------
+    "help.doctor": "Check Postgres, pgvector, migrations, model endpoints and ports.",
+    "help.doctor.skip_models": "Skip chat/embedding calls.",
     "help.provider_app": "Show, test and switch the chat provider.",
     "help.init": (
         "Set everything up step by step: Postgres, chat provider, embeddings, documents, "
@@ -95,6 +97,10 @@ MESSAGES: dict[str, str] = {
     "doctor.header.remedy": "REMEDY",
     # remedy descriptions: the English values are exactly the texts doctor.py produces
     # (split on "; "); commands in backticks stay as they are in every language.
+    "remedy.openai_base_url": "set AUTOONTOLOGY_OPENAI_BASE_URL in .env",
+    "remedy.claude_login": "run `claude auth login` (or `claude` then /login) as this user",
+    "remedy.codex_login": "run `codex login` as this user (ChatGPT account)",
+    "remedy.install_cli": "install the {bin} CLI and log in ({login})",
     "remedy.env_missing": "uv run autoontology init (writes .env; or cp .env.example .env)",
     "remedy.start_postgres": "start Postgres, e.g. `docker compose up -d`",
     "remedy.pgvector": (
@@ -309,6 +315,7 @@ MESSAGES: dict[str, str] = {
     "provider.col.model": "MODEL",
     "provider.col.last_test": "LAST TEST",
     "provider.col.remedy": "REMEDY",
+    "provider.seconds": "{seconds}s",
     "provider.last_ok": "ok",
     "provider.last_failed": "failed",
     "provider.active": "* = active chat provider ({provider}, from {origin})",

@@ -143,7 +143,7 @@ def test_doctor_prints_korean_headers(isolated_env, monkeypatch):
     res = runner.invoke(app, ["doctor"])
     assert res.exit_code == 1
     lines = res.output.splitlines()
-    assert lines[0].split() == ["점검", "상태", "세부", "조치"]
+    assert lines[0].split() == ["점검", "상태", "상세", "조치"]
     assert "Ollama 시작 (`ollama serve`)" in res.output and "FAIL" in res.output
     # the STATUS column lines up although the header is double-width
     col = i18n.width(lines[0][: lines[0].index("상태")])
@@ -171,7 +171,7 @@ def test_init_yes_prints_korean(isolated_env, monkeypatch):
     res = runner.invoke(app, ["init", "--yes", "--env", str(env)])
     assert res.exit_code == 0, res.output
     assert res.output.splitlines()[0] == "English: AUTOONTOLOGY_LANG=en"
-    for text in ("[2/7] 채팅 공급자", "공급자", "로그인", "[7/7] 요약", "항목", "값"):
+    for text in ("[2/7] 채팅 제공자", "제공자", "로그인", "[7/7] 요약", "항목", "값"):
         assert text in res.output, text
     assert "다음: uv run autoontology demo --set hanbit" in res.output
     assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in env.read_text(encoding="utf-8")
@@ -212,9 +212,9 @@ def test_provider_status_in_korean(isolated_env, monkeypatch):
     res = runner.invoke(app, ["provider", "status"])
     assert res.exit_code == 0, res.output
     header = res.output.splitlines()[0]
-    assert header.split() == ["공급자", "사용", "가능", "로그인", "모델", "최근", "테스트", "조치"]
-    assert "성공 2.9s (2026-10-29T01:02)" in res.output and "fix codex" in res.output
-    assert "* = 현재 채팅 공급자 (ollama" in res.output
+    assert header.split() == ["제공자", "사용", "가능", "로그인", "모델", "최근", "테스트", "조치"]
+    assert "성공 2.9초 (2026-10-29T01:02)" in res.output and "fix codex" in res.output
+    assert "* = 현재 채팅 제공자 (ollama" in res.output
     assert "* ollama  예" in res.output  # yes/no in Korean, columns padded
 
 
@@ -242,3 +242,57 @@ def test_help_texts_follow_the_language(tmp_path):
         check=True,
     ).stdout
     assert "묻지 않고 감지된 기본값으로 진행" in out and "--provider" in out
+
+
+#: The ``--help`` screens with Korean help texts, and the catalogue keys each one shows.
+HELP_SCREENS = {
+    ("init",): (
+        "help.init.provider",
+        "help.init.chat_model",
+        "help.init.docs",
+        "help.init.vision_model",
+        "help.init.yes",
+        "help.init.env",
+    ),
+    ("demo",): ("help.demo.set", "help.demo.no_open", "help.demo.resume", "help.demo.replace"),
+    ("provider",): ("help.provider_app",),
+    ("provider", "test"): ("help.provider.test.provider",),
+    ("provider", "use"): ("help.provider.use.chat_model",),
+    ("doctor",): ("help.doctor", "help.doctor.skip_models"),
+}
+
+
+@pytest.mark.parametrize("args", list(HELP_SCREENS), ids=" ".join)
+def test_korean_help_is_intact_at_80_columns(tmp_path, args):
+    """Rich cuts wide-character lines it cannot wrap ("비 …"): every Korean help text must
+    survive an 80-column terminal whole."""
+    env = {
+        **{k: v for k, v in os.environ.items() if not k.startswith("AUTOONTOLOGY_")},
+        "AUTOONTOLOGY_LANG": "ko",
+        "AUTOONTOLOGY_ENV_FILE": str(tmp_path / "absent.env"),
+        "COLUMNS": "80",
+    }
+    out = subprocess.run(
+        [sys.executable, "-m", "autoontology", *args, "--help"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "…" not in out, out
+    flat = re.sub(r"[\s│╭╮╰╯─]", "", out)
+    for key in HELP_SCREENS[args]:
+        assert re.sub(r"\s", "", ko.MESSAGES[key]) in flat, (key, out)
+
+
+def test_provider_status_remedies_and_times_in_korean():
+    assert i18n.remedy("set AUTOONTOLOGY_OPENAI_BASE_URL in .env", "ko") == (
+        ".env에 AUTOONTOLOGY_OPENAI_BASE_URL을 설정하세요"
+    )
+    text = i18n.remedy(
+        "install the claude CLI and log in "
+        "(run `claude auth login` (or `claude` then /login) as this user)",
+        "ko",
+    )
+    assert text.startswith("claude CLI를 설치하고 로그인하세요") and "`claude auth login`" in text
+    assert i18n.msg("provider.seconds", "ko", seconds=3.07) == "3.07초"
