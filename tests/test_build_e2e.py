@@ -5,9 +5,8 @@ Run with (the service must be up on the ``.env`` ports: ``uv run autoontology up
 
     AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_build_e2e.py -s
 
-Registers ``hanbit`` (samples/quickstart/structured) and ``hanbit-docs``
-(samples/quickstart/documents) when
-missing, runs ``build`` (a first run on the local qwen3:8b profile takes ~30-45 min; a
+Registers ``quick`` (samples/quickstart/structured) and ``quick-docs``
+(samples/quickstart/documents), the names ``demo --set quickstart`` uses, when missing, runs ``build`` (a first run on the local qwen3:8b profile takes ~30-45 min; a
 re-run only redoes the cheap steps), ``export``, then checks the unified ontology through
 the API of the running service.
 """
@@ -28,7 +27,7 @@ from autoontology.structured import pipeline
 
 pytestmark = pytest.mark.integration
 
-STRUCTURED, DOCS = "hanbit", "hanbit-docs"
+STRUCTURED, DOCS = "quick", "quick-docs"
 
 
 @pytest.fixture(scope="module")
@@ -64,9 +63,9 @@ def test_build_produces_one_unified_snapshot(live, built):
     assert built.status == "succeeded", built.problems
     assert built.steps["merge"] == built.steps["snapshot"] == "succeeded"
     for step in (
-        "structured:hanbit:compile",
-        "documents:hanbit-docs:consolidate",
-        "align:hanbit-docs",
+        f"structured:{STRUCTURED}:compile",
+        f"documents:{DOCS}:consolidate",
+        f"align:{DOCS}",
     ):
         assert built.steps[step] == "succeeded", step
     snap = store.latest_snapshot()
@@ -92,8 +91,8 @@ def test_export_writes_the_revision_folder(live, built):
         "ontology.jsonld",
         "ontology.graphml",
         "report.md",
-        "upstream/hanbit.model.yaml",
-        "upstream/hanbit.ossie.zip",
+        f"upstream/{STRUCTURED}.model.yaml",
+        f"upstream/{STRUCTURED}.ossie.zip",
     ):
         assert (folder / name).is_file(), name
     assert result.details["serialize"]["roundtrip"]["ok"]

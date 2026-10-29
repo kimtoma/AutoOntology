@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Integration: the real kordoc engine (``<home>/kordoc``, from ``autoontology tools
 install-kordoc``) on the HWP fixture and the generated PDF/DOCX, and the real
-``autoontology extract hanbit-docs samples/quickstart/documents`` against the local Ollama.
+``autoontology extract quick-docs samples/quickstart/documents`` against the local Ollama.
 
 The extract test needs ``autoontology up`` (chat goes through the service's /v1). On a store
 that already holds this source it is a no-op re-run, which also proves idempotence.
@@ -19,7 +19,7 @@ pytestmark = pytest.mark.integration
 
 SAMPLES = REPO_ROOT / "samples" / "quickstart" / "documents"
 HWP = REPO_ROOT / "tests" / "fixtures" / "hwp" / "biz_plan.hwp"
-SOURCE = "hanbit-docs"
+SOURCE = "quick-docs"  # the name `demo --set quickstart` uses
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ def _service_up(settings: Settings) -> bool:
     return service_alive(settings)
 
 
-def test_extract_hanbit_docs_against_ollama(monkeypatch):
+def test_extract_quick_docs_against_ollama(monkeypatch):
     from autoontology.engine import extract as extract_job
     from autoontology.store.db import Store
     from autoontology.store.documents import DocumentStore
