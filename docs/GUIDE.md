@@ -179,6 +179,12 @@ For an OpenAI-compatible API, open `.env` in a text editor after `init` and add 
 `AUTOONTOLOGY_OPENAI_API_KEY=...` yourself. Never paste a key into a chat window or a
 command that is saved in your shell history.
 
+You can also do all of this later from the web UI: the **Settings** page (the gear in the
+sidebar) lets you pick the provider and model, type the API key into a password field
+(stored only in `.env`, never shown again), **Test** the choice and **Save and restart**.
+The login itself (`claude auth login`, `codex login`) still has to be typed once in a
+terminal on the computer that runs AutoOntology.
+
 ## 5. The 10-minute path
 
 Open a terminal and type these commands one at a time. The comments say what each one
@@ -270,6 +276,12 @@ set it also shows the expected time for your provider:
 When everything is done, all five steps are ticked (the screenshot at the top of this
 guide). If the demo stops halfway (a closed laptop, a usage limit), run
 `uv run autoontology demo --resume`: finished steps are kept.
+
+**Switch the model later.** Open **Settings** in the sidebar, choose another provider (for
+example Claude instead of Ollama), press **Test** to see it answer, then **Save and
+restart**. The page restarts AutoOntology (about 5 seconds) and reconnects by itself; the
+Status page then shows the new provider. From a terminal, `uv run autoontology provider use
+claude` followed by `uv run autoontology restart` does the same.
 
 ## 6. Bring your own data
 
@@ -512,6 +524,14 @@ AutoOntology, set `AUTOONTOLOGY_TAILSCALE_HOSTS` (and optionally
 `AUTOONTOLOGY_TAILSCALE_LOGINS`) in `.env`, and restart with `down && up`. The README's
 "Remote access over Tailscale" section has the details. Never use `tailscale funnel`, which
 would put it on the public internet.
+
+**Can I change the model or enter an API key from my laptop?** Yes: open **Settings** in
+the web UI (also over Tailscale). The key is sent once to the computer that runs
+AutoOntology, written only to its `.env` (readable by its owner alone) and never shown,
+logged or sent back. The service and the engine must restart to use another model; the
+page does that for you (**Save and restart**) or tells you to run
+`uv run autoontology restart`. If you switch to an embedding model with another dimension,
+the page asks first, because every source must then be rebuilt.
 
 **What does it cost?** The software is free (MIT licence). Ollama is free. A subscription
 build counts against your plan's usage limits; the full hanbit sample makes

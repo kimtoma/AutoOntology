@@ -270,6 +270,34 @@ large for the command line. `expand_model_profile` also raises the engine's
 Embeddings (`EMBED_*`) go directly to Ollama or to the OpenAI-compatible base URL. The
 router redacts upstream error bodies (keys, bearer tokens) and caps their size.
 
+## Settings API and restart (`web/settings_api.py`, `engine/restart.py`)
+
+The engine freezes its model endpoints at import time in both processes (the backend, and
+the service, which imports it in-process during builds), so a provider change needs both
+to restart. `web/settings_api.py` (installed by `api.install` behind the same Host/Origin
+guard) reads the selection from the layers without touching `os.environ`
+(`pending_settings`: shell > the current `.env` > defaults, with `config.env_origin` per
+key), compares it with the running `Settings` (`restart_required`), tests a candidate
+in-process (a throwaway `FastAPI` app with `build_router(candidate)` behind
+`httpx.ASGITransport`, plus one `embed_texts` call with explicit `EmbedParams`), and writes
+`.env` through `onboarding.EnvFile` (backup, then mode 0600). Keys set in the shell are
+refused (`shell_override`); an embedder whose dimension differs from the stored `vdb.*`
+vectors (`jobs.vector_table_state`) needs `confirm_reingest`.
+
+`POST /api/settings/restart` refuses while anything runs (runs, claims, CLI runs, the
+playground, a provider test) or when the service was not started by `up` (its PID file
+must name this process), claims the workspace, writes `run/restart-<id>.json` and starts
+`python -m autoontology.engine.restart` detached: its own session (so `down`, which kills
+the service's process group, does not kill it), stdio to `logs/restart.log`, and an
+environment without the keys this process derived or copied from `.env`
+(`restart.helper_env`). The helper takes `run/restart.lock`, re-reads `.env`, waits half a
+second for the 202 to leave, runs `Supervisor.down()` and `up()`, waits for the old pid to
+go, and records `done` (with the new service pid) or `failed` (masked error). The new
+service answers `GET /api/settings/restart/{id}`; the UI polls `/health/live`, then that
+record until a `done` comes from another pid. `autoontology restart` runs the same helper
+in the foreground. `supervisor.child_env` lists every value it copies from `.env` in
+`AUTOONTOLOGY_DERIVED_ENV`, so children treat them as `.env` values, not shell values.
+
 ## Internationalisation
 
 Two languages, English and Korean, with no extra dependency on either side.

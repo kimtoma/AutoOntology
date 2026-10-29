@@ -174,8 +174,36 @@ Times were measured on an Apple M4 Mac mini (16 GB) from a fresh clone on 2026-1
 (see [Sample sets](#sample-sets)); "estimate" marks the ones we did not run.
 `uv run autoontology provider status` shows every provider (available, logged in, model,
 last test, what to do), `provider test` makes one test call, and `provider use <name>`
-switches the provider in `.env` (then restart with
+switches the provider in `.env` (then restart with `uv run autoontology restart`, or
 `uv run autoontology down && uv run autoontology up`).
+
+### Settings page
+
+The web UI's **Settings** page (`/ui/settings`, the gear in the sidebar) does the same
+from any browser that can open the UI, including another device over
+[Tailscale](#remote-access-over-tailscale): pick the chat provider (Ollama, Claude
+subscription, Codex/ChatGPT subscription, OpenAI-compatible API) and its model, the
+embedding provider and model, and for an OpenAI-compatible API the base URL and the API
+key. **Test** checks the choice without applying it (one test call and one embedding).
+**Save and restart** writes `.env` (other lines kept, a private backup next to it, mode
+0600) and restarts the service and the engine backend; the page waits and reconnects,
+which took about 5-6 s on an Apple M4 Mac mini.
+
+- **A restart is required**: the engine reads its model endpoints once, at start-up, so a
+  provider change only applies after both processes restart. The page does it for a
+  service started with `uv run autoontology up`; otherwise run
+  `uv run autoontology restart` (or `down` and `up`) yourself. It refuses while a build,
+  export, upload, test or playground request is running.
+- **The API key** is accepted only in the test and save requests, stored only in `.env`,
+  and never shown again, logged or returned (the page shows "Saved ✓"; type a new key to
+  replace it, or remove it).
+- **Logins stay on the server**: `claude auth login` / `codex login` must be run once in a
+  terminal on the computer that runs AutoOntology; the page shows whether each CLI is
+  installed and logged in.
+- Values set in the service's shell environment win over `.env`; the page shows them
+  read-only.
+- Changing the embedding model to one with another dimension needs a confirmation: data
+  already loaded must be re-ingested (rebuild every source).
 
 ### Using your Claude or ChatGPT subscription
 
@@ -413,10 +441,11 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 |---|---|
 | `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | Step-by-step setup: checks Postgres (retry after `docker compose up -d`), detects and picks the chat provider, embeddings and documents, writes `.env` (other lines kept, previous file backed up) and runs `setup`. A provider and embeddings choice already in `.env` is kept (the recommendation is shown as a hint). `--yes` asks nothing; exits 2 with the fix when Postgres is down or the chosen CLI is not logged in. |
 | `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | Starts the services (and prunes upstream connections whose `autoontology_src_*` database is gone; live ones no source here owns are only reported, since another checkout may share the catalog), registers the sample set's sources (already registered ones are kept; a source with the same name but other data is replaced only after you confirm, or with `--replace`, because its database and extracted concepts are deleted), prints the expected build time per provider, builds with per-step times, exports and opens the web UI. |
-| `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M]` | Shows every chat provider (available, logged in, model, last test, remedy), runs one test call, or switches the provider in `.env` (warns when a shell variable overrides the file). |
+| `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M] [--embed ollama\|openai] [--embed-model M] [--base-url URL] [--openai-chat-model M]` | Shows every chat provider (available, logged in, model, last test, remedy), runs one test call, or switches the providers in `.env` (warns when a shell variable overrides the file; the API key is never taken on the command line). |
 | `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | Idempotent preparation: creates the catalog database and the `vector` and `pg_trgm` extensions, runs the migrations, pulls the Ollama models (and `AUTOONTOLOGY_VISION_MODEL` when set) and builds the `openai/qwen3:8b` alias, and with `--docs` installs kordoc and its OCR models (`--skip-ocr-models` leaves the models out). |
 | `autoontology doctor [--skip-models]` | Checks Postgres, pgvector, migrations, model endpoints, the vector tables, the ports and (with the services up) orphaned upstream connections. |
 | `autoontology up` / `down` / `status` | Starts, stops or shows the engine backend and the service. |
+| `autoontology restart [--only backend]` | Restarts the service and the backend so both load the current `.env` (what the Settings page does after a save). |
 | `autoontology ui [--no-browser]` | Prints the web UI URL and opens it. |
 | `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | Registers a source. Structured sources are loaded into `autoontology_src_<name>`. |
 | `autoontology source list` | Lists the sources. |
@@ -445,6 +474,11 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 |---|---|
 | `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, `ocr_ready`, `vision_model`, `formats` (every supported extension by source kind, with its engine) and a provider summary (never the key): `providers.chat` (`name`, `model`, `available`, `logged_in`, `detail`, `remedy`, `last_test`) and `providers.embed`. |
 | `POST /api/providers/test` | One test call (`{"answer": "pong"}`) through the active chat provider; 409 while another test runs. The result is kept as `last_test`. |
+| `GET /api/settings` | The provider choice `.env` (and the shell) hold now, with each key's origin (`shell`, `.env`, `default`), `locked_keys` (shell-set), the CLI logins, Ollama's models, the stored vectors, `running` (what this process uses), `restart_required` and `service_pid`. Never the API key: `openai.api_key_set`. |
+| `POST /api/settings/test` | Tests a candidate (only the changed fields: `chat_provider`, `chat_model`, `embed_provider`, `embed_model`, `openai_base_url`, `api_key`) without applying it: one test call and one embedding (`dimension`, `mismatch_with_store`); 409 `test_in_progress`. |
+| `PUT /api/settings` | Writes the candidate to `.env` (backup, mode 0600): `{written, backup, restart_required}`. 400 `invalid_settings` or `shell_override`; 409 `embedding_dimension_changed` unless `confirm_reingest: true`; `clear_api_key: true` removes the key. |
+| `POST /api/settings/restart` | 202 `{restart_id, previous_pid}`: a detached helper restarts the service and the backend. 409 `run_active`, `restart_in_progress` or `not_supervised` (the service was not started by `up`). |
+| `GET /api/settings/restart/{id}` | That restart's state (`running`, `done`, `failed`), its error and log tail, answered by the new service. |
 | `GET /api/samples` | The sample sets in `samples/` (`quickstart`, `hanbit`): `[{set, path, sources: [{name, kind, path, files, bytes, formats}], registered, durations}]`; `durations` is the expected first-build time per chat provider, `{provider: {text, measured}}`. |
 | `POST /api/samples/load` | `{"set": "quickstart"}` registers that set's sources like `autoontology demo` (returns them with `action`: `created`, `kept` or `replaced`); 400 for an unknown set or a body that is not a JSON object, 409 while a run is active, and 409 `sample_conflict` (with `conflicts`: the differing locators) when a source with a sample name holds other data, unless the body has `"replace": true`. |
 | `GET /api/sources` | Lists the sources. |

@@ -167,8 +167,30 @@ curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/b
 ([샘플 세트](#샘플-세트) 참고). "추정"은 직접 실행하지 않은 값입니다.
 `uv run autoontology provider status`는 모든 제공자(사용 가능 여부, 로그인, 모델, 마지막 테스트,
 해야 할 일)를 보여 주고, `provider test`는 테스트 호출을 한 번 하며, `provider use <name>`은
-`.env`의 제공자를 바꿉니다(이후 `uv run autoontology down && uv run autoontology up`으로
-재시작).
+`.env`의 제공자를 바꿉니다(이후 `uv run autoontology restart` 또는
+`uv run autoontology down && uv run autoontology up`으로 재시작).
+
+### 설정 페이지
+
+웹 UI의 **설정** 페이지(`/ui/settings`, 사이드바의 톱니바퀴)에서는 UI를 열 수 있는 어느
+브라우저에서나, Tailscale로 접속한 다른 기기에서도 같은 일을 할 수 있습니다: 채팅 제공자(Ollama,
+Claude 구독, Codex/ChatGPT 구독, OpenAI 호환 API)와 모델, 임베딩 제공자와 모델, OpenAI 호환
+API라면 기본 URL과 API 키를 고릅니다. **테스트**는 적용하지 않고 선택을 확인합니다(테스트 호출
+1회와 임베딩 1회). **저장 후 재시작**은 `.env`에 기록하고(다른 줄은 유지, 옆에 비공개 백업, 권한
+0600) 서비스와 엔진 백엔드를 재시작합니다. 페이지가 기다렸다가 다시 연결하며, Apple M4 Mac mini에서
+약 5~6초 걸렸습니다.
+
+- **재시작이 필요합니다**: 엔진은 시작할 때 한 번만 모델 엔드포인트를 읽으므로 제공자 변경은 두
+  프로세스가 재시작해야 적용됩니다. `uv run autoontology up`으로 시작한 서비스라면 페이지가
+  재시작하고, 아니면 `uv run autoontology restart`(또는 `down`과 `up`)를 직접 실행하세요. 빌드,
+  내보내기, 업로드, 테스트, 플레이그라운드 요청이 진행 중이면 거절합니다.
+- **API 키**는 테스트와 저장 요청에서만 받고 `.env`에만 저장하며, 다시 표시하거나 로그에 남기거나
+  응답으로 돌려주지 않습니다(페이지에는 "저장됨 ✓"만 보이고, 새 키를 입력하면 교체, 삭제도 가능).
+- **로그인은 서버에서**: `claude auth login` / `codex login`은 AutoOntology를 실행하는 컴퓨터의
+  터미널에서 한 번 해야 합니다. 페이지는 각 CLI의 설치와 로그인 여부를 보여 줍니다.
+- 서비스의 셸 환경에 설정된 값은 `.env`보다 우선하며, 페이지에서는 읽기 전용으로 표시됩니다.
+- 차원이 다른 임베딩 모델로 바꾸려면 확인이 필요합니다: 이미 적재한 데이터를 재적재해야 합니다(모든
+  소스를 다시 빌드).
 
 ### Claude 또는 ChatGPT 구독 쓰기
 
@@ -393,10 +415,11 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 |---|---|
 | `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | 단계별 설정: Postgres 확인(`docker compose up -d` 후 재시도), 채팅 제공자·임베딩·문서 감지와 선택, `.env` 작성(다른 줄은 유지, 기존 파일은 백업), `setup` 실행. `.env`에 이미 있는 제공자·임베딩 선택은 유지합니다(추천은 힌트로만 표시). `--yes`는 아무것도 묻지 않으며, Postgres가 꺼져 있거나 고른 CLI가 로그인되지 않았으면 해결 방법과 함께 종료 코드 2로 끝납니다. |
 | `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | 서비스 시작(`autoontology_src_*` 데이터베이스가 사라진 업스트림 연결은 정리하고, 살아 있지만 이 체크아웃의 소스가 소유하지 않은 연결은 다른 체크아웃이 카탈로그를 공유할 수 있으므로 알리기만 함), 샘플 세트 소스 등록(이미 등록된 것은 유지, 같은 이름에 다른 데이터를 가진 소스는 데이터베이스와 추출된 개념이 삭제되므로 확인을 받거나 `--replace`일 때만 교체), 제공자별 예상 빌드 시간 출력, 단계별 시간과 함께 빌드, 내보내기, 웹 UI 열기. |
-| `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M]` | 모든 채팅 제공자 표시(사용 가능, 로그인, 모델, 마지막 테스트, 해결 방법), 테스트 호출 한 번, 또는 `.env`의 제공자 전환(셸 변수가 파일보다 우선하면 경고). |
+| `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M] [--embed ollama\|openai] [--embed-model M] [--base-url URL] [--openai-chat-model M]` | 모든 채팅 제공자 표시(사용 가능, 로그인, 모델, 마지막 테스트, 해결 방법), 테스트 호출 한 번, 또는 `.env`의 제공자 전환(셸 변수가 파일보다 우선하면 경고, API 키는 명령줄로 받지 않음). |
 | `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | 멱등 준비 작업: 카탈로그 데이터베이스와 `vector`, `pg_trgm` 확장을 만들고, 마이그레이션을 실행하고, Ollama 모델(설정했다면 `AUTOONTOLOGY_VISION_MODEL`도)을 받아 `openai/qwen3:8b` 별칭을 만들며, `--docs`를 주면 kordoc과 OCR 모델을 설치합니다(`--skip-ocr-models`는 모델을 뺍니다). |
 | `autoontology doctor [--skip-models]` | Postgres, pgvector, 마이그레이션, 모델 엔드포인트, 벡터 테이블, 포트, (서비스가 켜져 있으면) 고아 업스트림 연결을 점검합니다. |
 | `autoontology up` / `down` / `status` | 엔진 백엔드와 서비스를 시작, 중지하거나 상태를 보여 줍니다. |
+| `autoontology restart [--only backend]` | 서비스와 백엔드를 재시작해 둘 다 현재 `.env`를 읽게 합니다(설정 페이지가 저장 후 하는 일). |
 | `autoontology ui [--no-browser]` | 웹 UI URL을 출력하고 엽니다. |
 | `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | 소스를 등록합니다. 정형 소스는 `autoontology_src_<name>`에 적재됩니다. |
 | `autoontology source list` | 소스 목록을 보여 줍니다. |
@@ -424,6 +447,11 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 |---|---|
 | `GET /api/status` | 버전, 백엔드와 Postgres 상태, Ollama 모델, `kordoc_available`, `ocr_ready`, `vision_model`, `formats`(소스 종류별로 지원하는 모든 확장자와 그 엔진), 그리고 제공자 요약(키는 절대 포함하지 않음): `providers.chat`(`name`, `model`, `available`, `logged_in`, `detail`, `remedy`, `last_test`)과 `providers.embed`. |
 | `POST /api/providers/test` | 현재 채팅 제공자로 테스트 호출 한 번(`{"answer": "pong"}`). 다른 테스트가 진행 중이면 409. 결과는 `last_test`로 보관됩니다. |
+| `GET /api/settings` | `.env`(와 셸)가 지금 고른 제공자, 키마다의 출처(`shell`, `.env`, `default`), `locked_keys`(셸이 설정한 키), CLI 로그인, Ollama 모델, 저장된 벡터, `running`(이 프로세스가 쓰는 설정), `restart_required`, `service_pid`. API 키는 절대 돌려주지 않고 `openai.api_key_set`만 줍니다. |
+| `POST /api/settings/test` | 후보(바뀐 필드만: `chat_provider`, `chat_model`, `embed_provider`, `embed_model`, `openai_base_url`, `api_key`)를 적용하지 않고 테스트: 테스트 호출 1회와 임베딩 1회(`dimension`, `mismatch_with_store`). 409 `test_in_progress`. |
+| `PUT /api/settings` | 후보를 `.env`에 기록(백업, 권한 0600): `{written, backup, restart_required}`. 400 `invalid_settings` 또는 `shell_override`, `confirm_reingest: true`가 없으면 409 `embedding_dimension_changed`. `clear_api_key: true`는 키를 삭제합니다. |
+| `POST /api/settings/restart` | 202 `{restart_id, previous_pid}`: 분리된 헬퍼가 서비스와 백엔드를 재시작합니다. 409 `run_active`, `restart_in_progress`, `not_supervised`(`up`으로 시작하지 않은 서비스). |
+| `GET /api/settings/restart/{id}` | 그 재시작의 상태(`running`, `done`, `failed`), 오류와 로그 끝부분. 새 서비스가 응답합니다. |
 | `GET /api/samples` | `samples/`의 샘플 세트(`quickstart`, `hanbit`): `[{set, path, sources: [{name, kind, path, files, bytes, formats}], registered, durations}]`. `durations`는 채팅 제공자별 예상 첫 빌드 시간 `{provider: {text, measured}}`입니다. |
 | `POST /api/samples/load` | `{"set": "quickstart"}`: 그 세트의 소스를 `autoontology demo`와 똑같이 등록합니다(`action`: `created`, `kept`, `replaced`와 함께 반환). 모르는 세트나 JSON 객체가 아닌 본문은 400, 실행이 진행 중이면 409, 샘플 이름의 소스가 다른 데이터를 가지고 있으면 본문에 `"replace": true`가 없는 한 409 `sample_conflict`(`conflicts`에 서로 다른 위치). |
 | `GET /api/sources` | 소스 목록. |

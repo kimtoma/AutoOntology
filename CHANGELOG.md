@@ -9,6 +9,28 @@ behaviour).
 
 ### Added
 
+- **Settings page** (`/ui/settings`, gear after Status): choose the chat provider (Ollama,
+  Claude subscription, Codex/ChatGPT subscription, OpenAI-compatible API with base URL and
+  API key), the embedding provider and models, **Test** a candidate without applying it,
+  and **Save and restart**. Backed by `GET`/`PUT /api/settings`, `POST /api/settings/test`,
+  `POST /api/settings/restart` (202, a detached helper `autoontology.engine.restart`) and
+  `GET /api/settings/restart/{id}`. The API key is written only to `.env` (mode 0600,
+  backup) and never returned or logged; shell-set keys are read-only; an embedding
+  dimension change needs `confirm_reingest`. Home/Status provider cards link to it.
+- **`autoontology restart [--only backend]`** restarts the service and the backend with the
+  current `.env`; `provider use` gains `--embed`, `--embed-model`, `--base-url` and
+  `--openai-chat-model` (the key is never taken on the command line).
+
+### Changed
+
+- The `/settings` UI route is the Settings page (it used to redirect to `/status`).
+
+### Fixed
+
+- Values the supervisor copied from `.env` into its children are now listed in
+  `AUTOONTOLOGY_DERIVED_ENV`, so a restarted service re-reads a rewritten `.env` instead of
+  keeping the old values as if they came from the shell.
+
 - **Remote access over Tailscale Serve**: `AUTOONTOLOGY_TAILSCALE_HOSTS` lists tailnet
   hostnames the Host guard accepts, only with the `Tailscale-User-Login` identity header
   (`tailscale_identity_required` otherwise, so Funnel traffic is refused);
