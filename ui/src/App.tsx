@@ -14,6 +14,7 @@ import SettingsPage from "@/pages/settings"
 import StatusPage from "@/pages/status"
 import { legacyTarget } from "@/lib/routes"
 import { useT } from "@/i18n"
+import { SHARED_DEMO } from "@/lib/demo"
 
 // three.js and the force-graph libraries only load with this page
 const GraphPage = lazy(() => import("@/pages/graph"))
@@ -49,17 +50,17 @@ export default function App() {
       <CommandMenu />
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<HomePage />} />
-          <Route path="sources" element={<SourcesPage />} />
-          <Route path="build" element={<BuildPage />} />
+          <Route index element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HomePage />} />
+          <Route path="sources" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <SourcesPage />} />
+          <Route path="build" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <BuildPage />} />
           <Route path="ontology" element={<OntologyPage />} />
           <Route path="graph" element={lazyPage(GraphPage)} />
           <Route path="playground" element={lazyPage(PlaygroundPage)} />
           <Route path="exports" element={<ExportsPage />} />
-          <Route path="status" element={<StatusPage />} />
+          <Route path="status" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <StatusPage />} />
           <Route path="runs" element={<LegacyRedirect />} />
           <Route path="concepts" element={<LegacyRedirect />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <SettingsPage />} />
           <Route path="*" element={<EmptyState title={t("shell.pageMissing")} hint={t("shell.pageMissing.hint")} />} />
         </Route>
       </Routes>

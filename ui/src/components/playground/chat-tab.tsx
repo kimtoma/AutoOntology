@@ -13,6 +13,7 @@ import {
   api, errorMessage, type ElementChip, type RetrievedElement, type SseEvent,
 } from "@/lib/api"
 import { fmtNumber, t, tn, useT } from "@/i18n"
+import { SHARED_DEMO } from "@/lib/demo"
 
 interface Msg {
   role: "user" | "assistant"
@@ -96,7 +97,9 @@ export function ChatTab() {
       else if (ev.event === "error") patchLast((m) => ({ ...m, pending: false, error: String(d.detail ?? d.error) }))
     }
     try {
-      await api.playground.chat({ question: q, conversation_id: conversationId }, onEvent,
+      await api.playground.chat({ question: q, ...(SHARED_DEMO
+        ? { history: messages.filter((m) => !m.pending && !m.error).map(({ role, content }) => ({ role, content })) }
+        : { conversation_id: conversationId }) }, onEvent,
                                 ctrl.signal)
     } catch (err) {
       if ((err as Error).name !== "AbortError") patchLast((m) => ({ ...m, error: errorMessage(err) }))

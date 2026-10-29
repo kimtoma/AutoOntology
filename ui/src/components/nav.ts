@@ -1,4 +1,5 @@
 import { t, type MessageKey } from "@/i18n/core"
+import { DEMO_PAGES, SHARED_DEMO } from "@/lib/demo"
 import {
   Activity, BookOpen, Database, Download, FlaskConical, Hammer, Network, Rocket, Settings, type LucideIcon,
 } from "lucide-react"
@@ -24,7 +25,7 @@ export const NAV: NavItem[] = [
   item("/exports", Download, "exports"),
   item("/status", Activity, "status"),
   item("/settings", Settings, "settings"),
-]
+].filter((entry) => !SHARED_DEMO || DEMO_PAGES.has(entry.path))
 
 /** Whether *item* is the current page ("/" only on the home page itself). */
 export const isCurrent = (item: NavItem, pathname: string) =>
