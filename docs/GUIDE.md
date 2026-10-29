@@ -181,7 +181,7 @@ command that is saved in your shell history.
 
 You can also do all of this later from the web UI: the **Settings** page (the gear in the
 sidebar) lets you pick the provider and model, type the API key into a password field
-(stored only in `.env`, never shown again), **Test** the choice and **Save and restart**.
+(stored only in `.env`, never shown again; backups show it as `***`), **Test** the choice and **Save and restart**.
 The login itself (`claude auth login`, `codex login`) still has to be typed once in a
 terminal on the computer that runs AutoOntology.
 
@@ -531,7 +531,9 @@ AutoOntology, written only to its `.env` (readable by its owner alone) and never
 logged or sent back. The service and the engine must restart to use another model; the
 page does that for you (**Save and restart**) or tells you to run
 `uv run autoontology restart`. If you switch to an embedding model with another dimension,
-the page asks first, because every source must then be rebuilt.
+the page asks first: a build cannot re-embed while the old vectors exist, so you then remove
+every source (`uv run autoontology source rm <name> --drop-db`) and add it again, or keep
+the previous model (see the troubleshooting table, "vector tables").
 
 **What does it cost?** The software is free (MIT licence). Ollama is free. A subscription
 build counts against your plan's usage limits; the full hanbit sample makes

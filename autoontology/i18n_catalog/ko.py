@@ -322,7 +322,8 @@ MESSAGES: dict[str, str] = {
         "OpenAI 호환 엔드포인트의 채팅 모델 (AUTOONTOLOGY_OPENAI_CHAT_MODEL)."
     ),
     "help.restart": (
-        "서비스와 백엔드를 재시작해 둘 다 현재 .env를 읽게 합니다 (제공자를 바꾼 뒤)."
+        "서비스와 백엔드를 재시작해 둘 다 현재 .env를 읽게 합니다 (제공자를 바꾼 뒤). "
+        "down + up과 같아서 진행 중인 빌드를 기다리지 않습니다."
     ),
     "help.restart.only": "이 프로세스만 재시작합니다: backend.",
     "provider.unknown_embed": "알 수 없는 임베딩 제공자 {name!r}: {choices} 중에서 고르세요",
@@ -332,6 +333,6 @@ MESSAGES: dict[str, str] = {
         "AUTOONTOLOGY_OPENAI_API_KEY를 직접 입력하세요"
     ),
     "provider.restart_short": "또는: `uv run autoontology restart`",
-    "restart.failed": "재시작 실패 (종료 코드 {code}); 로그: {log}",
+    "restart.failed": "재시작 실패 (종료 코드 {code}): 위 출력을 보세요 ({log}에도 있음)",
     "restart.bad_only": "--only는 {choices} 중 하나여야 합니다 (받은 값 {value!r})",
 }

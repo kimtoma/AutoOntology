@@ -30,7 +30,8 @@ import {
 import { fmtSeconds } from "@/lib/labels"
 import {
   BASE_URL_VAR, CHAT_MODEL_VAR, CHAT_PROVIDERS, changeOf, EMBED_MODEL_VAR, EMBED_PROVIDER_VAR, EMBED_PROVIDERS,
-  formFrom, hasChanges, isLocked, KEY_VAR, PROVIDER_VAR, providerState, RestartTimeout, usesOpenai,
+  formFrom, hasChanges, isLocked, KEY_VAR, PROVIDER_VAR, providerState, RestartTimeout, savedKeyElsewhere,
+  urlOrigin, usesOpenai,
   waitForRestart, type ProviderState, type SettingsForm,
 } from "@/lib/settings"
 import { cn } from "@/lib/utils"
@@ -168,7 +169,8 @@ function ChatDetails({ s, form, setForm }: { s: SettingsState; form: SettingsFor
 function OpenaiEndpoint({ s, form, setForm }: { s: SettingsState; form: SettingsForm; setForm: (f: SettingsForm) => void }) {
   const t = useT()
   const keyHint = useId()
-  const keySaved = s.openai.api_key_set && !form.clearKey
+  const elsewhere = savedKeyElsewhere(s, form)
+  const keySaved = s.openai.api_key_set && !form.clearKey && !elsewhere
   return (
     <Card className="gap-4" id="settings-openai">
       <CardHeader>
@@ -194,6 +196,11 @@ function OpenaiEndpoint({ s, form, setForm }: { s: SettingsState; form: Settings
                  value={form.apiKey} aria-describedby={keyHint} disabled={isLocked(s, KEY_VAR)}
                  placeholder={keySaved ? "••••••••" : ""}
                  onChange={(e) => setForm({ ...form, apiKey: e.target.value, clearKey: false })} />
+          {elsewhere && (
+            <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs" id="settings-key-elsewhere" role="alert">
+              {t("settings.apiKey.otherEndpoint", { origin: urlOrigin(s.openai.base_url).replace(/:(80|443)$/, "") || "?" })}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground" id={keyHint}>{t("settings.apiKey.hint")}</p>
           {s.openai.api_key_set && !isLocked(s, KEY_VAR) && (
             <div>
@@ -342,7 +349,12 @@ export default function SettingsPage() {
     setPhase({ kind: "saving" })
     try {
       const body = { ...change, ...(confirmReingest ? { confirm_reingest: true } : {}) }
-      if (hasChanges(change)) await api.saveSettings(body)
+      if (hasChanges(change)) {
+        await api.saveSettings(body)
+        // saved: the typed key leaves the browser's memory, the form shows the new .env
+        setForm(null)
+        await qc.invalidateQueries({ queryKey: keys.settings })
+      }
     } catch (err) {
       if (err instanceof ApiError && err.code === "embedding_dimension_changed") {
         setDimension({ new: Number(err.body?.dimension), old: Number(err.body?.stored_dimension) })
@@ -355,8 +367,6 @@ export default function SettingsPage() {
     }
     if (!s.supervised) {
       setPhase({ kind: "idle" })
-      setForm(null)
-      await qc.invalidateQueries({ queryKey: keys.settings })
       toast.message(t("settings.saved.manual"), { description: s.restart_command })
       return
     }

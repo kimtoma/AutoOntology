@@ -104,8 +104,10 @@ CLI_STATUS_CACHE_S = 15.0
 RESTART_CLAIM_S = 180.0
 RESTART_COMMAND = "uv run autoontology restart"
 DIMENSION_WARNING = (
-    "the new embedding model has {new} dimensions but the stored vectors have {old}: "
-    "existing loaded data must be re-ingested (rebuild every source)"
+    "the new embedding model has {new} dimensions but the stored vectors have {old}; a "
+    "build cannot re-embed while those vectors exist: remove every source "
+    "(`uv run autoontology source rm <name> --drop-db`) and add it again, or keep the "
+    'previous model (README "Troubleshooting")'
 )
 
 

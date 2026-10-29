@@ -1457,4 +1457,5 @@ def restart(
     argv = helper.helper_argv(settings.home, env_file_path(), restart_id=helper.new_id(), only=only)
     code = subprocess.call(argv, env=helper.helper_env())
     if code:
-        _fail(msg("restart.failed", code=code, log=settings.logs_dir / "service.log"), code=code)
+        log = settings.logs_dir  # the service and backend logs
+        _fail(msg("restart.failed", code=code, log=log), code=code)

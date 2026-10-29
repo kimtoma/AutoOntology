@@ -259,7 +259,7 @@ def test_put_refuses_an_embedding_dimension_change_without_consent(envfile, stub
     res = c.put(API, json={"embed_model": "nomic-embed-text"})
     assert res.status_code == 409 and res.json()["error"] == "embedding_dimension_changed"
     assert res.json()["dimension"] == 768 and res.json()["stored_dimension"] == 1024
-    assert "re-ingested" in res.json()["detail"]
+    assert "source rm <name> --drop-db" in res.json()["detail"]
     assert "AUTOONTOLOGY_OLLAMA_EMBED_MODEL" not in envfile.read_text()
     res = c.put(API, json={"embed_model": "nomic-embed-text", "confirm_reingest": True})
     assert res.status_code == 200 and res.json()["written"] == ["AUTOONTOLOGY_OLLAMA_EMBED_MODEL"]

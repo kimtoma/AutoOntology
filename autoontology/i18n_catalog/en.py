@@ -344,7 +344,7 @@ MESSAGES: dict[str, str] = {
     ),
     "help.restart": (
         "Restart the service and the backend so both load the current .env (after a "
-        "provider change)."
+        "provider change). Like down + up: it does not wait for a running build."
     ),
     "help.restart.only": "Restart only this process: backend.",
     "provider.unknown_embed": "unknown embedding provider {name!r}: choose one of {choices}",
@@ -354,6 +354,6 @@ MESSAGES: dict[str, str] = {
         "({url}) or type AUTOONTOLOGY_OPENAI_API_KEY into {path} yourself"
     ),
     "provider.restart_short": "or: `uv run autoontology restart`",
-    "restart.failed": "restart failed (exit {code}); log: {log}",
+    "restart.failed": "restart failed (exit {code}): see the output above (also in {log})",
     "restart.bad_only": "--only must be one of {choices}, got {value!r}",
 }

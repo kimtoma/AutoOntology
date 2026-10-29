@@ -297,6 +297,14 @@ service answers `GET /api/settings/restart/{id}`; the UI polls `/health/live`, t
 record until a `done` comes from another pid. `autoontology restart` runs the same helper
 in the foreground. `supervisor.child_env` lists every value it copies from `.env` in
 `AUTOONTOLOGY_DERIVED_ENV`, so children treat them as `.env` values, not shell values.
+`POSTGRES_*` and `INGESTION_SERVICE_URL` that came from built-in defaults (not from `.env`)
+stay in the children's env as if set in the shell, so a later `.env` change to them needs
+`down` + `up`. A record whose helper process is gone is marked `failed` ("interrupted")
+on the next read instead of blocking later restarts; a failed restart releases the
+workspace claim at once; the newest 20 records are kept. The claim does not cover the
+playground, so a playground request started during the half-second grace is cut off by
+the restart. The saved API key is used only for the base-URL origin it was saved with:
+another origin needs a new key (400 `key_required`).
 
 ## Internationalisation
 

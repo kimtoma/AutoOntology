@@ -185,8 +185,9 @@ from any browser that can open the UI, including another device over
 subscription, Codex/ChatGPT subscription, OpenAI-compatible API) and its model, the
 embedding provider and model, and for an OpenAI-compatible API the base URL and the API
 key. **Test** checks the choice without applying it (one test call and one embedding).
-**Save and restart** writes `.env` (other lines kept, a private backup next to it, mode
-0600) and restarts the service and the engine backend; the page waits and reconnects,
+**Save and restart** writes `.env` (other lines kept, mode 0600 from the first byte, a
+0600 backup `.env.bak-<time>` next to it in which secret values read `***`; set
+`AUTOONTOLOGY_ENV_BACKUP_SECRETS=1` to keep them) and restarts the service and the engine backend; the page waits and reconnects,
 which took about 5-6 s on an Apple M4 Mac mini.
 
 - **A restart is required**: the engine reads its model endpoints once, at start-up, so a
@@ -196,14 +197,17 @@ which took about 5-6 s on an Apple M4 Mac mini.
   export, upload, test or playground request is running.
 - **The API key** is accepted only in the test and save requests, stored only in `.env`,
   and never shown again, logged or returned (the page shows "Saved ✓"; type a new key to
-  replace it, or remove it).
+  replace it, or remove it). A saved key is only ever sent to its own endpoint: after
+  changing the base URL to another host, enter that endpoint's key (400 `key_required`).
 - **Logins stay on the server**: `claude auth login` / `codex login` must be run once in a
   terminal on the computer that runs AutoOntology; the page shows whether each CLI is
   installed and logged in.
 - Values set in the service's shell environment win over `.env`; the page shows them
   read-only.
-- Changing the embedding model to one with another dimension needs a confirmation: data
-  already loaded must be re-ingested (rebuild every source).
+- Changing the embedding model to one with another dimension needs a confirmation: a
+  build cannot re-embed while the old vectors exist, so remove every source
+  (`uv run autoontology source rm <name> --drop-db`) and add it again, or keep the previous
+  model (see [Troubleshooting](#troubleshooting)).
 
 ### Using your Claude or ChatGPT subscription
 
@@ -445,7 +449,7 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | Idempotent preparation: creates the catalog database and the `vector` and `pg_trgm` extensions, runs the migrations, pulls the Ollama models (and `AUTOONTOLOGY_VISION_MODEL` when set) and builds the `openai/qwen3:8b` alias, and with `--docs` installs kordoc and its OCR models (`--skip-ocr-models` leaves the models out). |
 | `autoontology doctor [--skip-models]` | Checks Postgres, pgvector, migrations, model endpoints, the vector tables, the ports and (with the services up) orphaned upstream connections. |
 | `autoontology up` / `down` / `status` | Starts, stops or shows the engine backend and the service. |
-| `autoontology restart [--only backend]` | Restarts the service and the backend so both load the current `.env` (what the Settings page does after a save). |
+| `autoontology restart [--only backend]` | Restarts the service and the backend so both load the current `.env` (what the Settings page does after a save). Like `down` + `up`, it does not wait for a running build (the Settings page refuses then). |
 | `autoontology ui [--no-browser]` | Prints the web UI URL and opens it. |
 | `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | Registers a source. Structured sources are loaded into `autoontology_src_<name>`. |
 | `autoontology source list` | Lists the sources. |
@@ -575,6 +579,7 @@ then `.env`, then the built-in default.
 | `INGESTION_SERVICE_URL` | derived | Always derived from `AUTOONTOLOGY_PORT`; a value you set is overridden. |
 | `APP_URL` | unset | Read only by the engine's own web frontend, which AutoOntology does not run. |
 | `AUTOONTOLOGY_UPLOAD_MAX_MB` | `200` | Web UI upload limit per request. |
+| `AUTOONTOLOGY_ENV_BACKUP_SECRETS` | off | `1` keeps secret values (keys, passwords, tokens) in the `.env.bak-*` backups that `init`, `provider use` and the Settings page write; by default they read `***`. |
 | `AUTOONTOLOGY_GRAPH_MAX_NODES` | `1500` | Most nodes the graph view receives (the best-connected nodes are kept). |
 | `AUTOONTOLOGY_DEBUG` | `0` | `1` prints full tracebacks for unexpected CLI errors. |
 | `AUTOONTOLOGY_LOCK_TIMEOUT_S` | `300` | Maximum wait for the Postgres advisory lock around vector-table setup. |

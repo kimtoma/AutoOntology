@@ -81,6 +81,23 @@ export const usesOpenai = (f: SettingsForm) => f.chatProvider === "openai" || f.
 
 export const isLocked = (s: SettingsState, key: string) => s.locked_keys.includes(key)
 
+/** `scheme://host:port` of *url* ("" when it is not a URL): a saved key belongs to one. */
+export function urlOrigin(url: string): string {
+  try {
+    const u = new URL(url.trim())
+    const port = u.port || (u.protocol === "https:" ? "443" : u.protocol === "http:" ? "80" : "")
+    return `${u.protocol}//${u.hostname.toLowerCase()}:${port}`
+  } catch {
+    return ""
+  }
+}
+
+/** The saved key cannot be used with the form's base URL (another endpoint): the server
+    refuses it (400 key_required) until the key for that endpoint is typed. */
+export const savedKeyElsewhere = (s: SettingsState, f: SettingsForm) =>
+  s.openai.api_key_set && !f.clearKey && !f.apiKey.trim()
+  && urlOrigin(f.baseUrl) !== urlOrigin(s.openai.base_url)
+
 export type ProviderState = "ready" | "notInstalled" | "notLoggedIn" | "unavailable" | "needsSetup"
 
 /** The badge of a provider card, from the saved state (and the form for the openai fields). */
@@ -91,7 +108,9 @@ export function providerState(s: SettingsState, name: ChatProviderName, f?: Sett
   }
   if (name === "ollama") return s.ollama.reachable ? "ready" : "unavailable"
   const url = f ? f.baseUrl.trim() : s.openai.base_url
-  const key = f ? (!!f.apiKey.trim() || (s.openai.api_key_set && !f.clearKey)) : s.openai.api_key_set
+  const key = f
+    ? (!!f.apiKey.trim() || (s.openai.api_key_set && !f.clearKey && !savedKeyElsewhere(s, f)))
+    : s.openai.api_key_set
   return url && key ? "ready" : "needsSetup"
 }
 

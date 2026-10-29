@@ -214,6 +214,48 @@ describe("Settings page", () => {
     expect(calls.some((c) => c.path === "/settings/restart")).toBe(false)
   })
 
+  it("asks for the key again when the endpoint changes", async () => {
+    const user = userEvent.setup()
+    mockFetch({ "GET /settings": settings({ chat: { provider: "openai", model: "gpt-x", origin: ".env" },
+                                              openai: { base_url: "https://api.test/v1", api_key_set: true,
+                                                        chat_model: "gpt-x", embed_model: "" } }) })
+    renderPage(<SettingsPage />)
+    const url = await screen.findByLabelText("Base URL")
+    expect(document.getElementById("settings-key-elsewhere")).toBeNull()
+    await user.clear(url)
+    await user.type(url, "https://other.test/v1")
+    expect(screen.getByRole("alert")).toHaveTextContent("The saved key belongs to https://api.test")
+    expect(document.querySelector("[data-provider-option=openai][data-state=needsSetup]")).not.toBeNull()
+    await user.type(screen.getByLabelText(/^API key/, { selector: "input" }), "sk-other")
+    expect(document.getElementById("settings-key-elsewhere")).toBeNull()
+  })
+
+  it.each([
+    ["saved, restart refused", { supervised: true, restartFails: true }],
+    ["saved without a restart", { supervised: false, restartFails: false }],
+  ])("forgets the typed key once it is saved (%s)", async (_name, opts) => {
+    const user = userEvent.setup()
+    let saved = false
+    const openai = { base_url: "https://api.test/v1", api_key_set: false, chat_model: "gpt-x", embed_model: "" }
+    mockFetch({
+      "GET /settings": () => settings({ supervised: opts.supervised,
+                                        chat: { provider: "openai", model: "gpt-x", origin: ".env" },
+                                        openai: { ...openai, api_key_set: saved }, restart_required: saved }),
+      "PUT /settings": () => { saved = true; return { written: ["AUTOONTOLOGY_OPENAI_API_KEY"], backup: null, restart_required: true } },
+      "POST /settings/restart": () => new Response(JSON.stringify({ error: "run_active", detail: "a build is running" }),
+                                                   { status: 409, headers: { "content-type": "application/json" } }),
+    })
+    renderPage(<><SettingsPage /><Toaster /></>)
+    const key = await screen.findByLabelText(/^API key/, { selector: "input" })
+    await user.type(key, "sk-typed-secret")
+    await user.click(screen.getByRole("button", { name: "Save and restart" }))
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(within(dialog).getByRole("button", { name: opts.supervised ? "Save and restart" : "Save" }))
+    if (opts.restartFails) expect(await screen.findByText(/a build is running/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByLabelText(/^API key/, { selector: "input" })).toHaveValue(""))
+    expect(await screen.findByText(/Saved ✓/)).toBeInTheDocument()
+  })
+
   it("offers a restart for settings saved but not applied", async () => {
     mockFetch({ "GET /settings": settings({ restart_required: true, chat: { provider: "codex", model: "gpt-6-astra", origin: ".env" } }) })
     renderPage(<SettingsPage />)

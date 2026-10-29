@@ -176,8 +176,9 @@ curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/b
 브라우저에서나, Tailscale로 접속한 다른 기기에서도 같은 일을 할 수 있습니다: 채팅 제공자(Ollama,
 Claude 구독, Codex/ChatGPT 구독, OpenAI 호환 API)와 모델, 임베딩 제공자와 모델, OpenAI 호환
 API라면 기본 URL과 API 키를 고릅니다. **테스트**는 적용하지 않고 선택을 확인합니다(테스트 호출
-1회와 임베딩 1회). **저장 후 재시작**은 `.env`에 기록하고(다른 줄은 유지, 옆에 비공개 백업, 권한
-0600) 서비스와 엔진 백엔드를 재시작합니다. 페이지가 기다렸다가 다시 연결하며, Apple M4 Mac mini에서
+1회와 임베딩 1회). **저장 후 재시작**은 `.env`에 기록하고(다른 줄은 유지, 처음부터 권한 0600, 옆에 권한
+0600 백업 `.env.bak-<시각>`을 남기되 비밀 값은 `***`로 기록, 그대로 두려면
+`AUTOONTOLOGY_ENV_BACKUP_SECRETS=1`) 서비스와 엔진 백엔드를 재시작합니다. 페이지가 기다렸다가 다시 연결하며, Apple M4 Mac mini에서
 약 5~6초 걸렸습니다.
 
 - **재시작이 필요합니다**: 엔진은 시작할 때 한 번만 모델 엔드포인트를 읽으므로 제공자 변경은 두
@@ -186,11 +187,14 @@ API라면 기본 URL과 API 키를 고릅니다. **테스트**는 적용하지 �
   내보내기, 업로드, 테스트, 플레이그라운드 요청이 진행 중이면 거절합니다.
 - **API 키**는 테스트와 저장 요청에서만 받고 `.env`에만 저장하며, 다시 표시하거나 로그에 남기거나
   응답으로 돌려주지 않습니다(페이지에는 "저장됨 ✓"만 보이고, 새 키를 입력하면 교체, 삭제도 가능).
+  저장된 키는 자기 엔드포인트로만 보냅니다: 기본 URL을 다른 호스트로 바꾸면 그 엔드포인트의 키를
+  입력해야 합니다(400 `key_required`).
 - **로그인은 서버에서**: `claude auth login` / `codex login`은 AutoOntology를 실행하는 컴퓨터의
   터미널에서 한 번 해야 합니다. 페이지는 각 CLI의 설치와 로그인 여부를 보여 줍니다.
 - 서비스의 셸 환경에 설정된 값은 `.env`보다 우선하며, 페이지에서는 읽기 전용으로 표시됩니다.
-- 차원이 다른 임베딩 모델로 바꾸려면 확인이 필요합니다: 이미 적재한 데이터를 재적재해야 합니다(모든
-  소스를 다시 빌드).
+- 차원이 다른 임베딩 모델로 바꾸려면 확인이 필요합니다: 기존 벡터가 있는 동안에는 빌드가 다시
+  임베딩할 수 없으므로 모든 소스를 제거(`uv run autoontology source rm <name> --drop-db`)하고 다시
+  추가하거나, 이전 모델을 유지하세요([문제 해결](#문제-해결) 참고).
 
 ### Claude 또는 ChatGPT 구독 쓰기
 
@@ -419,7 +423,7 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 | `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | 멱등 준비 작업: 카탈로그 데이터베이스와 `vector`, `pg_trgm` 확장을 만들고, 마이그레이션을 실행하고, Ollama 모델(설정했다면 `AUTOONTOLOGY_VISION_MODEL`도)을 받아 `openai/qwen3:8b` 별칭을 만들며, `--docs`를 주면 kordoc과 OCR 모델을 설치합니다(`--skip-ocr-models`는 모델을 뺍니다). |
 | `autoontology doctor [--skip-models]` | Postgres, pgvector, 마이그레이션, 모델 엔드포인트, 벡터 테이블, 포트, (서비스가 켜져 있으면) 고아 업스트림 연결을 점검합니다. |
 | `autoontology up` / `down` / `status` | 엔진 백엔드와 서비스를 시작, 중지하거나 상태를 보여 줍니다. |
-| `autoontology restart [--only backend]` | 서비스와 백엔드를 재시작해 둘 다 현재 `.env`를 읽게 합니다(설정 페이지가 저장 후 하는 일). |
+| `autoontology restart [--only backend]` | 서비스와 백엔드를 재시작해 둘 다 현재 `.env`를 읽게 합니다(설정 페이지가 저장 후 하는 일). `down` + `up`처럼 진행 중인 빌드를 기다리지 않습니다(설정 페이지는 그때 거절). |
 | `autoontology ui [--no-browser]` | 웹 UI URL을 출력하고 엽니다. |
 | `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | 소스를 등록합니다. 정형 소스는 `autoontology_src_<name>`에 적재됩니다. |
 | `autoontology source list` | 소스 목록을 보여 줍니다. |
@@ -544,6 +548,7 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 | `INGESTION_SERVICE_URL` | 자동 계산 | 항상 `AUTOONTOLOGY_PORT`에서 계산되며, 직접 설정한 값은 덮어씁니다. |
 | `APP_URL` | 설정 안 됨 | 엔진 자체 웹 프런트엔드만 읽는 값이며, AutoOntology는 그 프런트엔드를 실행하지 않습니다. |
 | `AUTOONTOLOGY_UPLOAD_MAX_MB` | `200` | 웹 UI 요청당 업로드 한도. |
+| `AUTOONTOLOGY_ENV_BACKUP_SECRETS` | 꺼짐 | `1`이면 `init`, `provider use`, 설정 페이지가 쓰는 `.env.bak-*` 백업에 비밀 값(키, 비밀번호, 토큰)을 그대로 남깁니다. 기본값은 `***`. |
 | `AUTOONTOLOGY_GRAPH_MAX_NODES` | `1500` | 그래프 뷰가 받는 최대 노드 수(연결이 많은 노드를 남깁니다). |
 | `AUTOONTOLOGY_DEBUG` | `0` | `1`이면 예상하지 못한 CLI 오류의 전체 트레이스백을 출력합니다. |
 | `AUTOONTOLOGY_LOCK_TIMEOUT_S` | `300` | 벡터 테이블 설정을 감싸는 Postgres 권고 잠금(advisory lock)의 최대 대기 시간. |
