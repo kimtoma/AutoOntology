@@ -665,3 +665,44 @@ def test_a_token_renamed_in_right_before_the_relink_is_delivered(
     assert (codex_user / "auth.json").read_text() == second
     assert link.is_symlink()
     assert not [p.name for p in link.parent.iterdir() if p.name.startswith(".auth.json")]
+
+
+# --- codex round 1, finding 5: the same claude lookup as bootstrap.sh -------------------
+
+
+def _exe(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n")
+    path.chmod(0o755)
+    return path
+
+
+def test_claude_bin_with_a_tilde_is_expanded(isolated_env, monkeypatch):
+    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
+
+    user_home = isolated_env / "userhome"
+    real = _exe(user_home / "tools" / "claude")
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("PATH", str(isolated_env / "empty-bin"))
+    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_BIN", "~/tools/claude")
+    assert ClaudeCLIProvider(isolated_env / "h", []).binary() == str(real)
+
+
+def test_claude_local_install_is_the_last_fallback(isolated_env, monkeypatch):
+    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
+
+    user_home = isolated_env / "userhome"
+    monkeypatch.setenv("HOME", str(user_home))
+    bindir = isolated_env / "bin"
+    bindir.mkdir()
+    monkeypatch.setenv("PATH", str(bindir))
+    monkeypatch.delenv("AUTOONTOLOGY_CLAUDE_BIN", raising=False)
+    provider = ClaudeCLIProvider(isolated_env / "h", [])
+    assert provider.binary() is None
+    local = _exe(user_home / ".claude" / "local" / "claude")
+    assert provider.binary() == str(local)
+    on_path = _exe(bindir / "claude")  # PATH comes first, as in bootstrap.sh
+    assert provider.binary() == str(on_path)
+    # a configured binary that does not exist is not silently replaced by the fallback
+    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_BIN", str(isolated_env / "nope" / "claude"))
+    assert provider.binary() is None

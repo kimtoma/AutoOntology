@@ -61,6 +61,8 @@ class ClaudeCLIProvider(CLIProvider):
     name = "claude"
     bin_env = "AUTOONTOLOGY_CLAUDE_BIN"
     default_bin = "claude"
+    #: `claude migrate-installer`'s per-user install, often not on PATH (bootstrap.sh too)
+    fallback_bins = ("~/.claude/local/claude",)
     login_remedy = LOGIN_REMEDY
     strip_keys = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
     native_max_tokens = True

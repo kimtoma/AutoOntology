@@ -319,6 +319,55 @@ def test_claude_bin_from_environment_or_local_install(tmp_path):
     assert "claude CLI logged in" in proc.stdout
 
 
+def test_claude_outside_path_is_saved_into_env_dry_run(tmp_path):
+    """bootstrap finds ~/.claude/local/claude, which the app's PATH lookup would not:
+    the plan saves its absolute path into .env for init, the service and the CLI."""
+    env, _ = _fake_path(tmp_path, None)
+    local = Path(env["HOME"]) / ".claude" / "local"
+    local.mkdir(parents=True)
+    _stub(local, "claude", f"echo '{LOGGED_IN}'")
+    proc = _run(["--dry-run", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"AUTOONTOLOGY_CLAUDE_BIN={local / 'claude'}" in proc.stdout
+    # on PATH: nothing to save
+    _stub(tmp_path / "bin", "claude", f"echo '{LOGGED_IN}'")
+    proc = _run(["--dry-run", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path)
+    assert proc.returncode == 0 and "AUTOONTOLOGY_CLAUDE_BIN" not in proc.stdout
+
+
+@pytest.mark.skipif(REAL_GIT is None, reason="git not available")
+def test_claude_outside_path_reaches_init_and_env(tmp_path):
+    import sys
+
+    env, log = _fake_path(tmp_path, None)
+    # uv: `run python` really runs (init's EnvFile), `run autoontology init` records the
+    # claude binary it was given
+    _stub(
+        tmp_path / "bin",
+        "uv",
+        f'echo "uv $*" >> "{log}"\n'
+        'case "$1 $2" in\n'
+        f'  "run python") shift 2; PYTHONPATH="{REPO}" exec "{sys.executable}" "$@" ;;\n'
+        f'  "run autoontology") echo "init-bin ${{AUTOONTOLOGY_CLAUDE_BIN:-}}" >> "{log}" ;;\n'
+        "esac\necho 'uv 0.9.0'",
+    )
+    local = Path(env["HOME"]) / ".claude" / "local"
+    local.mkdir(parents=True)
+    _stub(local, "claude", f"echo '{LOGGED_IN}'")
+    upstream = _fixture_repo(tmp_path)
+    target = tmp_path / "c"
+    proc = _run(
+        ["--yes", "--no-demo", "--repo", str(upstream), "--dir", str(target)],
+        env=env,
+        cwd=tmp_path,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"init-bin {local / 'claude'}" in log.read_text()
+    lines = (target / ".env").read_text().splitlines()
+    assert f"AUTOONTOLOGY_CLAUDE_BIN={local / 'claude'}" in lines
+    assert stat.S_IMODE((target / ".env").stat().st_mode) == 0o600
+
+
 def test_missing_claude_cli_explains_aliases(tmp_path):
     env, _ = _fake_path(tmp_path, None)
     proc = _run(["--yes", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path)

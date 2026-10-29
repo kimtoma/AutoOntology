@@ -15,6 +15,7 @@
 #   3 install        uv sync
 #   4 configure      uv run autoontology init --yes --provider P [--docs|--no-docs]
 #                    (+ AUTOONTOLOGY_PORT / BACKEND_PORT from the shell saved into .env)
+#                    (+ AUTOONTOLOGY_CLAUDE_BIN when claude was found outside PATH)
 #   5 demo           uv run autoontology demo --set S --no-open --replace   (unless --no-demo)
 #   6 done           print the UI URL and the next steps
 #
@@ -182,6 +183,8 @@ main() {
   DRY=0
   local PROVIDER="claude" SET="quickstart" DEMO=1 YES=0
   local LANG_CHOICE="${AUTOONTOLOGY_LANG:-}" REPO_URL="$DEFAULT_REPO"
+  # the claude CLI path when the app's own PATH lookup would not find it (saved in .env)
+  local CLAUDE_BIN_SAVE=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -347,6 +350,11 @@ main() {
         rm -f "$tmp_out"
         if [ "$state" = "true" ]; then
           ok "claude CLI logged in"
+          # found outside PATH (~/.claude/local, a ~/ path): hand init the absolute path
+          if [ "$(command -v claude 2>/dev/null || true)" != "$cli_bin" ]; then
+            CLAUDE_BIN_SAVE="$cli_bin"
+            export AUTOONTOLOGY_CLAUDE_BIN="$cli_bin"
+          fi
         elif [ "$state" = "false" ]; then
           stop 3 "the claude CLI is not logged in" \
             "run: claude auth login" \
@@ -464,6 +472,23 @@ main() {
     run_in_dir "configured: .env written, setup done" uv run autoontology init --yes --provider "$PROVIDER" "$DOCS_FLAG"
   else
     run_in_dir "configured: .env written, setup done" uv run autoontology init --provider "$PROVIDER" "$DOCS_FLAG"
+  fi
+  # A claude CLI that only this script found must be found by init, the service and the
+  # CLI too: keep its absolute path in .env (init's own .env editor, with a backup).
+  if [ -n "$CLAUDE_BIN_SAVE" ]; then
+    if [ "$DRY" -eq 1 ]; then
+      plan "save AUTOONTOLOGY_CLAUDE_BIN=$CLAUDE_BIN_SAVE in .env (claude is not on PATH)"
+    else
+      run_in_dir "claude CLI path saved in .env" uv run python -c '
+import os
+from pathlib import Path
+from autoontology.onboarding import EnvFile
+env = EnvFile.load(Path(".env"))
+env.set("AUTOONTOLOGY_CLAUDE_BIN", os.environ["AUTOONTOLOGY_CLAUDE_BIN"])
+if env.changes():
+    env.write()
+'
+    fi
   fi
   # Ports given in the shell only would be lost in the next shell: keep them in .env
   # (init's own .env editor, with a backup).

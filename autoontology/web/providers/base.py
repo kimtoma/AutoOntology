@@ -406,11 +406,22 @@ class CLIProvider:
 
     # --- plumbing ----------------------------------------------------------------------
 
+    #: Install locations tried after PATH (``~`` expanded), in bootstrap.sh's order.
+    fallback_bins: tuple[str, ...] = ()
+
     def binary(self) -> str | None:
         configured = os.environ.get(self.bin_env, "").strip()
         if configured:
+            configured = os.path.expanduser(configured)
             return configured if Path(configured).is_file() else shutil.which(configured)
-        return shutil.which(self.default_bin)
+        found = shutil.which(self.default_bin)
+        if found:
+            return found
+        for fallback in self.fallback_bins:
+            path = Path(fallback).expanduser()
+            if path.is_file() and os.access(path, os.X_OK):
+                return str(path)
+        return None
 
     def require_binary(self) -> str:
         path = self.binary()
