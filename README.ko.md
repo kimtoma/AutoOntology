@@ -101,7 +101,8 @@ https://github.com/kimtoma/AutoOntology 를 ~/AutoOntology 에 클론하고 그 
 
 `--yes`는 묻지 않고 진행합니다. uv가 없으면 공식 설치 스크립트로 설치하고, `init`의 기본값을
 받아들이고, 예전 `quick`/`quick-docs` 샘플 소스(와 그 데이터베이스)를 교체합니다. 먼저
-확인받고 싶으면 `--yes` 없이 직접 터미널에서 실행하세요.
+확인받고 싶으면 `--yes` 없이 직접 터미널에서 실행하세요. 빈 폴더에서 실측한 전체 시간은 9분 34초였습니다(Apple M4 Mac
+mini, 2026-10-29, uv 캐시 있음, quickstart 빌드만 547초).
 
 영어로는:
 
@@ -135,8 +136,8 @@ Google Vertex AI, API 키로 설정한 Claude Code는 여기서 `loggedIn: false
 - Anthropic으로 보내는 것: 빌드 프롬프트입니다. 여기에는 표·컬럼 이름, 샘플 값, 문서 본문이
   들어가며 조직의 약관이 적용됩니다. 나머지(Postgres, Ollama 임베딩, 파일, 스냅샷, 내보내기)는
   모두 내 컴퓨터에 남습니다.
-- 사용량은 다른 Claude Code 사용과 똑같이 조직 플랜 한도에 포함됩니다. quickstart는 호출 수십
-  회, 큰 문서 묶음은 수백 회입니다.
+- 사용량은 다른 Claude Code 사용과 똑같이 조직 플랜 한도에 포함됩니다. quickstart 빌드는 실측에서
+  호출 139번, hanbit 전체 샘플은 약 520번이었습니다.
 - 관리자가 Claude Code 사용을 제한했다면 로그인이나 호출이 실패합니다. `uv run autoontology
   doctor`의 `chat provider` 행에 해결 방법이 나옵니다.
 
@@ -203,8 +204,8 @@ codex의 경우 로그인 파일을 전용 codex 홈에 링크만 하고, codex�
   들어가며, 내 계정의 약관에 따라 Anthropic(claude)이나 OpenAI(codex)로 전송됩니다. 데이터가
   로컬에 머물러야 한다면 Ollama를 쓰세요.
 - **사용 한도가 적용됩니다.** 모든 호출이 요금제 한도에 포함됩니다. 한도에 닿으면 라우터가
-  429 `usage_limit`로 응답합니다. 초기화를 기다리거나 제공자를 바꾸세요. quickstart 샘플
-  빌드는 호출이 대략 100~150번, hanbit 전체는 약 500번이며, 큰 문서 묶음은 더 많습니다.
+  429 `usage_limit`로 응답합니다. 초기화를 기다리거나 제공자를 바꾸세요. quickstart 빌드는
+  호출 139번(2026-10-29 실측), hanbit 전체 샘플은 약 520번입니다.
 - **임베딩에는 여전히 Ollama나 OpenAI 호환 엔드포인트가 필요합니다**
   (`AUTOONTOLOGY_EMBED_PROVIDER=ollama`와 `bge-m3`가 기본값, 또는 `openai`). 이때 `setup`은
   임베딩 모델만 받습니다.

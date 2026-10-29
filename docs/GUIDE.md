@@ -10,6 +10,8 @@ guide was measured on an Apple M4 Mac mini with 16 GB of memory unless it says
 
 Contents:
 
+- [Start with one prompt](#start-with-one-prompt) (shortcut with Claude Code)
+
 1. [What you get in 10 minutes](#1-what-you-get-in-10-minutes)
 2. [Words we use](#2-words-we-use)
 3. [Before you start](#3-before-you-start)
@@ -41,7 +43,8 @@ Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scrip
 `--yes` makes it non-interactive: it installs uv with the official installer if it is
 missing, accepts `init`'s defaults and replaces earlier `quick`/`quick-docs` sample sources
 (and their database). Drop `--yes` to be asked first, and run the script in your own
-terminal then.
+terminal then. A measured run from an empty folder took 9 min 34 s (Apple M4 Mac mini,
+2026-10-29, uv cache warm; the quickstart build itself 547 s).
 
 In Korean:
 
@@ -78,7 +81,7 @@ up through Amazon Bedrock, Google Vertex AI or an API key reports `loggedIn: fal
   else stays on your computer: Postgres, the embeddings (Ollama), the files, the
   snapshots and the exports.
 - Usage counts against your organization's plan limits like any other Claude Code use;
-  the quickstart makes dozens of calls, large document sets make hundreds.
+  the quickstart build made 139 calls in our measured run, the full hanbit sample about 520.
 - If your administrator restricts Claude Code, the login or the calls fail; `uv run
   autoontology doctor` shows the `chat provider` row with the remedy.
 
