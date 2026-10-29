@@ -440,6 +440,9 @@ add or change sources -> build changed sources -> review -> apply -> export
 Once something is built, the start page (**Overview**, first in the sidebar) answers
 "what is new, and what needs me?":
 
+- **Operations notices** (at the top): decisions not applied yet (with **Apply**), changed
+  sources, a build older than 7 days, an export older than the latest revision, a failed
+  run. When nothing needs doing it is one line, "All clear".
 - **Ontology**: the revision, when it was built, the number of classes, relations,
   evidence sentences and documents, and what changed since the previous revision ("+2
   added −1 removed ~3 changed"). **View changes** lists them.
@@ -449,8 +452,6 @@ Once something is built, the start page (**Overview**, first in the sidebar) ans
   ("3 files added, 1 changed", "the database schema changed"). **Build changed sources**
   rebuilds only those sources and keeps every other step (a resume build).
 - **Recent activity**: the last builds, exports and applies.
-- **Operations notices**: decisions not applied yet (with **Apply**), changed sources, a
-  build older than 7 days, an export older than the latest revision, a failed run.
 
 ![Overview](screenshots/overview.png)
 
@@ -464,7 +465,7 @@ sidebar). The categories, in plain words:
 |---|---|---|
 | **Proposals** | The model thinks a document concept means the same as a table concept (for example 계약 = Contract), but the identity policy did not merge them on its own. | **Accept** merges them (or choose *related*, *narrower* or *broader* instead); **Reject** keeps them apart. |
 | **Relations** | A document concept is related to, broader or narrower than a table concept (for example 계약ID is related to Contract). | **Accept** makes the relation confirmed (the table concept counts as aligned); **Reject** removes it. |
-| **Unaligned** | Document concepts that match nothing in your tables (new ones first). | **Acknowledge** keeps it as a concept of its own and stops listing it. |
+| **Unaligned** | Document concepts that match nothing in your tables (new ones first). | **Keep separate** keeps it as a concept of its own and stops listing it. |
 | **Synonyms** | Names kept off a table concept's synonyms because they look like a column name, an ID or a number. | **Accept** makes the name a synonym; **Reject** keeps it off. |
 | **Sources** | A source whose files or schema changed since its last build. | **Build changed sources**. |
 | **Merged** | Document concepts the model merged into a table concept by itself. Nothing waits here, and the tab is not counted in the sidebar number. | **Reject** a wrong merge: the next apply takes it apart and removes the synonym it added. |
@@ -501,9 +502,9 @@ changed and applies the decisions made during the day:
 ```
 
 `build --resume` keeps every step whose inputs did not change, and `apply` writes no
-revision when no decision waits, so a quiet night costs almost nothing. `build` exits 1 on a partial run, so `apply` is skipped then. People keep
-reviewing during the day, in the browser or with `uv run autoontology review list` and
-`review accept <id>`.
+revision when no decision waits, so a quiet night costs almost nothing. `build` exits 1 on
+a partial run, so `apply` is skipped then. People keep reviewing during the day, in the
+browser or with `uv run autoontology review list` and `review accept <id>`.
 
 ## 9. When results look wrong
 

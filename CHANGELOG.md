@@ -28,11 +28,12 @@ behaviour).
   notices (a failed run, unapplied decisions with **Apply**, changed sources, a build older
   than 7 days, an export behind the latest revision). It refreshes every 30 s and when a
   run ends.
-- **Review page** (`/ui/review`, with the pending count on its sidebar entry): tabs for
-  Proposals, Relations, Unaligned, Synonyms and Sources; each card shows the concept and
+- **Review page** (`/ui/review`, with the pending count on its sidebar entry): six tabs,
+  Proposals, Relations, Unaligned, Synonyms, Sources and Merged (automatic folds, not
+  counted in the badge); each card shows the concept and
   its definition, the candidate Term and relation, the confidence, the rationale and up to
   three evidence quotes. **Accept** (as same, related, narrower or broader for proposals and
-  relations), **Reject**, **Acknowledge** (unaligned concepts) and **Undo**; `j`/`k` move,
+  relations), **Reject**, **Keep separate** (unaligned concepts) and **Undo**; `j`/`k` move,
   `a`/`r` decide. A banner applies the pending decisions (an `apply` run, no model call)
   and follows the run to the new revision. Category, filter and page live in the URL.
 - **Ontology page**: a revision selector (older revisions read their own snapshot) and a
@@ -45,21 +46,6 @@ behaviour).
   and the diff names the ends of changed axioms and merges (`subject_name`,
   `object_name`, `term_name`).
 - Run kind `apply` is labelled "Apply decisions" on the Build page and in the run sheet.
-
-### Changed
-
-- The `/settings` UI route is the Settings page (it used to redirect to `/status`).
-- The sidebar reads Overview, Review, Sources, Build, Ontology, Graph, Playground,
-  Exports, Status, Settings. The first-run **Get started** checklist left it: `/ui/`
-  shows the checklist only while there is no snapshot, and it stays at `/ui/setup`,
-  linked as **Setup guide** from Settings and the command menu (⌘K).
-
-### Fixed
-
-- Values the supervisor copied from `.env` into its children are now listed in
-  `AUTOONTOLOGY_DERIVED_ENV`, so a restarted service re-reads a rewritten `.env` instead of
-  keeping the old values as if they came from the shell.
-
 - **Remote access over Tailscale Serve**: `AUTOONTOLOGY_TAILSCALE_HOSTS` lists tailnet
   hostnames the Host guard accepts, only with the `Tailscale-User-Login` identity header
   (`tailscale_identity_required` otherwise, so Funnel traffic is refused);
@@ -92,6 +78,20 @@ behaviour).
 - **Source freshness**: `GET /api/sources/freshness[?refresh=1]` shows, per source,
   whether its inputs changed since the last build: files added, changed or removed, a
   schema change, a reader change, `never_built` or `unknown`.
+
+### Changed
+
+- The `/settings` UI route is the Settings page (it used to redirect to `/status`).
+- The sidebar reads Overview, Review, Sources, Build, Ontology, Graph, Playground,
+  Exports, Status, Settings. The first-run **Get started** checklist left it: `/ui/`
+  shows the checklist only while there is no snapshot, and it stays at `/ui/setup`,
+  linked as **Setup guide** from Settings and the command menu (⌘K).
+
+### Fixed
+
+- Values the supervisor copied from `.env` into its children are now listed in
+  `AUTOONTOLOGY_DERIVED_ENV`, so a restarted service re-reads a rewritten `.env` instead of
+  keeping the old values as if they came from the shell.
 
 ## 0.2.0 - 2026-10-29
 

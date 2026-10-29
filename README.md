@@ -443,7 +443,7 @@ After the first build the ontology is something you run, not a one-off export. T
    the model thinks means the same as a table Term, which the policy did not fold by
    itself), *Relations* (related, broader or narrower), *Unaligned* concepts, *Synonyms*
    kept off a Term, and stale *Sources*. Accept (choosing same, related, narrower or
-   broader), reject, acknowledge or undo; `j`/`k` move and `a`/`r` decide. From the
+   broader), reject, keep separate (unaligned) or undo; `j`/`k` move and `a`/`r` decide. From the
    command line: `autoontology review list`, `review accept <id>`, `review reject <id>`.
 4. **Apply.** **Apply** on the banner (or `autoontology apply`) writes the decisions into
    a new revision: decisions, merge and snapshot, with no model call (under a second on
