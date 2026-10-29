@@ -30,7 +30,13 @@ A vision model you set with `AUTOONTOLOGY_VISION_MODEL` (optional image descript
 pulled through Ollama and is subject to its own license.
 
 A hosted model you configure through `AUTOONTOLOGY_OPENAI_*` is subject to its provider's
-terms.
+terms. With `AUTOONTOLOGY_CHAT_PROVIDER=claude` or `codex`, AutoOntology runs the Claude Code
+(`claude`) or Codex (`codex`) command-line tool you installed and logged in to; neither tool
+is part of or redistributed with this repository, and their use is subject to Anthropic's
+or OpenAI's terms for your account.
+
+The sample PDFs and scanned sample images were typeset with the macOS AppleGothic font
+(the PDFs embed a subset of the glyphs used); see `samples/README.en.md`.
 
 ## Python and JavaScript dependencies (not redistributed)
 

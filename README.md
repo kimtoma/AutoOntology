@@ -2,118 +2,53 @@
 
 **English** | [한국어](README.ko.md)
 
-AutoOntology turns structured data (CSV, TSV, XLSX, XLS, JSON, Parquet, SQLite, or a
-Postgres/MySQL/Snowflake database) and unstructured documents (Markdown, text, HTML,
-CSV/TSV and legacy Word `.doc`, and with the optional kordoc engine HWP/HWPX/HWPML, PDF,
-DOCX, PPTX, XLS/XLSX and OCR of scanned PDFs and PNG/JPEG/WebP images) into **one
-ontology** (see [Supported formats](#supported-formats)). It is built
-on [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology), which compiles tables
-into business Terms. AutoOntology adds document concept extraction, aligns the document
-concepts to those Terms, and merges both into a single versioned snapshot. It exports the
-snapshot as RDF/OWL (Turtle, JSON-LD), GraphML, an
-[Apache Ossie](https://github.com/apache/ossie) bundle and an
-[Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
-bundle. Everything runs on your machine with Postgres + pgvector and Ollama, or with any
-OpenAI-compatible endpoint.
+AutoOntology builds **one ontology** from your tables and your documents together. Point it
+at spreadsheets, database exports or a Postgres database, and at the policies, manuals,
+minutes, slide decks and scans that explain them (HWP/HWPX, PDF, Word, PowerPoint, Excel,
+Markdown, HTML, images through OCR). It finds the business concepts in both, matches the
+document concepts to the tables' Terms, and saves one versioned snapshot you can browse,
+query and export as RDF/OWL, GraphML, [Apache Ossie](https://github.com/apache/ossie) and
+[Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md).
+It is built on [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology), which
+compiles tables into business Terms, and runs on your machine with Postgres + pgvector and
+a model of your choice: local Ollama, your Claude or ChatGPT subscription, or any
+OpenAI-compatible API.
 
-![Ontology page](docs/screenshots/ontology.png)
+**New here? Read the [step-by-step guide](docs/GUIDE.md)** ([한국어](docs/GUIDE.ko.md)). It is
+written for domain experts with no data-engineering background: words explained, a
+checklist, the 10-minute path, how to prepare your own files, and a troubleshooting table.
 
-## Features
-
-- **One build, one ontology.** `autoontology build` runs every registered source:
-  structured sources (load, register, ingest, compile), document sources (read, chunk,
-  extract, consolidate), then alignment, merge and a snapshot with a revision number.
-- **Structured path** through the NVIDIA Auto Ontology engine. Tables become Terms with
-  column attributes, and semantic foreign keys are detected even when the files declare no
-  constraints.
-- **Documents path** using a local LLM. Concepts, relations, business rules and processes
-  are extracted with verbatim evidence quotes, then merged across chunks and documents.
-- **Alignment.** Document concepts are matched to Terms by embedding retrieval plus an LLM
-  judge, under a conservative, versioned identity policy (`identity-v2.1`). Accepted
-  `same` concepts fold into their Term.
-- **Exports** of every snapshot to `exports/r<rev>/`: `ontology.ttl`, `ontology.jsonld`,
-  `ontology.graphml`, `ossie/` (validated against the Ossie JSON Schemas and round-tripped
-  through the engine's converter), `okf/` (validated for OKF v0.2 conformance),
-  `report.md`, the engine's own per-source exports in `upstream/`, and the `export.json`
-  marker.
-- **Web UI** at `/ui/`: Sources, Build (live log), Ontology (searchable concept list with
-  origin badges), Graph (3D with a 2D fallback), Playground, Exports (preview and
-  download) and Status.
-- **Playground**: chat with the ontology (retrieval with citations), natural language to
-  SQL against the structured sources, and a read-only SPARQL console over the snapshot.
-- **Providers**: Ollama by default (`qwen3:8b` + `bge-m3`), or any OpenAI-compatible API
-  (OpenAI, NVIDIA build.nvidia.com, vLLM, LM Studio).
-- **Local by design**: the service binds to 127.0.0.1 and rejects requests from other
-  hosts or origins.
-
-## Architecture
-
-```
-                 browser (/ui/)                  autoontology CLI
-                       |                                |
-                       v                                v
-  +--------------------------------------------------------------------------+
-  | AutoOntology service  127.0.0.1:7800   (FastAPI, autoontology.web)       |
-  |   /api  REST + SSE   /api/playground   /ui  React app   /v1 model router |
-  |   in-process: build pipeline, SQLite store (data/autoontology.db),       |
-  |               exporters (RDF, GraphML, Ossie, OKF), SPARQL (rdflib)      |
-  +--------------------------------------------------------------------------+
-        | HTTP /api/...         | imports auto_ontology        | /v1/chat/completions
-        v                       v  (ingest, compile, vectors)  v
-  +-----------------------+   +-----------------------+   +-------------------------+
-  | NVIDIA Auto Ontology  |   | Postgres 17+pgvector  |   | Ollama :11434, or an    |
-  | backend 127.0.0.1:3101|-->| autoontology (catalog)|   | OpenAI-compatible API   |
-  | (vendor/auto-ontology)|   | autoontology_src_<n>  |   | (chat + embeddings)     |
-  +-----------------------+   +-----------------------+   +-------------------------+
-```
-
-The engine is an unmodified git submodule. AutoOntology calls it over HTTP for
-connections, exports and NL-to-SQL, and imports it in-process for ingest, semantic
-compilation and the vector tables. Both the backend and the service send their chat calls
-through the service's `/v1` router, which forwards them to Ollama or to the configured
-OpenAI-compatible endpoint. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+![Get started page](docs/screenshots/home.png)
 
 ## Quickstart
 
-Prerequisites:
-
-- Python 3.12 and [uv](https://docs.astral.sh/uv/).
-- Docker, **or** your own Postgres 17 with the [pgvector](https://github.com/pgvector/pgvector)
-  extension available.
-- [Ollama](https://ollama.com) running locally. `setup` pulls `qwen3:8b` (about 5 GB) and
-  `bge-m3`. To use a hosted API instead, see the next section.
-- Optional: Node.js 20 or newer, for HWP/PDF/DOCX/PPTX documents and image OCR through
-  kordoc.
-
 ```
-git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git
-cd AutoOntology
-docker compose up -d            # or point POSTGRES_* in .env at your own Postgres
+git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git && cd AutoOntology
+docker compose up -d            # or point POSTGRES_* in .env at your own Postgres 17 + pgvector
 uv sync
-uv run autoontology init        # checks what is installed, writes .env, runs setup
-uv run autoontology demo        # builds the quickstart sample set and opens the web UI
+uv run autoontology init        # checks what is installed, picks a model, writes .env, runs setup
+uv run autoontology demo        # builds the quickstart sample set, exports it and opens the web UI
 ```
 
-What happens:
+You need Python 3.12 with [uv](https://docs.astral.sh/uv/), Docker or your own Postgres 17
+with [pgvector](https://github.com/pgvector/pgvector), [Ollama](https://ollama.com) (for
+embeddings, and for chat unless you use a subscription or an API) and, for HWP/PDF/Office
+documents and images, Node.js 20 or newer. The [guide](docs/GUIDE.md#3-before-you-start)
+has a checklist with "how to check" commands.
 
-- `init` goes through seven numbered steps and prints one status line for each: Postgres,
-  chat provider, embeddings, documents, `.env`, `setup`, summary. It detects which chat
-  providers you can use (a logged-in `claude` or `codex` CLI, a running Ollama) and
-  suggests the first ready one, in the order claude, codex, ollama. It writes only the keys
-  it needs into `.env` (lines and comments you wrote stay as they are; an existing file is
-  first copied to `.env.bak-<timestamp>`). It never asks for an API key: for the `openai`
-  provider, type `AUTOONTOLOGY_OPENAI_API_KEY=…` into `.env` yourself. `--yes` takes the
-  detected defaults without asking anything; `--provider`, `--chat-model`,
-  `--docs/--no-docs` and `--vision-model` preset the answers. Running it again is safe.
-- `demo` starts the services, registers the sample set (`quick` and `quick-docs`; with
-  `--set hanbit` the full company: `hanbit`, `hanbit-docs`, `hanbit-images`), prints how
-  long the first build should take with each chat provider, builds (with the time of every
-  step), exports and opens the web UI. Then look at **Ontology → Graph → Playground**.
-  `demo --resume` continues an interrupted build; `--no-open` does not open the browser.
-- `uv run autoontology provider status` shows every chat provider (available, logged in,
-  model, last test, what to do), `provider test` makes one test call, and
-  `provider use claude` switches the provider in `.env` (then restart with
-  `uv run autoontology down && uv run autoontology up`).
+- `init` goes through seven numbered steps (Postgres, chat provider, embeddings,
+  documents, `.env`, `setup`, summary). It detects which chat providers you can use and
+  suggests the first ready one (claude, codex, ollama). It writes only the keys it needs
+  into `.env` and backs up an existing file to `.env.bak-<timestamp>`. It never asks for an
+  API key. `--yes` takes the detected defaults; `--provider`, `--chat-model`,
+  `--docs/--no-docs` and `--vision-model` preset the answers. Running it again is safe and
+  keeps the provider already in `.env`.
+- `demo` starts the services, registers the sample set (`quick`, `quick-docs`; with
+  `--set hanbit`: `hanbit`, `hanbit-docs`, `hanbit-images`), prints the expected build
+  time per provider, builds with the time of every step, exports and opens the web UI.
+  `--resume` continues an interrupted build, `--replace` replaces sources of the same name
+  that hold other data, and `--no-open` keeps the browser closed. Then look at
+  **Ontology → Graph → Playground**.
 
 <details>
 <summary>Manual steps (what init/demo do)</summary>
@@ -129,56 +64,46 @@ uv run autoontology export
 uv run autoontology ui
 ```
 
-What to expect:
-
 - `up` starts the engine backend on :3101 and the service on :7800, both in the
   background. `down` stops them, and `status` shows them.
-- `build` takes the longest. With a local `qwen3:8b`, each document chunk takes one to two
-  minutes. The sample documents produce 9 chunks without kordoc and 28 with it, so on an
-  Apple-silicon machine the first build takes roughly 20 minutes without kordoc and 50
-  minutes with it. Later builds reuse everything that did not change.
-- The sample folder has three files that need kordoc (`.pdf`, `.hwp`, `.docx`). **If you
-  skipped `--docs`, `build` skips them, prints a warning naming them and the install
-  command, and still succeeds (exit 0)**:
-  `` warning: documents:<source>:read: 3 document(s) need kordoc and were skipped (...): run
-  `uv run autoontology tools install-kordoc`, then build again ``. A documents source whose
-  files all need kordoc is read as 0 documents with the same warning. To add them later,
-  run `uv run autoontology tools install-kordoc` and then `uv run autoontology build` (or
-  `build --resume`): kordoc's availability is part of the documents source's fingerprint,
-  so the documents are read again.
-- `export` prints the folder it wrote, for example `exports/r0001/`.
-- `ui` opens http://127.0.0.1:7800/ui/.
+- Without kordoc (`setup` without `--docs`), `build` skips the `.pdf`, `.hwp` and `.docx`
+  sample documents, prints a warning naming them and the install command, and still
+  succeeds (exit 0). kordoc's availability is part of the documents source's fingerprint,
+  so after `uv run autoontology tools install-kordoc` the next `build` (or
+  `build --resume`) reads them.
+- `export` prints the folder it wrote, for example `exports/r0001/`; `ui` opens
+  http://127.0.0.1:7800/ui/.
 
 </details>
 
-The sample data is a fictitious Korean trading company ("한빛상사"). `samples/quickstart`
-holds three related CSV files (customers, contracts, invoices) and its contract and billing
-rules as documents. `samples/hanbit` is the full set: nine files of related tables in seven formats (11 tables),
-fifteen documents in twelve formats and six images for OCR. See
-[samples/README.en.md](samples/README.en.md) ([한국어](samples/README.md)).
+### Language
 
-### Using an OpenAI-compatible API instead of Ollama
+The web UI speaks English and Korean: pick one with the globe menu in the header (or open
+`/ui/?lang=ko`). The choice is remembered in the browser; without one the UI follows the
+browser language. The onboarding commands (`init`, `demo`, `provider`, `setup`, `doctor`)
+print Korean when `AUTOONTOLOGY_LANG=ko` is set (shell or `.env`) or the locale (`LANG`,
+`LC_ALL`) is Korean; `AUTOONTOLOGY_LANG=en` forces English. Commands and error codes stay
+the same in both languages.
 
-Set these in `.env`. Type the key into the file yourself; never paste it into a chat or
-commit it. The example uses NVIDIA's hosted endpoints; the model id is a placeholder.
+## Choose a provider
 
-```
-AUTOONTOLOGY_CHAT_PROVIDER=openai
-AUTOONTOLOGY_OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1
-AUTOONTOLOGY_OPENAI_API_KEY=your-api-key-here
-AUTOONTOLOGY_OPENAI_CHAT_MODEL=<chat model id from build.nvidia.com>
-# keep local embeddings (bge-m3 via Ollama) ...
-AUTOONTOLOGY_EMBED_PROVIDER=ollama
-# ... or embed through the same endpoint:
-# AUTOONTOLOGY_EMBED_PROVIDER=openai
-# AUTOONTOLOGY_OPENAI_EMBED_MODEL=<embedding model id>
-```
+The chat provider is the model that compiles the tables, extracts the document concepts
+and judges the matches. Embeddings (finding similar concepts) always use Ollama's `bge-m3`
+(1.2 GB) or an OpenAI-compatible embedding endpoint.
 
-Then run `uv run autoontology doctor` to check the configuration, and restart with
-`down` / `up`. With both providers set to `openai`, `setup` skips Ollama entirely. Write
-model ids as the endpoint knows them; AutoOntology adds the `openai/` prefix the engine
-needs and strips it again in the router. The embedding dimension is fixed once the first
-source has been ingested (see Troubleshooting).
+| Provider | `AUTOONTOLOGY_CHAT_PROVIDER` | Cost | Data leaves the machine | quickstart / hanbit first build | Set up with |
+|---|---|---|---|---|---|
+| Ollama, local `qwen3:8b` | `ollama` (default) | free | no | [[QS_OLLAMA_BUILD]] / 3-4 h (estimate) | Ollama installed; `init` pulls the models |
+| Claude subscription (Claude Code CLI) | `claude` | your plan's usage limits | yes, to Anthropic | [[QS_CLAUDE_BUILD]] / [[HB_CLAUDE_BUILD]] | `claude auth login` |
+| ChatGPT subscription (Codex CLI) | `codex` | your plan's usage limits | yes, to OpenAI | [[QS_CODEX_BUILD]] / [[HB_CODEX_BUILD]] | `codex login` |
+| Any OpenAI-compatible API | `openai` | per use | yes, to that endpoint | depends on the endpoint | base URL, model, key in `.env` |
+
+Times were measured on an Apple M4 Mac mini (16 GB) from a fresh clone on 2026-10-29
+(see [Sample sets](#sample-sets)); "estimate" marks the ones we did not run.
+`uv run autoontology provider status` shows every provider (available, logged in, model,
+last test, what to do), `provider test` makes one test call, and `provider use <name>`
+switches the provider in `.env` (then restart with
+`uv run autoontology down && uv run autoontology up`).
 
 ### Using your Claude or ChatGPT subscription
 
@@ -227,59 +152,44 @@ What to know:
   `AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT` (2) calls run at once, each within
   `AUTOONTOLOGY_PROVIDER_TIMEOUT_S` (120 s).
 
-### Language
+### Using an OpenAI-compatible API
 
-The web UI speaks English and Korean: pick one with the globe menu in the header (or open
-`/ui/?lang=ko`). The choice is remembered in the browser; without one the UI follows the
-browser language. The onboarding commands (`init`, `demo`, `provider`, `setup`, `doctor`)
-print Korean when `AUTOONTOLOGY_LANG=ko` is set (shell or `.env`) or the locale (`LANG`,
-`LC_ALL`) is Korean; `AUTOONTOLOGY_LANG=en` forces English. Commands and error codes stay
-the same in both languages.
+Set these in `.env`. Type the key into the file yourself; never paste it into a chat or
+commit it. The example uses NVIDIA's hosted endpoints; the model id is a placeholder.
 
-## CLI reference
+```
+AUTOONTOLOGY_CHAT_PROVIDER=openai
+AUTOONTOLOGY_OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1
+AUTOONTOLOGY_OPENAI_API_KEY=your-api-key-here
+AUTOONTOLOGY_OPENAI_CHAT_MODEL=<chat model id from build.nvidia.com>
+# keep local embeddings (bge-m3 via Ollama) ...
+AUTOONTOLOGY_EMBED_PROVIDER=ollama
+# ... or embed through the same endpoint:
+# AUTOONTOLOGY_EMBED_PROVIDER=openai
+# AUTOONTOLOGY_OPENAI_EMBED_MODEL=<embedding model id>
+```
 
-| Command | What it does |
-|---|---|
-| `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | Step-by-step setup: checks Postgres (retry after `docker compose up -d`), detects and picks the chat provider, embeddings and documents, writes `.env` (other lines kept, previous file backed up) and runs `setup`. A provider and embeddings choice already in `.env` is kept (the recommendation is shown as a hint). `--yes` asks nothing; exits 2 with the fix when Postgres is down or the chosen CLI is not logged in. |
-| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | Starts the services (and prunes upstream connections whose `autoontology_src_*` database is gone; live ones no source here owns are only reported, since another checkout may share the catalog), registers the sample set's sources (already registered ones are kept; a source with the same name but other data is replaced only after you confirm, or with `--replace`, because its database and extracted concepts are deleted), prints the expected build time per provider, builds with per-step times, exports and opens the web UI. |
-| `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M]` | Shows every chat provider (available, logged in, model, last test, remedy), runs one test call, or switches the provider in `.env` (warns when a shell variable overrides the file). |
-| `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | Idempotent preparation: creates the catalog database and the `vector` and `pg_trgm` extensions, runs the migrations, pulls the Ollama models (and `AUTOONTOLOGY_VISION_MODEL` when set) and builds the `openai/qwen3:8b` alias, and with `--docs` installs kordoc and its OCR models (`--skip-ocr-models` leaves the models out). |
-| `autoontology doctor [--skip-models]` | Checks Postgres, pgvector, migrations, model endpoints, the vector tables, the ports and (with the services up) orphaned upstream connections. |
-| `autoontology up` / `down` / `status` | Starts, stops or shows the engine backend and the service. |
-| `autoontology ui [--no-browser]` | Prints the web UI URL and opens it. |
-| `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | Registers a source. Structured sources are loaded into `autoontology_src_<name>`. |
-| `autoontology source list` | Lists the sources. |
-| `autoontology source rm N [--drop-db] [--force]` | Removes a source; `--drop-db` also drops its database. For a documents source it first removes, from the upstream Terms, the synonyms that source's alignments added (manual aliases, other sources' aliases and aliases still covered by another source's accepted `same` alignment are kept). This needs the engine database; if it fails, the source is kept unless `--force` is given. When `--force` cannot delete the upstream connection (backend down), `--drop-db` keeps the database and tells you to run `tools prune-connections <database> --include-unowned --drop-db` later. |
-| `autoontology build [--source N ...] [--resume]` | Builds every source into one snapshot. `--source` rebuilds only the named sources (align, merge and snapshot still cover all of them). `--resume` continues the latest build and keeps steps whose inputs did not change (see [Resuming a build](#resuming-a-build)). |
-| `autoontology ontology` | Shows the latest snapshot: revision, sources and counts. |
-| `autoontology runs [--limit N]` | Shows recent runs and their steps. |
-| `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
-| `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
-| `autoontology tools build-ui` | Rebuilds the web UI into `autoontology/web/static/dist` (needs pnpm). |
-| `autoontology tools status` | Shows the kordoc engine and the Node binary in use. |
-| `autoontology tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | Deletes upstream connections named `autoontology_src_*` whose database is gone. Connections whose database exists but that no source in this checkout owns are listed and deleted only with `--include-unowned` (another checkout sharing the catalog may use them); `--drop-db` then also drops their databases. |
-| `autoontology version` | Prints the version. |
+Then run `uv run autoontology doctor` to check the configuration, and restart with
+`down` / `up`. With both providers set to `openai`, `setup` skips Ollama entirely. Write
+model ids as the endpoint knows them; AutoOntology adds the `openai/` prefix the engine
+needs and strips it again in the router. The embedding dimension is fixed once the first
+source has been ingested (see Troubleshooting).
 
-`build` exits 1 when a run is partial (for example a document failed to read or a chunk
-failed to extract), and prints a `--resume` hint. A partial run still saves its snapshot.
-Documents skipped only because kordoc is not installed are a warning, not a failure: the
-run succeeds and exits 0.
+## Sample sets
 
-### Resuming a build
+The sample data is a fictitious Korean trading company, "한빛상사" (Hanbit Trading); the
+content is in Korean. `demo --set <set>` (or **Get started → Load sample data** in the web
+UI) registers a set; [samples/README.en.md](samples/README.en.md)
+([한국어](samples/README.md)) describes every file and the relations between the tables.
 
-`build --resume` keeps a step only while its inputs are unchanged:
+| Set | Sources | Tables | Documents | Images | Document chunks | First build: ollama | claude | codex |
+|---|---|---|---|---|---|---|---|---|
+| `quickstart` | `quick`, `quick-docs` | 3 CSV files, 155 rows | 5 (MD, PDF, DOCX, HWP) | - | 28 (9 without kordoc) | [[QS_OLLAMA_BUILD]] | [[QS_CLAUDE_BUILD]] | [[QS_CODEX_BUILD]] |
+| `hanbit` | `hanbit`, `hanbit-docs`, `hanbit-images` | 9 files in 7 formats, 11 tables, 5,603 rows | 15 in 12 formats | 6 (OCR) | 132 + 9 from images (42 without kordoc) | 3-4 h (estimate) | [[HB_CLAUDE_BUILD]] | [[HB_CODEX_BUILD]] |
 
-- Files and documents are hashed. A documents source's fingerprint also includes whether
-  kordoc is available and, when it holds images or PDFs, whether the OCR models are ready.
-- A database-URL source's fingerprint includes its live schema, read from
-  `information_schema` for Postgres. If the database cannot be read, or it is MySQL or
-  Snowflake (no bundled driver), its steps always run again.
-- align, merge and snapshot also run again when the set of registered sources changed.
-- align runs again when the upstream Terms changed (a name, description, synonym or table
-  edited, or a Term added or removed; its own synonym and description writes do not count),
-  and judges again only the concepts whose candidate Terms changed.
+[[SAMPLE_TIMES_NOTE]]
 
-### Supported formats
+## Supported formats
 
 The kind of the source decides how a file is read, not its extension: a `.csv` in a
 structured source is a table; in a documents source it is a document. `GET /api/status`
@@ -301,75 +211,27 @@ warning, like documents that need kordoc: the build succeeds, and the next build
 also has a text layer yield no text until then. Setting `AUTOONTOLOGY_VISION_MODEL` later
 re-reads the images already stored so they get a description.
 
-## HTTP API
+## What the build does
 
-The service listens on `http://127.0.0.1:7800`. All JSON routes live under `/api`. Every
-error has the shape `{"error": <code>, "detail": <message>}`.
+```
+ tables: CSV, TSV, XLSX, XLS, JSON,                 documents: HWP/HWPX, PDF, DOCX, PPTX,
+ Parquet, SQLite, or a database URL                 XLS/XLSX, DOC, CSV, MD, TXT, HTML; images
+            |                                                    |
+   load -> register -> ingest -> compile               read -> extract -> consolidate
+   (into    (engine     (catalog  (LLM: Terms,          (native,  (LLM: concepts,  (merge
+   Postgres) connection) + vectors) semantic FKs)        kordoc,   relations,       duplicates)
+            |                                           OCR)      verbatim quotes)  |
+            +------------------ align: embeddings + LLM judge + identity policy ----+
+                                             |
+                                   merge -> snapshot (revision N)
+                                             |
+                  web UI: Ontology, Graph, Playground      export -> exports/rNNNN/
+                                                           (TTL, JSON-LD, GraphML, Ossie, OKF)
+```
 
-| Method and path | Purpose |
-|---|---|
-| `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, `ocr_ready`, `vision_model`, `formats` (every supported extension by source kind, with its engine) and a provider summary (never the key): `providers.chat` (`name`, `model`, `available`, `logged_in`, `detail`, `remedy`, `last_test`) and `providers.embed`. |
-| `POST /api/providers/test` | One test call (`{"answer": "pong"}`) through the active chat provider; 409 while another test runs. The result is kept as `last_test`. |
-| `GET /api/samples` | The sample sets in `samples/` (`quickstart`, `hanbit`): `[{set, path, sources: [{name, kind, path, files, bytes}], registered}]`. |
-| `POST /api/samples/load` | `{"set": "quickstart"}` registers that set's sources like `autoontology demo` (returns them with `action`: `created`, `kept` or `replaced`); 400 for an unknown set or a body that is not a JSON object, 409 while a run is active, and 409 `sample_conflict` (with `conflicts`: the differing locators) when a source with a sample name holds other data, unless the body has `"replace": true`. |
-| `GET /api/sources` | Lists the sources. |
-| `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
-| `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion or the alias cleanup fails or does not finish, like `source rm --force`). A documents source's alias additions are removed from the upstream Terms first, as with `source rm`. |
-| `POST /api/runs` | Starts a run: `{kind: "build", sources?, resume?}` or `{kind: "export", revision?, format?}`. |
-| `GET /api/runs`, `GET /api/runs/{id}` | Lists runs; shows one run with its steps. |
-| `GET /api/runs/{id}/events` | Server-sent events: the live log and step updates of a run. |
-| `POST /api/runs/{id}/cancel` | Cancels a run. |
-| `GET /api/ontology[?revision=]` | Snapshot header: revision, workspace, base IRI, sources and counts (404 `no_snapshot` before the first build). |
-| `GET /api/ontology/graph?layer=all\|structured\|documents\|aligned&evidence=&revision=` | The unified graph. Every node has an `origin`. |
-| `GET /api/ontology/concepts?q=&kind=&origin=&source=&page=&size=&revision=` | Terms and document concepts in one paged list. |
-| `GET /api/ontology/concepts/{term-…\|concept-…}[?revision=]` | One concept: definition, synonyms, columns, alignments, relations and evidence. |
-| `GET /api/exports` | The export folders and their files. |
-| `GET /api/exports/{rev}/{path}` | One exported file (`?inline=true` for a preview). |
-| `POST /api/playground/chat` | Chat with the ontology (SSE, with citations). |
-| `GET /api/playground/conversations[/{id}]`, `DELETE …/{id}` | Stored chats. |
-| `GET` / `POST /api/playground/index` | State of the retrieval index; rebuilds it. |
-| `POST /api/playground/sql` | Natural language to SQL through the engine (SSE): `{question, source?}`. |
-| `GET /api/playground/sparql/examples` | Example queries. |
-| `POST /api/playground/sparql` | `{query, limit?}` runs a read-only SPARQL query against the snapshot. |
-| `POST /v1/chat/completions`, `GET /v1/models` | The model router used by the engine; not meant for clients. |
-| `POST /ingest`, `POST /ingest/delete?database_name=` | Internal: callbacks from the engine when a connection is registered or deleted. They queue an ingest or a graph deletion; not meant for clients. |
-| `GET /health/live`, `GET /health` | Liveness and readiness. |
-
-## Export formats
-
-`autoontology export` writes everything below into `exports/r<rev:04d>/`, together with
-`export.json`, a marker that records the workspace, the revision, which export run
-wrote each format, and a `files` list of every file the exporter wrote.
-
-| File | Format | What it contains |
-|---|---|---|
-| `ontology.ttl` | [RDF 1.1 Turtle](https://www.w3.org/TR/turtle/) | OWL classes for Terms and document concepts, object and datatype properties, individuals (rules, processes), `rdfs:subClassOf` and `skos:related` axioms, `skos:altLabel` synonyms, and evidence nodes with quotes, all under the `ao:` namespace (`AUTOONTOLOGY_BASE_IRI`). It is checked by a parse round-trip. |
-| `ontology.jsonld` | [JSON-LD 1.1](https://www.w3.org/TR/json-ld11/) | The same graph as JSON-LD. |
-| `ontology.graphml` | [GraphML](http://graphml.graphdrawing.org/specification.html) | Nodes and edges with string attributes, for Gephi, yEd or networkx. Edge ids are `e0`, `e1`, ... and unique across the file. |
-| `ossie/semantic_model.yaml`, `ossie/ontology.yaml`, `ossie/mapping.yaml` | [Apache Ossie](https://github.com/apache/ossie) spec 0.2.0.dev0 | The structured sources' datasets merged into one semantic model; the unified ontology (Terms and document concepts as `EntityType`s, column and document relationships with verbalizations, `extends` for subclass axioms); object mappings for Terms whose dataset declares a key. `validation.json` holds the JSON Schema results, structural checks and the round-trip through the engine's Ossie converter. |
-| `okf/` | [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) | A Markdown bundle with YAML frontmatter: `index.md`, `log.md`, `concepts/*.md` (type `Business Concept`), `tables/<source>.<table>.md` (type `Table`) and `documents/*.md` (type `Document`), with relationships as bundle links and evidence as footnotes. `validation.json` holds the conformance report. |
-| `report.md` | Markdown | A human-readable summary: counts, sources, merged concepts and every file with its sha256. |
-| `upstream/<source>.model.yaml`, `upstream/<source>.ossie.zip` | Engine native | The engine's own exports per structured source, fetched at export time. |
-| `export.json` | JSON | The marker: workspace, revision, the export run that wrote each format, `files`, the list of every file the exporter wrote, and `file_sha256`, each file's hash. |
-
-Options:
-
-- `--format rdf|ossie|okf` rewrites only that format (`rdf` covers ttl, jsonld, graphml and
-  `upstream/`) and keeps the other formats' files from the previous export of the same
-  revision.
-- `--out DIR` writes `DIR/r<rev>/`.
-
-Re-exporting a revision replaces its folder only when every file in it, at any depth
-(inside `okf/`, `ossie/` and `upstream/` too), is on the `files` list of its
-`export.json` with the content it recorded (`file_sha256`). This holds under `exports/` as well as under `--out`. A folder with any other
-file, without `export.json`, or whose `export.json` has no `files` list (an export from
-before this list existed) is refused, and nothing in it is removed. During the swap the
-previous folder is renamed to `r<NNNN>.prev-<timestamp>-<run>` and deleted once the new
-one is in place; the export run is `succeeded` only after that (a backup that cannot be
-deleted is left with a warning). An export interrupted between the two renames is restored
-from its `.prev-*` backup when the service starts, or by the next export.
-
-## How the unified ontology is built
+`uv run autoontology build` (or **Start build** in the web UI) runs every registered source
+in one run and saves one snapshot. Each step's time is shown live in the CLI and on the
+Build page.
 
 1. **Terms (structured).** Each structured source is loaded into its own Postgres
    database. The engine ingests the catalog and compiles a semantic layer: business Terms
@@ -410,7 +272,147 @@ from its `.prev-*` backup when the service starts, or by the next export.
 With the samples, the judge accepts 계약 → Contracts, 고객 → Customers and
 청구서 → Invoices, so all three Terms show as `aligned`.
 
-## Playground
+### Resuming a build
+
+`build --resume` keeps a step only while its inputs are unchanged:
+
+- Files and documents are hashed. A documents source's fingerprint also includes whether
+  kordoc is available and, when it holds images or PDFs, whether the OCR models are ready.
+- A database-URL source's fingerprint includes its live schema, read from
+  `information_schema` for Postgres. If the database cannot be read, or it is MySQL or
+  Snowflake (no bundled driver), its steps always run again.
+- align, merge and snapshot also run again when the set of registered sources changed.
+- align runs again when the upstream Terms changed (a name, description, synonym or table
+  edited, or a Term added or removed; its own synonym and description writes do not count),
+  and judges again only the concepts whose candidate Terms changed.
+
+## Reference
+
+### Architecture
+
+```
+                 browser (/ui/)                  autoontology CLI
+                       |                                |
+                       v                                v
+  +--------------------------------------------------------------------------+
+  | AutoOntology service  127.0.0.1:7800   (FastAPI, autoontology.web)       |
+  |   /api  REST + SSE   /api/playground   /ui  React app   /v1 model router |
+  |   in-process: build pipeline, SQLite store (data/autoontology.db),       |
+  |               exporters (RDF, GraphML, Ossie, OKF), SPARQL (rdflib)      |
+  +--------------------------------------------------------------------------+
+        | HTTP /api/...         | imports auto_ontology        | /v1/chat/completions
+        v                       v  (ingest, compile, vectors)  v
+  +-----------------------+   +-----------------------+   +-------------------------+
+  | NVIDIA Auto Ontology  |   | Postgres 17+pgvector  |   | Ollama :11434, or an    |
+  | backend 127.0.0.1:3101|-->| autoontology (catalog)|   | OpenAI-compatible API   |
+  | (vendor/auto-ontology)|   | autoontology_src_<n>  |   | (chat + embeddings)     |
+  +-----------------------+   +-----------------------+   +-------------------------+
+```
+
+The engine is an unmodified git submodule. AutoOntology calls it over HTTP for
+connections, exports and NL-to-SQL, and imports it in-process for ingest, semantic
+compilation and the vector tables. Both the backend and the service send their chat calls
+through the service's `/v1` router, which forwards them to Ollama or to the configured
+OpenAI-compatible endpoint. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### CLI reference
+
+| Command | What it does |
+|---|---|
+| `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | Step-by-step setup: checks Postgres (retry after `docker compose up -d`), detects and picks the chat provider, embeddings and documents, writes `.env` (other lines kept, previous file backed up) and runs `setup`. A provider and embeddings choice already in `.env` is kept (the recommendation is shown as a hint). `--yes` asks nothing; exits 2 with the fix when Postgres is down or the chosen CLI is not logged in. |
+| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | Starts the services (and prunes upstream connections whose `autoontology_src_*` database is gone; live ones no source here owns are only reported, since another checkout may share the catalog), registers the sample set's sources (already registered ones are kept; a source with the same name but other data is replaced only after you confirm, or with `--replace`, because its database and extracted concepts are deleted), prints the expected build time per provider, builds with per-step times, exports and opens the web UI. |
+| `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M]` | Shows every chat provider (available, logged in, model, last test, remedy), runs one test call, or switches the provider in `.env` (warns when a shell variable overrides the file). |
+| `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | Idempotent preparation: creates the catalog database and the `vector` and `pg_trgm` extensions, runs the migrations, pulls the Ollama models (and `AUTOONTOLOGY_VISION_MODEL` when set) and builds the `openai/qwen3:8b` alias, and with `--docs` installs kordoc and its OCR models (`--skip-ocr-models` leaves the models out). |
+| `autoontology doctor [--skip-models]` | Checks Postgres, pgvector, migrations, model endpoints, the vector tables, the ports and (with the services up) orphaned upstream connections. |
+| `autoontology up` / `down` / `status` | Starts, stops or shows the engine backend and the service. |
+| `autoontology ui [--no-browser]` | Prints the web UI URL and opens it. |
+| `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | Registers a source. Structured sources are loaded into `autoontology_src_<name>`. |
+| `autoontology source list` | Lists the sources. |
+| `autoontology source rm N [--drop-db] [--force]` | Removes a source; `--drop-db` also drops its database. For a documents source it first removes, from the upstream Terms, the synonyms that source's alignments added (manual aliases, other sources' aliases and aliases still covered by another source's accepted `same` alignment are kept). This needs the engine database; if it fails, the source is kept unless `--force` is given. When `--force` cannot delete the upstream connection (backend down), `--drop-db` keeps the database and tells you to run `tools prune-connections <database> --include-unowned --drop-db` later. |
+| `autoontology build [--source N ...] [--resume]` | Builds every source into one snapshot. `--source` rebuilds only the named sources (align, merge and snapshot still cover all of them). `--resume` continues the latest build and keeps steps whose inputs did not change (see [Resuming a build](#resuming-a-build)). |
+| `autoontology ontology` | Shows the latest snapshot: revision, sources and counts. |
+| `autoontology runs [--limit N]` | Shows recent runs and their steps. |
+| `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
+| `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
+| `autoontology tools build-ui` | Rebuilds the web UI into `autoontology/web/static/dist` (needs pnpm). |
+| `autoontology tools status` | Shows the kordoc engine and the Node binary in use. |
+| `autoontology tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | Deletes upstream connections named `autoontology_src_*` whose database is gone. Connections whose database exists but that no source in this checkout owns are listed and deleted only with `--include-unowned` (another checkout sharing the catalog may use them); `--drop-db` then also drops their databases. |
+| `autoontology version` | Prints the version. |
+
+`build` exits 1 when a run is partial (for example a document failed to read or a chunk
+failed to extract), and prints a `--resume` hint. A partial run still saves its snapshot.
+Documents skipped only because kordoc is not installed are a warning, not a failure: the
+run succeeds and exits 0.
+
+### HTTP API
+
+The service listens on `http://127.0.0.1:7800`. All JSON routes live under `/api`. Every
+error has the shape `{"error": <code>, "detail": <message>}`.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, `ocr_ready`, `vision_model`, `formats` (every supported extension by source kind, with its engine) and a provider summary (never the key): `providers.chat` (`name`, `model`, `available`, `logged_in`, `detail`, `remedy`, `last_test`) and `providers.embed`. |
+| `POST /api/providers/test` | One test call (`{"answer": "pong"}`) through the active chat provider; 409 while another test runs. The result is kept as `last_test`. |
+| `GET /api/samples` | The sample sets in `samples/` (`quickstart`, `hanbit`): `[{set, path, sources: [{name, kind, path, files, bytes, formats}], registered, durations}]`; `durations` is the expected first-build time per chat provider, `{provider: {text, measured}}`. |
+| `POST /api/samples/load` | `{"set": "quickstart"}` registers that set's sources like `autoontology demo` (returns them with `action`: `created`, `kept` or `replaced`); 400 for an unknown set or a body that is not a JSON object, 409 while a run is active, and 409 `sample_conflict` (with `conflicts`: the differing locators) when a source with a sample name holds other data, unless the body has `"replace": true`. |
+| `GET /api/sources` | Lists the sources. |
+| `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
+| `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion or the alias cleanup fails or does not finish, like `source rm --force`). A documents source's alias additions are removed from the upstream Terms first, as with `source rm`. |
+| `POST /api/runs` | Starts a run: `{kind: "build", sources?, resume?}` or `{kind: "export", revision?, format?}`. |
+| `GET /api/runs`, `GET /api/runs/{id}` | Lists runs; shows one run with its steps. |
+| `GET /api/runs/{id}/events` | Server-sent events: the live log and step updates of a run. |
+| `POST /api/runs/{id}/cancel` | Cancels a run. |
+| `GET /api/ontology[?revision=]` | Snapshot header: revision, workspace, base IRI, sources and counts (404 `no_snapshot` before the first build). |
+| `GET /api/ontology/graph?layer=all\|structured\|documents\|aligned&evidence=&revision=` | The unified graph. Every node has an `origin`. |
+| `GET /api/ontology/concepts?q=&kind=&origin=&source=&page=&size=&revision=` | Terms and document concepts in one paged list. |
+| `GET /api/ontology/concepts/{term-…\|concept-…}[?revision=]` | One concept: definition, synonyms, columns, alignments, relations and evidence. |
+| `GET /api/exports` | The export folders and their files. |
+| `GET /api/exports/{rev}/{path}` | One exported file (`?inline=true` for a preview). |
+| `POST /api/playground/chat` | Chat with the ontology (SSE, with citations). |
+| `GET /api/playground/conversations[/{id}]`, `DELETE …/{id}` | Stored chats. |
+| `GET` / `POST /api/playground/index` | State of the retrieval index; rebuilds it. |
+| `POST /api/playground/sql` | Natural language to SQL through the engine (SSE): `{question, source?}`. |
+| `GET /api/playground/sparql/examples` | Example queries. |
+| `POST /api/playground/sparql` | `{query, limit?}` runs a read-only SPARQL query against the snapshot. |
+| `POST /v1/chat/completions`, `GET /v1/models` | The model router used by the engine; not meant for clients. |
+| `POST /ingest`, `POST /ingest/delete?database_name=` | Internal: callbacks from the engine when a connection is registered or deleted. They queue an ingest or a graph deletion; not meant for clients. |
+| `GET /health/live`, `GET /health` | Liveness and readiness. |
+
+### Export formats
+
+`autoontology export` writes everything below into `exports/r<rev:04d>/`, together with
+`export.json`, a marker that records the workspace, the revision, which export run
+wrote each format, and a `files` list of every file the exporter wrote.
+
+| File | Format | What it contains |
+|---|---|---|
+| `ontology.ttl` | [RDF 1.1 Turtle](https://www.w3.org/TR/turtle/) | OWL classes for Terms and document concepts, object and datatype properties, individuals (rules, processes), `rdfs:subClassOf` and `skos:related` axioms, `skos:altLabel` synonyms, and evidence nodes with quotes, all under the `ao:` namespace (`AUTOONTOLOGY_BASE_IRI`). It is checked by a parse round-trip. |
+| `ontology.jsonld` | [JSON-LD 1.1](https://www.w3.org/TR/json-ld11/) | The same graph as JSON-LD. |
+| `ontology.graphml` | [GraphML](http://graphml.graphdrawing.org/specification.html) | Nodes and edges with string attributes, for Gephi, yEd or networkx. Edge ids are `e0`, `e1`, ... and unique across the file. |
+| `ossie/semantic_model.yaml`, `ossie/ontology.yaml`, `ossie/mapping.yaml` | [Apache Ossie](https://github.com/apache/ossie) spec 0.2.0.dev0 | The structured sources' datasets merged into one semantic model; the unified ontology (Terms and document concepts as `EntityType`s, column and document relationships with verbalizations, `extends` for subclass axioms); object mappings for Terms whose dataset declares a key. `validation.json` holds the JSON Schema results, structural checks and the round-trip through the engine's Ossie converter. |
+| `okf/` | [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) | A Markdown bundle with YAML frontmatter: `index.md`, `log.md`, `concepts/*.md` (type `Business Concept`), `tables/<source>.<table>.md` (type `Table`) and `documents/*.md` (type `Document`), with relationships as bundle links and evidence as footnotes. `validation.json` holds the conformance report. |
+| `report.md` | Markdown | A human-readable summary: counts, sources, merged concepts and every file with its sha256. |
+| `upstream/<source>.model.yaml`, `upstream/<source>.ossie.zip` | Engine native | The engine's own exports per structured source, fetched at export time. |
+| `export.json` | JSON | The marker: workspace, revision, the export run that wrote each format, `files`, the list of every file the exporter wrote, and `file_sha256`, each file's hash. |
+
+Options:
+
+- `--format rdf|ossie|okf` rewrites only that format (`rdf` covers ttl, jsonld, graphml and
+  `upstream/`) and keeps the other formats' files from the previous export of the same
+  revision.
+- `--out DIR` writes `DIR/r<rev>/`.
+
+Re-exporting a revision replaces its folder only when every file in it, at any depth
+(inside `okf/`, `ossie/` and `upstream/` too), is on the `files` list of its
+`export.json` with the content it recorded (`file_sha256`). This holds under `exports/` as well as under `--out`. A folder with any other
+file, without `export.json`, or whose `export.json` has no `files` list (an export from
+before this list existed) is refused, and nothing in it is removed. During the swap the
+previous folder is renamed to `r<NNNN>.prev-<timestamp>-<run>` and deleted once the new
+one is in place; the export run is `succeeded` only after that (a backup that cannot be
+deleted is left with a warning). An export interrupted between the two renames is restored
+from its `.prev-*` backup when the service starts, or by the next export.
+
+### Playground
 
 - **Chat** answers questions about the latest snapshot. It retrieves the most relevant
   elements (Terms, concepts, rules, relations, evidence) and cites them; each citation
@@ -430,7 +432,7 @@ With the samples, the judge accepts 계약 → Contracts, 고객 → Customers a
     -d '{"query": "SELECT ?class ?label WHERE { ?class a owl:Class ; rdfs:label ?label } LIMIT 5"}'
   ```
 
-## Configuration
+### Configuration
 
 Copy `.env.example` to `.env`. Every value has a default. Precedence is: shell environment,
 then `.env`, then the built-in default.
@@ -502,10 +504,12 @@ are overridden.
 - **Small local models merge conservatively.** With `qwen3:8b`, extraction is slow (one to
   two minutes per chunk), and the identity policy deliberately prefers `related` over a wrong
   `same`. Expect review proposals rather than many folded concepts.
-- **OCR is tested on rendered pages only.** kordoc's built-in OCR (PP-OCRv5 korean) is
-  covered by an integration test on a page of the HWP fixture rendered to PNG, and was
-  checked by hand on the same kind of page embedded in an image-only PDF. Photos, skewed
-  or low-resolution scans and handwriting have not been tested.
+- **OCR is tested on generated images only.** kordoc's built-in OCR (PP-OCRv5 korean) is
+  covered by integration tests on a rendered HWP page and on the six hanbit images
+  (tilted, noisy contract and invoice scans, an org chart, a flow chart, a bar/line chart
+  and a whiteboard-style table), and was checked by hand on an image-only PDF. Real camera
+  photos and handwriting have not been tested. Small misreadings happen (`ID` read as `D`),
+  and charts yield their labels and numbers, not their meaning.
 - **Legacy `.doc` support is text-only.** Images, text boxes, headers, footers and
   footnotes are not read, and an empty table cell can split a table row in two.
 - **Ossie and OKF are pre-1.0 specifications** (Ossie 0.2.0.dev0, OKF v0.2) and may change;
@@ -559,6 +563,9 @@ are overridden.
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
 ## Troubleshooting
+
+The [guide's troubleshooting table](docs/GUIDE.md#9-troubleshooting) lists every
+`doctor` and `init` remedy with its cause. The most common ones:
 
 | Symptom | Fix |
 |---|---|
