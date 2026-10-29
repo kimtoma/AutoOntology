@@ -160,3 +160,39 @@ def test_load_holds_the_workspace_while_registering(client, monkeypatch):
     monkeypatch.setattr(onboarding, "register_sample_set", register)
     assert c.post(f"{API}/samples/load", json={"set": "quickstart"}).status_code == 200
     assert seen == ["samples"] and manager.busy() is None
+
+
+def test_source_registration_during_a_sample_load_is_409_busy(client, monkeypatch, tmp_path):
+    """A JSON `POST /api/sources` while a sample load holds the workspace is refused (409
+    `busy`) instead of registering a source the load could then remove."""
+    from autoontology import onboarding
+
+    c, settings, manager = client
+    other = tmp_path / "mine"
+    other.mkdir()
+    (other / "a.md").write_text("# a\n", encoding="utf-8")
+    answers = []
+    real = onboarding.register_sample_set
+
+    def register(*a, **kw):
+        answers.append(
+            c.post(
+                f"{API}/sources",
+                json={"name": "quick-docs", "kind": "documents", "locator": str(other)},
+            )
+        )
+        return real(*a, **kw)
+
+    monkeypatch.setattr(onboarding, "register_sample_set", register)
+    resp = c.post(f"{API}/samples/load", json={"set": "quickstart"})
+    assert resp.status_code == 200, resp.text
+    assert [s["action"] for s in resp.json()["sources"]] == ["created", "created"]
+    assert answers[0].status_code == 409 and answers[0].json()["error"] == "busy"
+    sample = (Path(settings.samples_dir) / "quickstart" / "documents").resolve()
+    src = Store.for_home(settings.home).get_source("quick-docs")
+    assert str(sample) in src.locator
+    assert manager.busy() is None
+    # once the load is done, registration works again
+    ok = c.post(f"{API}/sources", json={"name": "mine", "kind": "documents", "locator": str(other)})
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["active_run"] is None and manager.busy() is None

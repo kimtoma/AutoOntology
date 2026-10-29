@@ -917,11 +917,23 @@ def _validation_text(exc: Exception) -> str:
 
 
 def _add_locator(api: Api, body: SourceIn) -> dict[str, Any]:
+    validate_name(body.name, body.kind)
+    try:  # a sample load holds the workspace: it may remove a source of this name
+        api.runs.claim(body.name, "register")
+    except RunStartError as exc:
+        raise ApiError(409, "busy", f"{exc}; try again when it has finished") from exc
+    try:
+        source = _add_locator_claimed(api, body)
+    finally:
+        api.runs.release(body.name)
+    return api.source_dict(source)
+
+
+def _add_locator_claimed(api: Api, body: SourceIn) -> Any:
     from autoontology.engine.extract import ensure_documents_source
     from autoontology.structured import pipeline
     from autoontology.structured.loaders import LoadError
 
-    validate_name(body.name, body.kind)
     if api.store.get_source(body.name):
         raise ApiError(409, "source_exists", f"source {body.name!r} already exists")
     try:
@@ -940,7 +952,7 @@ def _add_locator(api: Api, body: SourceIn) -> dict[str, Any]:
             )
     except (LoadError, ValueError) as exc:
         raise ApiError(400, "invalid_source", mask(str(exc))) from exc
-    return api.source_dict(source)
+    return source
 
 
 async def _add_upload(api: Api, form: Any) -> dict[str, Any]:

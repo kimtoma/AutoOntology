@@ -10,6 +10,7 @@ images}``) that ``demo`` and ``POST /api/samples/load`` register (:func:`registe
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import io
 import os
@@ -270,7 +271,7 @@ class EnvFile:
             while backup.exists():
                 n += 1
                 backup = target.with_name(f"{target.name}.bak-{stamp}-{n}")
-            shutil.copy2(target, backup)
+            _private_copy(target, backup)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.tmp-")
         try:
@@ -289,6 +290,28 @@ class EnvFile:
         self.path, self.existed, self.original = target, True, text
         self.baseline = _parse(text)
         return backup
+
+
+def _private_copy(src: Path, dest: Path) -> None:
+    """Copy *src* to a new file *dest* that is 0600 from its creation (exclusive create,
+    so the umask never makes the credentials readable by others while they are written),
+    then copy *src*'s timestamps; a failed copy removes the partial file."""
+    data = src.read_bytes()
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view) :]
+        os.fsync(fd)
+    except BaseException:
+        os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(dest)
+        raise
+    os.close(fd)
+    st = src.stat()
+    with contextlib.suppress(OSError):
+        os.utime(dest, ns=(st.st_atime_ns, st.st_mtime_ns))
 
 
 SECRET_KEY_RE = re.compile(r"(KEY|PASSWORD|TOKEN|SECRET)", re.I)
@@ -492,7 +515,8 @@ def register_sample_set(
     """Register the sources of *set_name* idempotently. A source that already exists with
     the same kind and path is kept; one with another path (or kind) is removed (with its
     database and extracted concepts) and added again, but only with *replace*: otherwise
-    :class:`SampleConflict` is raised before anything changes. Returns
+    :class:`SampleConflict` is raised before anything changes (checked again right before
+    each removal, so a source registered meanwhile is never removed without it). Returns
     ``[(source, "created" | "kept" | "replaced")]``."""
     from autoontology.engine.extract import ensure_documents_source
     from autoontology.structured import pipeline
@@ -511,6 +535,20 @@ def register_sample_set(
                 out.append((current, "kept"))
                 say(f"{sample.name}: already registered ({sample.path})")
                 continue
+            if not replace:
+                # registered by someone else after the preflight: the consent covered
+                # nothing of it, so stop before anything is removed
+                old_path = _registered_path(current)
+                raise SampleConflict(
+                    [
+                        {
+                            "name": sample.name,
+                            "kind": current.kind,
+                            "registered": str(old_path) if old_path else current.locator,
+                            "sample": str(sample.path),
+                        }
+                    ]
+                )
             old = _registered_path(current) or current.locator
             say(
                 f"{sample.name}: registered for {old} ({current.kind}); replacing it with "

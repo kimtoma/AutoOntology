@@ -336,3 +336,82 @@ def test_duration_comment_and_hanbit_counts_are_current():
         if is_measured
     }
     assert measured == {("quickstart", "ollama"), ("quickstart", "claude"), ("hanbit", "claude")}
+
+
+def test_env_backup_is_0600_from_creation(tmp_path, monkeypatch):
+    """The backup holds the same credentials as `.env`: it is never readable by others,
+    not even while its bytes are being written (umask 022, traversable checkout)."""
+    path = tmp_path / ".env"
+    path.write_text(TEMPLATE + "AUTOONTOLOGY_OPENAI_API_KEY=sk-secret\n", encoding="utf-8")
+    os.chmod(path, 0o600)
+    old_umask = os.umask(0o022)
+    seen: list[tuple[str, int]] = []
+    real_write = os.write
+
+    def watching_write(fd, data):
+        seen.append(("", stat.S_IMODE(os.fstat(fd).st_mode)))
+        return real_write(fd, data)
+
+    monkeypatch.setattr(os, "write", watching_write)
+    try:
+        env = EnvFile.load(path)
+        env.set("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
+        backup = env.write(path)
+    finally:
+        os.umask(old_umask)
+        monkeypatch.undo()
+    assert backup is not None
+    assert seen and all(mode & 0o077 == 0 for _n, mode in seen)
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o600
+    assert "sk-secret" in backup.read_text(encoding="utf-8")
+
+
+def test_failed_env_backup_leaves_no_partial_file(tmp_path, monkeypatch):
+    path = tmp_path / ".env"
+    path.write_text(TEMPLATE, encoding="utf-8")
+    os.chmod(path, 0o600)
+    env = EnvFile.load(path)
+    env.set("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
+
+    def broken_write(fd, data):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "write", broken_write)
+    with pytest.raises(OSError):
+        env.write(path)
+    monkeypatch.undo()
+    assert not list(tmp_path.glob(".env.bak-*"))
+    assert path.read_text(encoding="utf-8") == TEMPLATE  # .env itself untouched
+
+
+def test_sample_load_never_removes_a_source_registered_after_the_preflight(
+    isolated_env, monkeypatch
+):
+    """replace=False: a different `quick-docs` registered between the conflict preflight
+    and the removal (another request) is a conflict, never silently replaced."""
+    settings = _settings(isolated_env, monkeypatch)
+    store = Store.for_home(settings.home)
+    removed: list[str] = []
+
+    def remove(settings, store, src, *, drop_db, notify):
+        removed.append(src.name)
+        store.delete_source(src.id)
+
+    other = Path(isolated_env) / "other-docs"
+    other.mkdir()
+    (other / "x.md").write_text("# x\n", encoding="utf-8")
+    real_preflight = onboarding.sample_conflicts
+
+    def preflight_then_concurrent_registration(*args, **kwargs):
+        out = real_preflight(*args, **kwargs)
+        from autoontology.engine.extract import ensure_documents_source
+
+        ensure_documents_source(store, "quick-docs", other)  # the interleaved request
+        return out
+
+    monkeypatch.setattr(onboarding, "sample_conflicts", preflight_then_concurrent_registration)
+    with pytest.raises(onboarding.SampleConflict) as conflict:
+        onboarding.register_sample_set(settings, store, "quickstart", remove=remove)
+    assert removed == []
+    assert [c["name"] for c in conflict.value.conflicts] == ["quick-docs"]
+    assert store.get_source("quick-docs") is not None
