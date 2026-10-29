@@ -278,6 +278,8 @@ export function OverviewDashboard({ ontology }: { ontology: OntologySummary }) {
   const exports = useQuery({ queryKey: keys.exports, queryFn: api.exports, refetchInterval: POLL })
   const fresh = useQuery({ queryKey: keys.freshness, queryFn: () => api.freshness(), refetchInterval: POLL })
   const pending = usePendingCount()
+  // the snapshot header itself (a build or an apply from the CLI moves it too)
+  useQuery({ queryKey: keys.ontology, queryFn: () => api.ontology(), retry: retryServerErrors, refetchInterval: POLL })
   const active = (runs.data ?? []).find(isActiveRun)
   useRunEnd(active?.id)
   const build = useBuildChanged(setRunId)
