@@ -47,7 +47,10 @@ export function ApplyBanner({ className }: { className?: string }) {
     announced.current = done.id
     if (done.status === "succeeded") {
       const rev = done.params.applied_revision
-      toast.success(typeof rev === "number" ? t("apply.done", { n: rev }) : t("apply.doneNoRevision"))
+      // nothing was pending (a decision undone meanwhile): merge and snapshot are skipped
+      const noop = done.steps.some((s) => s.name === "snapshot" && s.status === "skipped")
+      if (noop) toast.info(typeof rev === "number" ? t("apply.nothing", { n: rev }) : t("apply.doneNoRevision"))
+      else toast.success(typeof rev === "number" ? t("apply.done", { n: rev }) : t("apply.doneNoRevision"))
     } else {
       toast.error(t("apply.failed"), { description: done.error?.slice(0, 200) || undefined })
     }

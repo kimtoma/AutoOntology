@@ -507,7 +507,7 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | `autoontology ontology` | Shows the latest snapshot: revision, sources and counts. |
 | `autoontology review list [--category C] [--status pending\|decided\|all] [--limit N] [--json]` | Lists the review inbox (proposals, axioms, unaligned, aliases, stale sources). |
 | `autoontology review accept <id> [--relation same\|related\|narrower\|broader] [--term T] [--note N]` / `reject <id>` / `acknowledge <id>` / `undo <id>` | Records or removes a person's decision on one item. |
-| `autoontology apply` | Writes the pending decisions into a new revision (decisions, merge, snapshot) without any model call. |
+| `autoontology apply [--force]` | Writes the pending decisions into a new revision (decisions, merge, snapshot) without any model call; with nothing pending it writes none (`--force` writes one anyway). |
 | `autoontology runs [--limit N]` | Shows recent runs and their steps. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
@@ -540,7 +540,7 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 | `GET /api/sources` | Lists the sources. |
 | `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
 | `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion or the alias cleanup fails or does not finish, like `source rm --force`). A documents source's alias additions are removed from the upstream Terms first, as with `source rm`. |
-| `POST /api/runs` | Starts a run: `{kind: "build", sources?, resume?}`, `{kind: "export", revision?, format?}` or `{kind: "apply"}` (the review decisions into a new revision, no model call; 404 `no_snapshot` before the first build). |
+| `POST /api/runs` | Starts a run: `{kind: "build", sources?, resume?}`, `{kind: "export", revision?, format?}` or `{kind: "apply", force?}` (the review decisions into a new revision, no model call; merge and snapshot are skipped when nothing is pending; 404 `no_snapshot` before the first build). |
 | `GET /api/runs`, `GET /api/runs/{id}` | Lists runs; shows one run with its steps. |
 | `GET /api/runs/{id}/events` | Server-sent events: the live log and step updates of a run. |
 | `POST /api/runs/{id}/cancel` | Cancels a run. |
@@ -550,7 +550,7 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 | `GET /api/ontology/concepts/{term-…\|concept-…}[?revision=]` | One concept: definition, synonyms, columns, alignments, relations, evidence and `decisions` (who accepted or rejected it, when, and the revision that applied it). |
 | `GET /api/ontology/revisions[?limit=]` | The snapshots, newest first: revision, time, run kind (`build`, `apply`), counts and sources. |
 | `GET /api/ontology/diff[?from=&to=]` | What changed between two revisions (default: the latest against the one before): classes added, removed and changed (with the fields), axioms, merges, sources and the change in counts. |
-| `GET /api/review?category=&status=pending\|decided\|all&page=&size=` | The review inbox: `counts` per category, `unapplied`, and the items with concept, Term, relation, confidence, rationale, evidence and `decision`. |
+| `GET /api/review?category=&status=pending\|decided\|all&page=&size=` | The review inbox: `counts` per category, `unapplied`, and the items with concept, Term, relation, confidence, rationale, evidence and `decision`. `category=folds` lists the automatic merges (not in the badge); freshness is computed only for `category=stale_sources` or `?sources=1`. |
 | `GET /api/review/pending-count` | `{pending, counts, unapplied}` (the sidebar badge). |
 | `POST /api/review/{id}/decision`, `DELETE /api/review/{id}/decision` | Records `{decision: accept\|reject\|acknowledge, relation?, term_id?, note?}` on an item, or removes it. |
 | `GET /api/sources/freshness[?refresh=1]` | Per source: `state` (`fresh`, `stale`, `never_built`, `unknown`) and the reasons (files added, changed or removed, schema or reader changed), cached 60 s. |

@@ -405,7 +405,9 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
    `review reject <id>`.
 4. **적용.** 배너의 **적용**(또는 `autoontology apply`)이 결정을 새 리비전에 반영합니다: 결정,
    병합, 스냅샷 순서이며 모델 호출이 없습니다(quickstart 세트에서 1초 미만). 결정은 이후 빌드에서도
-   유지되며 align 판정이 덮어쓰지 않습니다.
+   유지되며 align 판정이 덮어쓰지 않습니다. 대기 중인 결정이 없으면 리비전을 만들지 않습니다
+   (`--force`로 강제). **병합됨** 탭에는 모델이 스스로 합친 개념이 있어 잘못된 병합을 거절할 수
+   있습니다(배지 숫자에는 들어가지 않음).
 5. **내보내기.** 최신 내보내기가 최신 리비전보다 오래되면 개요가 알려 줍니다.
 
 온톨로지 페이지에서 어떤 리비전이든 열고 그 리비전에서 무엇이 바뀌었는지(**r{n}에서 변경**) 볼 수
@@ -467,7 +469,7 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `autoontology ontology` | 최신 스냅샷의 리비전, 소스, 개수를 보여 줍니다. |
 | `autoontology review list [--category C] [--status pending\|decided\|all] [--limit N] [--json]` | 검토 대기 항목(제안, 관계, 미정렬, 동의어, 바뀐 소스)을 보여 줍니다. |
 | `autoontology review accept <id> [--relation same\|related\|narrower\|broader] [--term T] [--note N]` / `reject <id>` / `acknowledge <id>` / `undo <id>` | 항목 하나에 대한 사람의 결정을 기록하거나 지웁니다. |
-| `autoontology apply` | 대기 중인 결정을 새 리비전에 반영합니다(결정, 병합, 스냅샷). 모델을 호출하지 않습니다. |
+| `autoontology apply [--force]` | 대기 중인 결정을 새 리비전에 반영합니다(결정, 병합, 스냅샷). 모델을 호출하지 않습니다. 대기 중인 결정이 없으면 리비전을 만들지 않습니다(`--force`는 강제로 만듦). |
 | `autoontology runs [--limit N]` | 최근 실행과 그 단계들을 보여 줍니다. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
@@ -499,7 +501,7 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `GET /api/sources` | 소스 목록. |
 | `POST /api/sources` | 소스 추가: JSON `{name, kind: files\|database\|documents, locator, recursive?}` 또는 multipart 업로드. |
 | `DELETE /api/sources/{name}` | 소스 제거(`?drop_db=true`는 데이터베이스도 삭제, `&force=true`는 `source rm --force`처럼 엔진의 그래프 삭제나 별칭 정리가 실패하거나 끝나지 않아도 로컬에서 제거). 문서 소스는 `source rm`과 마찬가지로 먼저 업스트림 용어에서 그 소스가 추가한 별칭을 지웁니다. |
-| `POST /api/runs` | 실행 시작: `{kind: "build", sources?, resume?}`, `{kind: "export", revision?, format?}` 또는 `{kind: "apply"}`(검토 결정을 새 리비전에 반영, 모델 호출 없음; 첫 빌드 전에는 404 `no_snapshot`). |
+| `POST /api/runs` | 실행 시작: `{kind: "build", sources?, resume?}`, `{kind: "export", revision?, format?}` 또는 `{kind: "apply", force?}`(검토 결정을 새 리비전에 반영, 모델 호출 없음; 대기 결정이 없으면 merge·snapshot을 건너뜀; 첫 빌드 전에는 404 `no_snapshot`). |
 | `GET /api/runs`, `GET /api/runs/{id}` | 실행 목록, 그리고 단계가 포함된 실행 하나. |
 | `GET /api/runs/{id}/events` | 서버 전송 이벤트(SSE): 실행의 실시간 로그와 단계 갱신. |
 | `POST /api/runs/{id}/cancel` | 실행 취소. |
@@ -509,7 +511,7 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `GET /api/ontology/concepts/{term-…\|concept-…}[?revision=]` | 개념 하나: 정의, 동의어, 컬럼, 매칭, 관계, 근거, `decisions`(누가 언제 수락·거절했고 어느 리비전에 적용됐는지). |
 | `GET /api/ontology/revisions[?limit=]` | 스냅샷 목록(최신 순): 리비전, 시각, 실행 종류(`build`, `apply`), 개수, 소스. |
 | `GET /api/ontology/diff[?from=&to=]` | 두 리비전 사이의 변경(기본값: 최신과 그 직전): 추가·삭제·변경된 클래스(바뀐 필드 포함), 공리, 병합, 소스, 개수 변화. |
-| `GET /api/review?category=&status=pending\|decided\|all&page=&size=` | 검토 대기 목록: 분류별 `counts`, `unapplied`, 항목(개념, 용어, 관계, 신뢰도, 근거 설명, 근거 인용, `decision`). |
+| `GET /api/review?category=&status=pending\|decided\|all&page=&size=` | 검토 대기 목록: 분류별 `counts`, `unapplied`, 항목(개념, 용어, 관계, 신뢰도, 근거 설명, 근거 인용, `decision`). `category=folds`는 자동 병합 목록(배지에 안 셈), 신선도는 `category=stale_sources`나 `?sources=1`일 때만 계산. |
 | `GET /api/review/pending-count` | `{pending, counts, unapplied}`(사이드바 배지). |
 | `POST /api/review/{id}/decision`, `DELETE /api/review/{id}/decision` | 항목에 `{decision: accept\|reject\|acknowledge, relation?, term_id?, note?}`를 기록하거나 지웁니다. |
 | `GET /api/sources/freshness[?refresh=1]` | 소스별 `state`(`fresh`, `stale`, `never_built`, `unknown`)와 이유(파일 추가·변경·삭제, 스키마·읽기 설정 변경), 60초 캐시. |

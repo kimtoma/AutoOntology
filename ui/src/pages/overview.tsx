@@ -21,7 +21,7 @@ import { useRunEnd } from "@/hooks/use-run-events"
 import { useBuildChanged, useReviewActions } from "@/hooks/use-review"
 import { useNow } from "@/hooks/use-now"
 import { fmtDate, fmtNumber, useT, type MessageKey } from "@/i18n"
-import { api, errorMessage, REVIEW_CATEGORIES, type OntologySummary, type RunRequest } from "@/lib/api"
+import { api, errorMessage, WAITING_CATEGORIES, type OntologySummary, type RunRequest } from "@/lib/api"
 import { isActiveRun } from "@/lib/checklist"
 import { fmtSeconds, RUN_LABEL, runSeconds } from "@/lib/labels"
 import { ago, deltaSummary, freshnessText, opsNotices, staleSources, type Notice } from "@/lib/ops"
@@ -117,7 +117,7 @@ function ConfirmCard({ onBuild }: { onBuild: (sources: string[]) => void }) {
              action={<Button size="sm" variant="ghost" asChild><Link to="/review" id="btn-open-review">{t("overview.confirm.open")} <ArrowRight aria-hidden /></Link></Button>}>
       {counts && (
         <ul className="flex flex-wrap gap-1.5" id="ops-review-counts">
-          {REVIEW_CATEGORIES.map((c) => (
+          {WAITING_CATEGORIES.map((c) => (
             <li key={c}>
               <Link to={`/review?category=${c}`} data-category={c} data-count={counts[c]}
                     className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs hover:bg-accent",

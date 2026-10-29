@@ -47,7 +47,7 @@ const DIFF = {
             totals: { added: 1, removed: 0 } },
   sources: { added: [], removed: [] }, counts_delta: { classes: -1 },
 }
-const COUNTS = (axioms: number) => ({ proposals: 0, axioms, unaligned: 1, aliases: 0, stale_sources: 1, total: axioms + 2 })
+const COUNTS = (axioms: number) => ({ proposals: 0, axioms, unaligned: 1, aliases: 0, stale_sources: 1, folds: 3, total: axioms + 2 })
 const item = (n: number): ReviewItem => ({
   id: `ax:c${n}`, category: "axioms",
   concept: { id: `c${n}`, node: `concept-c${n}`, name: `계약ID${n}`, kind: "attribute", source: "quick-docs", definition: "계약 식별자." },
@@ -214,10 +214,41 @@ describe("Review page", () => {
     expect(await screen.findByText("Revision 4 written", {}, { timeout: 4000 })).toBeInTheDocument()
   })
 
+  it("lists automatic merges in a sixth tab and says when there was nothing to apply", async () => {
+    const user = userEvent.setup()
+    const fold: ReviewItem = { ...item(9), id: "fold:c9", category: "folds", relation: "same" }
+    let polls = 0
+    mockFetch(dashboardRoutes({
+      "GET /review": (url: string) => (url.includes("category=folds") ? LISTING([fold]) : LISTING([item(1)])),
+      "GET /review/pending-count": { pending: 3, counts: COUNTS(1), unapplied: 1 },
+      "POST /runs": { run_id: "ap2" },
+      "GET /runs/ap2": () => {
+        polls += 1
+        return { id: "ap2", kind: "apply", status: "succeeded", started_at: NOW, finished_at: NOW, error: null,
+                 params: { applied_revision: 3 }, managed: true, progress: {}, source: null,
+                 steps: [{ name: "decisions", status: "succeeded", started_at: NOW, finished_at: NOW, detail: {} },
+                         { name: "merge", status: "skipped", started_at: null, finished_at: null, detail: {} },
+                         { name: "snapshot", status: "skipped", started_at: null, finished_at: null, detail: {} }] }
+      },
+    }))
+    renderPage(<><ReviewPage /><Toaster /></>, "/review")
+    const tabs = await screen.findAllByRole("tab")
+    expect(tabs.map((x) => x.getAttribute("data-tab"))).toEqual(
+      ["proposals", "axioms", "unaligned", "aliases", "stale_sources", "folds"])
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Merged/ })).toHaveTextContent("3"))
+    // no category in the URL: the first waiting one with items, never the merges
+    expect(screen.getByRole("tab", { name: /Relations/ })).toHaveAttribute("aria-selected", "true")
+    await user.click(screen.getByRole("tab", { name: /Merged/ }))
+    expect(await screen.findByText("계약ID9")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Apply" }))
+    expect(await screen.findByText("Nothing to apply: revision 3 is current", {}, { timeout: 4000 })).toBeInTheDocument()
+    expect(polls).toBeGreaterThan(0)
+  })
+
   it("shows the empty state with the last-checked time", async () => {
     mockFetch(dashboardRoutes({
-      "GET /review": LISTING([], { proposals: 0, axioms: 0, unaligned: 0, aliases: 0, stale_sources: 0, total: 0 }),
-      "GET /review/pending-count": { pending: 0, counts: { proposals: 0, axioms: 0, unaligned: 0, aliases: 0, stale_sources: 0, total: 0 }, unapplied: 0 },
+      "GET /review": LISTING([], { proposals: 0, axioms: 0, unaligned: 0, aliases: 0, stale_sources: 0, folds: 0, total: 0 }),
+      "GET /review/pending-count": { pending: 0, counts: { proposals: 0, axioms: 0, unaligned: 0, aliases: 0, stale_sources: 0, folds: 0, total: 0 }, unapplied: 0 },
     }))
     renderPage(<ReviewPage />, "/review")
     expect(await screen.findByText("Nothing to review")).toBeInTheDocument()

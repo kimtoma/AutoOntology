@@ -60,3 +60,11 @@ def test_diff_names_the_ends_of_axioms_and_merges():
     assert changed["object_name"] == labels["term-t-i"] != ""
     for m in revisions.diff(None, new)["merges"]["added"]:
         assert m["term_name"] == labels[m["term"]]
+
+
+def test_concept_detail_alignments_carry_the_axiom_status(ops):  # noqa: F811
+    c, _ = _client(ops)
+    rows = _rows(ops)
+    cid = rows["청구서"].concept_id
+    links = c.get(f"{API}/ontology/concepts/concept-{cid}").json()["alignments"]
+    assert [x.get("status") for x in links if x["relation"] != "same"] == ["proposed"]

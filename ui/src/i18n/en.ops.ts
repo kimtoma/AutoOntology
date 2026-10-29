@@ -96,12 +96,14 @@ export const enOps = {
   "review.tab.unaligned": "Unaligned",
   "review.tab.aliases": "Synonyms",
   "review.tab.stale_sources": "Sources",
+  "review.tab.folds": "Merged",
   "review.tabs": "Review categories",
   "review.help.proposals": "The model thinks these document concepts mean the same as a table concept, but the policy did not fold them on its own.",
   "review.help.axioms": "A document concept is related to, broader or narrower than a table concept. Accepting makes it an accepted relation.",
   "review.help.unaligned": "Document concepts that match nothing in the tables. Acknowledge one to keep it as its own class.",
   "review.help.aliases": "Names kept off a Term's synonyms (column names, IDs, numbers). Accept one to make it a synonym.",
   "review.help.stale_sources": "Sources whose files or schema changed since the last build. Build them to bring the ontology up to date.",
+  "review.help.folds": "Document concepts the model merged into a table concept by itself. Nothing waits here; reject a wrong merge and the next apply takes it apart.",
   "review.status": "Show",
   "review.status.pending": "To review",
   "review.status.decided": "Decided",
@@ -152,6 +154,7 @@ export const enOps = {
   "apply.running": "Applying… {step}",
   "apply.done": "Revision {n} written",
   "apply.doneNoRevision": "Decisions applied",
+  "apply.nothing": "Nothing to apply: revision {n} is current",
   "apply.failed": "Apply failed",
   "apply.busy": "Another run is active: try again when it ends.",
 
@@ -183,6 +186,7 @@ export const enOps = {
   "concept.decision.proposal": "Proposal: no one has decided yet",
   "concept.decision.by": "{who} · {date}",
   "concept.decision.open": "Open in Review",
+  "concept.decidedByPerson": "decided by a person",
 
   // Settings, setup
   "settings.setup": "Setup guide",

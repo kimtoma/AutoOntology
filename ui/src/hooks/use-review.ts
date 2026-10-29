@@ -24,7 +24,8 @@ function patchItem(qc: QueryClient, id: string, decision: Decision | null) {
 
 export const RELATIONS: AcceptRelation[] = ["same", "related", "narrower", "broader"]
 
-export const isAlignment = (item: ReviewItem) => item.category === "proposals" || item.category === "axioms"
+export const isAlignment = (item: ReviewItem) =>
+  item.category === "proposals" || item.category === "axioms" || item.category === "folds"
 
 /** The relation a proposal or relation item is accepted with by default: the suggested one. */
 export function suggestedRelation(item: ReviewItem): AcceptRelation {
@@ -48,8 +49,7 @@ export function useReviewActions() {
   const [announcement, setAnnouncement] = useState("")
   const decide = useMutation({
     mutationFn: ({ item, decision, relation }: DecideArgs) =>
-      api.decide(item.id, relation && (item.category === "proposals" || item.category === "axioms")
-        ? { decision, relation } : { decision }),
+      api.decide(item.id, relation && isAlignment(item) ? { decision, relation } : { decision }),
     onSuccess: (res, { item, decision }) => {
       patchItem(qc, item.id, res.decision)
       invalidateAfterDecision(qc)

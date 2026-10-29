@@ -17,7 +17,7 @@ import { keys, retryServerErrors, usePendingCount } from "@/hooks/queries"
 import { primaryDecision, suggestedRelation, useBuildChanged, useReviewActions } from "@/hooks/use-review"
 import { fmtDate, fmtNumber, useT } from "@/i18n"
 import {
-  api, REVIEW_CATEGORIES, type AcceptRelation, type ReviewCategory, type ReviewStatus,
+  api, REVIEW_CATEGORIES, WAITING_CATEGORIES, type AcceptRelation, type ReviewCategory, type ReviewStatus,
 } from "@/lib/api"
 
 export const PAGE_SIZE = 20
@@ -44,7 +44,7 @@ export default function ReviewPage() {
   // no category in the URL: the first one with something to review
   const urlCategory = params.get("category")
   const category: ReviewCategory = isCategory(urlCategory) ? urlCategory
-    : REVIEW_CATEGORIES.find((c) => (counts?.[c] ?? 0) > 0) ?? "proposals"
+    : WAITING_CATEGORIES.find((c) => (counts?.[c] ?? 0) > 0) ?? "proposals"
   const page = Math.max(1, Number(params.get("page") ?? 1) || 1)
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params)

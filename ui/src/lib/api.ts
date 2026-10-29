@@ -82,7 +82,7 @@ export type RunRequest =
   | { kind: "build"; sources?: string[] | null; resume?: boolean }
   | { kind: "export"; revision?: number | null; format?: ExportFormat }
   /** review decisions -> merge -> snapshot, no model call (engine/apply.py) */
-  | { kind: "apply" }
+  | { kind: "apply"; force?: boolean }
 
 /* --- ontology snapshot -------------------------------------------------------------------- */
 
@@ -115,6 +115,8 @@ export interface AlignmentLink {
   label: string
   confidence: number | null
   accepted: boolean
+  /** alignment axioms: proposed | accepted (by the judge) | decided (by a person) */
+  status?: "proposed" | "accepted" | "decided" | string
 }
 
 export interface ConceptItem {
@@ -201,8 +203,12 @@ export interface ConceptDecision {
 
 /* --- review inbox, revisions, freshness (web/review.py, revisions.py, freshness.py) -------- */
 
-export type ReviewCategory = "proposals" | "axioms" | "unaligned" | "aliases" | "stale_sources"
-export const REVIEW_CATEGORIES: ReviewCategory[] = ["proposals", "axioms", "unaligned", "aliases", "stale_sources"]
+export type ReviewCategory = "proposals" | "axioms" | "unaligned" | "aliases" | "stale_sources" | "folds"
+/** The review tabs. `folds` (automatic merges a person may reject) is listed only when asked
+    for and never counted in the badge total. */
+export const REVIEW_CATEGORIES: ReviewCategory[] = ["proposals", "axioms", "unaligned", "aliases", "stale_sources", "folds"]
+/** The categories that wait for a person (the badge and the Overview counts). */
+export const WAITING_CATEGORIES: ReviewCategory[] = ["proposals", "axioms", "unaligned", "aliases", "stale_sources"]
 export type DecisionKind = "alignment" | "alias" | "concept"
 export type DecisionValue = "accept" | "reject" | "acknowledge"
 export type AcceptRelation = "same" | "related" | "narrower" | "broader"

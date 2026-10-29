@@ -415,7 +415,7 @@ def test_review_accept_then_apply_flow(live, browser):
     card.wait_for()
     assert page.locator("#review-list [data-review-item]").count() >= 1
     tabs = page.locator("#review-tabs [data-tab]").evaluate_all("ts => ts.map(t => t.dataset.tab)")
-    assert tabs == ["proposals", "axioms", "unaligned", "aliases", "stale_sources"], tabs
+    assert tabs == ["proposals", "axioms", "unaligned", "aliases", "stale_sources", "folds"], tabs
     card.locator("[data-action=accept]").click()
     page.locator(f"[data-review-item='{first['id']}'][data-decided=accept]").wait_for()
     assert posts == [{"decision": "accept", "relation": first["relation"]}], posts

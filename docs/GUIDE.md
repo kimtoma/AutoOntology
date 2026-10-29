@@ -467,6 +467,7 @@ sidebar). The categories, in plain words:
 | **Unaligned** | Document concepts that match nothing in your tables (new ones first). | **Acknowledge** keeps it as a concept of its own and stops listing it. |
 | **Synonyms** | Names kept off a table concept's synonyms because they look like a column name, an ID or a number. | **Accept** makes the name a synonym; **Reject** keeps it off. |
 | **Sources** | A source whose files or schema changed since its last build. | **Build changed sources**. |
+| **Merged** | Document concepts the model merged into a table concept by itself. Nothing waits here, and the tab is not counted in the sidebar number. | **Reject** a wrong merge: the next apply takes it apart and removes the synonym it added. |
 
 Each card shows the concept and its definition, the candidate, the model's confidence and
 reasoning, and up to three sentences from the documents with the document and page. Use
@@ -482,7 +483,8 @@ not asked again about a concept a person decided.
 Decisions do not change the ontology until you **apply** them. The banner on the Review
 page (and the notice on the Overview) says how many wait; **Apply** writes a new revision
 from them: no model call, under a second on the quickstart sample (about a minute on a
-large ontology, estimate). The Overview then shows the new revision and what changed.
+large ontology, estimate). With nothing pending (a decision undone meanwhile) it writes no
+revision and says "Nothing to apply". The Overview then shows the new revision and what changed.
 `uv run autoontology apply` does the same from a terminal.
 
 On the **Ontology** page, the revision menu opens any earlier revision, and **Changed in
@@ -498,8 +500,8 @@ changed and applies the decisions made during the day:
 0 2 * * * cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
 ```
 
-`build --resume` keeps every step whose inputs did not change, so a quiet night costs
-almost nothing. `build` exits 1 on a partial run, so `apply` is skipped then. People keep
+`build --resume` keeps every step whose inputs did not change, and `apply` writes no
+revision when no decision waits, so a quiet night costs almost nothing. `build` exits 1 on a partial run, so `apply` is skipped then. People keep
 reviewing during the day, in the browser or with `uv run autoontology review list` and
 `review accept <id>`.
 

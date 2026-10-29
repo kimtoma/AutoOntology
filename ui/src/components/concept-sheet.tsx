@@ -161,7 +161,8 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
                 {other(a.with, a.label)}
                 <span className="text-xs text-muted-foreground">
                   {a.confidence != null && t("concept.confidence", { n: a.confidence.toFixed(2) })}
-                  {" · "}{a.accepted ? t("concept.accepted") : t("concept.proposal")}
+                  {" · "}{a.status === "decided" ? t("concept.decidedByPerson")
+                    : a.accepted ? t("concept.accepted") : t("concept.proposal")}
                 </span>
               </li>
             ))}
@@ -205,7 +206,7 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
 }
 
 const CATEGORY_OF_PREFIX: Record<string, string> = {
-  al: "proposals", ax: "axioms", un: "unaligned", alias: "aliases",
+  al: "proposals", ax: "axioms", un: "unaligned", alias: "aliases", fold: "folds",
 }
 
 function DecisionLine({ d }: { d: ConceptDecision }) {
