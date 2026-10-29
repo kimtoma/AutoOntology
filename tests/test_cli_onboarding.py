@@ -618,3 +618,61 @@ def test_setup_names_the_vision_model_even_when_models_are_skipped(isolated_env,
     res = runner.invoke(app, ["setup", "--skip-models"])
     assert res.exit_code == 0, res.output
     assert "vision model: gemma4:e4b skipped (--skip-models)" in res.output
+
+
+def test_provider_use_sets_embeddings_and_the_openai_endpoint(isolated_env, monkeypatch):
+    env = Path(isolated_env) / ".env"
+    env.write_text("AUTOONTOLOGY_CHAT_PROVIDER=claude\n")
+    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env))
+    res = runner.invoke(
+        app,
+        [
+            "provider",
+            "use",
+            "openai",
+            "--openai-chat-model",
+            "gpt-test",
+            "--base-url",
+            "https://api.test/v1/",
+            "--embed",
+            "openai",
+            "--embed-model",
+            "text-embedding-test",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    text = env.read_text()
+    assert "AUTOONTOLOGY_CHAT_PROVIDER=openai" in text
+    assert "AUTOONTOLOGY_OPENAI_CHAT_MODEL=gpt-test" in text
+    assert "AUTOONTOLOGY_OPENAI_BASE_URL=https://api.test/v1\n" in text
+    assert "AUTOONTOLOGY_EMBED_PROVIDER=openai" in text
+    assert "AUTOONTOLOGY_OPENAI_EMBED_MODEL=text-embedding-test" in text
+    assert "API key is never taken on the command line" in res.output
+    assert "/ui/settings" in res.output and "uv run autoontology restart" in res.output
+    for bad in (["--embed", "gemini"], ["--base-url", "ftp://x"], ["--embed-model", "a b"]):
+        assert runner.invoke(app, ["provider", "use", "claude", *bad]).exit_code == 2, bad
+
+
+def test_restart_runs_the_helper_in_the_foreground(isolated_env, monkeypatch):
+    import subprocess
+
+    calls = []
+
+    def call(argv, env):
+        calls.append((argv, env))
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", call)
+    monkeypatch.setenv("AUTOONTOLOGY_DERIVED_ENV", "REASONING_MODEL")
+    monkeypatch.setenv("REASONING_MODEL", "openai/derived")
+    res = runner.invoke(app, ["restart"])
+    assert res.exit_code == 0, res.output
+    argv, env = calls[0]
+    assert argv[1:3] == ["-m", "autoontology.engine.restart"] and "--home" in argv
+    assert "--only" not in argv and "REASONING_MODEL" not in env
+    runner.invoke(app, ["restart", "--only", "backend"])
+    assert calls[1][0][-2:] == ["--only", "backend"]
+    assert runner.invoke(app, ["restart", "--only", "service"]).exit_code == 2
+    monkeypatch.setattr(subprocess, "call", lambda argv, env: 1)
+    res = runner.invoke(app, ["restart"])
+    assert res.exit_code == 1 and "restart failed" in res.output

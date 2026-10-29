@@ -313,4 +313,25 @@ MESSAGES: dict[str, str] = {
     ),
     "provider.not_ready": "경고: {name} 준비 안 됨 ({note}): {remedy}",
     "provider.restart": "재시작: {command}",
+    "help.provider.use.embed": "임베딩 제공자: ollama | openai.",
+    "help.provider.use.embed_model": "해당 임베딩 제공자의 임베딩 모델.",
+    "help.provider.use.base_url": (
+        "OpenAI 호환 엔드포인트의 기본 URL (AUTOONTOLOGY_OPENAI_BASE_URL)."
+    ),
+    "help.provider.use.openai_chat_model": (
+        "OpenAI 호환 엔드포인트의 채팅 모델 (AUTOONTOLOGY_OPENAI_CHAT_MODEL)."
+    ),
+    "help.restart": (
+        "서비스와 백엔드를 재시작해 둘 다 현재 .env를 읽게 합니다 (제공자를 바꾼 뒤)."
+    ),
+    "help.restart.only": "이 프로세스만 재시작합니다: backend.",
+    "provider.unknown_embed": "알 수 없는 임베딩 제공자 {name!r}: {choices} 중에서 고르세요",
+    "provider.bad_url": "{flag} {value!r}은(는) http:// 또는 https:// URL이어야 합니다",
+    "provider.key_hint": (
+        "API 키는 명령줄로 받지 않습니다: 설정 페이지({url})에서 입력하거나 {path}에 "
+        "AUTOONTOLOGY_OPENAI_API_KEY를 직접 입력하세요"
+    ),
+    "provider.restart_short": "또는: `uv run autoontology restart`",
+    "restart.failed": "재시작 실패 (종료 코드 {code}); 로그: {log}",
+    "restart.bad_only": "--only는 {choices} 중 하나여야 합니다 (받은 값 {value!r})",
 }

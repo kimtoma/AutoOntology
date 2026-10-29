@@ -334,4 +334,26 @@ MESSAGES: dict[str, str] = {
     ),
     "provider.not_ready": "warning: {name} is not ready ({note}): {remedy}",
     "provider.restart": "restart: {command}",
+    "help.provider.use.embed": "Embedding provider: ollama | openai.",
+    "help.provider.use.embed_model": "Embedding model of that embedding provider.",
+    "help.provider.use.base_url": (
+        "Base URL of the OpenAI-compatible endpoint (AUTOONTOLOGY_OPENAI_BASE_URL)."
+    ),
+    "help.provider.use.openai_chat_model": (
+        "Chat model of the OpenAI-compatible endpoint (AUTOONTOLOGY_OPENAI_CHAT_MODEL)."
+    ),
+    "help.restart": (
+        "Restart the service and the backend so both load the current .env (after a "
+        "provider change)."
+    ),
+    "help.restart.only": "Restart only this process: backend.",
+    "provider.unknown_embed": "unknown embedding provider {name!r}: choose one of {choices}",
+    "provider.bad_url": "{flag} {value!r} must be an http:// or https:// URL",
+    "provider.key_hint": (
+        "the API key is never taken on the command line: enter it on the Settings page "
+        "({url}) or type AUTOONTOLOGY_OPENAI_API_KEY into {path} yourself"
+    ),
+    "provider.restart_short": "or: `uv run autoontology restart`",
+    "restart.failed": "restart failed (exit {code}); log: {log}",
+    "restart.bad_only": "--only must be one of {choices}, got {value!r}",
 }

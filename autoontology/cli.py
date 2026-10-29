@@ -1357,21 +1357,56 @@ def provider_test(
 def provider_use(
     name: str = typer.Argument(..., help="ollama | claude | codex | openai"),
     chat_model: str = typer.Option(None, "--chat-model", help=msg("help.provider.use.chat_model")),
+    embed: str = typer.Option(None, "--embed", help=msg("help.provider.use.embed")),
+    embed_model: str = typer.Option(
+        None, "--embed-model", help=msg("help.provider.use.embed_model")
+    ),
+    base_url: str = typer.Option(None, "--base-url", help=msg("help.provider.use.base_url")),
+    openai_chat_model: str = typer.Option(
+        None, "--openai-chat-model", help=msg("help.provider.use.openai_chat_model")
+    ),
 ) -> None:
     """Switch the chat provider in .env (comments and other lines are kept)."""
+    import re
+
     from autoontology import onboarding
-    from autoontology.config import CHAT_MODEL_RE, CHAT_PROVIDERS, CLI_PROVIDERS, env_file_path
+    from autoontology.config import (
+        CHAT_MODEL_RE,
+        CHAT_PROVIDERS,
+        CLI_PROVIDERS,
+        EMBED_PROVIDERS,
+        env_file_path,
+    )
 
     if name not in CHAT_PROVIDERS:
         _fail(msg("provider.unknown", name=name, choices=", ".join(CHAT_PROVIDERS)), code=2)
-    if chat_model is not None and not CHAT_MODEL_RE.fullmatch(chat_model):
-        _fail(msg("init.bad_model", flag="--chat-model", value=chat_model), code=2)
+    if embed is not None and embed not in EMBED_PROVIDERS:
+        _fail(msg("provider.unknown_embed", name=embed, choices=", ".join(EMBED_PROVIDERS)), code=2)
+    for flag, value in (
+        ("--chat-model", chat_model),
+        ("--embed-model", embed_model),
+        ("--openai-chat-model", openai_chat_model),
+    ):
+        if value is not None and not CHAT_MODEL_RE.fullmatch(value):
+            _fail(msg("init.bad_model", flag=flag, value=value), code=2)
+    if base_url is not None and not re.fullmatch(r"https?://[^\s\"'<>]{1,290}", base_url):
+        _fail(msg("provider.bad_url", flag="--base-url", value=base_url), code=2)
     settings = _settings()
     path = env_file_path()
     env_file = onboarding.EnvFile.load(path)
     keys = {"AUTOONTOLOGY_CHAT_PROVIDER": name}
     if chat_model:
         keys[onboarding.CHAT_MODEL_VARS[name]] = chat_model
+    if openai_chat_model:
+        keys["AUTOONTOLOGY_OPENAI_CHAT_MODEL"] = openai_chat_model
+    if embed:
+        keys["AUTOONTOLOGY_EMBED_PROVIDER"] = embed
+    if embed_model:
+        embed_name = embed or settings.embed_provider
+        var = "AUTOONTOLOGY_OPENAI_EMBED_MODEL" if embed_name == "openai" else None
+        keys[var or "AUTOONTOLOGY_OLLAMA_EMBED_MODEL"] = embed_model
+    if base_url:
+        keys["AUTOONTOLOGY_OPENAI_BASE_URL"] = base_url.rstrip("/")
     for key, value in keys.items():
         env_file.set(key, value)
     changed = env_file.changes()
@@ -1385,6 +1420,7 @@ def provider_use(
         typer.echo(msg("provider.backup", path=backup))
     for warning in overrides:
         typer.echo(msg("provider.warning", warning=warning), err=True)
+    uses_openai = "openai" in (name, embed or settings.embed_provider)
     if name == "openai" and not (
         env_file.get("AUTOONTOLOGY_OPENAI_BASE_URL") or settings.openai_base_url
     ):
@@ -1395,4 +1431,30 @@ def provider_use(
             typer.echo(
                 msg("provider.not_ready", name=name, note=info.note, remedy=info.remedy), err=True
             )
+    if uses_openai and not (env_file.get("AUTOONTOLOGY_OPENAI_API_KEY") or settings.openai_api_key):
+        typer.echo(
+            msg("provider.key_hint", url=f"{settings.service_url}/ui/settings", path=path),
+            err=True,
+        )
     typer.echo(msg("provider.restart", command=onboarding.RESTART_HINT))
+    typer.echo(msg("provider.restart_short"))
+
+
+@app.command(help=msg("help.restart"))
+def restart(
+    only: str = typer.Option(None, "--only", help=msg("help.restart.only")),
+) -> None:
+    """Restart the service and the backend with the current .env (the same detached helper
+    the Settings page starts, here in the foreground)."""
+    import subprocess
+
+    from autoontology.config import env_file_path
+    from autoontology.engine import restart as helper
+
+    if only is not None and only not in helper.ONLY_CHOICES:
+        _fail(msg("restart.bad_only", choices=", ".join(helper.ONLY_CHOICES), value=only), code=2)
+    settings = _settings()
+    argv = helper.helper_argv(settings.home, env_file_path(), restart_id=helper.new_id(), only=only)
+    code = subprocess.call(argv, env=helper.helper_env())
+    if code:
+        _fail(msg("restart.failed", code=code, log=settings.logs_dir / "service.log"), code=code)
