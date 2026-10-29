@@ -438,6 +438,7 @@ def test_skill_frontmatter_and_command():
     assert "description: " in front
     assert "scripts/bootstrap.sh --yes --provider claude" in text
     assert "AUTOONTOLOGY_LANG=ko" in text
+    assert "background" in text and "AUTOONTOLOGY_CLAUDE_BIN" in text
 
 
 @pytest.mark.parametrize("doc", list(ONE_PROMPT_DOCS), ids=lambda p: p.name)
@@ -448,6 +449,14 @@ def test_one_prompt_section(doc):
     assert "~/AutoOntology 에 클론하고" in text  # the Korean prompt too
     assert CURL in text
     assert "claude auth login" in text and "claude auth status" in text
+    assert "run it in the background and wait" in text  # the agent must not time out
+    assert "백그라운드로 실행하고 끝날 때까지 기다려" in text
+    if doc.name.endswith(".ko.md"):
+        assert "`--yes`는 묻지 않고 진행합니다" in text
+        assert "Cowork에서는 시험해 보지 않았고" in text
+    else:
+        assert "`--yes` makes it non-interactive" in text
+        assert "Cowork has not been tested" in text
 
 
 def test_documented_commands_exist_in_agent_files():

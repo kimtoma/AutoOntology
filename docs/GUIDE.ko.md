@@ -34,29 +34,38 @@
 **터미널의 Claude Code.** 홈 폴더에서 `claude`를 실행하고 다음을 붙여 넣습니다.
 
 ```text
-https://github.com/kimtoma/AutoOntology 를 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
+https://github.com/kimtoma/AutoOntology 를 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
 ```
+
+`--yes`는 묻지 않고 진행합니다. uv가 없으면 공식 설치 스크립트로 설치하고, `init`의 기본값을
+받아들이고, 예전 `quick`/`quick-docs` 샘플 소스(와 그 데이터베이스)를 교체합니다. 먼저
+확인받고 싶으면 `--yes` 없이 직접 터미널에서 실행하세요.
 
 영어로는:
 
 ```text
-Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there; when it finishes, open the UI URL it prints and tell me what was built.
+Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
 ```
 
 **Claude 데스크톱 앱.** **Code** 탭(데스크톱 앱 안의 Claude Code)을 열고, 작업 폴더로 홈
 폴더를 고르고 로컬 환경을 선택한 다음(서비스가 클라우드 샌드박스가 아니라 내 컴퓨터에서 돌아야
-합니다) 같은 프롬프트를 붙여 넣습니다. Cowork는 작업을 별도의 격리된 환경에서 실행하므로 이
-설정에는 Code 탭을 쓰세요.
+합니다) 같은 프롬프트를 붙여 넣습니다. Claude 제공자는 `claude` 명령줄 도구를 쓰므로,
+데스크톱 앱을 쓰더라도 그 컴퓨터에 Claude Code(CLI)를 설치하고 `claude auth login`으로
+로그인해 두어야 합니다. Cowork에서는 시험해 보지 않았고, 내 컴퓨터의 Docker·Postgres·Ollama에
+접근하지 못할 수 있습니다.
 
 이미 클론했다면 저장소에서 Claude Code를 열고 `/setup-autoontology`를 입력하거나,
 `scripts/bootstrap.sh --yes --provider claude`를 직접 실행합니다. `--dry-run`은 아무것도
 바꾸지 않고 계획만 출력하고, `--provider codex|ollama|openai`, `--set hanbit`,
-`--no-demo`, `--lang ko`로 기본값을 바꿉니다. 여러 번 실행해도 안전하며, 종료 코드가 다음 할
+`--no-demo`, `--lang ko`로 기본값을 바꿉니다. 같은 폴더에서는 여러 번 실행해도 안전합니다(같은 Postgres를 쓰는 두 번째 체크아웃은 첫 번째
+체크아웃의 샘플 데이터베이스 `autoontology_src_quick*`를 교체합니다). 셸에서
+`AUTOONTOLOGY_PORT`/`BACKEND_PORT`로 준 포트는 `.env`에 저장됩니다. 종료 코드가 다음 할
 일을 알려 줍니다. 3은 제공자 CLI에 로그인되어 있지 않다는 뜻이고, 4는 빠진 사전 조건(Docker
 또는 `POSTGRES_*`로 지정한 내 Postgres, 임베딩용 Ollama, uv, git)과 설치 방법을 출력합니다.
 
 **Claude Enterprise(그리고 Team, Pro, Max).** API 키가 필요 없습니다. AutoOntology는
-로그인되어 있는 `claude` CLI를 호출합니다.
+로그인되어 있는 `claude` CLI를 호출합니다. claude.ai 로그인만 지원하며, Amazon Bedrock,
+Google Vertex AI, API 키로 설정한 Claude Code는 여기서 `loggedIn: false`로 나옵니다.
 
 - `claude auth login`으로 한 번 로그인하면서 **조직 계정**을 고르고, `claude auth status`로
   확인합니다(`loggedIn: true`). 로그인되어 있지 않으면 스크립트가 이 안내와 함께 종료 코드 3으로
@@ -64,8 +73,8 @@ Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scrip
 - Anthropic으로 보내는 것: 빌드 프롬프트입니다. 여기에는 표·컬럼 이름, 샘플 값, 문서 본문이
   들어가며 조직의 약관이 적용됩니다. 나머지(Postgres, Ollama 임베딩, 파일, 스냅샷, 내보내기)는
   모두 내 컴퓨터에 남습니다.
-- 사용량은 다른 Claude Code 사용과 똑같이 조직 플랜 한도에 포함됩니다. quickstart는 호출 약
-  10회, 큰 문서 묶음은 수백 회입니다.
+- 사용량은 다른 Claude Code 사용과 똑같이 조직 플랜 한도에 포함됩니다. quickstart는 호출 수십
+  회, 큰 문서 묶음은 수백 회입니다.
 - 관리자가 Claude Code 사용을 제한했다면 로그인이나 호출이 실패합니다. `uv run autoontology
   doctor`의 `chat provider` 행에 해결 방법이 나옵니다.
 

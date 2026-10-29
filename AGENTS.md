@@ -15,10 +15,12 @@ scripts/bootstrap.sh --dry-run                      # print the plan only
 ```
 
 If the user asks to set AutoOntology up, run the bootstrap (or the
-`/setup-autoontology` skill in `.claude/skills/`). Exit code 3 means the provider CLI is
+`/setup-autoontology` skill in `.claude/skills/`). It takes about 10 minutes: run it in the
+background (always with `--yes`; without a terminal it exits 2) and wait. Exit code 3 means the provider CLI is
 not logged in: ask the user to run `claude auth login` (Claude Enterprise/Team: the
 organization account) themselves, then run the script again. Exit code 4 names a missing
-prerequisite and how to install it. `AUTOONTOLOGY_LANG=ko` (or `--lang ko`) prints the
+prerequisite and how to install it (a `claude` that is only a shell alias: set
+`AUTOONTOLOGY_CLAUDE_BIN`). `AUTOONTOLOGY_LANG=ko` (or `--lang ko`) prints the
 CLI messages in Korean.
 
 ## Commands
