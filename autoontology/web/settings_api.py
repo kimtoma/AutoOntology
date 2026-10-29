@@ -176,6 +176,20 @@ def _clean_model(value: str, what: str) -> str:
     return value
 
 
+def url_origin(url: str) -> str:
+    """``scheme://host:port`` of *url* (lower case, default port filled in; "" if none)."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port or {"http": 80, "https": 443}.get(parts.scheme.lower())
+    except ValueError:
+        return ""
+    if not parts.scheme or not parts.hostname:
+        return ""
+    return f"{parts.scheme.lower()}://{parts.hostname.lower()}:{port}"
+
+
 def candidate_settings(pending: Settings, body: SettingsIn, *, test: bool) -> Settings:
     """*pending* with the body's changes applied (validated: 400 ``invalid_settings``)."""
     chat = body.chat_provider or pending.chat_provider
@@ -203,6 +217,22 @@ def candidate_settings(pending: Settings, body: SettingsIn, *, test: bool) -> Se
         updates["openai_api_key"] = key
     elif (body.clear_api_key and not test) or (test and not body.use_saved_key):
         updates["openai_api_key"] = ""
+    new_url = updates.get("openai_base_url", pending.openai_base_url)
+    if (
+        "openai_api_key" not in updates
+        and pending.openai_api_key
+        and url_origin(new_url) != url_origin(pending.openai_base_url)
+    ):
+        # the saved key is never sent to (nor saved for) another endpoint than its own
+        old = url_origin(pending.openai_base_url) or "no endpoint"
+        raise ApiError(
+            400,
+            "key_required",
+            f"the saved API key belongs to {old}: enter the API key for "
+            f"{url_origin(new_url) or 'the new endpoint'} (a saved key is never sent to "
+            "another endpoint)",
+            saved_origin=url_origin(pending.openai_base_url),
+        )
     cand = dataclasses.replace(pending, **updates)
     problems = validate_model_profile(cand)
     if problems:
@@ -322,6 +352,8 @@ class SettingsApi:
         self._write_lock = threading.Lock()
         self._cli_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._restart_claim: threading.Timer | None = None
+        #: the restart this process started (its claim is released if that one fails)
+        self._restart_id: str | None = None
 
     @property
     def running(self) -> Settings:
@@ -393,7 +425,7 @@ class SettingsApi:
                 "embed_model": running.effective_embed_model,
             },
             "openai": {
-                "base_url": pending.openai_base_url,
+                "base_url": mask(pending.openai_base_url),
                 "api_key_set": bool(key) and not any(m in key for m in PLACEHOLDER_KEY_MARKERS),
                 "chat_model": pending.openai_chat_model,
                 "embed_model": pending.openai_embed_model,
@@ -570,17 +602,28 @@ class SettingsApi:
         timer.daemon = True
         timer.start()
         self._restart_claim = timer
+        self._restart_id = record["id"]
         logger.info("settings: restart %s started (service pid %s)", record["id"], os.getpid())
         return {"restart_id": record["id"], "previous_pid": os.getpid()}
+
+    def release_restart_claim(self) -> None:
+        if self._restart_claim is not None:
+            self._restart_claim.cancel()
+            self._restart_claim = None
+        self._restart_id = None
+        self.api.runs.release(WORKSPACE)
 
     def restart_status(self, restart_id: str) -> dict[str, Any]:
         from autoontology.engine import restart
 
         if not restart.RESTART_ID_RE.fullmatch(restart_id):
             raise ApiError(404, "unknown_restart", "no such restart")
+        restart.running_restart(self.running.run_dir)  # a dead helper's record -> failed
         record = restart.read_record(self.running.run_dir, restart_id)
         if record is None:
             raise ApiError(404, "unknown_restart", "no such restart")
+        if record.get("state") == "failed" and restart_id == self._restart_id:
+            self.release_restart_claim()  # this process keeps running: builds may start
         return {
             **{k: mask(v) if isinstance(v, str) else v for k, v in record.items()},
             "log_tail": restart.log_tail(self.running.logs_dir, restart_id),

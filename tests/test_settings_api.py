@@ -493,3 +493,201 @@ def test_put_makes_an_open_env_file_private(envfile, stubs):
     res = _client().put(API, json={"chat_provider": "codex"})
     assert res.status_code == 200, res.text
     assert stat.S_IMODE(envfile.stat().st_mode) == 0o600
+
+
+# --- the key on the wire -----------------------------------------------------------------
+
+
+@pytest.fixture
+def openai_stub():
+    """A local OpenAI-compatible endpoint (chat + embeddings) that records the
+    Authorization header of every request."""
+    import http.server
+    import socketserver
+
+    seen = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 - http.server API
+            length = int(self.headers.get("content-length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            seen.append((self.path, self.headers.get("authorization", "")))
+            if self.path.endswith("/embeddings"):
+                n = len(body.get("input") or [])
+                out = {
+                    "object": "list",
+                    "data": [
+                        {"object": "embedding", "index": i, "embedding": [0.1] * 8}
+                        for i in range(n)
+                    ],
+                    "model": body.get("model"),
+                    "usage": {"prompt_tokens": 1, "total_tokens": 1},
+                }
+            else:
+                out = {
+                    "id": "x",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": body.get("model"),
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": '{"answer": "pong"}'},
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+            data = json.dumps(out).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/v1", seen
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture
+def debug_log(tmp_path):
+    """Every logger at DEBUG (ours, httpx, openai, uvicorn's access log) into one file."""
+    path = tmp_path / "debug.log"
+    handler = logging.FileHandler(path)
+    handler.setLevel(logging.DEBUG)
+    root = logging.getLogger()
+    old = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    loggers = [logging.getLogger(n) for n in ("uvicorn.access", "httpx", "httpcore", "openai")]
+    saved = [(lg, lg.level, lg.propagate) for lg in loggers]
+    for lg in loggers:
+        lg.setLevel(logging.DEBUG)
+        lg.propagate = True
+    yield path
+    for lg, level, propagate in saved:
+        lg.setLevel(level)
+        lg.propagate = propagate
+    root.removeHandler(handler)
+    root.setLevel(old)
+    handler.close()
+
+
+def test_the_key_reaches_only_its_endpoint_and_no_log(envfile, monkeypatch, openai_stub, debug_log):
+    """The real network path (router passthrough + upstream embed_texts) with DEBUG logs."""
+    url, seen = openai_stub
+    monkeypatch.setattr(settings_api, "vector_state", lambda s: {"rows": 0, "dimension": None})
+    from autoontology.engine import ollama
+
+    monkeypatch.setattr(ollama, "list_models", lambda *a, **k: set())
+    c = _client()
+    candidate = {
+        "chat_provider": "openai",
+        "chat_model": "gpt-test",
+        "embed_provider": "openai",
+        "embed_model": "emb-test",
+        "openai_base_url": url,
+        "api_key": KEY,
+    }
+    texts = []
+    res = c.post(f"{API}/test", json=candidate)
+    texts.append(res.text)
+    out = res.json()
+    assert out["chat"]["ok"] is True and out["embed"]["ok"] is True, out
+    assert out["embed"]["dimension"] == 8
+    assert {auth for _p, auth in seen} == {f"Bearer {KEY}"}
+    assert {p.rsplit("/", 1)[-1] for p, _a in seen} == {"completions", "embeddings"}
+    res = c.put(API, json=candidate)
+    texts.append(res.text)
+    assert res.status_code == 200, res.text
+    texts.append(c.get(API).text)
+    # the saved key is used for its own endpoint, never for another one
+    seen.clear()
+    res = c.post(f"{API}/test", json={})
+    texts.append(res.text)
+    assert res.json()["chat"]["ok"] is True and {a for _p, a in seen} == {f"Bearer {KEY}"}
+    seen.clear()
+    other = url.replace("127.0.0.1", "localhost")
+    for method in ("post", "put"):
+        path = f"{API}/test" if method == "post" else API
+        res = getattr(c, method)(path, json={"openai_base_url": other})
+        texts.append(res.text)
+        assert res.status_code == 400 and res.json()["error"] == "key_required", res.text
+        assert "enter the API key" in res.json()["detail"]
+    assert seen == []
+    # explicitly without the saved key: refused as incomplete, nothing is sent anywhere
+    res = c.post(f"{API}/test", json={"openai_base_url": other, "use_saved_key": False})
+    texts.append(res.text)
+    assert res.status_code == 400 and res.json()["error"] == "invalid_settings"
+    assert seen == []
+    # a key typed for the new endpoint goes there
+    res = c.post(f"{API}/test", json={"openai_base_url": other, "api_key": NEW_KEY})
+    texts.append(res.text)
+    assert {a for _p, a in seen} == {f"Bearer {NEW_KEY}"}
+    logged = debug_log.read_text()
+    assert "POST" in logged or "HTTP Request" in logged  # the DEBUG log did record traffic
+    for secret in (KEY, NEW_KEY):
+        assert secret not in logged
+        for text in texts:
+            assert secret not in text
+
+
+def test_a_dead_helper_does_not_block_the_next_restart(envfile, stubs, monkeypatch):
+    import subprocess
+    import sys
+
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    run_dir = Settings.from_env().run_dir
+    stuck = {"id": "dddddddddddd", "state": "running", "started_at": restart_mod._now(),
+             "helper_pid": dead.pid}  # fmt: skip
+    restart_mod.write_record(run_dir, stuck)
+    assert restart_mod.running_restart(run_dir) is None
+    record = restart_mod.read_record(run_dir, "dddddddddddd")
+    assert record["state"] == "failed" and "interrupted" in record["error"]
+    # alive helper: still running; no pid yet: only within the spawn grace
+    alive = {**stuck, "id": "eeeeeeeeeeee", "helper_pid": os.getpid()}
+    restart_mod.write_record(run_dir, alive)
+    assert restart_mod.running_restart(run_dir)["id"] == "eeeeeeeeeeee"
+    old = {"id": "ffffffffffff", "state": "running", "started_at": "2000-01-01T00:00:00+00:00"}
+    restart_mod.write_record(run_dir, old)
+    restart_mod.running_restart(run_dir)
+    assert restart_mod.read_record(run_dir, "ffffffffffff")["state"] == "failed"
+    # the page is usable again: GET and PUT are not blocked by the dead records
+    restart_mod.write_record(run_dir, {**alive, "state": "done"})
+    c = _client()
+    assert c.get(API).json()["restart_in_progress"] is False
+    assert c.put(API, json={"chat_provider": "codex"}).status_code == 200
+
+
+def test_a_failed_restart_releases_the_workspace(envfile, stubs, spawned, monkeypatch):
+    monkeypatch.setattr(settings_api, "supervised", lambda s: True)
+    c = _client()
+    assert c.post(f"{API}/restart").status_code == 202
+    runs = c.app.state.api.runs
+    assert runs.busy().kind == "restart"
+    run_dir = Settings.from_env().run_dir
+    record = restart_mod.read_record(run_dir, "0123456789ab")
+    restart_mod.write_record(run_dir, {**record, "state": "failed", "error": "lock busy"})
+    assert c.get(f"{API}/restart/0123456789ab").json()["state"] == "failed"
+    assert runs.busy() is None
+
+
+def test_old_restart_records_are_pruned(isolated_env):
+    settings = Settings.from_env()
+    for i in range(25):
+        restart_mod.write_record(
+            settings.run_dir, {"id": f"{i:012x}", "state": "done", "started_at": restart_mod._now()}
+        )
+    record = restart_mod.spawn(settings, popen=lambda *a, **k: type("P", (), {"pid": 1})())
+    left = sorted(settings.run_dir.glob("restart-*.json"))
+    assert len(left) == restart_mod.KEEP_RECORDS
+    assert (settings.run_dir / f"restart-{record['id']}.json") in left

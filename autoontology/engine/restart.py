@@ -41,6 +41,10 @@ LOCK_NAME = "restart.lock"
 GRACE_S = 0.5
 #: A "running" record older than this is stale (the helper died without finishing).
 STALE_AFTER_S = 600.0
+#: A "running" record without a helper pid yet (spawn in progress) counts this long.
+SPAWN_GRACE_S = 30.0
+#: Restart records kept in ``run/`` (older ones are pruned when a new restart starts).
+KEEP_RECORDS = 20
 ONLY_CHOICES = ("backend",)
 
 
@@ -88,16 +92,52 @@ def _age_s(record: dict[str, Any]) -> float:
     return (datetime.now(timezone.utc) - started).total_seconds()
 
 
+def _helper_alive(record: dict[str, Any]) -> bool:
+    from autoontology.engine.supervisor import pid_alive
+
+    if _age_s(record) >= STALE_AFTER_S:
+        return False
+    pid = record.get("helper_pid")
+    if isinstance(pid, int) and pid > 0:
+        return pid_alive(pid)
+    return _age_s(record) < SPAWN_GRACE_S
+
+
 def running_restart(run_dir: Path) -> dict[str, Any] | None:
-    """The record of a restart still running (not stale), if any."""
+    """The record of a restart still running, if any. A ``running`` record whose helper
+    process is gone (or that is too old) is marked ``failed`` instead, so a crashed helper
+    never blocks the next restart."""
+    found = None
     for path in sorted(Path(run_dir).glob("restart-*.json")):
         restart_id = path.stem.removeprefix("restart-")
         if not RESTART_ID_RE.fullmatch(restart_id):
             continue
         record = read_record(run_dir, restart_id)
-        if record and record.get("state") == "running" and _age_s(record) < STALE_AFTER_S:
-            return record
-    return None
+        if not record or record.get("state") != "running":
+            continue
+        if _helper_alive(record):
+            found = found or record
+            continue
+        record.update(
+            state="failed",
+            finished_at=_now(),
+            error="interrupted: the restart helper exited without finishing",
+        )
+        with contextlib.suppress(OSError):
+            write_record(run_dir, record)
+    return found
+
+
+def prune_records(run_dir: Path, keep: int = KEEP_RECORDS) -> None:
+    """Delete all but the *keep* newest finished restart records."""
+    paths = sorted(Path(run_dir).glob("restart-*.json"), key=lambda p: p.stat().st_mtime)
+    for path in paths[: max(0, len(paths) - keep)]:
+        restart_id = path.stem.removeprefix("restart-")
+        record = read_record(run_dir, restart_id) if RESTART_ID_RE.fullmatch(restart_id) else None
+        if record and record.get("state") == "running":
+            continue
+        with contextlib.suppress(OSError):
+            path.unlink()
 
 
 def log_tail(logs_dir: Path, restart_id: str, lines: int = 20) -> str:
@@ -169,6 +209,7 @@ def spawn(
     from autoontology.config import REPO_ROOT, env_file_path
 
     restart_id = new_id()
+    prune_records(settings.run_dir, KEEP_RECORDS - 1)
     record = {
         "id": restart_id,
         "state": "running",
@@ -190,7 +231,7 @@ def spawn(
     )
     try:
         with (settings.logs_dir / LOG_NAME).open("ab") as log:
-            popen(
+            proc = popen(
                 argv,
                 cwd=REPO_ROOT,
                 env=helper_env(),
@@ -204,6 +245,13 @@ def spawn(
         record.update(state="failed", finished_at=_now(), error=f"{type(exc).__name__}: {exc}")
         write_record(settings.run_dir, record)
         raise
+    pid = getattr(proc, "pid", None)
+    if isinstance(pid, int):
+        current = read_record(settings.run_dir, restart_id) or record
+        if current.get("state") == "running" and not current.get("helper_pid"):
+            current["helper_pid"] = pid
+            write_record(settings.run_dir, current)
+        record["helper_pid"] = pid
     return record
 
 
@@ -251,7 +299,9 @@ def run(
         "started_at": _now(),
         "previous_pid": wait_pid,
     }
-    record.update(state="running", finished_at=None, error=None, new_pid=None)
+    record.update(
+        state="running", finished_at=None, error=None, new_pid=None, helper_pid=os.getpid()
+    )
     write_record(run_dir, record)
 
     def say(line: str) -> None:
