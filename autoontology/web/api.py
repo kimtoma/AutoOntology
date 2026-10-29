@@ -970,7 +970,10 @@ def build_router(api: Api) -> APIRouter:
         detail = concept_detail(model, concept_id, index)
         if detail is None:
             raise ApiError(404, "unknown_concept", f"unknown concept {concept_id!r}")
-        return {"revision": head.revision, **detail}
+        from autoontology.web.concept_decisions import concept_decisions
+
+        decisions = concept_decisions(api.store, concept_id)
+        return {"revision": head.revision, **detail, "decisions": decisions}
 
     # exports ----------------------------------------------------------------------------
 
