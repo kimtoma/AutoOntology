@@ -224,6 +224,9 @@ class MergedOntology:
     alignment_counts: dict[str, int] = field(default_factory=dict)
     #: owl:Class count the Turtle must have (:func:`expected_class_count` over the inputs)
     expected_classes: int | None = None
+    #: the review decisions the model reflects: {kind, subject, decision, relation, source,
+    #: name} (``source``/``name``: the documents source and concept or alias it is about)
+    decisions: list[dict[str, Any]] = field(default_factory=list)
 
     # --- snapshot (de)serialisation ------------------------------------------------------
 
@@ -651,9 +654,12 @@ def build(
     structured: Sequence[StructuredSnapshot] = (),
     documents: Sequence[DocumentsInput] = (),
     base: str = DEFAULT_BASE_IRI,
+    decisions: Sequence[Any] = (),
 ) -> MergedOntology:
     """The unified model of *structured* and *documents*; *name* is the workspace name and
-    *base* the namespace of every IRI (``AUTOONTOLOGY_BASE_IRI``)."""
+    *base* the namespace of every IRI (``AUTOONTOLOGY_BASE_IRI``). *decisions*
+    (:class:`autoontology.store.decisions.Decision`): the review decisions; the alignment
+    ones are already on the alignment rows, an accepted alias goes onto its Term here."""
     model = MergedOntology(
         name=name,
         base=base,
@@ -670,4 +676,41 @@ def build(
     for docs in documents:
         _add_documents(model, docs, term_class, columns)
     model.expected_classes = expected_class_count(structured, documents)
+    _add_decisions(model, documents, term_class, decisions)
     return model
+
+
+def _add_decisions(
+    model: MergedOntology,
+    documents: Sequence[DocumentsInput],
+    term_class: dict[str, str],
+    decisions: Sequence[Any],
+) -> None:
+    """Accepted aliases onto their Term's labels, and :attr:`MergedOntology.decisions`."""
+    concepts = {c.id: (d.source, c.name) for d in documents for c in d.concepts}
+    for d in sorted(decisions, key=lambda d: (d.kind, d.subject_key)):
+        source, label = concepts.get(d.subject_key, ("", ""))
+        if d.kind == "alias":
+            term_id, _, alias = d.subject_key.partition("|")
+            cls = model.classes.get(term_class.get(term_id, ""))
+            if cls is None:
+                continue
+            if d.decision == "accept":
+                hits = [r for r in cls.rejected_aliases if r.get("alias") == alias]
+                if not hits:
+                    continue
+                cls.rejected_aliases = [r for r in cls.rejected_aliases if r not in hits]
+                _add_unique(cls.alt_labels, alias)
+            source, label = cls.documents_source, alias
+        elif d.subject_key not in concepts:
+            continue
+        model.decisions.append(
+            {
+                "kind": d.kind,
+                "subject": d.subject_key,
+                "decision": d.decision,
+                "relation": d.relation or None,
+                "source": source,
+                "name": label,
+            }
+        )

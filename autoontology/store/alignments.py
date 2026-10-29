@@ -162,6 +162,11 @@ class AlignmentStore:
             row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _record(row)
 
+    def delete(self, concept_id: str) -> None:
+        """Forget the concept's committed verdict (the next align pass judges it again)."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM alignments WHERE concept_id = ?", (concept_id,))
+
     def get(self, concept_id: str, *, preview: bool = False) -> AlignmentRecord | None:
         with self._conn() as conn:
             row = conn.execute(

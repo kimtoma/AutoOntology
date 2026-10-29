@@ -180,6 +180,8 @@ def write(
     pending = {
         (e.get("source"), e.get("name")) for e in [*model.low_confidence, *model.dry_run_same]
     }
+    # a person decided it: no longer a draft
+    pending -= {(d.get("source"), d.get("name")) for d in model.decisions}
 
     # paths ------------------------------------------------------------------------------
     nodes: list[Any] = sorted(

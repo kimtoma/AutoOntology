@@ -388,11 +388,15 @@ class _Build:
         snapshots = [fetch_snapshot(self.client, s) for s in built]
         documents = [self.fresh(s) for s in self.documents]
         inputs = documents_inputs(self.store, documents)
+        from autoontology.store.decisions import DecisionStore
+
+        self.decisions = DecisionStore(self.store).list()
         self.model = merged.build(
             self.settings.workspace,
             structured=snapshots,
             documents=inputs,
             base=self.settings.base_iri,
+            decisions=self.decisions,
         )
         counts = self.model.counts()
         for name in missing:

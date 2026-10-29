@@ -655,6 +655,8 @@ def test_v4_migration_keeps_a_baseline_confirmed_under_v3(env, tmp_path):
         conn.execute("DROP TABLE term_legacy_descriptions")
         conn.execute("DELETE FROM schema_version WHERE version >= 4")
         conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
+        conn.execute("DROP TABLE review_decisions")
+        conn.execute("ALTER TABLE alignments DROP COLUMN judged_json")
     env["store"] = Store(path)  # migrates v3 -> v4 (and on)
     with sqlite3.connect(path) as conn:
         legacy = conn.execute(

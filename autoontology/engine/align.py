@@ -318,6 +318,13 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
     # is judged again (no resume, no cache), and only that successful judge call confirms
     # the description it saw as the baseline (never a permanent wildcard)
     legacy = {tid for tid, texts in auto_descriptions.items() if al.ANY_DESCRIPTION in texts}
+    # a person's decision replaces the judge for its concept, on every pass (never a dry
+    # run: previews stay the judge's)
+    from autoontology.engine import overlay
+    from autoontology.store.decisions import DecisionStore
+
+    decided = {} if ctx.dry_run else DecisionStore(ctx.store).by_subject("alignment")
+    decided_count = 0
 
     def guard(
         raw: al.ValidatedVerdict, concept: al.ConceptInfo
@@ -334,6 +341,44 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
 
     for index, concept in enumerate(concepts, start=1):
         name = CONCEPT_STEP_PREFIX + concept.id
+        decision = decided.get(concept.id)
+        if (
+            decision is not None
+            and decision.decision == "accept"
+            and decision.payload.get("term_id") not in terms
+        ):
+            logger.warning(
+                "  %s: the Term of the review decision is gone: judged again", concept.name
+            )
+            decision = None
+        stored = None if ctx.dry_run else ctx.aligns.get(concept.id)
+        if decision is not None:
+            term_id = decision.payload.get("term_id") if decision.decision == "accept" else ""
+            if not overlay.reflects(stored, decision):
+                ctx.aligns.put(
+                    overlay.decided_record(
+                        stored,
+                        decision,
+                        source_id=ctx.source.id,
+                        concept_id=concept.id,
+                        concept_name=concept.name,
+                        run_id=ctx.run.id,
+                        term_name=terms[term_id].name if term_id else "",
+                        structured_source=snap.source_of(term_id) if term_id else "",
+                    )
+                )
+            counts[decision.relation] += 1
+            decided_count += 1
+            ctx.store.finish_step(
+                ctx.run.id,
+                name,
+                status="succeeded",
+                detail={"relation": decision.relation, "term_id": term_id, "path": "decision"},
+            )
+            continue
+        if overlay.is_decided(stored):
+            assert stored is not None
+            overlay.restore(ctx.aligns, stored)  # its decision was removed: the judge's again
         # the judge's input now: concept content, candidate Term ids + content, model and
         # prompt version (judge_key); none for a concept that is not judged
         alignable = concept.kind in al.ALIGNABLE_KINDS
@@ -554,6 +599,8 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
             " [accepted]" if accepted else "",
             " (cached)" if path == "cached" else f" in {seconds:.1f}s",
         )
+    if decided_count:
+        stats["decided"] = decided_count
     return {
         "concepts": len(concepts),
         "relations": dict(counts),
@@ -582,10 +629,15 @@ def _step_apply(ctx: _AlignCtx) -> dict[str, Any]:
     # eligible rather than `accepted`: a dry run persists accepted=False but still plans
     # the verdicts of this mode's table: a dry run plans from its previews
     known = ctx.snapshot().term_map()
+    # a person's accepted `same` is applied whatever its confidence
     eligible = [
         a
         for a in ctx.aligns.list(ctx.source.id, preview=ctx.dry_run)
-        if _eligible(ctx, a.relation, a.confidence) and a.term_id in known
+        if (
+            _eligible(ctx, a.relation, a.confidence)
+            or (not ctx.dry_run and a.judged and a.accepted and a.relation == "same")
+        )
+        and a.term_id in known
     ]
     concepts = {c.id: c for c in ctx.docs.list_concepts(ctx.source.id)}
     matches: dict[str, list[al.SameMatch]] = {}
