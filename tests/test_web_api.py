@@ -1375,3 +1375,111 @@ def test_status_lists_formats_ocr_and_vision(env, monkeypatch):
     assert body["formats"]["structured"][".xls"]["kind"] == "structured"
     assert body["kordoc_available"] is True and body["ocr_ready"] is True
     assert body["vision_model"] is None
+
+
+# --- remote access over Tailscale Serve ------------------------------------------------------
+
+TS_HOST = "box.example.ts.net"
+TS_LOGIN = {"tailscale-user-login": "alice@example.com"}
+
+
+def _ts_client(monkeypatch, hosts="box.example.ts.net", logins=""):
+    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_HOSTS", hosts)
+    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_LOGINS", logins)
+    settings = Settings.from_env()
+    app = web.create_app(settings, runs=RunManager(settings, jobs=FakeJobs().table))
+    return TestClient(app), settings
+
+
+def test_tailscale_settings_parse_spaces_ports_and_case(isolated_env, monkeypatch):
+    monkeypatch.setenv(
+        "AUTOONTOLOGY_TAILSCALE_HOSTS", " Box.Example.TS.net:8444 , ,other.example.ts.net"
+    )
+    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_LOGINS", " Alice@Example.com,  bob@example.com ,")
+    s = Settings.from_env()
+    assert s.tailscale_hosts == ("box.example.ts.net", "other.example.ts.net")
+    assert s.tailscale_logins == ("alice@example.com", "bob@example.com")
+    monkeypatch.delenv("AUTOONTOLOGY_TAILSCALE_HOSTS")
+    monkeypatch.delenv("AUTOONTOLOGY_TAILSCALE_LOGINS")
+    s = Settings.from_env()
+    assert s.tailscale_hosts == () and s.tailscale_logins == ()
+
+
+def test_tailnet_host_needs_the_identity_header(isolated_env, monkeypatch):
+    c, _ = _ts_client(monkeypatch)
+    resp = c.get(f"{API}/sources", headers={"host": f"{TS_HOST}", **TS_LOGIN})
+    assert resp.status_code == 200, resp.text
+    resp = c.get(f"{API}/sources", headers={"host": f"{TS_HOST.upper()}:443", **TS_LOGIN})
+    assert resp.status_code == 200
+    resp = c.get(f"{API}/sources", headers={"host": TS_HOST})
+    assert resp.status_code == 403
+    assert resp.json() == {
+        "error": "tailscale_identity_required",
+        "detail": "this hostname is served to tailnet clients only",
+    }
+    resp = c.get(f"{API}/sources", headers={"host": TS_HOST, "tailscale-user-login": "  "})
+    assert resp.json()["error"] == "tailscale_identity_required"
+    resp = c.get(f"{API}/sources", headers={"host": "evil.example", **TS_LOGIN})
+    assert resp.status_code == 403 and resp.json()["error"] == "forbidden_host"
+    # localhost keeps working without any header
+    assert c.get(f"{API}/sources").status_code == 200
+
+
+def test_tailnet_login_allow_list(isolated_env, monkeypatch):
+    c, _ = _ts_client(monkeypatch, logins="Alice@Example.com")
+    ok = c.get(
+        f"{API}/sources", headers={"host": TS_HOST, "tailscale-user-login": "ALICE@example.com"}
+    )
+    assert ok.status_code == 200
+    resp = c.get(
+        f"{API}/sources", headers={"host": TS_HOST, "tailscale-user-login": "mallory@example.com"}
+    )
+    assert resp.status_code == 403 and resp.json()["error"] == "access_denied"
+    assert "mallory" not in resp.text
+
+
+def test_empty_allow_list_accepts_any_tailnet_login(isolated_env, monkeypatch):
+    c, _ = _ts_client(monkeypatch, logins="")
+    for login in ("alice@example.com", "bob@github"):
+        resp = c.get(f"{API}/sources", headers={"host": TS_HOST, "tailscale-user-login": login})
+        assert resp.status_code == 200
+
+
+def test_tailnet_host_without_configuration_is_foreign(isolated_env, monkeypatch):
+    c, _ = _ts_client(monkeypatch, hosts="")
+    resp = c.get(f"{API}/sources", headers={"host": TS_HOST, **TS_LOGIN})
+    assert resp.status_code == 403 and resp.json()["error"] == "forbidden_host"
+
+
+def test_tailnet_host_still_refuses_cross_origin_writes(isolated_env, monkeypatch):
+    c, _ = _ts_client(monkeypatch)
+    d = _docs_dir(isolated_env)
+    body = {"name": "docs", "kind": "documents", "locator": str(d)}
+    headers = {"host": TS_HOST, **TS_LOGIN}
+    resp = c.post(
+        f"{API}/sources", json=body, headers={**headers, "origin": "https://evil.example"}
+    )
+    assert resp.status_code == 403 and resp.json()["error"] == "cross_origin"
+    resp = c.post(
+        f"{API}/sources", json=body, headers={**headers, "origin": "http://127.0.0.1:7800"}
+    )
+    assert resp.status_code == 403 and resp.json()["error"] == "cross_origin"
+    resp = c.post(f"{API}/sources", json=body, headers={**headers, "origin": f"https://{TS_HOST}"})
+    assert resp.status_code == 201, resp.text
+
+
+def test_status_reports_remote_access_without_logins(isolated_env, monkeypatch):
+    import httpx
+
+    from autoontology.engine import pg
+
+    monkeypatch.setattr(
+        web_api.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("x"))
+    )
+    monkeypatch.setattr(
+        pg, "connect", lambda *a, **k: (_ for _ in ()).throw(pg.psycopg.OperationalError("x"))
+    )
+    c, _ = _ts_client(monkeypatch, logins="alice@example.com")
+    body = c.get(f"{API}/status").json()
+    assert body["remote"] == {"tailscale_hosts": [TS_HOST], "logins_restricted": True}
+    assert "alice" not in json.dumps(body)

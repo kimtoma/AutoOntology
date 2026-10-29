@@ -171,6 +171,21 @@ def host_name(header: str) -> str:
     return header.rsplit(":", 1)[0] if ":" in header else header
 
 
+#: Header ``tailscale serve`` adds for tailnet clients (absent on public Funnel traffic).
+TAILSCALE_LOGIN_HEADER = "tailscale-user-login"
+
+
+def tailscale_refusal(settings: Settings, login: str | None) -> tuple[str, str] | None:
+    """Why a request on a configured tailnet hostname is refused, or None to let it through.
+    The login itself is never part of the answer."""
+    login = (login or "").strip().lower()
+    if not login:
+        return ("tailscale_identity_required", "this hostname is served to tailnet clients only")
+    if settings.tailscale_logins and login not in settings.tailscale_logins:
+        return ("access_denied", "this tailnet login is not allowed")
+    return None
+
+
 #: Paths the Host/Origin guard leaves open (liveness/readiness probes).
 UNGUARDED_PREFIXES = ("/health",)
 
@@ -497,6 +512,10 @@ class Api:
             "checks": checks,
             "doctor": "uv run autoontology doctor",
             "upload_max_mb": round(upload_limit_bytes() / (1024 * 1024), 1),
+            "remote": {
+                "tailscale_hosts": list(s.tailscale_hosts),
+                "logins_restricted": bool(s.tailscale_logins),
+            },
         }
         return mask(result)
 
@@ -1183,7 +1202,15 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
         # 127.0.0.1:7800, no Origin) and curl/CLI clients pass.
         if guarded_path(request.url.path):
             host = host_name(request.headers.get("host") or "")
-            if host not in LOCAL_HOSTS:
+            if host in settings.tailscale_hosts:
+                # Only tailscaled (`tailscale serve`) delivers this Host to 127.0.0.1, and it
+                # adds the identity header for tailnet clients only -- never for Funnel.
+                refusal = tailscale_refusal(settings, request.headers.get(TAILSCALE_LOGIN_HEADER))
+                if refusal:
+                    return JSONResponse(
+                        {"error": refusal[0], "detail": refusal[1]}, status_code=403
+                    )
+            elif host not in LOCAL_HOSTS:
                 return JSONResponse(
                     {
                         "error": "forbidden_host",

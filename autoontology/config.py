@@ -355,6 +355,19 @@ def _bool_env(name: str, default: bool) -> bool:
     raise ValueError(f"{name} must be a boolean (1/0, true/false), got {raw!r}")
 
 
+def _csv_env(raw: str, *, strip_port: bool = False) -> tuple[str, ...]:
+    """Comma-separated values, lower-cased, blanks dropped; ``strip_port`` keeps the host of
+    ``name:port`` (AUTOONTOLOGY_TAILSCALE_HOSTS)."""
+    out: list[str] = []
+    for item in raw.split(","):
+        item = item.strip().lower()
+        if strip_port and ":" in item and not item.startswith("["):
+            item = item.rsplit(":", 1)[0]
+        if item and item not in out:
+            out.append(item)
+    return tuple(out)
+
+
 @dataclass(frozen=True)
 class Settings:
     home: Path
@@ -407,6 +420,11 @@ class Settings:
     doc_max_bytes: int = 50 * 1024 * 1024
     #: Folder holding the sample sets (``quickstart``, ``hanbit``; AUTOONTOLOGY_SAMPLES_DIR).
     samples_dir: Path = REPO_ROOT / "samples"
+    #: Tailnet hostnames ``tailscale serve`` forwards with (AUTOONTOLOGY_TAILSCALE_HOSTS);
+    #: accepted only with the Tailscale identity header.
+    tailscale_hosts: tuple[str, ...] = ()
+    #: Tailnet logins allowed on those hostnames (AUTOONTOLOGY_TAILSCALE_LOGINS; empty = any).
+    tailscale_logins: tuple[str, ...] = field(default=(), repr=False)
 
     def __post_init__(self) -> None:
         validate_catalog_database_name(self.postgres_database)
@@ -461,6 +479,8 @@ class Settings:
             samples_dir=Path(env["AUTOONTOLOGY_SAMPLES_DIR"].strip()).expanduser()
             if env.get("AUTOONTOLOGY_SAMPLES_DIR", "").strip()
             else REPO_ROOT / "samples",
+            tailscale_hosts=_csv_env(env.get("AUTOONTOLOGY_TAILSCALE_HOSTS", ""), strip_port=True),
+            tailscale_logins=_csv_env(env.get("AUTOONTOLOGY_TAILSCALE_LOGINS", "")),
         )
 
     @property

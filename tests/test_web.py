@@ -136,3 +136,26 @@ def test_shims_and_proxy_refuse_foreign_host_and_cross_origin(isolated_env, monk
     assert resp.status_code == 202 and ingested == [{"database": "x"}]
     # health probes stay open
     assert c.get("/health/live", headers={"host": "evil.example"}).status_code == 200
+
+
+def test_shims_and_proxy_on_the_tailnet_host_need_the_identity_header(isolated_env, monkeypatch):
+    """The /ingest shims and /v1 passthrough share the Tailscale rule with the API."""
+    deleted = []
+    monkeypatch.setattr(web, "enqueue_delete", lambda db, settings=None: deleted.append(db))
+    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_HOSTS", "box.example.ts.net")
+    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_LOGINS", "alice@example.com")
+    c = client(isolated_env)
+    url = "/ingest/delete?database_name=autoontology_src_hanbit"
+    host = {"host": "box.example.ts.net"}
+    resp = c.post(url, headers=host)
+    assert resp.status_code == 403 and resp.json()["error"] == "tailscale_identity_required"
+    resp = c.post(url, headers={**host, "tailscale-user-login": "mallory@example.com"})
+    assert resp.status_code == 403 and resp.json()["error"] == "access_denied"
+    resp = c.post("/v1/chat/completions", json={"model": "m", "messages": []}, headers=host)
+    assert resp.status_code == 403 and resp.json()["error"] == "tailscale_identity_required"
+    alice = {**host, "tailscale-user-login": "alice@example.com"}
+    resp = c.post(url, headers={**alice, "origin": "https://evil.example"})
+    assert resp.status_code == 403 and resp.json()["error"] == "cross_origin"
+    assert deleted == []
+    resp = c.post(url, headers=alice)
+    assert resp.status_code == 202 and deleted == ["autoontology_src_hanbit"]
