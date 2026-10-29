@@ -94,9 +94,9 @@ and judges the matches. Embeddings (finding similar concepts) always use Ollama'
 | Provider | `AUTOONTOLOGY_CHAT_PROVIDER` | Cost | Data leaves the machine | quickstart / hanbit first build | Set up with |
 |---|---|---|---|---|---|
 | Ollama, local `qwen3:8b` | `ollama` (default) | free | no | 46 min / 4-5 h (estimate) | Ollama installed; `init` pulls the models |
-| Claude subscription (Claude Code CLI) | `claude` | your plan's usage limits | yes, to Anthropic | 8 min / 37 min | `claude auth login` |
+| Claude subscription (Claude Code CLI) | `claude` | your plan's usage limits | yes, to Anthropic | 8-11 min / 37 min | `claude auth login` |
 | ChatGPT subscription (Codex CLI) | `codex` | your plan's usage limits | yes, to OpenAI | ~15 min (estimate) / ~75 min (estimate) | `codex login` |
-| Any OpenAI-compatible API | `openai` | per use | yes, to that endpoint | depends on the endpoint | base URL, model, key in `.env` |
+| Any OpenAI-compatible API | `openai` | per use | yes, unless the endpoint runs on your own machine | depends on the endpoint | base URL, model, key in `.env` |
 
 Times were measured on an Apple M4 Mac mini (16 GB) from a fresh clone on 2026-10-29
 (see [Sample sets](#sample-sets)); "estimate" marks the ones we did not run.
@@ -141,7 +141,8 @@ What to know:
   account's terms. Use Ollama when the data must stay local.
 - **Usage limits apply.** Every call counts against your plan's limits. When a limit is
   reached the router answers 429 `usage_limit`; wait for the reset or switch provider.
-  A build of the small sample makes about ten calls; large document sets make hundreds.
+  A build of the quickstart sample makes roughly 100-150 calls and the full hanbit sample
+  about 500; large document sets make more.
 - **Embeddings still need Ollama or an OpenAI-compatible endpoint**
   (`AUTOONTOLOGY_EMBED_PROVIDER=ollama` with `bge-m3`, the default, or `openai`). `setup`
   then pulls only the embedding model.
@@ -184,7 +185,7 @@ UI) registers a set; [samples/README.en.md](samples/README.en.md)
 
 | Set | Sources | Tables | Documents | Images | Document chunks | First build: ollama | claude | codex |
 |---|---|---|---|---|---|---|---|---|
-| `quickstart` | `quick`, `quick-docs` | 3 CSV files, 155 rows | 5 (MD, PDF, DOCX, HWP) | - | 28 (9 without kordoc) | 46 min | 8 min | ~15 min (estimate) |
+| `quickstart` | `quick`, `quick-docs` | 3 CSV files, 155 rows | 5 (MD, PDF, DOCX, HWP) | - | 28 (9 without kordoc) | 46 min | 8-11 min | ~15 min (estimate) |
 | `hanbit` | `hanbit`, `hanbit-docs`, `hanbit-images` | 9 files in 7 formats, 11 tables, 5,603 rows | 15 in 12 formats | 6 (OCR) | 132 + 9 from images (42 without kordoc) | 4-5 h (estimate) | 37 min | ~75 min (estimate) |
 
 How the times were measured (Apple M4 Mac mini, 16 GB, 2026-10-29, first build, kordoc and
@@ -194,14 +195,15 @@ OCR installed, `bge-m3` embeddings through Ollama):
   (7 s), then `demo --set quickstart`: build 2,732 s, of which compile 126 s, document
   extraction 2,322 s (28 chunks, about 83 s each), consolidation 41 s and alignment 237 s;
   demo total 2,748 s. Rehearsal B ran on the same machine at the same time for most of it.
-- **quickstart / claude, 8 min**: build 461 s (demo 479 s), measured in a working copy.
+- **quickstart / claude, 8-11 min**: build 461 s (demo 479 s) and 637 s in two runs in
+  working copies (the slower one also re-matched a stale documents source).
 - **hanbit / claude, 37 min**: a fresh clone, `init --yes --provider claude --docs` (9 s),
   then `demo --set hanbit`: compile 97 s (11 tables), extraction 734 s (132 chunks) + 39 s
   (images), consolidation 360 s + 36 s, alignment 645 s + 228 s; 2,164 s until the
   subscription's 5-hour usage limit stopped the last 3 of 58 image-concept judgments, then
   `demo --resume` finished them in 34 s. About 520 model calls in total.
 - **codex**: `provider test` answered in 6.8 s; compiling the 3 quickstart tables took 53 s
-  (claude 25 s, ollama 126 s) and its judgments about 7 s each (claude about 3.5 s). The
+  (claude about 25 s, ollama 126 s) and its judgments about 7 s each (claude about 3.5 s). The
   codex rows are estimates scaled from that.
 
 ## Supported formats
@@ -320,17 +322,18 @@ With the samples, the judge accepts 계약 → Contracts, 고객 → Customers a
         | HTTP /api/...         | imports auto_ontology        | /v1/chat/completions
         v                       v  (ingest, compile, vectors)  v
   +-----------------------+   +-----------------------+   +-------------------------+
-  | NVIDIA Auto Ontology  |   | Postgres 17+pgvector  |   | Ollama :11434, or an    |
-  | backend 127.0.0.1:3101|-->| autoontology (catalog)|   | OpenAI-compatible API   |
-  | (vendor/auto-ontology)|   | autoontology_src_<n>  |   | (chat + embeddings)     |
+  | NVIDIA Auto Ontology  |   | Postgres 17+pgvector  |   | Ollama :11434, an       |
+  | backend 127.0.0.1:3101|-->| autoontology (catalog)|   | OpenAI-compatible API,  |
+  | (vendor/auto-ontology)|   | autoontology_src_<n>  |   | or the claude / codex   |
+  |                       |   |                       |   | CLI (chat only)         |
   +-----------------------+   +-----------------------+   +-------------------------+
 ```
 
 The engine is an unmodified git submodule. AutoOntology calls it over HTTP for
 connections, exports and NL-to-SQL, and imports it in-process for ingest, semantic
 compilation and the vector tables. Both the backend and the service send their chat calls
-through the service's `/v1` router, which forwards them to Ollama or to the configured
-OpenAI-compatible endpoint. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+through the service's `/v1` router, which forwards them to Ollama, to the configured
+OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### CLI reference
 

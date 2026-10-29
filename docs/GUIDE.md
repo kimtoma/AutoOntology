@@ -23,14 +23,15 @@ Contents:
 
 ## 1. What you get in 10 minutes
 
-You run five commands. AutoOntology checks your computer, writes its settings file, loads a
+You type six short commands. AutoOntology checks your computer, writes its settings file, loads a
 small sample company ("한빛상사", a fictional Korean trading company: three tables of
 customers, contracts and invoices plus five policy documents), asks a language model to
 read all of it, and shows you one combined map of the business: which concepts exist
 (customer, contract, invoice, payment status, approver ...), how they relate, which table
 columns hold them, and the exact sentences in the documents that define them. With a Claude
-or ChatGPT subscription the whole sample takes about 8 minutes; with a
-local model on a laptop it takes about 45 minutes (section 4 has the numbers). The
+subscription the whole sample took 8 to 11 minutes in our runs (a ChatGPT subscription about
+15 minutes, estimate); with a local model on a laptop it took 46 minutes (section 4 has the
+numbers). The
 **Get started** page of the web UI shows the five steps and ticks them off as they finish:
 
 ![Get started page after the demo](screenshots/home.png)
@@ -71,7 +72,7 @@ Type each "how to check" command; if it prints a version, you have it.
 | Ollama, even with a subscription | Embeddings (turning text into numbers so similar concepts are found). Only the small `bge-m3` model (1.2 GB) is needed unless Ollama is also your chat model. An OpenAI-compatible embedding endpoint works instead. | `ollama list` | https://ollama.com |
 | Node.js 20 or newer (optional) | Reading HWP/HWPX, PDF, DOCX, PPTX, XLS/XLSX documents and images (OCR). Without it, Markdown, text, HTML, CSV and `.doc` documents still work. | `node --version` | https://nodejs.org |
 
-Disk space: about 2 GB for the project and its tools, plus 5 GB for the `qwen3:8b` model
+Disk space (estimate): about 2 GB for the project and its tools, plus 5 GB for the `qwen3:8b` model
 if you use Ollama for chat.
 
 ## 4. Choose a model provider
@@ -84,7 +85,7 @@ later with one command, so pick the one you can start with today.
 | Cost | Free | Included in your Claude Pro/Max plan; counts against its usage limits | Included in your ChatGPT plan; counts against its usage limits | Pay per use on your API account |
 | Quickstart sample (first build) | 46 min | 8 min | ~15 min (estimate) | depends on the endpoint |
 | Full hanbit sample (first build) | 4-5 h (estimate) | 37 min | ~75 min (estimate) | depends on the endpoint |
-| Does your data leave the machine? | **No** | Yes: prompts go to Anthropic under your account's terms | Yes: prompts go to OpenAI under your account's terms | Yes: to the endpoint you configure |
+| Does your data leave the machine? | **No** | Yes: prompts go to Anthropic under your account's terms | Yes: prompts go to OpenAI under your account's terms | Yes, unless the endpoint runs on your own machine |
 | Setup effort | Install Ollama; `init` pulls `qwen3:8b` (5 GB) | `claude auth login` once | `codex login` once | Base URL, model name, and a key you type into `.env` yourself |
 | Quality notes | Small model: slower, finds fewer concepts and merges conservatively | Best results in our tests; fast | Good results; each call is slower than Claude | Depends on the model |
 
@@ -157,10 +158,10 @@ model with one test call:
 models: openai/qwen3:8b answers 'pong' with completion_tokens 2 (thinking off); embeddings bge-m3
 ```
 
-The last line is `next: uv run autoontology demo` (with `--set hanbit` for a
-subscription, because the larger sample is quick there). `init` took 7 s (Ollama)
+The last line is `next: uv run autoontology demo` (with `--set hanbit` for any
+provider except Ollama, because the larger sample is quick there). `init` took 7 s (Ollama)
 and 9 s (Claude) in our rehearsals once the tools were installed; installing
-kordoc the first time adds about a minute. `init --yes` answers every question with the
+kordoc the first time adds about a minute (estimate). `init --yes` answers every question with the
 suggested value, and `--provider claude` (or `ollama`, `codex`, `openai`) picks the
 provider without asking.
 
@@ -348,10 +349,12 @@ not only in a table or an image. A larger model finds more: switch provider (bel
 **Two things were merged that should not be, or the opposite.** Alignment works in three
 steps:
 
-1. For each document concept, the five most similar Terms are picked by meaning
+1. For each document concept that is an entity, a metric or an attribute (rules and
+   processes are not matched), the five most similar Terms are picked by meaning
    (embeddings).
-2. The model judges each pair: `same`, `broader` (the concept is wider than the Term),
-   `narrower` (the concept is a part or kind of the Term), `related`, or `none`, with a
+2. The model judges each pair: `same`, `broader` (the Term is wider: the concept is a part
+   or kind of the Term), `narrower` (the Term is a part or kind of the concept), `related`,
+   or `none`, with a
    confidence.
 3. A strict rule decides: `same` is accepted only when the confidence is at least 0.90
    **and** one of the concept's names exactly equals a name of the Term (after ignoring
@@ -375,8 +378,9 @@ keep data local; use a subscription or a larger endpoint for the best ontology.
 ## 9. Troubleshooting
 
 `uv run autoontology doctor` checks everything and prints a REMEDY column; `init` prints
-`fix:` lines. Each remedy below is printed exactly as shown (with
-`AUTOONTOLOGY_LANG=ko` the descriptions are in Korean, the commands stay the same).
+`fix:` lines. The commands below are the ones doctor and init suggest, with a few extra
+steps added (with `AUTOONTOLOGY_LANG=ko` their messages are in Korean; the commands stay the
+same).
 
 | Symptom | Cause | What to type |
 |---|---|---|
@@ -395,9 +399,11 @@ keep data local; use a subscription or a larger endpoint for the best ontology.
 | doctor `ollama` FAIL, or `warn  Ollama is not answering` | Ollama is not running | `ollama serve` (install from https://ollama.com) |
 | doctor `ollama` FAIL "models missing", or chat model `openai/qwen3:8b` not found | The models or the alias are not pulled | `uv run autoontology setup` (or `setup --force-alias`) |
 | doctor `model profile` FAIL/WARN | A provider value in `.env` is missing or not a known model | Set the `AUTOONTOLOGY_OPENAI_*` / `_CLAUDE_*` / `_CODEX_*` values (see `.env.example`); for Ollama use an `openai/<name>` alias |
+| doctor `chat endpoint` FAIL "not bare JSON: schema not enforced" | Ollama ignores the answer format | Keep `AUTOONTOLOGY_OLLAMA_NO_THINK` on (the default) and upgrade Ollama |
+| doctor `chat no-think` FAIL | The Ollama chat alias still "thinks" before answering | `uv run autoontology setup --force-alias` |
 | doctor `chat endpoint` FAIL | The model did not answer the test call | `uv run autoontology provider test`, then the remedy it prints; for openai check `AUTOONTOLOGY_OPENAI_BASE_URL` / `API_KEY` / `CHAT_MODEL` |
 | doctor `embedding endpoint` FAIL | The embedding model is not reachable | Check `EMBED_*` / `AUTOONTOLOGY_EMBED_PROVIDER` in `.env` and that Ollama is up |
-| doctor `vector tables` FAIL "the embedder emits N dimensions" | You changed the embedding model after building | Restore the old embedding model, or remove every source (`uv run autoontology source rm <name>`) and build again |
+| doctor `vector tables` FAIL "the embedder emits N dimensions" | You changed the embedding model after building | Restore the old embedding model, or remove every source (`uv run autoontology source rm <name>`) and empty the `vdb` vector tables, then build again |
 | doctor `node` WARN | Node.js 20+ is missing | Install Node.js 20+ (only needed for HWP/PDF/DOCX/PPTX/XLSX documents) |
 | doctor `kordoc` WARN, or build warns "N document(s) need kordoc and were skipped" | The document reader is not installed | `uv run autoontology tools install-kordoc`, then `uv run autoontology build --resume` |
 | doctor `kordoc` WARN "installed with --omit-optional" | PDF and OCR support was left out | `uv run autoontology tools install-kordoc --force` |
@@ -418,8 +424,9 @@ keep data local; use a subscription or a larger endpoint for the best ontology.
 **Is my data private?** With Ollama for chat and embeddings, nothing leaves your computer:
 the services listen only on 127.0.0.1 and reject other machines. With a Claude or ChatGPT
 subscription or an API, the prompts (table and column names, a few sample values, document
-text) go to that provider under your account's terms. Login tokens are never read or
-logged by AutoOntology.
+text) go to that provider under your account's terms. AutoOntology never sends or logs your
+login tokens (for codex it only links your `auth.json` into a private folder and copies a
+refreshed token back).
 
 **What does it cost?** The software is free (MIT licence). Ollama is free. A subscription
 build counts against your plan's usage limits; the full hanbit sample makes
@@ -427,7 +434,7 @@ about 520 model calls. An API is billed by your provider.
 
 **How long does it take?** See the table in section 4. Rule of thumb: count the document
 chunks (`demo` and the Build page show them); a local `qwen3:8b` takes one to two minutes
-per chunk, a subscription about 6 seconds (three calls run at once). Tables add little: compiling the 11 hanbit tables
+per chunk, a subscription about 6 seconds (at most two calls run at once). Tables add little: compiling the 11 hanbit tables
 took 97 seconds with Claude.
 
 **Can I work offline?** Yes, with Ollama for chat and embeddings, after `init` has

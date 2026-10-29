@@ -22,12 +22,12 @@
 
 ## 1. 10분이면 얻는 것
 
-명령 다섯 개를 입력하면 AutoOntology가 컴퓨터 환경을 점검하고, 설정 파일을 쓰고, 작은 샘플
+짧은 명령 여섯 개를 입력하면 AutoOntology가 컴퓨터 환경을 점검하고, 설정 파일을 쓰고, 작은 샘플
 회사(가상의 무역회사 "한빛상사": 고객·계약·청구 표 3개와 규정 문서 5개)를 불러온 뒤, 언어
 모델에게 전부 읽혀서 업무 전체를 하나의 지도로 보여 줍니다. 어떤 개념이 있는지(고객, 계약, 청구,
 수납상태, 승인권자 …), 서로 어떻게 연결되는지, 어느 표의 어느 컬럼에 담겨 있는지, 그리고 문서의
-어느 문장이 그 개념을 정의하는지까지 나옵니다. Claude나 ChatGPT 구독을 쓰면 샘플 전체가 약
-8분, 노트북의 로컬 모델로는 45분 걸립니다(자세한 숫자는 4장).
+어느 문장이 그 개념을 정의하는지까지 나옵니다. Claude 구독으로는 샘플 전체가 8~11분(ChatGPT 구독은 약 15분, 추정),
+노트북의 로컬 모델로는 46분 걸렸습니다(자세한 숫자는 4장).
 웹 UI의 **시작하기** 페이지가 다섯 단계를 보여 주고, 끝난 단계마다 체크 표시를 합니다.
 
 ![데모를 마친 뒤의 시작하기 페이지](screenshots/home.ko.png)
@@ -39,7 +39,7 @@
 | **온톨로지** | 업무에서 쓰는 개념을 모아 서로의 관계까지 그려 넣은 공용 사전입니다. 여기서는 표와 문서를 함께 읽어 만든 결과 파일 묶음 하나를 말합니다. |
 | **비즈니스 개념(용어, Term)** | **표**에서 찾은 개념입니다. 예를 들어 고객 표에서 나온 "고객"이고, 표의 컬럼이 속성이 됩니다. NVIDIA Auto Ontology 엔진이 이름과 설명을 붙이며, 이 문서에서는 용어(Term)라고 부릅니다. |
 | **문서 개념** | 규정, 매뉴얼, 회의록, 스캔본 같은 **문서**에서 찾은 개념입니다. 예: "연체", "승인권자". 각 개념은 근거가 된 원문 문장을 함께 보관합니다. |
-| **매칭** | 문서 개념을 표의 용어와 짝짓는 일입니다. "계약관리규정의 '계약'은 계약(Contracts) 표와 같은 것이다"처럼요. 결과는 *같음(same)*, *더 넓음(broader)*, *더 좁음(narrower)*, *관련(related)* 중 하나입니다. |
+| **매칭** | 문서 개념을 표의 용어와 짝짓는 일입니다. "계약관리규정의 '계약'은 계약(Contracts) 표와 같은 것이다"처럼요. 결과는 *동일(same)*, *상위(broader)*, *하위(narrower)*, *관련(related)* 중 하나입니다. |
 | **스냅샷 / 리비전** | 빌드 한 번의 저장된 결과이며 1, 2, 3 … 번호가 붙습니다. 덮어쓰지 않고 빌드할 때마다 새 리비전이 추가되며, 화면은 가장 최근 것을 보여 줍니다. |
 | **소스** | 등록한 폴더, 업로드한 파일 묶음, 또는 데이터베이스 하나입니다. `hanbit`, `hanbit-docs`처럼 짧은 이름을 붙입니다. 소스 하나는 표(정형)나 문서 중 한 종류만 담습니다. |
 | **빌드** | 모든 소스를 읽고, 모델에게 개념을 찾게 하고, 매칭한 뒤, 새 리비전을 저장하는 실행입니다. 첫 빌드가 가장 오래 걸리고, 다음 빌드부터는 바뀌지 않은 부분을 재사용합니다. |
@@ -66,7 +66,7 @@ SQL로: 말로 질문하면 표로 답을 받음).
 | 구독을 쓰더라도 Ollama | 임베딩(비슷한 개념을 찾으려고 글을 숫자로 바꾸는 일)에 씁니다. Ollama를 채팅 모델로도 쓰지 않는다면 작은 `bge-m3` 모델(1.2 GB)만 있으면 됩니다. OpenAI 호환 임베딩 엔드포인트로 대신할 수도 있습니다. | `ollama list` | https://ollama.com |
 | Node.js 20 이상(선택) | HWP/HWPX, PDF, DOCX, PPTX, XLS/XLSX 문서와 이미지(OCR)를 읽습니다. 없어도 Markdown, 텍스트, HTML, CSV, `.doc` 문서는 읽습니다. | `node --version` | https://nodejs.org |
 
-디스크 공간: 프로젝트와 도구에 약 2 GB, Ollama를 채팅 모델로 쓰면 `qwen3:8b` 모델에 5 GB가 더
+디스크 공간(추정): 프로젝트와 도구에 약 2 GB, Ollama를 채팅 모델로 쓰면 `qwen3:8b` 모델에 5 GB가 더
 필요합니다.
 
 ## 4. 모델 제공자 고르기
@@ -77,9 +77,9 @@ SQL로: 말로 질문하면 표로 답을 받음).
 | | Ollama(로컬) | Claude 구독 | ChatGPT 구독(Codex) | OpenAI 호환 API |
 |---|---|---|---|---|
 | 비용 | 무료 | Claude Pro/Max 요금제에 포함, 사용량 한도에서 차감 | ChatGPT 요금제에 포함, 사용량 한도에서 차감 | API 계정에서 쓴 만큼 과금 |
-| quickstart 샘플(첫 빌드) | 46분 | 8분 | ~15분(추정) | 엔드포인트에 따라 다름 |
+| quickstart 샘플(첫 빌드) | 46분 | 8~11분 | ~15분(추정) | 엔드포인트에 따라 다름 |
 | hanbit 전체 샘플(첫 빌드) | 4~5시간(추정) | 37분 | ~75분(추정) | 엔드포인트에 따라 다름 |
-| 데이터가 컴퓨터 밖으로 나가나요? | **아니요** | 예: 프롬프트가 내 계정 약관에 따라 Anthropic으로 갑니다 | 예: 프롬프트가 내 계정 약관에 따라 OpenAI로 갑니다 | 예: 설정한 엔드포인트로 갑니다 |
+| 데이터가 컴퓨터 밖으로 나가나요? | **아니요** | 예: 프롬프트가 내 계정 약관에 따라 Anthropic으로 갑니다 | 예: 프롬프트가 내 계정 약관에 따라 OpenAI로 갑니다 | 예(엔드포인트가 내 컴퓨터에서 돌면 아니요) |
 | 준비 | Ollama 설치, `init`이 `qwen3:8b`(5 GB)를 받음 | `claude auth login` 한 번 | `codex login` 한 번 | 기본 URL, 모델 이름, 그리고 `.env`에 직접 입력하는 키 |
 | 품질 | 작은 모델: 느리고, 찾는 개념이 적고, 보수적으로 병합 | 저희 테스트에서 가장 좋은 결과, 빠름 | 좋은 결과, 호출 하나는 Claude보다 느림 | 모델에 따라 다름 |
 
@@ -90,9 +90,9 @@ SQL로: 말로 질문하면 표로 답을 받음).
 AutoOntology를 실행할 사용자 계정으로 한 번 로그인해 두세요.
 
 ```
-claude auth login        # Claude: or start `claude` and type /login; check with `claude auth status`
-codex login              # ChatGPT: choose the ChatGPT account; check with `codex login status`
-ollama serve             # Ollama: start it if `ollama list` says it cannot connect
+claude auth login        # Claude: 또는 claude를 실행해 /login 입력, 확인은 claude auth status
+codex login              # ChatGPT: ChatGPT 계정 선택, 확인은 codex login status
+ollama serve             # Ollama: ollama list가 연결할 수 없다고 하면 실행
 ```
 
 OpenAI 호환 API를 쓰려면 `init` 뒤에 텍스트 편집기로 `.env`를 열고
@@ -157,9 +157,9 @@ uv run autoontology demo
 다음: uv run autoontology demo --set hanbit
 ```
 
-마지막 줄은 다음에 입력할 명령입니다(구독을 쓰면 큰 샘플도 금방 끝나므로 `--set hanbit`이
-붙습니다). 리허설에서 도구가 설치된 상태의 `init`은 7초(Ollama), 9초(Claude)
-걸렸고, kordoc을 처음 설치할 때는 1분쯤 더 걸립니다. `init --yes`는 모든 질문에 제안된 값으로
+마지막 줄은 다음에 입력할 명령입니다(Ollama가 아닌 제공자는 큰 샘플도 금방 끝나므로
+`--set hanbit`이 붙습니다). 리허설에서 도구가 설치된 상태의 `init`은 7초(Ollama), 9초(Claude)
+걸렸고, kordoc을 처음 설치할 때는 1분쯤(추정) 더 걸립니다. `init --yes`는 모든 질문에 제안된 값으로
 답하고, `--provider claude`(또는 `ollama`, `codex`, `openai`)는 묻지 않고 제공자를 정합니다.
 
 **`uv run autoontology demo`**는 백그라운드 서비스 두 개를 시작하고, 샘플 세트를 소스로
@@ -283,7 +283,7 @@ Markdown, TXT, HTML. 제목이 분명할수록 좋습니다. 리더가 제목을
 **레이어**에서 전체, 표의 용어만(정형), 문서 개념만(문서), 매칭된 것만(매칭)을 고를 수 있고,
 **근거(원본 문서)**를 켜면 원본 문서도 노드로 나타납니다. **노드 찾기**는 이름이나 동의어로 개념을
 찾아가고, 노드를 누르면 상세 정보가 열리며 **이웃만 보기**로 그 노드에 집중할 수 있습니다. 연결선
-위를 움직이는 점은 수락된 *같음(same)* 매칭입니다.
+위를 움직이는 점은 수락된 *동일(same)* 매칭입니다.
 
 ![그래프 페이지](screenshots/graph.ko.png)
 
@@ -291,7 +291,7 @@ Markdown, TXT, HTML. 제목이 분명할수록 좋습니다. 리더가 제목을
 
 - **채팅**: 평소 말로 묻습니다("연체는 언제 되나요?"). 답변은 근거로 쓴 개념, 규칙, 원문을 인용하며,
   인용을 누르면 해당 개념이 열립니다. 가장 최근 리비전에 대해서만 답합니다.
-- **SQL**: 데이터에 대해 묻으면("지역별 고객 수") 엔진이 SQL을 작성해 정형 소스에서 실행하고 표와
+- **SQL**: 데이터에 대해 물으면("지역별 고객 수") 엔진이 SQL을 작성해 정형 소스에서 실행하고 표와
   SQL을 보여 줍니다.
 - **SPARQL**: 온톨로지 자체에 읽기 전용 질의를 실행합니다. 예시 메뉴에 바로 쓸 수 있는 질의가
   있습니다: Classes, Synonyms per Term, Aligned concepts, Relations and their evidence, Business
@@ -331,9 +331,11 @@ Markdown, TXT, HTML. 제목이 분명할수록 좋습니다. 리더가 제목을
 
 **합쳐지면 안 되는 게 합쳐졌거나, 그 반대예요.** 매칭은 세 단계로 이뤄집니다.
 
-1. 문서 개념마다 의미가 가장 비슷한 용어 다섯 개를 고릅니다(임베딩).
-2. 모델이 쌍마다 `same`(같음), `broader`(개념이 용어보다 넓음), `narrower`(개념이 용어의 일부나
-   하위 종류), `related`(관련), `none`(무관) 중 하나와 신뢰도를 판정합니다.
+1. 엔터티·지표·속성인 문서 개념마다(규칙과 절차는 매칭하지 않음) 의미가 가장 비슷한 용어 다섯
+   개를 고릅니다(임베딩).
+2. 모델이 쌍마다 `same`(동일), `broader`(상위: 용어가 더 넓음, 개념이 용어의 일부나 하위 종류),
+   `narrower`(하위: 용어가 더 좁음, 용어가 개념의 일부나 하위 종류), `related`(관련), `none`(무관)
+   중 하나와 신뢰도를 판정합니다.
 3. 엄격한 규칙이 결정합니다. `same`은 신뢰도가 0.90 이상이고 **동시에** 개념의 이름 하나가 용어의
    이름과 정확히 같을 때만(대소문자와 공백 무시, 영어 복수형은 단수로 봄) 받아들입니다. 그렇지
    않으면 검토할 수 있는 제안인 `related`로 남깁니다. 그래서 "계약"은 이름이 맞을 때만 계약
@@ -355,30 +357,32 @@ Markdown, TXT, HTML. 제목이 분명할수록 좋습니다. 리더가 제목을
 
 ## 9. 문제 해결
 
-`uv run autoontology doctor`가 전체를 점검해 조치 열을 출력하고, `init`은 `fix:` 줄을 출력합니다.
-아래 조치는 실제로 출력되는 명령 그대로입니다(`AUTOONTOLOGY_LANG=ko`이면 설명은 한국어로, 명령은
-그대로 나옵니다).
+`uv run autoontology doctor`가 전체를 점검해 조치 열을 출력하고, `init`은 `조치:` 줄을 출력합니다.
+아래 명령은 doctor와 init이 제안하는 것에 몇 가지 단계를 더한 것입니다(`AUTOONTOLOGY_LANG=ko`이면
+메시지는 한국어, 명령은 그대로입니다).
 
 | 증상 | 원인 | 입력할 것 |
 |---|---|---|
 | `.env` WARN "missing: using the built-in defaults" | 아직 설정 파일이 없음 | `uv run autoontology init` |
-| `init stopped: Postgres is not reachable`, 또는 doctor `postgres` FAIL | 데이터베이스가 꺼져 있거나 `.env`가 다른 곳을 가리킴 | `docker compose up -d` 후 `uv run autoontology init` 다시 실행. 직접 운영하는 Postgres라면 `.env`에 `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 설정 |
+| `init 중단: Postgres에 연결할 수 없습니다`, 또는 doctor `postgres` FAIL | 데이터베이스가 꺼져 있거나 `.env`가 다른 곳을 가리킴 | `docker compose up -d` 후 `uv run autoontology init` 다시 실행. 직접 운영하는 Postgres라면 `.env`에 `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 설정 |
 | `docker compose up -d`가 5432 포트에서 실패 | 다른 Postgres가 이미 그 포트를 씀 | 먼저 `.env`에 `POSTGRES_PORT=5433` 설정, 또는 그 Postgres를 사용 |
 | doctor `database autoontology` FAIL "missing", 또는 `alembic` WARN | 카탈로그가 준비되지 않음 | `uv run autoontology setup` |
 | doctor `extension vector` FAIL | Postgres 서버에 pgvector가 없음 | `brew install pgvector`(또는 `postgresql-17-pgvector` 패키지), 또는 `docker compose` 사용. 그다음 `uv run autoontology setup` |
 | `setup`: 데이터베이스 생성 권한 없음 | Postgres 사용자가 데이터베이스를 만들 수 없음 | `psql`에서 `ALTER USER <이름> CREATEDB;`, 또는 `autoontology` 데이터베이스를 직접 생성 |
-| `init stopped: the claude CLI is not logged in`, doctor `chat provider` FAIL | 이 사용자 계정으로 로그인하지 않음 | `claude auth login`(또는 `codex login`) 후 `uv run autoontology init` 다시 실행 |
-| doctor `chat provider` FAIL "install the claude CLI and log in" | CLI가 설치되지 않았거나 PATH의 `claude`가 래퍼임 | 설치하거나, `.env`에 `AUTOONTOLOGY_CLAUDE_BIN=/path/to/claude` 설정(codex는 `AUTOONTOLOGY_CODEX_BIN`) |
-| `init stopped: the openai provider needs a base URL` | openai를 `--yes`로 골랐는데 URL이 없음 | `.env`에 `AUTOONTOLOGY_OPENAI_BASE_URL` 설정, 또는 `--yes` 없이 `init` 실행 |
-| `init stopped: ... needs a chat model name` / `openai embeddings need a model name` | openai를 `--yes`로 골랐는데 모델이 없음 | `--chat-model`을 주거나 `.env`에 `AUTOONTOLOGY_OPENAI_CHAT_MODEL` / `AUTOONTOLOGY_OPENAI_EMBED_MODEL` 설정 |
-| `warn  your shell sets KEY=..., which wins over .env` | 셸 프로필의 변수가 `.env`보다 우선함 | `unset KEY` 후 셸 프로필에서도 삭제 |
-| `init stopped during setup` | 바로 위 줄이 실패한 부분을 알려 줌 | 그 부분을 고친 뒤 `uv run autoontology init` 다시 실행(반복해도 안전) |
-| doctor `ollama` FAIL, 또는 `warn  Ollama is not answering` | Ollama가 실행 중이 아님 | `ollama serve`(설치는 https://ollama.com) |
+| `init 중단: claude CLI에 로그인되어 있지 않습니다`, doctor `chat provider` FAIL | 이 사용자 계정으로 로그인하지 않음 | `claude auth login`(또는 `codex login`) 후 `uv run autoontology init` 다시 실행 |
+| doctor `chat provider` FAIL, 조치 "claude CLI를 설치하고 로그인하세요" | CLI가 설치되지 않았거나 PATH의 `claude`가 래퍼임 | 설치하거나, `.env`에 `AUTOONTOLOGY_CLAUDE_BIN=/path/to/claude` 설정(codex는 `AUTOONTOLOGY_CODEX_BIN`) |
+| `init 중단: openai 제공자에는 … base URL이 필요합니다` | openai를 `--yes`로 골랐는데 URL이 없음 | `.env`에 `AUTOONTOLOGY_OPENAI_BASE_URL` 설정, 또는 `--yes` 없이 `init` 실행 |
+| `init 중단: … 채팅 모델 이름이 필요합니다` / `init 중단: openai 임베딩에는 모델 이름이 필요합니다` | openai를 `--yes`로 골랐는데 모델이 없음 | `--chat-model`을 주거나 `.env`에 `AUTOONTOLOGY_OPENAI_CHAT_MODEL` / `AUTOONTOLOGY_OPENAI_EMBED_MODEL` 설정 |
+| `warn  셸에 KEY=...이(가) 설정되어 있어 .env보다 우선합니다` | 셸 프로필의 변수가 `.env`보다 우선함 | `unset KEY` 후 셸 프로필에서도 삭제 |
+| `setup 단계에서 init 중단` | 바로 위 줄이 실패한 부분을 알려 줌 | 그 부분을 고친 뒤 `uv run autoontology init` 다시 실행(반복해도 안전) |
+| doctor `ollama` FAIL, 또는 `warn  Ollama가 응답하지 않습니다` | Ollama가 실행 중이 아님 | `ollama serve`(설치는 https://ollama.com) |
 | doctor `ollama` FAIL "models missing", 또는 채팅 모델 `openai/qwen3:8b`를 찾을 수 없음 | 모델이나 별칭을 받지 않음 | `uv run autoontology setup`(또는 `setup --force-alias`) |
 | doctor `model profile` FAIL/WARN | `.env`의 제공자 값이 없거나 알려진 모델이 아님 | `AUTOONTOLOGY_OPENAI_*` / `_CLAUDE_*` / `_CODEX_*` 값 설정(`.env.example` 참고). Ollama는 `openai/<이름>` 별칭 사용 |
+| doctor `chat endpoint` FAIL "not bare JSON: schema not enforced" | Ollama가 답변 형식을 무시함 | `AUTOONTOLOGY_OLLAMA_NO_THINK`을 켠 상태(기본값)로 두고 Ollama 업그레이드 |
+| doctor `chat no-think` FAIL | Ollama 채팅 별칭이 답하기 전에 여전히 "생각"함 | `uv run autoontology setup --force-alias` |
 | doctor `chat endpoint` FAIL | 모델이 테스트 호출에 답하지 않음 | `uv run autoontology provider test` 후 출력되는 조치. openai는 `AUTOONTOLOGY_OPENAI_BASE_URL` / `API_KEY` / `CHAT_MODEL` 확인 |
 | doctor `embedding endpoint` FAIL | 임베딩 모델에 연결할 수 없음 | `.env`의 `EMBED_*` / `AUTOONTOLOGY_EMBED_PROVIDER`와 Ollama 실행 여부 확인 |
-| doctor `vector tables` FAIL "the embedder emits N dimensions" | 빌드한 뒤 임베딩 모델을 바꿈 | 이전 임베딩 모델로 되돌리거나, 모든 소스를 지우고(`uv run autoontology source rm <이름>`) 다시 빌드 |
+| doctor `vector tables` FAIL "the embedder emits N dimensions" | 빌드한 뒤 임베딩 모델을 바꿈 | 이전 임베딩 모델로 되돌리거나, 모든 소스를 지우고(`uv run autoontology source rm <이름>`) `vdb` 벡터 테이블을 비운 뒤 다시 빌드 |
 | doctor `node` WARN | Node.js 20 이상이 없음 | Node.js 20 이상 설치(HWP/PDF/DOCX/PPTX/XLSX 문서에만 필요) |
 | doctor `kordoc` WARN, 또는 빌드 경고 "N document(s) need kordoc and were skipped" | 문서 리더가 설치되지 않음 | `uv run autoontology tools install-kordoc` 후 `uv run autoontology build --resume` |
 | doctor `kordoc` WARN "installed with --omit-optional" | PDF·OCR 지원 없이 설치됨 | `uv run autoontology tools install-kordoc --force` |
@@ -399,14 +403,15 @@ Markdown, TXT, HTML. 제목이 분명할수록 좋습니다. 리더가 제목을
 **내 데이터는 안전한가요?** 채팅과 임베딩 모두 Ollama를 쓰면 아무것도 컴퓨터 밖으로 나가지
 않습니다. 서비스는 127.0.0.1에서만 받고 다른 컴퓨터의 요청은 거부합니다. Claude·ChatGPT 구독이나
 API를 쓰면 프롬프트(표와 컬럼 이름, 몇 개의 샘플 값, 문서 본문)가 내 계정 약관에 따라 해당
-제공자에게 갑니다. 로그인 토큰은 AutoOntology가 읽거나 기록하지 않습니다.
+제공자에게 갑니다. AutoOntology는 로그인 토큰을 보내거나 기록하지 않습니다(codex는
+`auth.json`을 전용 폴더에 링크하고, 갱신된 토큰을 다시 복사해 둘 뿐입니다).
 
 **비용은요?** 소프트웨어는 무료(MIT 라이선스)이고 Ollama도 무료입니다. 구독으로 빌드하면 요금제
 사용량 한도에서 차감되며, hanbit 전체 샘플은 모델 호출 약 520번이 들었습니다. API는
 제공자가 과금합니다.
 
 **얼마나 걸리나요?** 4장의 표를 보세요. 어림셈: 문서 청크 수를 세세요(`demo`와 빌드 페이지에
-나옵니다). 로컬 `qwen3:8b`는 청크 하나에 1~2분, 구독은 약 6초입니다(호출 세 개를 동시에 실행). 표는 시간이 별로 들지
+나옵니다). 로컬 `qwen3:8b`는 청크 하나에 1~2분, 구독은 약 6초입니다(동시에 최대 두 개씩 호출). 표는 시간이 별로 들지
 않습니다. hanbit 표 11개 컴파일은 Claude로 97초 걸렸습니다.
 
 **인터넷 없이 쓸 수 있나요?** 네. 채팅과 임베딩에 Ollama를 쓰고, `init`으로 모델과 kordoc을 한 번

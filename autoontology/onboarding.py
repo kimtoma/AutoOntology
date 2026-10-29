@@ -537,16 +537,17 @@ def register_sample_set(
 
 #: Expected first-build duration per sample set and chat provider: (text, measured).
 #: Measured values come from fresh-clone rehearsals on an Apple M4 Mac mini (16 GB),
-#: 2026-10-29: quickstart/ollama build 2732 s (demo 2748 s), quickstart/claude build 461 s
-#: (demo 479 s), hanbit/claude build 2198 s (2164 s + a 34 s --resume after a usage limit).
+#: 2026-10-29: quickstart/ollama build 2732 s (demo 2748 s, ~46 min), quickstart/claude build
+#: 461 s and 637 s in two runs in working copies, hanbit/claude build 2198 s (2164 s +
+#: a 34 s --resume after a usage limit).
 #: Estimates are scaled from those (codex: compile and judge calls took about twice as
 #: long as claude's; ollama on hanbit: ~83 s per chunk x 141 chunks plus alignment).
 #: quickstart: 3 tables, 28 document chunks with kordoc / 9 without; hanbit: 11 tables,
 #: 132 document chunks + 9 image chunks = 141.
 DEMO_DURATIONS: dict[str, dict[str, tuple[str, bool]]] = {
     "quickstart": {
-        "ollama": ("~45 min (qwen3:8b on an Apple M4)", True),
-        "claude": ("~8 min", True),
+        "ollama": ("~46 min (qwen3:8b on an Apple M4)", True),
+        "claude": ("8-11 min", True),
         "codex": ("~15 min", False),
         "openai": ("5-15 min (depends on the endpoint)", False),
     },

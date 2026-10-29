@@ -22,7 +22,7 @@ Korean interface.
   `autoontology provider status|test|use`.
 - **Claude and ChatGPT subscriptions as chat providers** (`AUTOONTOLOGY_CHAT_PROVIDER=claude`
   or `codex`): the logged-in `claude` / `codex` CLI runs as a locked-down subprocess per
-  call, routed through the service's `/v1` router; login tokens are never read or logged.
+  call, routed through the service's `/v1` router; login tokens are never sent or logged.
   `GET /api/status` reports the provider state, `POST /api/providers/test` makes one test
   call.
 - **Formats**: CSV/TSV and legacy Word `.doc` documents (native), Excel 97-2003 `.xls`
@@ -51,6 +51,10 @@ Korean interface.
 - The 0.1.0 samples (the tables and the documents folder) moved to
   `samples/quickstart/structured` and `samples/quickstart/documents`; the demo source names
   are `quick` and `quick-docs`.
+- Identity policy `identity-v2.2`: instance-like names (record IDs such as `S037`,
+  numbers/dates, company names with a legal-form marker such as `주식회사`, `㈜` or `Inc.`)
+  never become Term synonyms or identity evidence, and a concept named like one is never
+  `same`. They are listed as rejected synonyms in `align-report.md` and the concept detail.
 - With a non-Ollama chat provider, `setup` pulls only the embedding model.
 - `source rm --force --drop-db` keeps the database when the upstream connection could not
   be deleted, and says how to clean it up later.

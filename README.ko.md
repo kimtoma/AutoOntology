@@ -90,9 +90,9 @@ uv run autoontology ui
 | 제공자 | `AUTOONTOLOGY_CHAT_PROVIDER` | 비용 | 데이터가 컴퓨터 밖으로 나감 | quickstart / hanbit 첫 빌드 | 준비 방법 |
 |---|---|---|---|---|---|
 | Ollama, 로컬 `qwen3:8b` | `ollama`(기본값) | 무료 | 아니요 | 46분 / 4~5시간(추정) | Ollama 설치, 모델은 `init`이 받음 |
-| Claude 구독(Claude Code CLI) | `claude` | 요금제 사용 한도 안에서 | 예, Anthropic으로 | 8분 / 37분 | `claude auth login` |
+| Claude 구독(Claude Code CLI) | `claude` | 요금제 사용 한도 안에서 | 예, Anthropic으로 | 8~11분 / 37분 | `claude auth login` |
 | ChatGPT 구독(Codex CLI) | `codex` | 요금제 사용 한도 안에서 | 예, OpenAI로 | ~15분(추정) / ~75분(추정) | `codex login` |
-| 임의의 OpenAI 호환 API | `openai` | 사용량만큼 | 예, 그 엔드포인트로 | 엔드포인트에 따라 다름 | `.env`에 기본 URL, 모델, 키 |
+| 임의의 OpenAI 호환 API | `openai` | 사용량만큼 | 예(엔드포인트가 내 컴퓨터에서 돌면 아니요) | 엔드포인트에 따라 다름 | `.env`에 기본 URL, 모델, 키 |
 
 시간은 2026-10-29에 Apple M4 Mac mini(16 GB)에서 새로 클론한 상태로 측정했습니다
 ([샘플 세트](#샘플-세트) 참고). "추정"은 직접 실행하지 않은 값입니다.
@@ -135,8 +135,8 @@ codex의 경우 로그인 파일을 전용 codex 홈에 링크만 하고, codex�
   들어가며, 내 계정의 약관에 따라 Anthropic(claude)이나 OpenAI(codex)로 전송됩니다. 데이터가
   로컬에 머물러야 한다면 Ollama를 쓰세요.
 - **사용 한도가 적용됩니다.** 모든 호출이 요금제 한도에 포함됩니다. 한도에 닿으면 라우터가
-  429 `usage_limit`로 응답합니다. 초기화를 기다리거나 제공자를 바꾸세요. 작은 샘플을 빌드하면
-  호출이 열 번쯤이고, 큰 문서 묶음은 수백 번입니다.
+  429 `usage_limit`로 응답합니다. 초기화를 기다리거나 제공자를 바꾸세요. quickstart 샘플
+  빌드는 호출이 대략 100~150번, hanbit 전체는 약 500번이며, 큰 문서 묶음은 더 많습니다.
 - **임베딩에는 여전히 Ollama나 OpenAI 호환 엔드포인트가 필요합니다**
   (`AUTOONTOLOGY_EMBED_PROVIDER=ollama`와 `bge-m3`가 기본값, 또는 `openai`). 이때 `setup`은
   임베딩 모델만 받습니다.
@@ -177,7 +177,7 @@ AUTOONTOLOGY_EMBED_PROVIDER=ollama
 
 | 세트 | 소스 | 표 | 문서 | 이미지 | 문서 청크 | 첫 빌드: ollama | claude | codex |
 |---|---|---|---|---|---|---|---|---|
-| `quickstart` | `quick`, `quick-docs` | CSV 파일 3개, 155행 | 5개(MD, PDF, DOCX, HWP) | - | 28개(kordoc 없이 9개) | 46분 | 8분 | ~15분(추정) |
+| `quickstart` | `quick`, `quick-docs` | CSV 파일 3개, 155행 | 5개(MD, PDF, DOCX, HWP) | - | 28개(kordoc 없이 9개) | 46분 | 8~11분 | ~15분(추정) |
 | `hanbit` | `hanbit`, `hanbit-docs`, `hanbit-images` | 7가지 형식의 파일 9개, 표 11개, 5,603행 | 12가지 형식의 15개 | 6개(OCR) | 132개 + 이미지에서 9개(kordoc 없이 42개) | 4~5시간(추정) | 37분 | ~75분(추정) |
 
 시간을 잰 방법(Apple M4 Mac mini, 16 GB, 2026-10-29, 첫 빌드, kordoc과 OCR 설치, 임베딩은
@@ -187,13 +187,14 @@ Ollama의 `bge-m3`):
   `demo --set quickstart`: 빌드 2,732초(컴파일 126초, 문서 추출 2,322초(청크 28개, 개당 약
   83초), 통합 41초, 매칭 237초), demo 합계 2,748초. 대부분의 시간 동안 리허설 B가 같은 컴퓨터에서
   동시에 돌았습니다.
-- **quickstart / claude, 8분**: 빌드 461초(demo 479초), 작업 사본에서 측정.
+- **quickstart / claude, 8~11분**: 작업 사본에서 두 번 잰 빌드 461초(demo 479초)와
+  637초(느린 쪽은 오래된 문서 소스도 다시 매칭).
 - **hanbit / claude, 37분**: 새로 클론해 `init --yes --provider claude --docs`(9초) 후
   `demo --set hanbit`: 컴파일 97초(표 11개), 추출 734초(청크 132개) + 39초(이미지), 통합 360초 +
   36초, 매칭 645초 + 228초. 2,164초 지점에서 구독의 5시간 사용량 한도에 걸려 이미지 개념 58개 중
   마지막 3개의 판정이 멈췄고, `demo --resume`이 34초 만에 마무리했습니다. 모델 호출은 모두 약
   520번입니다.
-- **codex**: `provider test`가 6.8초에 응답했고, quickstart 표 3개 컴파일에 53초(claude 25초,
+- **codex**: `provider test`가 6.8초에 응답했고, quickstart 표 3개 컴파일에 53초(claude 약 25초,
   ollama 126초), 판정 하나에 약 7초(claude 약 3.5초)가 걸렸습니다. codex 행은 이를 바탕으로 한
   추정입니다.
 
@@ -304,16 +305,17 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
         | HTTP /api/...         | imports auto_ontology        | /v1/chat/completions
         v                       v  (ingest, compile, vectors)  v
   +-----------------------+   +-----------------------+   +-------------------------+
-  | NVIDIA Auto Ontology  |   | Postgres 17+pgvector  |   | Ollama :11434, or an    |
-  | backend 127.0.0.1:3101|-->| autoontology (catalog)|   | OpenAI-compatible API   |
-  | (vendor/auto-ontology)|   | autoontology_src_<n>  |   | (chat + embeddings)     |
+  | NVIDIA Auto Ontology  |   | Postgres 17+pgvector  |   | Ollama :11434, an       |
+  | backend 127.0.0.1:3101|-->| autoontology (catalog)|   | OpenAI-compatible API,  |
+  | (vendor/auto-ontology)|   | autoontology_src_<n>  |   | or the claude / codex   |
+  |                       |   |                       |   | CLI (chat only)         |
   +-----------------------+   +-----------------------+   +-------------------------+
 ```
 
 엔진은 수정하지 않은 git 서브모듈입니다. AutoOntology는 연결, 내보내기, 자연어→SQL은 HTTP로
 엔진을 호출하고, 적재, 시맨틱 컴파일, 벡터 테이블은 엔진을 프로세스 안에서 import해 실행합니다.
-백엔드와 서비스 모두 채팅 호출을 서비스의 `/v1` 라우터로 보내고, 라우터가 이를 Ollama 또는
-설정된 OpenAI 호환 엔드포인트로 전달합니다. 자세한 내용은
+백엔드와 서비스 모두 채팅 호출을 서비스의 `/v1` 라우터로 보내고, 라우터가 이를 Ollama,
+설정된 OpenAI 호환 엔드포인트, 또는 로그인된 `claude` / `codex` CLI로 전달합니다. 자세한 내용은
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)(영문)에 있습니다.
 
 ### CLI 레퍼런스
