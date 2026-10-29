@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Loader2, Zap } from "lucide-react"
+import { Loader2, Settings, Zap } from "lucide-react"
+import { Link } from "react-router"
 
 import { CheckChip } from "@/components/status-chip"
 import { Button } from "@/components/ui/button"
@@ -112,6 +113,9 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
           {test.isPending ? t("provider.testing") : t("provider.test")}
         </Button>
         <span className="text-xs text-muted-foreground">{t("provider.test.hint")}</span>
+        <Button size="sm" variant="link" asChild className="h-auto px-0">
+          <Link to="/settings" id="link-provider-settings"><Settings aria-hidden /> {t("settings.link")}</Link>
+        </Button>
       </div>
       {test.isError && (busy ? (
         <p className="text-xs text-muted-foreground" role="status" data-test-result="busy">

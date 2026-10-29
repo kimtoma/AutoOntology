@@ -13,6 +13,7 @@ export const keys = {
   exports: ["exports"] as const,
   graph: ["graph"] as const,
   samples: ["samples"] as const,
+  settings: ["settings"] as const,
 }
 
 /** No retry for answers that will not change by retrying (404 no_snapshot, 400 ...). */

@@ -88,7 +88,7 @@ describe("concept ids of playground chips", () => {
 describe("legacy routes", () => {
   it("send old links to the new pages", () => {
     expect(legacyTarget("/runs", "?run=x")).toBe("/build?run=x")
-    expect(legacyTarget("/settings", "")).toBe("/status")
+    expect(legacyTarget("/settings", "")).toBeNull()  // a real page now
     expect(legacyTarget("/concepts", "?concept=abc")).toBe("/ontology?concept=concept-abc")
     expect(legacyTarget("/concepts", "?concept=term-a&q=x")).toBe("/ontology?concept=term-a&q=x")
     expect(legacyTarget("/concepts", "")).toBe("/ontology")

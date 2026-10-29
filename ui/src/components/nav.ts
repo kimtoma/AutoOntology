@@ -1,6 +1,6 @@
 import { t, type MessageKey } from "@/i18n/core"
 import {
-  Activity, BookOpen, Database, Download, FlaskConical, Hammer, Network, Rocket, type LucideIcon,
+  Activity, BookOpen, Database, Download, FlaskConical, Hammer, Network, Rocket, Settings, type LucideIcon,
 } from "lucide-react"
 
 export interface NavItem { path: string; label: string; icon: LucideIcon; hint: string; id: string }
@@ -23,6 +23,7 @@ export const NAV: NavItem[] = [
   item("/playground", FlaskConical, "playground"),
   item("/exports", Download, "exports"),
   item("/status", Activity, "status"),
+  item("/settings", Settings, "settings"),
 ]
 
 /** Whether *item* is the current page ("/" only on the home page itself). */

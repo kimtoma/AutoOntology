@@ -10,6 +10,7 @@ import ExportsPage from "@/pages/exports"
 import HomePage from "@/pages/home"
 import OntologyPage from "@/pages/ontology"
 import SourcesPage from "@/pages/sources"
+import SettingsPage from "@/pages/settings"
 import StatusPage from "@/pages/status"
 import { legacyTarget } from "@/lib/routes"
 import { useT } from "@/i18n"
@@ -58,7 +59,7 @@ export default function App() {
           <Route path="status" element={<StatusPage />} />
           <Route path="runs" element={<LegacyRedirect />} />
           <Route path="concepts" element={<LegacyRedirect />} />
-          <Route path="settings" element={<LegacyRedirect />} />
+          <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<EmptyState title={t("shell.pageMissing")} hint={t("shell.pageMissing.hint")} />} />
         </Route>
       </Routes>

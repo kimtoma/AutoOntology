@@ -306,6 +306,78 @@ export interface ServiceStatus {
   upload_max_mb?: number
 }
 
+/* --- settings (GET/PUT /api/settings, web/settings_api.py) --------------------------------- */
+
+export type ChatProviderName = "ollama" | "openai" | "claude" | "codex"
+export type EmbedProviderName = "ollama" | "openai"
+export type SettingOrigin = "shell" | ".env" | "default"
+
+export interface CliProviderInfo {
+  found: boolean
+  logged_in: boolean
+  detail: string
+  remedy: string
+  model: string
+  default_model: string
+  known_models: string[]
+  login_command: string
+}
+
+/** `GET /api/settings`: what `.env` (and the shell) select now. Never a key: `api_key_set`. */
+export interface SettingsState {
+  chat: { provider: ChatProviderName; model: string; origin: SettingOrigin }
+  embed: { provider: EmbedProviderName; model: string; origin: SettingOrigin }
+  running: { chat_provider: string; chat_model: string; embed_provider: string; embed_model: string }
+  openai: { base_url: string; api_key_set: boolean; chat_model: string; embed_model: string }
+  cli: { claude: CliProviderInfo; codex: CliProviderInfo }
+  ollama: { endpoint: string; reachable: boolean; models: string[]; chat_model: string; embed_model: string }
+  origins: Record<string, SettingOrigin>
+  /** `.env` keys the service's shell environment sets (they win over `.env`: not editable here) */
+  locked_keys: string[]
+  vectors: { rows: number | null; dimension: number | null; error?: string }
+  restart_required: boolean
+  restart_in_progress: boolean
+  service_pid: number
+  /** started by `autoontology up` (only then can it restart itself) */
+  supervised: boolean
+  restart_command: string
+}
+
+/** The body of `POST /api/settings/test` and `PUT /api/settings`: only what changes. */
+export interface SettingsChange {
+  chat_provider?: ChatProviderName
+  chat_model?: string
+  embed_provider?: EmbedProviderName
+  embed_model?: string
+  openai_base_url?: string
+  /** a new key; never sent back by the server */
+  api_key?: string
+  use_saved_key?: boolean
+  clear_api_key?: boolean
+  confirm_reingest?: boolean
+}
+
+export interface SettingsTest {
+  chat: { ok: boolean; provider: string; model: string; seconds?: number; answer?: string | null;
+          error?: string | null; remedy?: string | null }
+  embed: { ok: boolean; provider: string; model: string; seconds?: number; dimension?: number;
+           error?: string; mismatch_with_store: boolean; stored_dimension: number | null }
+}
+
+export interface SettingsSaved { written: string[]; backup: string | null; restart_required: boolean }
+
+export interface RestartState {
+  id: string
+  state: "running" | "done" | "failed"
+  started_at?: string
+  finished_at?: string | null
+  error?: string | null
+  previous_pid?: number | null
+  new_pid?: number | null
+  log_tail?: string
+  service_pid?: number
+}
+
 /* --- sample sets (GET /api/samples, POST /api/samples/load) -------------------------------- */
 
 export interface SampleSource {
@@ -491,6 +563,11 @@ export interface ConceptQuery {
 export const api = {
   status: () => request<ServiceStatus>("/status"),
   testProvider: () => request<ProviderTest>("/providers/test", { method: "POST" }),
+  settings: () => request<SettingsState>("/settings"),
+  testSettings: (body: SettingsChange) => request<SettingsTest>("/settings/test", json("POST", body)),
+  saveSettings: (body: SettingsChange) => request<SettingsSaved>("/settings", json("PUT", body)),
+  restart: () => request<{ restart_id: string; previous_pid: number }>("/settings/restart", { method: "POST" }),
+  restartState: (id: string) => request<RestartState>(`/settings/restart/${enc(id)}`),
   samples: () => request<SampleSet[]>("/samples"),
   /** *replace*: consent to replacing same-named sources that point elsewhere (409 sample_conflict). */
   loadSamples: (set: string, replace = false) =>
