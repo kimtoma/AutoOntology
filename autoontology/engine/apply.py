@@ -62,20 +62,19 @@ NOTHING_PENDING = "no pending decisions"
 def pending_work(store: Store, model: Any | None = None) -> dict[str, Any]:
     """What the next apply would change: ``{decisions, reverted, removed, total}`` --
     decisions no snapshot reflects yet, alignment rows whose decision was removed (they get
-    their judged verdict back) and decisions the latest snapshot reflects that are gone
+    their judged verdict back) or whose synonyms are still to be taken off a Term
+    (:func:`overlay.unfold_pending`), and decisions the latest snapshot reflects that are gone
     (an undone alias or acknowledgement). *model*: the latest snapshot's, when loaded."""
     from autoontology.ontology.model import MergedOntology
 
     current = DecisionStore(store).list()
     keys = {(d.kind, d.subject_key) for d in current}
     pending = {(d.kind, d.subject_key) for d in current if d.applied_revision is None}
-    reverted: set[tuple[str, str]] = set()
-    aligns = AlignmentStore(store)
-    for source in store.list_sources():
-        if source.kind == "documents":
-            for row in aligns.list(source.id):
-                if row.judged and ("alignment", row.concept_id) not in keys:
-                    reverted.add(("alignment", row.concept_id))
+    reverted = {
+        ("alignment", row.concept_id)
+        for row in AlignmentStore(store).review_rows()
+        if (row.judged and ("alignment", row.concept_id) not in keys) or overlay.unfold_pending(row)
+    }
     if model is None:
         snap = store.latest_snapshot()
         model = MergedOntology.from_dict(snap.model) if snap and snap.model else None
@@ -208,14 +207,12 @@ def _step_decisions(build: _Build) -> dict[str, Any]:
         source = build.fresh(source)
         rows = {a.concept_id: a for a in aligns.list(source.id)}
         same = False
-        touched: set[str] = set()
         for concept in docs.list_concepts(source.id):
             decision, row = decisions.get(concept.id), rows.get(concept.id)
             if decision is None:
                 if overlay.is_decided(row):
                     assert row is not None
                     back = overlay.restore(aligns, row)
-                    touched.add(concept.name)
                     same = same or bool(back and back.accepted and back.relation == "same")
                     out["restored"] += 1
                 continue
@@ -245,27 +242,25 @@ def _step_decisions(build: _Build) -> dict[str, Any]:
                 )
             )
             out["written"] += 1
-            touched.add(concept.name)
             logger.info(
                 "  %s: %s %s",
                 concept.name,
                 decision.relation,
                 terms[term_id].name if decision.decision == "accept" else "-",
             )
-        if (same or touched) and structured:
-            added, removed = _apply_synonyms(build, source, structured, touched)
+        unfold = any(overlay.unfold_pending(a) for a in aligns.list(source.id))
+        if (same or unfold) and structured:
+            added, removed = _apply_synonyms(build, source, structured)
             out["synonyms_added"] += added
             out["synonyms_removed"] += removed
     out["orphaned"] = len(set(decisions) - seen)
     return out
 
 
-def _apply_synonyms(
-    build: _Build, source: Source, structured: list[Source], touched: set[str]
-) -> tuple[int, int]:
+def _apply_synonyms(build: _Build, source: Source, structured: list[Source]) -> tuple[int, int]:
     """The align ``apply`` step over *source* (no model call): ``(added, removed)``
     synonyms -- a person's accepted ``same`` adds the concept's names to the Term, a
-    rejected or removed fold of a *touched* concept takes them off again."""
+    rejected, removed or moved fold takes them off again (:func:`overlay.unfold_pending`)."""
     ctx = align_job._AlignCtx(
         settings=build.settings,
         store=build.store,
@@ -281,7 +276,6 @@ def _apply_synonyms(
         min_sim=0.0,
         min_conf=_min_conf(build.store),
         top_k=align_job.al.DEFAULT_TOP_K,
-        unfolded=set(touched),
     )
     detail = align_job._step_apply(ctx)
     added = sum(

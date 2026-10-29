@@ -175,7 +175,11 @@ process can send any Host and login header.
   alias stays untrusted). It removes only the recorded additions of that source's
   alignment that no accepted `same` of any documents source still accounts for. So the
   Term's `skos:altLabel` and the concept's own class never both carry the name in RDF,
-  Ossie or OKF. This runs in a build's align pass and in apply.
+  Ossie or OKF. This runs in a build's align pass and in apply. What to take off is read
+  from the rows themselves (`overlay.unfold_pending`): a row keeps the `applied` record of
+  its upstream write until the removal succeeds, so a failed removal or a crash between
+  judge and apply is completed by the next apply or `build --resume`. The decision counts
+  as applied only after that.
 - **Model and exports.** An accepted `related`/`narrower`/`broader` row becomes an
   `OAxiom(accepted=True)`, which makes the Term `aligned`; a decided one also has
   `decided=True`. Every alignment axiom carries a status, `proposed`, `accepted` (by the
@@ -227,7 +231,8 @@ process can send any Host and login header.
   with the stored documents (path, sha256) or the load manifest, the database schema, or
   the reader settings. A source with no recorded build is `never_built`. Unreadable
   inputs or an unreachable database give `unknown` with the error class (a database is
-  read once). The computation runs outside the cache lock.
+  read once). The computation runs outside the cache lock, one at a time: a caller that
+  arrives meanwhile waits for it and shares its result.
 
 ### Playground (`autoontology/playground`)
 

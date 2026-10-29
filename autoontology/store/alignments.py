@@ -198,6 +198,15 @@ class AlignmentStore:
             ).fetchall()
         return [_record(r) for r in rows]
 
+    def review_rows(self) -> list[AlignmentRecord]:
+        """Committed rows a decision touched or that recorded an upstream write (the
+        partial index ``alignments_review_idx``): what pending review work is read from."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM alignments WHERE judged_json != '{}' OR applied_json != '{}'"
+            ).fetchall()
+        return [_record(r) for r in rows]
+
     def set_applied(self, alignment_id: int, applied: dict[str, Any]) -> None:
         """Record what apply wrote for a committed verdict."""
         with self._conn() as conn:

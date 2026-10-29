@@ -449,3 +449,47 @@ def test_diff_default_from_is_the_revision_before_to(api):
     assert c.get(f"{API}/ontology/diff", params={"to": 2}).json()["from"] == 1
     assert c.get(f"{API}/ontology/diff", params={"to": 1}).json()["from"] is None
     assert api["store"].previous_revision(3) == 2
+
+
+def test_concurrent_freshness_requests_share_one_computation(ops, monkeypatch):  # noqa: F811
+    import threading
+
+    from autoontology.web import freshness as fr
+    from autoontology.web.api import Api
+
+    api_ = Api(Settings.from_env())
+    calls, entered, release = [], threading.Event(), threading.Event()
+
+    def slow(store, settings):
+        calls.append(1)
+        entered.set()
+        release.wait(5)
+        return [{"name": "x", "stale": False}]
+
+    monkeypatch.setattr(fr, "freshness", slow)
+    results = []
+    first = threading.Thread(target=lambda: results.append(api_.freshness(refresh=True)))
+    first.start()
+    assert entered.wait(5)
+    second = threading.Thread(target=lambda: results.append(api_.freshness()))
+    second.start()
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert len(calls) == 1 and [r[0] for r in results] == [[{"name": "x", "stale": False}]] * 2
+
+
+def test_pending_work_reads_only_the_review_rows(ops):  # noqa: F811
+    store = ops["store"]
+    rows = _rows(ops)
+    assert {r.concept_name for r in ops["aligns"].review_rows()} == {"계약", "고객"}  # applied
+    with store._conn() as conn:
+        plan = " ".join(
+            str(r[3])
+            for r in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM alignments "
+                "WHERE judged_json != '{}' OR applied_json != '{}'"
+            )
+        )
+    assert "alignments_review_idx" in plan
+    assert rows

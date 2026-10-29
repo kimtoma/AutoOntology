@@ -22,6 +22,7 @@ def _downgrade(path, version):
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.execute("DROP TABLE review_decisions")
+    conn.execute("DROP INDEX IF EXISTS alignments_review_idx")
     conn.execute("ALTER TABLE alignments DROP COLUMN judged_json")
     if version < 5:
         conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
@@ -564,3 +565,95 @@ def test_a_decision_holds_on_the_resumed_judge_path(ops, monkeypatch):
     detail = {s.name: s.detail for s in ops["store"].get_steps(result.run_id)}["align:hanbit-docs"]
     assert detail["resumed"] >= 1 and ops["judge"].judged == []
     assert (_rows(ops)["계약"].relation, _rows(ops)["계약"].accepted) == ("none", False)
+
+
+# --- re-review: the unfold follows the rows' state (retries and resumes) -----------------
+
+
+def _flaky_writer(ops, fails=1):
+    from tests.test_align import ClientWriter
+
+    class Flaky(ClientWriter):
+        def __init__(self, client):
+            super().__init__(client)
+            self.fails = fails
+
+        def remove_synonyms(self, term_id, removals):
+            if self.fails:
+                self.fails -= 1
+                raise ConnectionError("backend went away")
+            return super().remove_synonyms(term_id, removals)
+
+    return Flaky(ops["client"])
+
+
+def test_a_failed_unfold_is_retried_by_the_next_apply(ops):
+    from autoontology.engine.apply import run_apply
+    from autoontology.engine.jobs import JobError
+
+    rows = _rows(ops)
+    d = ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
+    writer = _flaky_writer(ops)
+    with pytest.raises(JobError, match="decisions"):
+        run_apply(ops["store"], ops["settings"], client=ops["client"], writer=writer)
+    assert "계약" in ops["client"].terms["t-contract"]["synonyms"]
+    assert ops["decisions"].get("alignment", d.subject_key).applied_revision is None
+    result = run_apply(ops["store"], ops["settings"], client=ops["client"], writer=writer)
+    assert result.revision == 2
+    _check_unfolded(ops, "계약", "t-contract", "term-t-contract")
+    assert ops["decisions"].get("alignment", d.subject_key).applied_revision == 2
+    assert not _rows(ops)["계약"].applied  # the trace is cleared once the synonyms are off
+
+
+def test_a_build_unfolds_a_rejected_fold(ops):
+    rows = _rows(ops)
+    d = ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
+    result = tb.run(ops, judge=ops["judge"])
+    assert result.status == "succeeded", result.problems
+    _check_unfolded(ops, "계약", "t-contract", "term-t-contract")
+    assert ops["decisions"].get("alignment", d.subject_key).applied_revision == result.revision
+
+
+def test_a_build_resumed_after_a_crash_between_judge_and_apply_unfolds(ops, monkeypatch):
+    from autoontology.engine import align as align_job
+    from autoontology.engine.jobs import JobError
+
+    rows = _rows(ops)
+    d = ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
+    real = align_job.ALIGN_STEP_FUNCS["apply"]
+
+    def crash(ctx):
+        raise ConnectionError("backend went away")
+
+    monkeypatch.setitem(align_job.ALIGN_STEP_FUNCS, "apply", crash)
+    with pytest.raises(JobError, match="align"):
+        tb.run(ops, judge=ops["judge"])
+    assert _rows(ops)["계약"].relation == "none"  # the judge step wrote the decision
+    assert "계약" in ops["client"].terms["t-contract"]["synonyms"]
+    monkeypatch.setitem(align_job.ALIGN_STEP_FUNCS, "apply", real)
+    result = tb.run(ops, judge=ops["judge"], resume=True)
+    assert result.status == "succeeded", result.problems
+    _check_unfolded(ops, "계약", "t-contract", "term-t-contract")
+    assert ops["decisions"].get("alignment", d.subject_key).applied_revision == result.revision
+
+
+def test_an_undone_same_on_a_never_judged_concept_still_unfolds(ops):
+    """A concept with no judged verdict before its decision: removing the decision keeps
+    the row (unaligned) until its synonyms are off the Term."""
+    rows = _rows(ops)
+    cid = rows["청구서"].concept_id
+    ops["aligns"].delete(cid)  # as if never judged
+    ops["decisions"].put(
+        Decision("alignment", cid, "accept", {"relation": "same", "term_id": "t-customer"})
+    )
+    _apply(ops)
+    assert "청구서" in ops["client"].terms["t-customer"]["synonyms"]
+    ops["decisions"].delete("alignment", cid)
+    writer = _flaky_writer(ops)
+    from autoontology.engine.apply import run_apply
+    from autoontology.engine.jobs import JobError
+
+    with pytest.raises(JobError):
+        run_apply(ops["store"], ops["settings"], client=ops["client"], writer=writer)
+    run_apply(ops["store"], ops["settings"], client=ops["client"], writer=writer)
+    _check_unfolded(ops, "청구서", "t-customer", "term-t-customer")

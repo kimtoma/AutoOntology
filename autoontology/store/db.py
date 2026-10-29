@@ -400,7 +400,8 @@ MIGRATIONS: list[tuple[int, str]] = [
         # overrides the align judge on every later pass and is reflected in the next
         # snapshot by an `apply` run (applied_revision). alignments.judged_json = the
         # judge's verdict a decision replaced on that row, restored when the decision is
-        # removed ('{}' on rows no decision touched).
+        # removed ('{}' on rows no decision touched); alignments_review_idx = the rows the
+        # pending review work is read from (decided, or with an upstream write recorded).
         """
         CREATE TABLE IF NOT EXISTS review_decisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -414,7 +415,9 @@ MIGRATIONS: list[tuple[int, str]] = [
             applied_revision INTEGER,
             UNIQUE (kind, subject_key)
         );
-        ALTER TABLE alignments ADD COLUMN judged_json TEXT NOT NULL DEFAULT '{}'
+        ALTER TABLE alignments ADD COLUMN judged_json TEXT NOT NULL DEFAULT '{}';
+        CREATE INDEX IF NOT EXISTS alignments_review_idx ON alignments (concept_id)
+            WHERE judged_json != '{}' OR applied_json != '{}'
         """,
     ),
 ]

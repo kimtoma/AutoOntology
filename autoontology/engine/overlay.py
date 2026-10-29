@@ -50,9 +50,21 @@ def rationale(decision: Decision) -> str:
     return f"{HUMAN_RATIONALE}: {decision.note}" if decision.note else HUMAN_RATIONALE
 
 
+def unfold_pending(row: AlignmentRecord | None) -> bool:
+    """*row* records synonyms written to a Term (``applied``) that its verdict no longer
+    accounts for -- not an accepted ``same`` to that Term (a decision rejected or removed
+    the fold, or moved it to another Term): the align apply step takes them off, then
+    clears ``applied``. Derived from the stored row, so a failed removal or a crash
+    before it is retried by the next apply or build."""
+    if row is None or row.dry_run or not row.applied:
+        return False
+    term = row.applied.get("term_id") or row.term_id
+    return not (row.accepted and row.relation == "same" and term == row.term_id)
+
+
 def reflects(row: AlignmentRecord | None, decision: Decision) -> bool:
-    """*row* already carries *decision* (nothing to write)."""
-    if not is_decided(row) or row.relation != decision.relation:
+    """*row* already carries *decision* (nothing to write), its synonyms included."""
+    if not is_decided(row) or row.relation != decision.relation or unfold_pending(row):
         return False
     assert row is not None
     if decision.decision == "accept":
@@ -101,9 +113,9 @@ def decided_record(
         # never a judge cache hit: the judge did not say this
         judge_key="",
         candidates=existing.candidates if existing else [],
-        applied=existing.applied
-        if existing and same_term and accept and decision.relation == "same"
-        else {},
+        # kept whatever the decision: synonyms it no longer accounts for are taken off by the
+        # apply step (:func:`unfold_pending`)
+        applied=existing.applied if existing else {},
         proposal={},
         judged=judged_state(existing),
     )
@@ -111,16 +123,18 @@ def decided_record(
 
 def restore(aligns: AlignmentStore, row: AlignmentRecord) -> AlignmentRecord | None:
     """Put the judged verdict of a decided *row* back (its decision was removed); drop the
-    row when the concept had no verdict before the decision. Returns the restored row."""
+    row when the concept had no verdict before the decision and wrote nothing upstream.
+    Returns the restored row."""
     judged = row.judged
     if "relation" not in judged:
-        aligns.delete(row.concept_id)
-        return None
-    keep_applied = (
-        row.applied
-        if judged.get("relation") == "same" and judged.get("term_id") == row.term_id
-        else judged.get("applied") or {}
-    )
+        if not row.applied:
+            aligns.delete(row.concept_id)
+            return None
+        # never judged, but its synonyms are on a Term: an unaligned row until they are
+        # off (the next align pass judges it, keeping the trace)
+        judged = {"relation": "none", "accepted": False, "rationale": "", "proposal": {}}
+    # what was written stays recorded until the apply step reconciles it
+    keep_applied = row.applied or judged.get("applied") or {}
     fields = {k: judged[k] for k in JUDGED_KEYS if k in judged}
     return aligns.put(
         AlignmentRecord(

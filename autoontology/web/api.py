@@ -89,6 +89,8 @@ ORIGINS: tuple[str, ...] = ("structured", "document", "aligned")
 STATUS_CACHE_S = 15.0
 #: ``GET /api/sources/freshness`` cache (``?refresh=1`` bypasses it)
 FRESHNESS_CACHE_S = 60.0
+#: how long a caller waits for another caller's freshness computation
+FRESHNESS_WAIT_S = 120.0
 
 
 class ApiError(Exception):
@@ -242,6 +244,8 @@ class Api:
         #: ``GET /api/sources/freshness``: (monotonic time, rows), one computation at a time
         self._freshness: tuple[float, list[dict[str, Any]]] | None = None
         self._freshness_lock = threading.Lock()
+        #: the computation in progress (concurrent callers wait for it), or None
+        self._freshness_flight: threading.Event | None = None
 
     @property
     def store(self) -> Store:
@@ -406,17 +410,36 @@ class Api:
 
     def freshness(self, refresh: bool = False) -> tuple[list[dict[str, Any]], float]:
         """``(rows, age in seconds)`` of the per-source freshness, computed at most every
-        :data:`FRESHNESS_CACHE_S` (``refresh``: now). The computation (file hashes, database
-        connections) runs outside the lock; only the cache swap holds it."""
+        :data:`FRESHNESS_CACHE_S` (``refresh``: now). One computation at a time (file hashes,
+        database connections), outside the lock: a caller arriving meanwhile waits for it
+        and shares its result; only the cache swap holds the lock."""
         from autoontology.web.freshness import freshness
 
-        cached = self.cached_freshness()
-        if cached is not None and not refresh and cached[1] < FRESHNESS_CACHE_S:
-            return cached
-        rows = freshness(self.store, self.settings)
         with self._freshness_lock:
-            self._freshness = (time.monotonic(), rows)
-        return rows, 0.0
+            cached = self._freshness
+            fresh = cached and time.monotonic() - cached[0] < FRESHNESS_CACHE_S
+            if cached and fresh and not refresh:
+                return cached[1], time.monotonic() - cached[0]
+            flight = self._freshness_flight
+            leader = flight is None
+            if leader:
+                flight = self._freshness_flight = threading.Event()
+        assert flight is not None
+        if not leader:
+            flight.wait(FRESHNESS_WAIT_S)
+            done = self.cached_freshness()
+            if done is not None:
+                return done
+        try:
+            rows = freshness(self.store, self.settings)
+            with self._freshness_lock:
+                self._freshness = (time.monotonic(), rows)
+            return rows, 0.0
+        finally:
+            if leader:
+                with self._freshness_lock:
+                    self._freshness_flight = None
+                flight.set()
 
     def cached_freshness(self) -> tuple[list[dict[str, Any]], float] | None:
         """The last computed freshness and its age, never computing it (None: never)."""

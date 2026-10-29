@@ -225,6 +225,7 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
     conn.execute("DELETE FROM schema_version WHERE version >= 4")  # back to a v3 store
     conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
     conn.execute("DROP TABLE review_decisions")
+    conn.execute("DROP INDEX IF EXISTS alignments_review_idx")
     conn.execute("ALTER TABLE alignments DROP COLUMN judged_json")
     for i, applied in enumerate(
         [

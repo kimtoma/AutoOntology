@@ -154,9 +154,6 @@ class _AlignCtx:
     details: dict[str, Any] = field(default_factory=dict)
     #: the report folder (None: no align-report.md)
     report_dir: Path | None = None
-    #: names of concepts whose verdict a review decision (or its removal) changed in this
-    #: pass: the apply step takes the synonyms they no longer account for off their Terms
-    unfolded: set[str] = field(default_factory=set)
 
     @property
     def export_dir(self) -> Path:
@@ -358,7 +355,6 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
         if decision is not None:
             term_id = decision.payload.get("term_id") if decision.decision == "accept" else ""
             if not overlay.reflects(stored, decision):
-                ctx.unfolded.add(concept.name)
                 ctx.aligns.put(
                     overlay.decided_record(
                         stored,
@@ -383,7 +379,6 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
         if overlay.is_decided(stored):
             assert stored is not None
             overlay.restore(ctx.aligns, stored)  # its decision was removed: the judge's again
-            ctx.unfolded.add(concept.name)
         # the judge's input now: concept content, candidate Term ids + content, model and
         # prompt version (judge_key); none for a concept that is not judged
         alignable = concept.kind in al.ALIGNABLE_KINDS
@@ -444,7 +439,10 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
                         existing.applied
                         if not existing.dry_run
                         and not ctx.dry_run
-                        and _eligible(ctx, verdict.relation, verdict.confidence)
+                        and (
+                            _eligible(ctx, verdict.relation, verdict.confidence)
+                            or overlay.unfold_pending(existing)  # still to take off
+                        )
                         else {}
                     )
                     ctx.aligns.put(
@@ -536,6 +534,9 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
             and existing.term_id == verdict.term_id
             else {}
         )
+        if not keep_applied and overlay.unfold_pending(existing):
+            assert existing is not None
+            keep_applied = existing.applied  # synonyms still to take off (apply step)
         ctx.aligns.put(
             _record(
                 ctx,
@@ -650,20 +651,29 @@ def _accepted_aliases(ctx: _AlignCtx) -> dict[str, set[str]]:
 
 
 def _unfold(ctx: _AlignCtx) -> int:
-    """Take off the Terms the synonyms this source's alignment wrote for the concepts in
-    ``ctx.unfolded`` that no accepted ``same`` accounts for any more (a review decision
-    rejected or removed the fold); the records stay (still untrusted). Returns how many."""
+    """Take off the Terms the synonyms this source's alignment wrote for the concepts whose
+    row no longer accounts for them (:func:`overlay.unfold_pending`: a review decision
+    rejected, removed or moved the fold) and that no accepted ``same`` of any source
+    accounts for; then clear those rows' ``applied``. The records stay (still untrusted).
+    Derived from the rows, so a failed removal is retried by the next pass. Returns how
+    many synonyms were removed."""
+    from autoontology.engine import overlay
+
+    rows = [a for a in ctx.aligns.list(ctx.source.id) if overlay.unfold_pending(a)]
+    if not rows:
+        return 0
+    names = {a.concept_name for a in rows}
     terms = ctx.snapshot(refresh=True).term_map()
     stale, _kept = al.stale_auto_aliases(
         terms, ctx.aligns.alias_provenance(live=True), _accepted_aliases(ctx), ctx.source.id
     )
     plan: dict[str, list[str]] = {}
     for alias in stale:
-        if set(alias.concepts) & ctx.unfolded:
+        if set(alias.concepts) & names:
             plan.setdefault(alias.term_id, []).append(alias.alias)
     removed = 0
     for term_id, aliases in sorted(plan.items()):
-        result = ctx.writer.remove_synonyms(term_id, aliases)
+        result = ctx.writer.remove_synonyms(term_id, aliases)  # raises: retried next pass
         ctx.aligns.mark_aliases_removed(term_id, aliases)
         removed += len(result.get("removed") or [])
         if result.get("embeddings_refreshed") is False:
@@ -673,11 +683,14 @@ def _unfold(ctx: _AlignCtx) -> int:
             terms[term_id].name if term_id in terms else term_id,
             ", ".join(aliases),
         )
+    for a in rows:  # reconciled: nothing of theirs is left on a Term
+        assert a.id is not None
+        ctx.aligns.set_applied(a.id, {})
     return removed
 
 
 def _step_apply(ctx: _AlignCtx) -> dict[str, Any]:
-    unfolded = 0 if ctx.dry_run or not ctx.unfolded else _unfold(ctx)
+    unfolded = 0 if ctx.dry_run else _unfold(ctx)
     # eligible rather than `accepted`: a dry run persists accepted=False but still plans
     # the verdicts of this mode's table: a dry run plans from its previews
     known = ctx.snapshot().term_map()
