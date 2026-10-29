@@ -922,6 +922,14 @@ class Store:
             row = conn.execute("SELECT max(revision) FROM ontology_snapshots").fetchone()
         return int(row[0]) if row and row[0] is not None else None
 
+    def previous_revision(self, revision: int) -> int | None:
+        """The newest revision older than *revision* (None: there is none)."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT max(revision) FROM ontology_snapshots WHERE revision < ?", (revision,)
+            ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
     def list_snapshots(self, limit: int = 50) -> list[Snapshot]:
         with self._conn() as conn:
             rows = conn.execute(

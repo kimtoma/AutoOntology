@@ -154,6 +154,9 @@ class _AlignCtx:
     details: dict[str, Any] = field(default_factory=dict)
     #: the report folder (None: no align-report.md)
     report_dir: Path | None = None
+    #: names of concepts whose verdict a review decision (or its removal) changed in this
+    #: pass: the apply step takes the synonyms they no longer account for off their Terms
+    unfolded: set[str] = field(default_factory=set)
 
     @property
     def export_dir(self) -> Path:
@@ -355,6 +358,7 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
         if decision is not None:
             term_id = decision.payload.get("term_id") if decision.decision == "accept" else ""
             if not overlay.reflects(stored, decision):
+                ctx.unfolded.add(concept.name)
                 ctx.aligns.put(
                     overlay.decided_record(
                         stored,
@@ -379,6 +383,7 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
         if overlay.is_decided(stored):
             assert stored is not None
             overlay.restore(ctx.aligns, stored)  # its decision was removed: the judge's again
+            ctx.unfolded.add(concept.name)
         # the judge's input now: concept content, candidate Term ids + content, model and
         # prompt version (judge_key); none for a concept that is not judged
         alignable = concept.kind in al.ALIGNABLE_KINDS
@@ -625,7 +630,54 @@ def _raw_verdict(record: AlignmentRecord) -> al.ValidatedVerdict:
     )
 
 
+def _accepted_aliases(ctx: _AlignCtx) -> dict[str, set[str]]:
+    """term id -> the normalized names every accepted ``same`` (any documents source)
+    accounts for on it: never taken off."""
+    out: dict[str, set[str]] = {}
+    for source in ctx.store.list_sources():
+        if source.kind != "documents":
+            continue
+        concepts = {c.id: c for c in ctx.docs.list_concepts(source.id)}
+        for a in ctx.aligns.list(source.id):
+            c = concepts.get(a.concept_id)
+            if not (a.accepted and a.relation == "same" and a.term_id and c is not None):
+                continue
+            info = al.ConceptInfo(
+                id=c.id, name=c.name, kind=c.kind, name_en=c.name_en, synonyms=c.synonyms
+            )
+            out.setdefault(a.term_id, set()).update(al.accepted_aliases(info))
+    return out
+
+
+def _unfold(ctx: _AlignCtx) -> int:
+    """Take off the Terms the synonyms this source's alignment wrote for the concepts in
+    ``ctx.unfolded`` that no accepted ``same`` accounts for any more (a review decision
+    rejected or removed the fold); the records stay (still untrusted). Returns how many."""
+    terms = ctx.snapshot(refresh=True).term_map()
+    stale, _kept = al.stale_auto_aliases(
+        terms, ctx.aligns.alias_provenance(live=True), _accepted_aliases(ctx), ctx.source.id
+    )
+    plan: dict[str, list[str]] = {}
+    for alias in stale:
+        if set(alias.concepts) & ctx.unfolded:
+            plan.setdefault(alias.term_id, []).append(alias.alias)
+    removed = 0
+    for term_id, aliases in sorted(plan.items()):
+        result = ctx.writer.remove_synonyms(term_id, aliases)
+        ctx.aligns.mark_aliases_removed(term_id, aliases)
+        removed += len(result.get("removed") or [])
+        if result.get("embeddings_refreshed") is False:
+            ctx.aligns.add_pending_refresh(term_id, "synonyms removed by a review decision")
+        logger.info(
+            "  %s: removed synonyms %s (review decision)",
+            terms[term_id].name if term_id in terms else term_id,
+            ", ".join(aliases),
+        )
+    return removed
+
+
 def _step_apply(ctx: _AlignCtx) -> dict[str, Any]:
+    unfolded = 0 if ctx.dry_run or not ctx.unfolded else _unfold(ctx)
     # eligible rather than `accepted`: a dry run persists accepted=False but still plans
     # the verdicts of this mode's table: a dry run plans from its previews
     known = ctx.snapshot().term_map()
@@ -762,6 +814,7 @@ def _step_apply(ctx: _AlignCtx) -> dict[str, Any]:
         "refresh_failed": refresh_failed,
         "pending_refreshes": pending,
         "rejected_aliases": rejected_total,
+        **({"synonyms_removed": unfolded} if unfolded else {}),
     }
 
 

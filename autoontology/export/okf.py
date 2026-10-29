@@ -253,11 +253,13 @@ def write(
     for a in model.axioms:
         if a.subject not in outgoing or a.object not in path_of:
             continue
+        status = f", {a.status}" if a.status else ""
         if a.kind == "subclass_of":
-            outgoing[a.subject].append(f"is a kind of {link(a.object)}")
+            note = f" ({a.source}{status})" if a.status else ""
+            outgoing[a.subject].append(f"is a kind of {link(a.object)}{note}")
         else:
             conf = f", confidence {a.confidence:.2f}" if a.confidence is not None else ""
-            outgoing[a.subject].append(f"is related to {link(a.object)} ({a.source}{conf})")
+            outgoing[a.subject].append(f"is related to {link(a.object)} ({a.source}{status}{conf})")
     columns_of: dict[str, list[tuple[str, list[Any], _Table]]] = {}
     for t in tables.values():
         for term in t.terms:

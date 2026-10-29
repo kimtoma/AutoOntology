@@ -14,6 +14,12 @@ Categories, in this order:
   kept off a Term (instance-like names, column names);
 * ``stale_sources`` (``src:<source name>``): sources whose inputs changed since the last
   build (``web/freshness.py``); the action is a build, not a decision.
+* ``folds`` (``fold:<concept id>``), listed only when asked for (``category=folds``): the
+  concepts the judge folded into a Term (accepted ``same``), so a wrong merge can be
+  rejected -- the next apply unfolds it and takes its synonyms off the Term.
+
+Accepting ``broader`` means concept ⊑ Term (the concept is narrower than the Term),
+``narrower`` Term ⊑ concept, ``related`` skos:related.
 
 Item ids are stable across calls. A decided item keeps its id; once the decision is
 applied and the item is no longer current (an accepted alias left ``rejected_aliases``),
@@ -29,8 +35,18 @@ from autoontology.store.db import Store
 from autoontology.store.decisions import ACCEPT_RELATIONS, Decision, DecisionStore, alias_key
 from autoontology.store.documents import DocumentStore
 
-CATEGORIES: tuple[str, ...] = ("proposals", "axioms", "unaligned", "aliases", "stale_sources")
+CATEGORIES: tuple[str, ...] = (
+    "proposals",
+    "axioms",
+    "unaligned",
+    "aliases",
+    "stale_sources",
+    "folds",
+)
+#: listed (and counted in ``total``) only when asked for: every automatic fold
+ON_REQUEST: tuple[str, ...] = ("folds",)
 PREFIX_OF: dict[str, str] = {
+    "folds": "fold",
     "proposals": "al",
     "axioms": "ax",
     "unaligned": "un",
@@ -40,6 +56,7 @@ PREFIX_OF: dict[str, str] = {
 CATEGORY_OF: dict[str, str] = {v: k for k, v in PREFIX_OF.items()}
 #: decision kind of each category (stale sources take no decision)
 KIND_OF: dict[str, str] = {
+    "folds": "alignment",
     "proposals": "alignment",
     "axioms": "alignment",
     "unaligned": "concept",
@@ -180,6 +197,16 @@ class Inbox:
                     reason=proposal.get("reason") or "",
                     suggested="accept",
                 )
+            elif state["relation"] == "same" and state["accepted"] and state["term_id"]:
+                self._add(
+                    "folds",
+                    cid,
+                    term=(state["term_id"], state["term_name"]),
+                    relation="same",
+                    confidence=state["confidence"],
+                    rationale=state["rationale"],
+                    suggested="accept",
+                )
             elif (
                 state["relation"] in AXIOM_RELATIONS
                 and not state["accepted"]
@@ -207,7 +234,7 @@ class Inbox:
                     continue
                 if entry.get("relation") == "skipped":  # a kind that is never aligned
                     continue
-                if f"al:{cid}" in self.items or f"ax:{cid}" in self.items:
+                if any(f"{p}:{cid}" in self.items for p in ("al", "ax", "fold")):
                     continue
                 row = self.rows.get(cid)
                 self._add(
@@ -236,6 +263,23 @@ class Inbox:
                         alias=alias,
                         suggested="reject",
                     )
+            # an alias decision the latest snapshot reflects but that was removed since: a
+            # pending item again (the next apply puts the alias back among the rejected)
+            for entry in self.model.decisions:
+                if entry.get("kind") != "alias" or ("alias", entry["subject"]) in self._decided:
+                    continue
+                term_id, _, alias = str(entry["subject"]).partition("|")
+                cls = next((c for c in self.model.classes.values() if c.term_id == term_id), None)
+                if cls is None or f"alias:{entry['subject']}" in self.items:
+                    continue
+                self._add(
+                    "aliases",
+                    entry["subject"],
+                    term=(term_id, cls.label),
+                    relation="same",
+                    alias=alias,
+                    suggested="reject",
+                )
         for f in self.freshness:
             if f.get("stale"):
                 self.items[f"src:{f['name']}"] = {
@@ -256,8 +300,8 @@ class Inbox:
             item = d.payload.get("item")
             if not isinstance(item, dict) or not item.get("id") or item["id"] in self.items:
                 continue
-            if kind == "alignment" and (
-                f"al:{subject}" in self.items or f"ax:{subject}" in self.items
+            if kind == "alignment" and any(
+                f"{p}:{subject}" in self.items for p in ("al", "ax", "fold")
             ):
                 continue
             self.items[item["id"]] = {**item, "decision": d.to_dict()}
@@ -318,6 +362,9 @@ class Inbox:
         items = list(self.items.values())
         pending = [i for i in items if i["decision"] is None]
         counts = {c: sum(i["category"] == c for i in pending) for c in CATEGORIES}
+        if category not in ON_REQUEST:  # automatic folds only when asked for
+            items = [i for i in items if i["category"] not in ON_REQUEST or i["decision"]]
+            pending = [i for i in pending if i["category"] not in ON_REQUEST]
         if status == "pending":
             chosen = pending
         elif status == "decided":
@@ -339,7 +386,11 @@ class Inbox:
         total = len(chosen)
         start = (page - 1) * size
         return {
-            "counts": {**counts, "total": len(pending)},
+            # the badge: what waits for a person (automatic folds are not waiting)
+            "counts": {
+                **counts,
+                "total": sum(counts[c] for c in CATEGORIES if c not in ON_REQUEST),
+            },
             "unapplied": self.unapplied(),
             "status": status,
             "category": category,
@@ -351,15 +402,11 @@ class Inbox:
         }
 
     def unapplied(self) -> int:
-        """Decisions no snapshot reflects yet, plus rows whose decision was removed (an
-        apply gives them their judged verdict back)."""
-        pending = sum(d.applied_revision is None for d in self._decided.values())
-        reverted = sum(
-            1
-            for cid, row in self.rows.items()
-            if row.judged and ("alignment", cid) not in self._decided
-        )
-        return pending + reverted
+        """What the next apply would change (:func:`autoontology.engine.apply.pending_work`):
+        decisions no snapshot reflects yet, plus removed ones."""
+        from autoontology.engine.apply import pending_work
+
+        return pending_work(self.store, self.model)["total"]
 
     def item(self, item_id: str) -> dict[str, Any]:
         parse_item_id(item_id)
@@ -398,6 +445,7 @@ class Inbox:
                 400, "invalid_decision", f"a {category} item takes {' or '.join(allowed)}"
             )
         snapshot = {k: v for k, v in item.items() if k != "decision"}
+        category = item["category"]
         payload: dict[str, Any] = {"category": category, "item": snapshot}
         if kind == "alignment":
             row = self.rows.get(subject)

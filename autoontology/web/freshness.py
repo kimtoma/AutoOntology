@@ -137,11 +137,14 @@ def source_freshness(store: Store, settings: Settings, source: Source) -> dict[s
             out.update(state="never_built", stale=True, reasons=[_reason("never_built", [])])
             return out
         out["last_inputs_sha"], out["last_built_at"] = last
+        # a database is read once: its error class, else the schema for the fingerprint
+        schema = _schema(source) if source.kind == "database" else None
         current = input_fingerprint(
             source,
             settings.home,
             settings.vision_model,
             reader=extract_job.reader_settings(settings),
+            schema=schema,
         )
         if not current:  # it swallows errors: read the inputs again to name the error
             _diagnose(source)
@@ -167,18 +170,24 @@ class InputsUnreadable(RuntimeError):
     """The fingerprint could not be taken, and reading the inputs did not say why."""
 
 
+def _schema(source: Source) -> str:
+    """The live schema fingerprint of a database source; raises when it cannot be read."""
+    from autoontology.structured import pipeline
+
+    conn = pipeline.parse_database_url(source.locator)
+    introspect = pipeline.SCHEMA_INTROSPECTORS.get(conn["type"])
+    if introspect is None:
+        raise InputsUnreadable(f"no schema introspector for {conn['type']!r}")
+    return pipeline.schema_rows_fingerprint(introspect(conn))
+
+
 def _diagnose(source: Source) -> None:
     """Read *source*'s inputs the way the fingerprint does, raising what it swallowed."""
     from autoontology.engine import extract as extract_job
     from autoontology.structured import pipeline
 
     if source.kind == "database":
-        conn = pipeline.parse_database_url(source.locator)
-        introspect = pipeline.SCHEMA_INTROSPECTORS.get(conn["type"])
-        if introspect is None:
-            raise InputsUnreadable(f"no schema introspector for {conn['type']!r}")
-        introspect(conn)
-        return
+        return  # read (and raised) before the fingerprint
     if source.kind == "documents":
         target, recursive = extract_job.documents_target(source)
         files = extract_job.readers.discover_documents(target, recursive=recursive)

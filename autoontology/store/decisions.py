@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Review decisions (schema v6, table ``review_decisions``): what a person decided about a
-review item. One active decision per ``(kind, subject_key)``; a new one replaces it and
+review item. One active decision per ``(kind, subject_key)`` -- and per concept: an
+``alignment`` decision replaces the concept's ``concept`` one and vice versa; a new one replaces it and
 deleting it lets the align judge decide again.
 
 Subjects:
@@ -38,6 +39,8 @@ ALLOWED: dict[str, tuple[str, ...]] = {
 }
 #: relations an accepted alignment may take
 ACCEPT_RELATIONS: tuple[str, ...] = ("same", "related", "narrower", "broader")
+#: kinds keyed by a concept id: a concept holds one decision of either kind
+CONCEPT_KINDS: tuple[str, str] = ("alignment", "concept")
 #: rationale prefix of an alignment row a decision wrote
 HUMAN_RATIONALE = "human decision"
 
@@ -113,6 +116,12 @@ class DecisionStore:
             if not decision.payload.get("term_id"):
                 raise ValueError("accept needs a Term")
         with self._conn() as conn:
+            if decision.kind in CONCEPT_KINDS:  # one decision per concept, whatever its kind
+                conn.execute(
+                    "DELETE FROM review_decisions WHERE subject_key = ? AND kind IN (?, ?) "
+                    "AND kind != ?",
+                    (decision.subject_key, *CONCEPT_KINDS, decision.kind),
+                )
             conn.execute(
                 "INSERT INTO review_decisions (kind, subject_key, decision, payload_json, note, "
                 "decided_by, decided_at, applied_revision) VALUES (?,?,?,?,?,?,?,NULL) "

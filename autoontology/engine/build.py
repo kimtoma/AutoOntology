@@ -156,7 +156,12 @@ def ocr_state(home: Path) -> str:
 
 
 def input_fingerprint(
-    source: Source, home: Path | None = None, vision_model: str = "", *, reader: str = ""
+    source: Source,
+    home: Path | None = None,
+    vision_model: str = "",
+    *,
+    reader: str = "",
+    schema: str | None = None,
 ) -> str:
     """A hash of what the per-source steps of *source* read: the locator plus, for files
     and documents sources, every input file's path and content hash -- and, for documents
@@ -186,7 +191,8 @@ def input_fingerprint(
                 digest.update(f"vision\0{vision_model}\0".encode())
         else:
             files = []
-            schema = pipeline.schema_fingerprint(source)
+            # *schema*: the caller read it already (one connection)
+            schema = pipeline.schema_fingerprint(source) if schema is None else schema
             if not schema:
                 return ""
             digest.update(f"schema\0{schema}\0".encode())

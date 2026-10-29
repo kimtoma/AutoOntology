@@ -170,6 +170,15 @@ class OAxiom:
     #: an alignment axiom from a judge verdict that passed the accept threshold (the
     #: persisted ``accepted``); a mere proposal is still exported but changes no origin
     accepted: bool = False
+    #: an alignment axiom a person's review decision set (``accepted`` then says which way)
+    decided: bool = False
+
+    @property
+    def status(self) -> str:
+        """``proposed`` | ``accepted`` | ``decided`` (alignment axioms; "" otherwise)."""
+        if self.source != "alignment":
+            return ""
+        return "decided" if self.decided else "accepted" if self.accepted else "proposed"
 
 
 @dataclass
@@ -541,8 +550,14 @@ def _add_documents(
                         source="alignment",
                         derived_from=list(evidence),
                         confidence=a.confidence,
-                        rationale=a.rationale,
+                        # a decision's note, then what the judge had said
+                        rationale="; ".join(
+                            t for t in (a.rationale, (a.judged or {}).get("rationale") or "") if t
+                        )
+                        if a.judged
+                        else a.rationale,
                         accepted=bool(a.accepted),
+                        decided=bool(a.judged),
                     )
                 )
             else:

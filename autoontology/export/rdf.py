@@ -65,6 +65,7 @@ def to_graph(model: MergedOntology) -> Graph:
         ("quote", "quote"),
         ("valueConcept", "value concept"),
         ("alignmentConfidence", "alignment confidence"),
+        ("alignmentStatus", "alignment status (proposed, accepted, decided)"),
         ("verified", "quote verified"),
     ):
         g.add((ao[prop], RDF.type, OWL.AnnotationProperty))
@@ -152,6 +153,8 @@ def to_graph(model: MergedOntology) -> Graph:
         g.add((st, ao.source, Literal(a.source)))
         if a.confidence is not None:
             g.add((st, ao.alignmentConfidence, Literal(round(float(a.confidence), 3))))
+        if a.status:
+            g.add((st, ao.alignmentStatus, Literal(a.status)))
         if a.rationale:
             g.add((st, RDFS.comment, _text(a.rationale)))
         for ev in a.derived_from:

@@ -258,6 +258,10 @@ def test_cli_review_and_apply(ops, monkeypatch):  # noqa: F811
     res = runner.invoke(cli.app, ["apply"])
     assert res.exit_code == 0, res.output
     assert "revision 2" in res.output and "2 decision(s) applied" in res.output
+    res = runner.invoke(cli.app, ["apply"])
+    assert res.exit_code == 0 and "nothing to apply (revision 2)" in res.output, res.output
+    res = runner.invoke(cli.app, ["apply", "--force"])
+    assert res.exit_code == 0 and "revision 3" in res.output, res.output
     res = runner.invoke(cli.app, ["review", "undo", item])
     assert res.exit_code == 0 and "decision removed" in res.output
     assert runner.invoke(cli.app, ["review", "undo", item]).exit_code == 1
@@ -297,3 +301,151 @@ def test_diff_of_models(monkeypatch):
     assert len(capped["classes"]["added"]) == 2
     assert capped["classes"]["totals"]["added"] == everything["classes"]["totals"]["added"]
     assert revisions.diff(new, new)["classes"]["totals"] == {"added": 0, "removed": 0, "changed": 0}
+
+
+# --- fix wave -----------------------------------------------------------------------------
+
+
+def test_badge_and_inbox_never_compute_freshness(api, monkeypatch):
+    from autoontology.web import freshness as fr
+
+    calls = []
+    real = fr.freshness
+
+    def counted(store, settings):
+        calls.append(1)
+        return real(store, settings)
+
+    monkeypatch.setattr(fr, "freshness", counted)
+    c = api["api"]
+    assert c.get(f"{API}/review/pending-count").status_code == 200
+    assert c.get(f"{API}/review").status_code == 200
+    assert c.get(f"{API}/review", params={"category": "axioms"}).status_code == 200
+    assert calls == []
+    c.get(f"{API}/review", params={"category": "stale_sources"})
+    assert len(calls) == 1
+    c.get(f"{API}/review", params={"sources": 1})  # cached for a minute
+    c.get(f"{API}/review/pending-count")
+    assert len(calls) == 1
+
+
+def test_freshness_is_computed_outside_the_lock(ops, monkeypatch):  # noqa: F811
+    import threading
+
+    from autoontology.web import freshness as fr
+    from autoontology.web.api import Api
+
+    api_ = Api(Settings.from_env())
+    entered, release = threading.Event(), threading.Event()
+
+    def slow(store, settings):
+        entered.set()
+        release.wait(5)
+        return [{"name": "x", "stale": True}]
+
+    monkeypatch.setattr(fr, "freshness", slow)
+    worker = threading.Thread(target=lambda: api_.freshness(refresh=True))
+    worker.start()
+    assert entered.wait(5)
+    # the cache can be read (and the badge served) while the computation runs
+    assert api_.cached_freshness() is None
+    release.set()
+    worker.join(5)
+    assert api_.cached_freshness()[0] == [{"name": "x", "stale": True}]
+
+
+def test_apply_with_nothing_pending_writes_no_revision(api):
+    c, runs = api["api"], api["runs"]
+
+    def apply(body):
+        resp = c.post(f"{API}/runs", json=body)
+        assert resp.status_code == 202, resp.text
+        runs.join(resp.json()["run_id"], 10)
+        return c.get(f"{API}/runs/{resp.json()['run_id']}").json()
+
+    run = apply({"kind": "apply"})
+    assert run["status"] == "succeeded" and run["params"]["applied_revision"] == 1
+    steps = {s["name"]: s for s in run["steps"]}
+    assert steps["snapshot"]["status"] == "skipped"
+    assert steps["snapshot"]["detail"]["reason"] == "no pending decisions"
+    assert c.get(f"{API}/ontology/revisions").json()["revisions"][0]["revision"] == 1
+    forced = apply({"kind": "apply", "force": True})
+    assert forced["params"]["applied_revision"] == 2
+    assert c.post(f"{API}/runs", json={"kind": "build", "force": True}).status_code == 400
+
+
+def test_rejecting_an_automatic_fold_from_the_inbox(api):
+    c, runs = api["api"], api["runs"]
+    rows = _rows(api)
+    assert "fold:" not in str([i["id"] for i in _items(c, size=100)["items"]])  # on request
+    folds = _items(c, category="folds")
+    ids = {i["concept"]["name"]: i["id"] for i in folds["items"]}
+    assert ids["계약"] == f"fold:{rows['계약'].concept_id}" and folds["counts"]["folds"] == 2
+    assert folds["counts"]["total"] == _items(c)["counts"]["total"]  # folds not in the badge
+    resp = c.post(f"{API}/review/{ids['계약']}/decision", json={"decision": "reject"})
+    assert resp.status_code == 200 and resp.json()["decision"]["relation"] == "none"
+    assert resp.json()["decision"]["payload"]["category"] == "folds"
+    run_id = c.post(f"{API}/runs", json={"kind": "apply"}).json()["run_id"]
+    runs.join(run_id, 10)
+    assert "계약" not in api["client"].terms["t-contract"]["synonyms"]
+    diff = c.get(f"{API}/ontology/diff").json()
+    assert [n["name"] for n in diff["classes"]["added"]] == ["계약"]
+    assert [m["concept_name"] for m in diff["merges"]["removed"]] == ["계약"]
+    decided = _items(c, status="decided")["items"]
+    assert [i["id"] for i in decided] == [ids["계약"]]
+
+
+def test_an_undone_alias_decision_is_pending_again(api):
+    c, runs = api["api"], api["runs"]
+    rows = _rows(api)
+    # a column name on Customer: the fold of 수납 keeps it off the Term (a rejected alias)
+    api["client"].attrs["t-customer"].append(
+        {
+            "id": "a9",
+            "name": "수납",
+            "source_column": "수납",
+            "datatype": "text",
+            "primary_column": {
+                "table_id": "tb-k",
+                "table_name": "customers",
+                "schema_id": "s1",
+                "column_name": "수납",
+            },
+            "referenced_columns": [],
+        }
+    )
+
+    def apply():
+        run_id = c.post(f"{API}/runs", json={"kind": "apply"}).json()["run_id"]
+        runs.join(run_id, 10)
+
+    c.post(
+        f"{API}/review/al:{rows['수납'].concept_id}/decision",
+        json={"decision": "accept"},
+    )
+    apply()
+    item = "alias:t-customer|수납"
+    aliases = _items(c, category="aliases")["items"]
+    assert [i["id"] for i in aliases] == [item]
+    c.post(f"{API}/review/{item}/decision", json={"decision": "accept"})
+    apply()
+    assert _items(c, category="aliases")["items"] == []
+    assert c.get(f"{API}/review/pending-count").json()["unapplied"] == 0
+    c.delete(f"{API}/review/{item}/decision")
+    again = _items(c, category="aliases")
+    assert [i["id"] for i in again["items"]] == [item] and again["items"][0]["decision"] is None
+    assert again["unapplied"] == 1
+    apply()
+    after = _items(c, category="aliases")
+    assert [i["id"] for i in after["items"]] == [item] and after["unapplied"] == 0
+
+
+def test_diff_default_from_is_the_revision_before_to(api):
+    c = api["api"]
+    for _ in range(2):
+        api["runs"].join(
+            c.post(f"{API}/runs", json={"kind": "apply", "force": True}).json()["run_id"], 10
+        )
+    assert c.get(f"{API}/ontology/diff", params={"to": 2}).json()["from"] == 1
+    assert c.get(f"{API}/ontology/diff", params={"to": 1}).json()["from"] is None
+    assert api["store"].previous_revision(3) == 2

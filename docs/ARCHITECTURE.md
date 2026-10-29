@@ -147,44 +147,87 @@ over from the previous export of the same revision. A validation failure writes
 ### Operations: review, apply, diff, freshness
 
 A person's decisions on what the build proposed are stored in `review_decisions`
-(`store/decisions.py`), one per subject: an alignment (`subject_key` = concept id:
-`accept` with `same`, `related`, `narrower` or `broader`, or `reject`), an alias
-(`<term id>|<alias>`: `accept` or `reject`) or an unaligned concept (`acknowledge`).
+(`store/decisions.py`), one per subject:
+
+| Subject | `subject_key` | Decisions |
+|---|---|---|
+| alignment (proposal, axiom or automatic fold) | concept id | `accept` with `same`, `related`, `narrower` or `broader`; `reject` |
+| alias | `<term id>\|<alias>` | `accept`, `reject` |
+| unaligned concept | concept id | `acknowledge` |
+
+A concept holds one decision: an alignment decision replaces its `concept` one and vice
+versa. Relation directions: accepting `broader` means the concept is narrower than the
+Term (concept ⊑ Term), `narrower` means Term ⊑ concept, `related` is `skos:related`.
+`decided_by` is the tailnet login when the request came through a configured tailnet
+hostname, else `local`. It is attribution for the record, not authentication: a local
+process can send any Host and login header.
 
 - **Overlay** (`engine/overlay.py`). A decided concept's `alignments` row carries the
   decision: relation and Term from the decision, `accepted` for an accept, `none` for a
   reject, rationale `human decision: <note>`. The judge's verdict moves to the row's
   `judged_json` and comes back when the decision is removed. The align judge step checks
   for a decision before the resume and cache paths, so a decided concept is never judged
-  again (its Term must still exist; otherwise it is judged as usual). The align apply step
-  writes the synonyms of a person's accepted `same` to the Term whatever its confidence.
-  In the model, an accepted `related`/`narrower`/`broader` row becomes an
-  `OAxiom(accepted=True)`; RDF and Ossie serialise it exactly like a proposal, but it
-  makes the Term `aligned`. An accepted alias moves from `rejected_aliases` to the Term's
-  `alt_labels`. `MergedOntology.decisions` lists the reflected decisions, and OKF marks
-  those concepts `stable`.
+  again (its Term must still exist; otherwise it is judged as usual).
+- **Synonyms upstream.** The align apply step writes the synonyms of a person's accepted
+  `same` to the Term whatever its confidence. When a decision rejects or removes a fold
+  whose synonyms were already written, the same step takes them off the Term
+  (`TermWriter.remove_synonyms`, then `mark_aliases_removed`; the record stays, so the
+  alias stays untrusted). It removes only the recorded additions of that source's
+  alignment that no accepted `same` of any documents source still accounts for. So the
+  Term's `skos:altLabel` and the concept's own class never both carry the name in RDF,
+  Ossie or OKF. This runs in a build's align pass and in apply.
+- **Model and exports.** An accepted `related`/`narrower`/`broader` row becomes an
+  `OAxiom(accepted=True)`, which makes the Term `aligned`; a decided one also has
+  `decided=True`. Every alignment axiom carries a status, `proposed`, `accepted` (by the
+  judge) or `decided` (by a person):
+  - RDF: `ao:alignmentStatus` on the reified statement;
+  - OKF: the `is related to` / `is a kind of` lines;
+  - Ossie: the `related_to` description.
+  A decided axiom's rationale is the decision note followed by the judge's rationale. An
+  accepted alias moves from `rejected_aliases` to the Term's `alt_labels`.
+  `MergedOntology.decisions` lists the reflected decisions, and OKF marks those concepts
+  `stable`.
 - **Apply** (`engine/apply.py`, run kind `apply`): `decisions -> merge -> snapshot`. It
-  writes the decided rows and restores the rows whose decision was removed, adds the
-  synonyms of accepted `same` decisions upstream, then merges and saves a revision. It
-  needs the backend but never a model or the LLM proxy. It holds the workspace lease, and
-  build, export and apply refuse to start while another of them is active. Every snapshot
-  step (build or apply) sets `applied_revision` on the pending decisions the model
-  reflects.
-- **Review inbox** (`web/review.py`, `/api/review`). Items are built from the alignment
-  rows (`al:` refused `same` proposals, `ax:` judge axioms with confidence >= 0.6), the
-  latest model (`un:` unaligned document classes, new since the previous revision first;
-  `alias:` rejected aliases) and freshness (`src:` stale sources). Ids are stable. A
-  decided item that is no longer current is rebuilt from the copy its decision stored.
-- **Diff** (`web/revisions.py`, `/api/ontology/diff`). Nodes are keyed by model local.
-  A node counts as changed when its label, kind, definitions, synonyms, tables or
-  relation/property counts differ. Axioms and merges are diffed by their ends. Each list
-  holds at most 500 entries; `totals` counts all of them.
+  writes the decided rows and restores the rows whose decision was removed, adds and
+  removes synonyms upstream as above, then merges and saves a revision. It needs the
+  backend but never a model or the LLM proxy. It holds the workspace lease, and build,
+  export and apply refuse to start while another of them is active. Every snapshot step
+  (build or apply) sets `applied_revision` on the pending decisions the model reflects.
+
+  Apply writes no revision when nothing is pending (`pending_work`: no unapplied
+  decision, no removed one). In that case merge and snapshot are recorded `skipped` with
+  reason `no pending decisions`, the run succeeds, and `applied_revision` is the latest
+  revision. `--force` / `{"force": true}` writes one anyway. A scheduled run therefore adds
+  no empty revisions:
+
+  ```
+  # crontab: every night, rebuild what changed, then reflect the review decisions
+  30 2 * * * cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
+  ```
+- **Review inbox** (`web/review.py`, `/api/review`). Items come from three places:
+  - the alignment rows: `al:` refused `same` proposals and `ax:` judge axioms with
+    confidence >= 0.6; also `fold:` automatic folds (accepted `same`), listed only with
+    `category=folds` and never counted in the badge total;
+  - the latest model: `un:` unaligned document classes (new since the previous revision
+    first) and `alias:` rejected aliases. An alias decision that was applied and then
+    removed is listed as pending again.
+  - the freshness cache: `src:` stale sources.
+
+  Ids are stable. A decided item that is no longer current is rebuilt from the copy its
+  decision stored. Freshness is computed only for `category=stale_sources` or
+  `?sources=1`; every other listing and `/api/review/pending-count` read only the cache.
+- **Diff** (`web/revisions.py`, `/api/ontology/diff`). The default `from` is the newest
+  revision older than `to`. Nodes are keyed by model local. A node counts as changed when
+  its label, kind, definitions, synonyms, tables or relation/property counts differ.
+  Axioms and merges are diffed by their ends. Each list holds at most 500 entries;
+  `totals` counts all of them.
 - **Freshness** (`web/freshness.py`, `/api/sources/freshness`, 60 s cache). For each
   source, the current `input_fingerprint` is compared with the `inputs_sha` of its newest
   succeeded build step. When they differ, the reasons say what changed: files compared
   with the stored documents (path, sha256) or the load manifest, the database schema, or
   the reader settings. A source with no recorded build is `never_built`. Unreadable
-  inputs or an unreachable database give `unknown` with the error class.
+  inputs or an unreachable database give `unknown` with the error class (a database is
+  read once). The computation runs outside the cache lock.
 
 ### Playground (`autoontology/playground`)
 

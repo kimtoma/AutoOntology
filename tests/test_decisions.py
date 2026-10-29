@@ -2,6 +2,8 @@
 """Review decisions (schema v6): the store, the migration from older stores."""
 
 import sqlite3
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -242,9 +244,49 @@ def test_accepted_axioms_export_like_proposals():
     proposal = merged.build("ws", structured=[fx.structured()], documents=[docs])
     decided = merged.build("ws", structured=[fx.structured()], documents=[accepted])
     assert "term-t-i" not in proposal.aligned_terms() and "term-t-i" in decided.aligned_terms()
-    from rdflib.compare import isomorphic
+    from rdflib import Literal, Namespace
 
-    assert isomorphic(rdf.to_graph(proposal), rdf.to_graph(decided))
+    ao = Namespace("http://example.com/autoontology#")
+
+    def statuses(model):
+        return sorted(str(o) for o in rdf.to_graph(model).objects(None, ao.alignmentStatus))
+
+    # serialised the same way, the status says which is which
+    assert statuses(proposal) == ["accepted", "proposed"]  # 거래처 accepted, 연체율 proposed
+    assert statuses(decided) == ["accepted", "accepted"]
+    g = rdf.to_graph(decided)
+    assert (None, ao.alignmentStatus, Literal("accepted")) in g
+    from autoontology.export import okf
+
+    okf.write(decided, Path(tempfile.mkdtemp()), revision=1, created_at=fx.CREATED)
+    # a person's decision is "decided", and the judge's rationale is kept after the note
+    human = merged.DocumentsInput(
+        docs.source,
+        docs.documents,
+        docs.concepts,
+        docs.relations,
+        docs.evidence,
+        [
+            AlignmentRecord(
+                **{
+                    **a.__dict__,
+                    "accepted": True,
+                    "rationale": "human decision: 확인",
+                    "judged": {"relation": "related", "rationale": "근거"},
+                }
+            )
+            if a.concept_id == "c3"
+            else a
+            for a in docs.alignments
+        ],
+    )
+    model = merged.build("ws", structured=[fx.structured()], documents=[human])
+    axiom = next(a for a in model.axioms if a.object == "term-t-i")
+    assert (axiom.status, axiom.rationale) == ("decided", "human decision: 확인; 근거")
+    out = Path(tempfile.mkdtemp())
+    okf.write(model, out, revision=1, created_at=fx.CREATED)
+    body = (out / "okf/concepts/연체율.md").read_text("utf-8")
+    assert "(alignment, decided, confidence 0.70)" in body
 
 
 def test_okf_marks_decided_concepts_stable(tmp_path):
@@ -326,12 +368,16 @@ def _no_models(monkeypatch):
         monkeypatch.setattr(module, name, refuse)
 
 
-def _apply(ops):
+def _apply(ops, **kw):
     from autoontology.engine.apply import run_apply
     from tests.test_align import ClientWriter
 
     return run_apply(
-        ops["store"], ops["settings"], client=ops["client"], writer=ClientWriter(ops["client"])
+        ops["store"],
+        ops["settings"],
+        client=ops["client"],
+        writer=ClientWriter(ops["client"]),
+        **kw,
     )
 
 
@@ -361,10 +407,16 @@ def test_apply_reflects_the_decisions_in_a_new_revision_without_a_model(ops, mon
     assert {m.concept_name for m in model.merges} == {"고객", "수납"}
     axiom = next(a for a in model.axioms if a.source == "alignment")
     assert (axiom.subject, axiom.kind, axiom.accepted) == ("term-t-contract", "subclass_of", True)
-    # nothing pending: a second apply still snapshots, and writes no row
+    # nothing pending: no new revision (merge and snapshot skipped), unless forced
     again = _apply(ops)
-    detail = {s.name: s.detail for s in store.get_steps(again.run_id)}["decisions"]
-    assert again.revision == 3 and detail["written"] == 0 and detail["unchanged"] == 3
+    steps = {s.name: s for s in store.get_steps(again.run_id)}
+    assert again.status == "succeeded" and again.revision == 2 and store.latest_revision() == 2
+    assert steps["decisions"].detail["written"] == 0 and steps["decisions"].detail["unchanged"] == 3
+    assert {steps[n].status for n in ("merge", "snapshot")} == {"skipped"}
+    assert steps["snapshot"].detail["reason"] == "no pending decisions"
+    assert store.get_run(again.run_id).params["applied_revision"] == 2
+    forced = _apply(ops, force=True)
+    assert forced.revision == 3 and store.latest_revision() == 3
     # a removed decision: apply gives the row its judged verdict back
     ops["decisions"].delete("alignment", rows["계약"].concept_id)
     _apply(ops)
@@ -394,3 +446,121 @@ def test_a_build_marks_the_decisions_it_reflects(ops):
     d = ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
     result = tb.run(ops, judge=ops["judge"])
     assert ops["decisions"].get("alignment", d.subject_key).applied_revision == result.revision
+
+
+# --- fix wave: unfolding, one decision per subject, resumed path --------------------------
+
+
+def _exports(model):
+    """(RDF graph, Ossie ontology document as text, OKF Contract/Customer bodies)."""
+    import json
+    import tempfile
+    from pathlib import Path
+
+    from autoontology.export import okf, ossie, rdf
+
+    graph = rdf.to_graph(model)
+    onto = ossie.build_ontology(
+        model,
+        revision=1,
+        created_at="2026-01-01T00:00:00+00:00",
+        datasets=[],
+        semantic_relationships=[],
+        warnings=[],
+    )
+    out = Path(tempfile.mkdtemp())
+    okf.write(model, out, revision=1, created_at="2026-01-01T00:00:00+00:00")
+    bodies = {p.stem: p.read_text("utf-8") for p in (out / "okf/concepts").glob("*.md")}
+    return graph, json.dumps(onto.document, ensure_ascii=False), bodies
+
+
+def _alt_labels(graph, local):
+    from rdflib import SKOS, URIRef
+
+    base = "http://example.com/autoontology#"
+    return {str(o) for o in graph.objects(URIRef(base + local), SKOS.altLabel)}
+
+
+def _check_unfolded(ops, name, term_id, term_local):
+    """*name* is its own class again and no longer a synonym of the Term anywhere."""
+    assert name not in ops["client"].terms[term_id]["synonyms"]
+    model = MergedOntology.from_dict(ops["store"].latest_snapshot().model)
+    assert name not in model.classes[term_local].alt_labels
+    assert name in {c.label for c in model.classes.values() if c.source == "document"}
+    assert name not in {m.concept_name for m in model.merges}
+    graph, onto, bodies = _exports(model)
+    assert name not in _alt_labels(graph, term_local)
+    assert f"Also known as: {name}" not in onto and f", {name}" not in onto.split(term_local)[0]
+    term_body = next(b for b in bodies.values() if f"#{term_local}" in b)
+    assert f"- {name}\n" not in term_body
+    live = AlignmentStore(ops["store"]).alias_provenance(live=True).get(term_id, [])
+    assert name not in {r["alias"] for r in live}
+
+
+def test_rejecting_an_applied_fold_takes_its_synonyms_off_the_term(ops):
+    rows = _rows(ops)
+    assert "계약" in ops["client"].terms["t-contract"]["synonyms"]  # the judge's fold
+    ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
+    result = _apply(ops)
+    detail = {s.name: s.detail for s in ops["store"].get_steps(result.run_id)}["decisions"]
+    assert detail["synonyms_removed"] >= 1
+    _check_unfolded(ops, "계약", "t-contract", "term-t-contract")
+    # the other fold is untouched
+    assert "고객" in ops["client"].terms["t-customer"]["synonyms"]
+
+
+def test_undoing_an_applied_same_takes_its_synonyms_off_the_term(ops):
+    _accept(ops, "수납", "same", "t-customer")
+    _apply(ops)
+    assert "수납" in ops["client"].terms["t-customer"]["synonyms"]
+    ops["decisions"].delete("alignment", _rows(ops)["수납"].concept_id)
+    _apply(ops)
+    assert _rows(ops)["수납"].relation == "related"  # the judge's verdict again
+    _check_unfolded(ops, "수납", "t-customer", "term-t-customer")
+    assert "고객" in ops["client"].terms["t-customer"]["synonyms"]
+
+
+def test_accepting_a_candidate_term_runs_through_apply(ops):
+    rows = _rows(ops)
+    ops["decisions"].put(
+        Decision(
+            "alignment",
+            rows["청구서"].concept_id,
+            "accept",
+            {"relation": "same", "term_id": "t-customer", "term_name": "Customer"},
+        )
+    )
+    _apply(ops)
+    row = _rows(ops)["청구서"]
+    assert (row.relation, row.term_id, row.accepted) == ("same", "t-customer", True)
+    assert "청구서" in ops["client"].terms["t-customer"]["synonyms"]
+    model = MergedOntology.from_dict(ops["store"].latest_snapshot().model)
+    assert ("청구서", "term-t-customer") in {(m.concept_name, m.term_local) for m in model.merges}
+
+
+def test_one_decision_per_concept_across_kinds(tmp_path):
+    store = Store(tmp_path / "s.db")
+    decisions = DecisionStore(store)
+    decisions.put(Decision("concept", "c1", "acknowledge"))
+    decisions.put(Decision("alignment", "c1", "accept", {"relation": "related", "term_id": "t"}))
+    assert [(d.kind, d.subject_key) for d in decisions.list()] == [("alignment", "c1")]
+    decisions.put(Decision("concept", "c1", "acknowledge"))
+    assert [(d.kind, d.subject_key) for d in decisions.list()] == [("concept", "c1")]
+
+
+def test_a_decision_holds_on_the_resumed_judge_path(ops, monkeypatch):
+    """A decision added after the run judged its concept: a resumed build that re-enters
+    align (the Terms moved) reuses the other concepts' verdicts and applies the decision."""
+    rows = _rows(ops)
+    ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
+    monkeypatch.setattr(
+        tb.bj,
+        "_terms_moved",
+        lambda store, run, s, c, already: {n for n in already if n.startswith("align:")},
+    )
+    ops["judge"].judged.clear()
+    result = tb.run(ops, judge=ops["judge"], resume=True)
+    assert result.status == "succeeded", result.problems
+    detail = {s.name: s.detail for s in ops["store"].get_steps(result.run_id)}["align:hanbit-docs"]
+    assert detail["resumed"] >= 1 and ops["judge"].judged == []
+    assert (_rows(ops)["계약"].relation, _rows(ops)["계약"].accepted) == ("none", False)

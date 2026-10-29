@@ -244,10 +244,15 @@ def schema_fingerprint(source: Source) -> str:
         introspect = SCHEMA_INTROSPECTORS.get(conn["type"])
         if introspect is None:
             return ""
-        rows = sorted(introspect(conn))
+        rows = introspect(conn)
     except Exception:  # noqa: BLE001 - unreachable/unreadable: do not reuse
         return ""
-    return hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode()).hexdigest()
+    return schema_rows_fingerprint(rows)
+
+
+def schema_rows_fingerprint(rows: list[Any]) -> str:
+    """:func:`schema_fingerprint` of schema rows already read."""
+    return hashlib.sha256(json.dumps(sorted(rows), ensure_ascii=False).encode()).hexdigest()
 
 
 def redact_url(url: str) -> str:

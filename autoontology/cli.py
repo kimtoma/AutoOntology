@@ -553,9 +553,15 @@ def build(
 
 
 @app.command("apply")
-def apply_decisions() -> None:
+def apply_decisions(
+    force: bool = typer.Option(
+        False, "--force", help="Write a new revision even when no decision is pending."
+    ),
+) -> None:
     """Reflect the review decisions in a new ontology snapshot: decisions -> merge ->
-    snapshot, without any model call (needs `autoontology up` for the structured Terms)."""
+    snapshot, without any model call (needs `autoontology up` for the structured Terms).
+    With nothing pending it writes no revision (exit 0), so a scheduled
+    `autoontology build --resume && autoontology apply` adds no empty revisions."""
     import time
 
     from autoontology.engine import jobs
@@ -568,7 +574,7 @@ def apply_decisions() -> None:
     log_path = jobs.jobs_log_path(settings)
     jobs.setup_job_logging(settings, console=True)
     try:
-        result = run_apply(store, settings)
+        result = run_apply(store, settings, force=force)
     except (jobs.JobError, BackendError) as exc:
         hint = f"\nlog: {exc.log_path}" if getattr(exc, "log_path", None) else ""
         _fail(f"apply failed: {exc}{hint}")
@@ -576,6 +582,9 @@ def apply_decisions() -> None:
         _unexpected("apply", exc, log_path)
     run = store.get_run(result.run_id)
     applied = (run.params.get("decisions_applied") if run else 0) or 0
+    if run is not None and run.params.get("skipped"):
+        typer.echo(f"apply {result.run_id}: nothing to apply (revision {result.revision})")
+        return
     typer.echo(
         f"apply {result.run_id}: revision {result.revision} in "
         f"{time.monotonic() - started:.1f}s; {applied} decision(s) applied"
@@ -596,7 +605,10 @@ def _inbox(settings, store, *, with_sources: bool = True):
 @review_app.command("list")
 def review_list(
     category: str = typer.Option(
-        None, "--category", help="proposals | axioms | unaligned | aliases | stale_sources"
+        None,
+        "--category",
+        help="proposals | axioms | unaligned | aliases | stale_sources | folds (folds: only "
+        "when asked for)",
     ),
     status: str = typer.Option("pending", "--status", help="pending | decided | all"),
     limit: int = typer.Option(50, "--limit", min=1, max=1000),
@@ -679,10 +691,13 @@ def review_accept(
 
 @review_app.command("reject")
 def review_reject(
-    item_id: str = typer.Argument(..., help="al:<id>, ax:<id> or alias:<term id>|<alias>"),
+    item_id: str = typer.Argument(
+        ..., help="al:<id>, ax:<id>, fold:<id> or alias:<term id>|<alias>"
+    ),
     note: str = typer.Option("", "--note"),
 ) -> None:
-    """Reject an alignment (the concept stays unaligned) or keep an alias off its Term."""
+    """Reject an alignment or a fold (the concept stays or becomes its own class; apply takes
+    its synonyms off the Term) or keep an alias off its Term."""
     _decide(item_id, "reject", None, None, note)
 
 

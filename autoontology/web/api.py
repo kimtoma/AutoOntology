@@ -131,6 +131,8 @@ class DecisionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decision: Literal["accept", "reject", "acknowledge"]
     #: alignment accept: same | related | narrower | broader (default: the item's)
+    #: (``broader``: the concept is narrower than the Term, concept ⊑ Term; ``narrower``:
+    #: Term ⊑ concept; ``related``: skos:related)
     relation: Literal["same", "related", "narrower", "broader"] | None = None
     #: alignment accept: the item's Term (default) or one of its candidates
     term_id: str | None = Field(default=None, max_length=200)
@@ -139,8 +141,10 @@ class DecisionIn(BaseModel):
 
 class RunIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    #: apply: the review decisions -> a new snapshot, no model call (takes no other field)
+    #: apply: the review decisions -> a new snapshot, no model call (takes only `force`)
     kind: Literal["build", "export", "apply"]
+    #: apply: write a new revision even with no pending decision
+    force: bool = False
     #: build: rebuild only these sources (align/merge/snapshot still cover everything)
     sources: list[str] | None = Field(default=None, max_length=100)
     #: build: continue the latest build run
@@ -402,29 +406,42 @@ class Api:
 
     def freshness(self, refresh: bool = False) -> tuple[list[dict[str, Any]], float]:
         """``(rows, age in seconds)`` of the per-source freshness, computed at most every
-        :data:`FRESHNESS_CACHE_S` (``refresh``: now)."""
+        :data:`FRESHNESS_CACHE_S` (``refresh``: now). The computation (file hashes, database
+        connections) runs outside the lock; only the cache swap holds it."""
         from autoontology.web.freshness import freshness
 
+        cached = self.cached_freshness()
+        if cached is not None and not refresh and cached[1] < FRESHNESS_CACHE_S:
+            return cached
+        rows = freshness(self.store, self.settings)
+        with self._freshness_lock:
+            self._freshness = (time.monotonic(), rows)
+        return rows, 0.0
+
+    def cached_freshness(self) -> tuple[list[dict[str, Any]], float] | None:
+        """The last computed freshness and its age, never computing it (None: never)."""
         with self._freshness_lock:
             cached = self._freshness
-            if cached and not refresh and time.monotonic() - cached[0] < FRESHNESS_CACHE_S:
-                return cached[1], time.monotonic() - cached[0]
-            rows = freshness(self.store, self.settings)
-            self._freshness = (time.monotonic(), rows)
-            return rows, 0.0
+        return (cached[1], time.monotonic() - cached[0]) if cached else None
 
-    def inbox(self, *, with_freshness: bool = True) -> Any:
-        """The review :class:`~autoontology.web.review.Inbox` over the latest snapshot."""
+    def inbox(self, *, sources: bool = False) -> Any:
+        """The review :class:`~autoontology.web.review.Inbox` over the latest snapshot.
+        Stale sources come from the freshness cache; *sources*: computed when it expired
+        (the badge and the other categories never pay for file hashing)."""
         from autoontology.web.review import Inbox
 
         model = previous = None
         head = self.store.latest_snapshot(with_model=False)
         if head is not None:
             _, model = self.snapshot(head.revision)
-            older = [s.revision for s in self.store.list_snapshots(2) if s.revision < head.revision]
-            if older:
-                _, previous = self.snapshot(older[0])
-        rows = self.freshness()[0] if with_freshness else []
+            older = self.store.previous_revision(head.revision)
+            if older is not None:
+                _, previous = self.snapshot(older)
+        if sources:
+            rows = self.freshness()[0]
+        else:
+            cached = self.cached_freshness()
+            rows = cached[0] if cached else []
         return Inbox(self.store, model, previous, rows)
 
     def decided_by(self, request: Request) -> str:
@@ -758,6 +775,7 @@ def build_router(api: Api) -> APIRouter:
         status: str = Query("pending", max_length=20),
         page: int = Query(1, ge=1),
         size: int = Query(20, ge=1, le=100),
+        sources: bool = False,
     ) -> dict[str, Any]:
         from autoontology.web.review import CATEGORIES, STATUSES
 
@@ -767,7 +785,7 @@ def build_router(api: Api) -> APIRouter:
             )
         if status not in STATUSES:
             raise ApiError(400, "invalid_status", f"status must be one of {', '.join(STATUSES)}")
-        inbox = api.inbox()
+        inbox = api.inbox(sources=sources or category == "stale_sources")
         head = api.store.latest_snapshot(with_model=False)
         return {
             "revision": head.revision if head else None,
@@ -789,7 +807,7 @@ def build_router(api: Api) -> APIRouter:
             req = DecisionIn.model_validate(body)
         except ValidationError as exc:
             raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
-        inbox = api.inbox(with_freshness=item_id.startswith("src:"))
+        inbox = api.inbox()
         decision = _review(
             lambda: inbox.decide(
                 item_id,
@@ -805,7 +823,7 @@ def build_router(api: Api) -> APIRouter:
 
     @router.delete("/review/{item_id:path}/decision")
     def review_undo(item_id: str) -> dict[str, Any]:
-        inbox = api.inbox(with_freshness=False)
+        inbox = api.inbox()
         if not _review(lambda: inbox.undo(item_id)):
             raise ApiError(404, "no_decision", f"no decision on {item_id[:80]!r}")
         return {"removed": item_id}
@@ -825,10 +843,7 @@ def build_router(api: Api) -> APIRouter:
 
         new_head, new = api.snapshot(to)
         if from_ is None:
-            older = [
-                s.revision for s in api.store.list_snapshots(500) if s.revision < new_head.revision
-            ]
-            from_ = older[0] if older else None
+            from_ = api.store.previous_revision(new_head.revision)
         old_head = old = None
         if from_ is not None:
             old_head, old = api.snapshot(from_)
@@ -1230,6 +1245,8 @@ def _export_path_ok(path: str) -> bool:
 def _job_call(api: Api, req: RunIn):
     """``call(job_fn, store)`` for the run manager, after validating the request."""
     settings = api.settings
+    if req.force and req.kind != "apply":
+        raise ApiError(400, "invalid_request", "`force` is for apply runs only")
     if req.kind == "build":
         sources = [api.source(n).name for n in req.sources] if req.sources else None
         if not api.store.list_sources():
@@ -1237,9 +1254,9 @@ def _job_call(api: Api, req: RunIn):
         return lambda fn, store: fn(store, settings, sources=sources, resume=req.resume)
     if req.kind == "apply":
         if req.sources or req.resume or req.revision or req.format:
-            raise ApiError(400, "invalid_request", "apply takes no other field")
+            raise ApiError(400, "invalid_request", "apply takes only `force`")
         api.snapshot()  # 404 no_snapshot before a thread starts
-        return lambda fn, store: fn(store, settings)
+        return lambda fn, store: fn(store, settings, force=req.force)
     if req.sources or req.resume:
         raise ApiError(400, "invalid_request", "export takes only `revision` and `format`")
     api.snapshot(req.revision)  # 404 before a thread starts

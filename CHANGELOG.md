@@ -44,7 +44,15 @@ behaviour).
   accepted alignment axioms. OKF marks decided concepts `stable`.
 - **`autoontology apply`** and `POST /api/runs {"kind": "apply"}`: a run of three steps,
   `decisions`, `merge` and `snapshot`. It reflects the decisions in a new revision with
-  no model call.
+  no model call. With nothing pending it writes no revision (merge and snapshot are
+  `skipped`); `--force` / `{"force": true}` writes one anyway. When a decision rejects or
+  removes a fold whose synonyms were already written, they are taken off the upstream
+  Term again. You can also reject an automatic fold from the inbox
+  (`GET /api/review?category=folds`).
+- **Alignment status in exports**: every alignment axiom is marked `proposed`,
+  `accepted` (by the judge) or `decided` (by a person). It appears as
+  `ao:alignmentStatus` in RDF, in the OKF relation lines and in the Ossie `related_to`
+  description.
 - **Review inbox API**: `GET /api/review?category=&status=&page=&size=`,
   `GET /api/review/pending-count`, `POST`/`DELETE /api/review/{item_id}/decision`.
   `decided_by` is the tailnet login when the request comes through Tailscale Serve. CLI:

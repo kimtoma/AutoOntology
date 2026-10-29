@@ -580,7 +580,7 @@ def build_ontology(
                     base="related_to",
                     roles=[{"concept": names[a.object]}],
                     verbalize=f"{{S}} is related to {{{names[a.object]}}}",
-                    description=a.rationale,
+                    description=f"{a.rationale} ({a.status})" if a.status else a.rationale,
                     iri=SKOS_RELATED,
                 )
             )
