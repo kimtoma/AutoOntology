@@ -114,10 +114,11 @@ port_open() {
   fi
 }
 
-# run_timeout SECS OUTFILE CMD...: run CMD with stdout+stderr in OUTFILE; 124 on timeout.
+# run_timeout SECS OUTFILE CMD...: run CMD with stdout in OUTFILE (stderr dropped, so CLI
+# warnings never reach the status parser); 124 on timeout. Used only for the login checks.
 run_timeout() {
   local secs="$1" out="$2"; shift 2
-  "$@" >"$out" 2>&1 </dev/null &
+  "$@" >"$out" 2>/dev/null </dev/null &
   local pid=$! ticks=0
   while kill -0 "$pid" 2>/dev/null; do
     if [ "$ticks" -ge $((secs * 10)) ]; then

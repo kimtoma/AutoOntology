@@ -245,6 +245,21 @@ def test_claude_logged_in_pretty_json_and_no_account_details(tmp_path):
     assert "someone@example.com" not in proc.stdout + proc.stderr
 
 
+def test_claude_status_warning_on_stderr_is_ignored(tmp_path):
+    env, _ = _fake_path(tmp_path, None)
+    _stub(
+        tmp_path / "bin",
+        "claude",
+        "echo 'Warning: a newer version of Claude Code is available' >&2\n"
+        f"printf '%s\\n' '{LOGGED_IN}'",
+    )
+    proc = _run(["--dry-run", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "claude CLI logged in" in proc.stdout
+    assert "would stop" not in proc.stdout
+    assert "newer version" not in proc.stdout + proc.stderr
+
+
 @pytest.mark.parametrize(
     "output",
     [
