@@ -274,8 +274,8 @@ Build page.
    `Trade Good`). Substrings never count. Instance-like names (record IDs such as `S037`,
    numbers/dates, company names with a legal-form marker such as `주식회사`, `㈜` or `Inc.`)
    are never evidence or synonyms (they are listed as rejected), and a concept named like
-   one is never `same`. Any other `same` is downgraded to `related` and
-   kept as a review proposal.
+   one is never `same`. A `same` that fails any of these checks is downgraded to `related`
+   and kept as a review proposal.
 5. **Merge.** An accepted `same` **folds** the concept into its Term: the concept's names
    become synonyms (`skos:altLabel`) of the Term, and its document definition and evidence
    attach to the Term. A `broader` verdict makes the concept a subclass of the Term

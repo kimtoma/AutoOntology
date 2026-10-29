@@ -288,9 +288,10 @@ Click a concept to see its definition, its **synonyms** (names from the document
 were folded into it, such as 고객 for Customers), its table columns, its **alignments**
 (which document concepts point at it, with the verdict and the model's confidence), its
 relations, and its **evidence**: the exact sentences, with the document and page. Record
-IDs, numbers/dates and company names (주식회사 …, Inc.) never become synonyms; they are
-listed under the synonyms as rejected. Search
-looks at names, synonyms and definitions; filters narrow by origin and kind.
+IDs, numbers/dates and company names with a legal-form marker (only those: 주식회사, ㈜,
+Inc., Ltd and similar; 한빛상사 is kept) never become synonyms; they are listed under the
+synonyms as rejected. Search looks at names, synonyms and definitions; filters narrow by
+origin and kind.
 
 ![Ontology page](screenshots/ontology.png)
 
@@ -356,12 +357,13 @@ steps:
    (embeddings).
 2. The model judges each pair: `same`, `broader` (the Term is wider: the concept is a part
    or kind of the Term), `narrower` (the Term is a part or kind of the concept), `related`,
-   or `none`, with a
-   confidence.
+   or `none`, with a confidence.
 3. A strict rule decides: `same` is accepted only when the confidence is at least 0.90
    **and** one of the concept's names exactly equals a name of the Term (after ignoring
-   case and spaces; English plurals count as singular). Otherwise it is kept as `related`,
-   a suggestion you can review. So "계약" folds into the Contracts Term only if a name
+   case and spaces; English plurals count as singular). Record IDs (S037), numbers/dates
+   and company names with a legal-form marker (주식회사 …) never count as a matching name
+   and never become synonyms, and a concept named like one is never `same`. Otherwise it
+   is kept as `related`, a suggestion you can review. So "계약" folds into the Contracts Term only if a name
    matches, and similar-sounding words never merge by accident.
 
 If too little is matched, give the Term the business name: describe it in a document

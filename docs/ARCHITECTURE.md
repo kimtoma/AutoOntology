@@ -83,7 +83,9 @@ merge -> snapshot
   (`identity-v2.2`, `unstructured/align.py`). Accepted `same` verdicts add the concept's
   names to the Term's synonyms, except instance-like names (record IDs such as `S037`,
   numbers/dates, company names with a legal-form marker), which are recorded as
-  `rejected_aliases` (align report, concept detail).
+  `rejected_aliases` (align report, concept detail). An accepted `same` stored before
+  v2.2 whose concept name is instance-like still folds on an export-only run (only its
+  aliases are filtered) until the next align or `build --resume` re-applies the policy.
 - **Merge** (`ontology/model.py`). `MergedOntology` combines Terms, document concepts,
   alignment axioms, relations and evidence into one model under `AUTOONTOLOGY_BASE_IRI`,
   and gives every node an origin (`structured`, `document` or `aligned`).
