@@ -18,7 +18,12 @@ pgvector와 원하는 모델로 내 컴퓨터에서 실행됩니다. 모델은 �
 엔지니어링 배경이 없는 현업 전문가를 위해 썼습니다. 용어 설명, 점검 목록, 10분 코스, 내 파일을
 준비하는 방법, 문제 해결 표가 들어 있습니다.
 
-![시작하기 페이지](docs/screenshots/home.ko.png)
+![개요 페이지](docs/screenshots/overview.ko.png)
+
+웹 UI의 사이드바: **개요**(무엇이 바뀌었고 무엇을 확인해야 하는지), **검토**(모델이 제안한 것을
+확인), **소스**, **빌드**, **온톨로지**, **그래프**, **플레이그라운드**, **내보내기**, **상태**,
+**설정**. 첫 빌드 전에는 개요 자리에 다섯 단계 **시작하기** 체크리스트가 나오고, 그 뒤에는
+**설정 → 설치 안내**(`/ui/setup`)에서 다시 볼 수 있습니다.
 
 ## 빠른 시작
 
@@ -383,6 +388,36 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 - 업스트림 용어가 바뀌면(이름·설명·동의어·표 편집, 용어 추가·삭제; align 자신이 쓴 동의어와
   설명은 제외) align을 다시 실행하고, 후보 용어가 바뀐 개념만 다시 판정합니다.
 
+## 운영하기
+
+첫 빌드 뒤의 온톨로지는 한 번 내보내고 끝나는 결과물이 아니라 계속 운영하는 대상입니다. 주기는
+이렇습니다.
+
+1. **소스 추가·변경.** 소스 폴더에 새 파일을 넣거나 데이터베이스를 바꿉니다. **개요**가 소스마다
+   신선도를 쉬운 말로 보여 줍니다("파일 3개 추가, 1개 변경").
+2. **변경분 반영 빌드.** 개요의 버튼(또는 `autoontology build --resume`)이 바뀐 것만 다시 빌드하고
+   나머지 단계는 그대로 둡니다.
+3. **검토.** 모델이 제안하고 사람이 확인합니다. **검토** 페이지(사이드바에 대기 수가 표시됨)는
+   사람의 확인을 기다리는 항목을 분류합니다: *제안*(모델은 표의 용어와 같은 뜻이라고 보지만 정책이
+   스스로 합치지 않은 문서 개념), *관계*(관련·상위·하위), *미정렬* 개념, 용어에서 빠진 *동의어*,
+   바뀐 *소스*. 수락(같음·관련·더 좁음·더 넓음 중 선택), 거절, 확인, 되돌리기를 할 수 있고, `j`/`k`로
+   이동하고 `a`/`r`로 결정합니다. 명령줄에서는 `autoontology review list`, `review accept <id>`,
+   `review reject <id>`.
+4. **적용.** 배너의 **적용**(또는 `autoontology apply`)이 결정을 새 리비전에 반영합니다: 결정,
+   병합, 스냅샷 순서이며 모델 호출이 없습니다(quickstart 세트에서 1초 미만). 결정은 이후 빌드에서도
+   유지되며 align 판정이 덮어쓰지 않습니다.
+5. **내보내기.** 최신 내보내기가 최신 리비전보다 오래되면 개요가 알려 줍니다.
+
+온톨로지 페이지에서 어떤 리비전이든 열고 그 리비전에서 무엇이 바뀌었는지(**r{n}에서 변경**) 볼 수
+있고, 개념 시트에는 누가 언제 수락하거나 거절했는지 나옵니다. 사람 없이 돌리려면, 예를 들어 cron으로
+매일 밤:
+
+```bash
+cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
+```
+
+![검토 페이지](docs/screenshots/review.ko.png)
+
 ## 레퍼런스
 
 ### 아키텍처
@@ -430,6 +465,9 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 | `autoontology source rm N [--drop-db] [--force]` | 소스를 제거합니다. `--drop-db`는 그 데이터베이스도 삭제합니다. 문서 소스라면 먼저 그 소스의 매칭이 업스트림 용어에 추가한 동의어를 지웁니다(수동 별칭, 다른 소스의 별칭, 다른 소스의 수용된 `same` 매칭이 여전히 덮는 별칭은 유지). 이 작업에는 엔진 데이터베이스가 필요하며, 실패하면 `--force`를 주지 않는 한 소스를 유지합니다. `--force`로도 업스트림 연결을 지우지 못하면(백엔드 꺼짐) `--drop-db`는 데이터베이스를 남기고, 나중에 `tools prune-connections <database> --include-unowned --drop-db`를 실행하라고 안내합니다. |
 | `autoontology build [--source N ...] [--resume]` | 모든 소스를 스냅샷 하나로 빌드합니다. `--source`는 지정한 소스만 다시 빌드합니다(align, merge, snapshot은 여전히 전체를 대상으로 합니다). `--resume`은 최근 빌드를 이어 가며, 입력이 바뀌지 않은 단계는 유지합니다([빌드 이어 가기](#빌드-이어-가기) 참고). |
 | `autoontology ontology` | 최신 스냅샷의 리비전, 소스, 개수를 보여 줍니다. |
+| `autoontology review list [--category C] [--status pending\|decided\|all] [--limit N] [--json]` | 검토 대기 항목(제안, 관계, 미정렬, 동의어, 바뀐 소스)을 보여 줍니다. |
+| `autoontology review accept <id> [--relation same\|related\|narrower\|broader] [--term T] [--note N]` / `reject <id>` / `acknowledge <id>` / `undo <id>` | 항목 하나에 대한 사람의 결정을 기록하거나 지웁니다. |
+| `autoontology apply` | 대기 중인 결정을 새 리비전에 반영합니다(결정, 병합, 스냅샷). 모델을 호출하지 않습니다. |
 | `autoontology runs [--limit N]` | 최근 실행과 그 단계들을 보여 줍니다. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
@@ -461,14 +499,20 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 | `GET /api/sources` | 소스 목록. |
 | `POST /api/sources` | 소스 추가: JSON `{name, kind: files\|database\|documents, locator, recursive?}` 또는 multipart 업로드. |
 | `DELETE /api/sources/{name}` | 소스 제거(`?drop_db=true`는 데이터베이스도 삭제, `&force=true`는 `source rm --force`처럼 엔진의 그래프 삭제나 별칭 정리가 실패하거나 끝나지 않아도 로컬에서 제거). 문서 소스는 `source rm`과 마찬가지로 먼저 업스트림 용어에서 그 소스가 추가한 별칭을 지웁니다. |
-| `POST /api/runs` | 실행 시작: `{kind: "build", sources?, resume?}` 또는 `{kind: "export", revision?, format?}`. |
+| `POST /api/runs` | 실행 시작: `{kind: "build", sources?, resume?}`, `{kind: "export", revision?, format?}` 또는 `{kind: "apply"}`(검토 결정을 새 리비전에 반영, 모델 호출 없음; 첫 빌드 전에는 404 `no_snapshot`). |
 | `GET /api/runs`, `GET /api/runs/{id}` | 실행 목록, 그리고 단계가 포함된 실행 하나. |
 | `GET /api/runs/{id}/events` | 서버 전송 이벤트(SSE): 실행의 실시간 로그와 단계 갱신. |
 | `POST /api/runs/{id}/cancel` | 실행 취소. |
 | `GET /api/ontology[?revision=]` | 스냅샷 헤더: 리비전, 워크스페이스, base IRI, 소스, 개수(첫 빌드 전에는 404 `no_snapshot`). |
 | `GET /api/ontology/graph?layer=all\|structured\|documents\|aligned&evidence=&revision=` | 통합 그래프. 모든 노드에 `origin`이 있습니다. |
 | `GET /api/ontology/concepts?q=&kind=&origin=&source=&page=&size=&revision=` | 용어와 문서 개념을 한 목록으로 페이지 단위 제공. |
-| `GET /api/ontology/concepts/{term-…\|concept-…}[?revision=]` | 개념 하나: 정의, 동의어, 컬럼, 매칭, 관계, 근거. |
+| `GET /api/ontology/concepts/{term-…\|concept-…}[?revision=]` | 개념 하나: 정의, 동의어, 컬럼, 매칭, 관계, 근거, `decisions`(누가 언제 수락·거절했고 어느 리비전에 적용됐는지). |
+| `GET /api/ontology/revisions[?limit=]` | 스냅샷 목록(최신 순): 리비전, 시각, 실행 종류(`build`, `apply`), 개수, 소스. |
+| `GET /api/ontology/diff[?from=&to=]` | 두 리비전 사이의 변경(기본값: 최신과 그 직전): 추가·삭제·변경된 클래스(바뀐 필드 포함), 공리, 병합, 소스, 개수 변화. |
+| `GET /api/review?category=&status=pending\|decided\|all&page=&size=` | 검토 대기 목록: 분류별 `counts`, `unapplied`, 항목(개념, 용어, 관계, 신뢰도, 근거 설명, 근거 인용, `decision`). |
+| `GET /api/review/pending-count` | `{pending, counts, unapplied}`(사이드바 배지). |
+| `POST /api/review/{id}/decision`, `DELETE /api/review/{id}/decision` | 항목에 `{decision: accept\|reject\|acknowledge, relation?, term_id?, note?}`를 기록하거나 지웁니다. |
+| `GET /api/sources/freshness[?refresh=1]` | 소스별 `state`(`fresh`, `stale`, `never_built`, `unknown`)와 이유(파일 추가·변경·삭제, 스키마·읽기 설정 변경), 60초 캐시. |
 | `GET /api/exports` | 내보내기 폴더와 파일 목록. |
 | `GET /api/exports/{rev}/{path}` | 내보낸 파일 하나(`?inline=true`는 미리보기). |
 | `POST /api/playground/chat` | 온톨로지와 대화(SSE, 인용 포함). |
@@ -697,7 +741,7 @@ ACL 태그로 로그인한 서버)는 신원 헤더가 없으므로 같은 방�
 
 ## 문제 해결
 
-[가이드의 문제 해결 표](docs/GUIDE.ko.md#9-문제-해결)에 `doctor`와 `init`의 모든 해결 방법이
+[가이드의 문제 해결 표](docs/GUIDE.ko.md#10-문제-해결)에 `doctor`와 `init`의 모든 해결 방법이
 원인과 함께 정리되어 있습니다. 가장 흔한 것들:
 
 | 증상 | 해결 |
@@ -726,6 +770,7 @@ cd ui && pnpm install && pnpm lint && pnpm test && pnpm build
 
 [CONTRIBUTING.md](CONTRIBUTING.md)(영문)를 보세요.
 
+![시작하기 체크리스트](docs/screenshots/home.ko.png)
 ![그래프 페이지](docs/screenshots/graph.ko.png)
 ![내보내기 페이지](docs/screenshots/exports.ko.png)
 

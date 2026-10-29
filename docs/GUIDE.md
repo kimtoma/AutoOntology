@@ -19,9 +19,10 @@ Contents:
 5. [The 10-minute path](#5-the-10-minute-path)
 6. [Bring your own data](#6-bring-your-own-data)
 7. [Reading the results](#7-reading-the-results)
-8. [When results look wrong](#8-when-results-look-wrong)
-9. [Troubleshooting](#9-troubleshooting)
-10. [FAQ](#10-faq)
+8. [Operating a living ontology](#8-operating-a-living-ontology)
+9. [When results look wrong](#9-when-results-look-wrong)
+10. [Troubleshooting](#10-troubleshooting)
+11. [FAQ](#11-faq)
 
 ## Start with one prompt
 
@@ -106,7 +107,9 @@ columns hold them, and the exact sentences in the documents that define them. Wi
 subscription the whole sample took 8 to 11 minutes in our runs (a ChatGPT subscription about
 15 minutes, estimate); with a local model on a laptop it took 46 minutes (section 4 has the
 numbers). The
-**Get started** page of the web UI shows the five steps and ticks them off as they finish:
+**Get started** page of the web UI shows the five steps and ticks them off as they finish
+(after the first build the start page becomes the **Overview**, see
+[chapter 8](#8-operating-a-living-ontology)):
 
 ![Get started page after the demo](screenshots/home.png)
 
@@ -274,7 +277,8 @@ set it also shows the expected time for your provider:
 ![Get started during the build](screenshots/home-building.png)
 
 When everything is done, all five steps are ticked (the screenshot at the top of this
-guide). If the demo stops halfway (a closed laptop, a usage limit), run
+guide), and from then on the start page is the **Overview** (chapter 8). The checklist
+stays under **Settings → Setup guide**. If the demo stops halfway (a closed laptop, a usage limit), run
 `uv run autoontology demo --resume`: finished steps are kept.
 
 **Switch the model later.** Open **Settings** in the sidebar, choose another provider (for
@@ -345,7 +349,7 @@ Give each source a short name: lower-case letters, digits and `_` (documents may
   erp`, or **Sources → Add source → DB URL**. The database is read where it is; nothing is
   copied into AutoOntology.
 
-Then build: `uv run autoontology build`, or **Get started → Start build**. Export with
+Then build: `uv run autoontology build`, or **Build → Start**. Export with
 `uv run autoontology export` or the **Export** button.
 
 ### When to split sources
@@ -421,7 +425,85 @@ page previews every file and downloads it.
 
 ![Exports page](screenshots/exports.png)
 
-## 8. When results look wrong
+## 8. Operating a living ontology
+
+The first build is the beginning. Your organisation keeps writing documents and changing
+tables, and the models keep proposing; a person decides what becomes part of the shared
+ontology. AutoOntology is built for that cycle:
+
+```
+add or change sources -> build changed sources -> review -> apply -> export
+```
+
+### The Overview
+
+Once something is built, the start page (**Overview**, first in the sidebar) answers
+"what is new, and what needs me?":
+
+- **Ontology**: the revision, when it was built, the number of classes, relations,
+  evidence sentences and documents, and what changed since the previous revision ("+2
+  added −1 removed ~3 changed"). **View changes** lists them.
+- **Needs your confirmation**: how many items wait in each review category, and the first
+  five, which you can accept or reject right there.
+- **Sources**: each source and whether it changed since its last build, in plain words
+  ("3 files added, 1 changed", "the database schema changed"). **Build changed sources**
+  rebuilds only those sources and keeps every other step (a resume build).
+- **Recent activity**: the last builds, exports and applies.
+- **Operations notices**: decisions not applied yet (with **Apply**), changed sources, a
+  build older than 7 days, an export older than the latest revision, a failed run.
+
+![Overview](screenshots/overview.png)
+
+### Who confirms what
+
+The models do the reading; they are good at it but not always right. Everything they are
+not sure about waits on the **Review** page (the number next to **Review** in the
+sidebar). The categories, in plain words:
+
+| Tab | What waits | What your answer does |
+|---|---|---|
+| **Proposals** | The model thinks a document concept means the same as a table concept (for example 계약 = Contract), but the identity policy did not merge them on its own. | **Accept** merges them (or choose *related*, *narrower* or *broader* instead); **Reject** keeps them apart. |
+| **Relations** | A document concept is related to, broader or narrower than a table concept (for example 계약ID is related to Contract). | **Accept** makes the relation confirmed (the table concept counts as aligned); **Reject** removes it. |
+| **Unaligned** | Document concepts that match nothing in your tables (new ones first). | **Acknowledge** keeps it as a concept of its own and stops listing it. |
+| **Synonyms** | Names kept off a table concept's synonyms because they look like a column name, an ID or a number. | **Accept** makes the name a synonym; **Reject** keeps it off. |
+| **Sources** | A source whose files or schema changed since its last build. | **Build changed sources**. |
+
+Each card shows the concept and its definition, the candidate, the model's confidence and
+reasoning, and up to three sentences from the documents with the document and page. Use
+the keyboard for long lists: `j`/`k` move, `a` accepts, `r` rejects. **Undo** removes a
+decision. Your decision is recorded with your name (the tailnet login when you come in over
+Tailscale, else `local`) and the time, and a later build never overrides it: the model is
+not asked again about a concept a person decided.
+
+![Review page](screenshots/review.png)
+
+### Apply
+
+Decisions do not change the ontology until you **apply** them. The banner on the Review
+page (and the notice on the Overview) says how many wait; **Apply** writes a new revision
+from them: no model call, under a second on the quickstart sample (about a minute on a
+large ontology, estimate). The Overview then shows the new revision and what changed.
+`uv run autoontology apply` does the same from a terminal.
+
+On the **Ontology** page, the revision menu opens any earlier revision, and **Changed in
+r{n}** lists what that revision added, changed, removed and merged. A concept's sheet says
+whether a person accepted or rejected it, who and when, or that it is still a proposal.
+
+### Run it on a schedule
+
+Nobody has to press the buttons. A nightly cron entry (`crontab -e`) that builds what
+changed and applies the decisions made during the day:
+
+```bash
+0 2 * * * cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
+```
+
+`build --resume` keeps every step whose inputs did not change, so a quiet night costs
+almost nothing. `build` exits 1 on a partial run, so `apply` is skipped then. People keep
+reviewing during the day, in the browser or with `uv run autoontology review list` and
+`review accept <id>`.
+
+## 9. When results look wrong
 
 **Rebuild or resume?** `uv run autoontology build --resume` continues the last build and
 keeps every step whose inputs did not change (files, kordoc and OCR availability, the
@@ -465,7 +547,7 @@ document chunk, finds fewer concepts, and its judgments are more often `related`
 `same`. That is safe (nothing is merged wrongly) but leaves more suggestions. Use it to
 keep data local; use a subscription or a larger endpoint for the best ontology.
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 `uv run autoontology doctor` checks everything and prints a REMEDY column; `init` prints
 `fix:` lines. The commands below are the ones doctor and init suggest, with a few extra
@@ -509,7 +591,7 @@ same).
 | `/ui/` answers 503 `ui_not_built` | The web UI files are missing (a source archive) | `uv run autoontology tools build-ui` (needs Node and pnpm) |
 | A build seems stuck | Local models are slow | `uv run autoontology runs` shows the step and chunk counts; logs are in `data/logs/` |
 
-## 10. FAQ
+## 11. FAQ
 
 **Is my data private?** With Ollama for chat and embeddings, nothing leaves your computer:
 the services listen only on 127.0.0.1 and reject other machines. With a Claude or ChatGPT

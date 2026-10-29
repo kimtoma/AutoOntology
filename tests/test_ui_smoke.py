@@ -5,7 +5,8 @@ built and exported once).
 
 Run with: AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_ui_smoke.py
 (browsers: ``uv run playwright install chromium``). With ``AUTOONTOLOGY_SCREENSHOTS=1`` the
-last test also rewrites ``docs/screenshots/{home,ontology,graph,exports}.png`` and their Korean
+last test also rewrites ``docs/screenshots/{home,overview,review,ontology,graph,exports}.png``
+and their Korean
 ``*.ko.png`` versions at 1280 px.
 """
 
@@ -25,9 +26,20 @@ pytestmark = pytest.mark.integration
 #: Headless Chromium has no GPU: software WebGL (SwiftShader through ANGLE) for the 3D graph.
 GL_ARGS = ["--use-angle=swiftshader", "--use-gl=angle", "--enable-unsafe-swiftshader"]
 VIEWPORTS = {"mobile": (375, 812), "tablet": (768, 1024), "desktop": (1280, 800)}
-ROUTES = ("sources", "build", "ontology", "graph", "playground", "exports", "status", "settings")
-#: sidebar entries (data-nav): the Home page ("Get started", /ui/) comes first
-NAV_IDS = ("home", *ROUTES)
+ROUTES = (
+    "review",
+    "sources",
+    "build",
+    "ontology",
+    "graph",
+    "playground",
+    "exports",
+    "status",
+    "settings",
+)
+#: sidebar entries (data-nav): the Overview (/ui/) comes first; the first-run checklist
+#: ("Get started", /ui/setup) is not in the sidebar
+NAV_IDS = ("overview", *ROUTES)
 STEPS = ["models", "sources", "build", "explore", "export"]
 NO_HSCROLL = "document.documentElement.scrollWidth <= window.innerWidth"
 #: Elements inside <main> that overflow horizontally. An element may be wider than its box only
@@ -105,8 +117,9 @@ def test_shell_sources_and_status(live, browser, name):
     url, sources, _ = live
     page = new_page(browser, VIEWPORTS[name])
     page.goto(f"{url}/")
-    page.wait_for_url("**/ui/")  # / -> /ui/ (server): the Get started page
-    page.locator("#checklist > li[data-step]").first.wait_for()
+    page.wait_for_url("**/ui/")  # / -> /ui/ (server): the Overview once a snapshot exists
+    page.locator("#overview #ops-ontology").wait_for()
+    assert page.locator("#checklist").count() == 0
     page.goto(f"{url}/ui/sources")
     rows = page.locator("#sources-table tbody tr[data-source]")
     rows.first.wait_for()
@@ -148,7 +161,7 @@ def test_shell_sources_and_status(live, browser, name):
     assert "HWP" in page.locator("#source-kind-hint").inner_text()
     page.keyboard.press("Escape")
 
-    for route in ("", *ROUTES):
+    for route in ("", "setup", *ROUTES):
         page.goto(f"{url}/ui/{route}")
         page.locator("main h1").first.wait_for()
         page.wait_for_timeout(400)
@@ -178,7 +191,7 @@ def test_home_checklist_reflects_the_api(live, browser, name):
     url, sources, summary = live
     status = httpx.get(f"{url}/api/status").json()
     page = new_page(browser, VIEWPORTS[name])
-    page.goto(f"{url}/ui/")
+    page.goto(f"{url}/ui/setup")
     cards = page.locator("#checklist > li[data-step]")
     cards.first.wait_for()
     assert cards.evaluate_all("cs => cs.map(c => c.dataset.step)") == STEPS
@@ -216,7 +229,7 @@ def test_home_sample_dialog_lists_the_sets(live, browser):
     if not sets:
         pytest.skip("no sample sets next to the service")
     page = new_page(browser, VIEWPORTS["mobile"])
-    page.goto(f"{url}/ui/")
+    page.goto(f"{url}/ui/setup")
     page.click("#btn-load-samples")
     page.locator("#sample-sets [data-sample-set]").first.wait_for()
     shown = page.locator("#sample-sets [data-sample-set]").evaluate_all(
@@ -283,6 +296,140 @@ def test_home_sample_dialog_lists_the_sets(live, browser):
             page.locator(f"[data-loaded-source='{src['name']}']").inner_text().endswith("replaced")
         )
     assert page.evaluate(NO_HSCROLL)
+    assert page.errors == []
+    page.close()
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+@pytest.mark.parametrize("name", ["mobile", "desktop"])
+def test_overview_renders_after_a_snapshot(live, browser, name, lang):
+    url, _, summary = live
+    page = new_page(browser, VIEWPORTS[name], locale="ko-KR" if lang == "ko" else "en-US")
+    page.goto(f"{url}/ui/?lang={lang}")
+    page.locator("main h1", has_text="개요" if lang == "ko" else "Overview").wait_for()
+    assert page.locator("#checklist").count() == 0
+    for card in ("ops-ontology", "ops-review", "ops-sources", "ops-activity", "ops-notices"):
+        page.locator(f"#{card}").wait_for()
+    assert page.locator("#ops-revision").get_attribute("data-revision") == str(summary["revision"])
+    page.locator("#ops-delta[data-to]").wait_for(timeout=15000)
+    page.locator("#ops-freshness [data-source], #ops-sources p").first.wait_for(timeout=30000)
+    page.wait_for_timeout(300)
+    assert_fits(page, f"overview {lang} at {name}")
+    # the nav: Overview first, Review with the pending count
+    if name == "mobile":
+        page.get_by_role("button", name="메뉴 열기/닫기" if lang == "ko" else "Toggle menu").click()
+        links = page.locator("[data-mobile=true] a[data-nav]")
+    else:
+        links = page.locator("a[data-nav]")
+    links.first.wait_for()
+    assert links.evaluate_all("as => as.map(a => a.dataset.nav)") == list(NAV_IDS)
+    pending = httpx.get(f"{url}/api/review/pending-count").json()["pending"]
+    if pending:
+        badge = page.locator("#review-badge").first
+        badge.wait_for()
+        assert badge.get_attribute("data-count") == str(pending)
+    assert page.errors == []
+    page.close()
+
+
+def test_review_accept_then_apply_flow(live, browser):
+    """Accept, Undo and Apply against intercepted routes: no decision is stored, no run starts."""
+    url, _, summary = live
+    listing = httpx.get(f"{url}/api/review", params={"size": 20}).json()
+    if not listing["items"]:
+        pytest.skip("nothing to review in this snapshot")
+    first = next((i for i in listing["items"] if i["category"] in ("proposals", "axioms")), None)
+    if first is None:
+        pytest.skip("no proposal or relation item to accept")
+    page = new_page(browser, VIEWPORTS["desktop"])
+    posts, deletes, runs = [], [], []
+    state = {"unapplied": listing["unapplied"], "polls": 0}
+    decision = {
+        "id": 1,
+        "kind": "alignment",
+        "subject_key": first["concept"]["id"],
+        "decision": "accept",
+        "relation": first["relation"],
+        "payload": {},
+        "note": "",
+        "decided_by": "local",
+        "decided_at": "2026-10-29T12:00:00+00:00",
+        "applied_revision": None,
+    }
+
+    def decide(route):
+        if route.request.method == "DELETE":
+            deletes.append(route.request.url)
+            state["unapplied"] -= 1
+            _json(route, {"removed": first["id"]})
+            return
+        posts.append(json.loads(route.request.post_data or "{}"))
+        state["unapplied"] += 1
+        _json(route, {"item": {**first, "decision": decision}, "decision": decision})
+
+    def count(route):
+        body = httpx.get(f"{url}/api/review/pending-count").json()
+        _json(route, {**body, "unapplied": state["unapplied"]})
+
+    def start(route):
+        if route.request.method != "POST":
+            route.continue_()
+            return
+        runs.append(json.loads(route.request.post_data or "{}"))
+        _json(route, {"run_id": "apply-smoke"}, status=202)
+
+    def run(route):
+        state["polls"] += 1
+        done = state["polls"] > 1
+        _json(
+            route,
+            {
+                "id": "apply-smoke",
+                "kind": "apply",
+                "status": "succeeded" if done else "running",
+                "source": None,
+                "started_at": "2026-10-29T12:00:00+00:00",
+                "finished_at": "2026-10-29T12:00:01+00:00" if done else None,
+                "error": None,
+                "params": {"applied_revision": summary["revision"] + 1} if done else {},
+                "managed": True,
+                "progress": {},
+                "steps": [
+                    {
+                        "name": "decisions",
+                        "status": "succeeded",
+                        "started_at": None,
+                        "finished_at": None,
+                        "detail": {},
+                    }
+                ],
+            },
+        )
+
+    page.route(re.compile(r".*/api/review/.+/decision$"), decide)
+    page.route(re.compile(r".*/api/review/pending-count$"), count)
+    page.route(re.compile(r".*/api/runs$"), start)
+    page.route(re.compile(r".*/api/runs/apply-smoke$"), run)
+    page.goto(f"{url}/ui/review?category={first['category']}")
+    card = page.locator(f"[data-review-item='{first['id']}']")
+    card.wait_for()
+    assert page.locator("#review-list [data-review-item]").count() >= 1
+    tabs = page.locator("#review-tabs [data-tab]").evaluate_all("ts => ts.map(t => t.dataset.tab)")
+    assert tabs == ["proposals", "axioms", "unaligned", "aliases", "stale_sources"], tabs
+    card.locator("[data-action=accept]").click()
+    page.locator(f"[data-review-item='{first['id']}'][data-decided=accept]").wait_for()
+    assert posts == [{"decision": "accept", "relation": first["relation"]}], posts
+    assert "Accepted" in page.locator("#review-live").inner_text()
+    card.locator("[data-action=undo]").click()
+    page.locator(f"[data-review-item='{first['id']}']:not([data-decided])").wait_for()
+    assert len(deletes) == 1
+    card.locator("[data-action=accept]").click()
+    banner = page.locator("#apply-banner")
+    banner.wait_for()
+    assert "No model calls" in banner.inner_text()
+    page.click("#btn-apply")
+    page.get_by_text(f"Revision {summary['revision'] + 1} written").wait_for(timeout=10000)
+    assert runs == [{"kind": "apply"}], runs
     assert page.errors == []
     page.close()
 
@@ -536,7 +683,7 @@ def test_exports_show_ossie_and_okf_with_validation(live, browser):
 
 
 #: Korean headings of the pages checked in Korean (?lang=ko)
-KO_PAGES = {"": "시작하기", "sources": "소스", "build": "빌드"}
+KO_PAGES = {"": "개요", "setup": "시작하기", "review": "검토", "sources": "소스", "build": "빌드"}
 
 
 @pytest.mark.parametrize("name", ["mobile", "desktop"])
@@ -548,6 +695,8 @@ def test_korean_pages_fit(live, browser, name):
         page.locator("main h1", has_text=heading).wait_for()
         assert page.evaluate("document.documentElement.lang") == "ko"
         if path == "":
+            page.locator("#ops-activity").wait_for(timeout=15000)
+        if path == "setup":
             page.locator("[data-step=export]:not([data-state=checking])").wait_for(timeout=15000)
             assert page.locator("#checklist-progress").inner_text().startswith("5단계 중")
         if path == "build":
@@ -556,9 +705,9 @@ def test_korean_pages_fit(live, browser, name):
     # the sidebar labels (open on mobile) are Korean too and fit
     if name == "mobile":
         page.get_by_role("button", name="메뉴 열기/닫기").click()
-    nav = page.locator("[data-nav=home]").first
+    nav = page.locator("[data-nav=overview]").first
     nav.wait_for()
-    assert nav.inner_text().strip() == "시작하기"
+    assert nav.inner_text().strip() == "개요"
     assert page.evaluate(NO_HSCROLL)
     # the choice is remembered: a reload without ?lang= stays Korean
     page.goto(f"{url}/ui/sources")
@@ -715,7 +864,9 @@ def test_korean_pages_have_no_english_ui_labels(live, browser):
     url, _, _ = live
     page = new_page(browser, VIEWPORTS["desktop"], locale="ko-KR")
     checks = {
-        "": "[data-step=export]:not([data-state=checking])",
+        "": "#ops-activity",
+        "setup": "[data-step=export]:not([data-state=checking])",
+        "review": "#review-tabs",
         "sources": "#sources-table",
         "build": "#runs-table",
         "ontology": "#concept-list [data-concept]",
@@ -744,7 +895,7 @@ def test_korean_pages_have_no_english_ui_labels(live, browser):
 def test_lang_toggle_switches_without_reload(live, browser):
     url, _, _ = live
     page = new_page(browser, VIEWPORTS["desktop"])
-    page.goto(f"{url}/ui/?lang=en")
+    page.goto(f"{url}/ui/setup?lang=en")
     page.locator("main h1", has_text="Get started").wait_for()
     page.evaluate("window.__noReload = 1")
     page.locator("#lang-toggle").click()
@@ -775,7 +926,9 @@ def test_screenshots(live, browser):
     page = new_page(browser, VIEWPORTS["desktop"])
     page.emulate_media(color_scheme="light")
     shots = {
-        "home": ("/ui/", "[data-step=export]:not([data-state=checking])"),
+        "home": ("/ui/setup", "[data-step=export]:not([data-state=checking])"),
+        "overview": ("/ui/", "#ops-delta[data-to]"),
+        "review": ("/ui/review", "#review-list [data-review-item]"),
         "ontology": ("/ui/ontology", "#concept-list [data-concept]"),
         "graph": ("/ui/graph", "#graph-canvas canvas"),
         "exports": ("/ui/exports", "[data-validation=okf][data-ok=true]"),

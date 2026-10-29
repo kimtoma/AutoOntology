@@ -223,8 +223,12 @@ process can send any Host and login header.
 - **Diff** (`web/revisions.py`, `/api/ontology/diff`). The default `from` is the newest
   revision older than `to`. Nodes are keyed by model local. A node counts as changed when
   its label, kind, definitions, synonyms, tables or relation/property counts differ.
-  Axioms and merges are diffed by their ends. Each list holds at most 500 entries;
-  `totals` counts all of them.
+  Axioms and merges are diffed by their ends (named in `subject_name`/`object_name`/
+  `term_name`). Each list holds at most 500 entries; `totals` counts all of them.
+- **Concept decisions** (`web/concept_decisions.py`). The concept detail
+  (`/api/ontology/concepts/{id}`) lists the current decisions about the concept: a
+  document concept's alignment, fold and acknowledge decisions, a Term's alias decisions,
+  each with `decided_by`, `decided_at`, `applied_revision` and its review `item_id`.
 - **Freshness** (`web/freshness.py`, `/api/sources/freshness`, 60 s cache). For each
   source, the current `input_fingerprint` is compared with the `inputs_sha` of its newest
   succeeded build step. When they differ, the reasons say what changed: files compared
@@ -397,6 +401,35 @@ playground, so a playground request started during the half-second grace is cut 
 the restart. The saved API key is used only for the base-URL origin it was saved with:
 another origin needs a new key (400 `key_required`).
 
+## Web UI (`ui/`)
+
+A React app (Vite, TanStack Query, shadcn/ui) built into `autoontology/web/static/dist`
+and served under `/ui/`; every non-asset `/ui/*` path gets `index.html`. `ui/src/lib/api.ts`
+is the only client of `/api`.
+
+- **Navigation** (`components/nav.ts`): Overview (`/`), Review (`/review`), Sources, Build,
+  Ontology, Graph, Playground, Exports, Status, Settings. The Review entry carries the
+  pending count (`GET /api/review/pending-count`, polled every 30 s and refreshed after a
+  decision or a run). The first-run checklist (`pages/home.tsx`) is `/setup`, reachable from
+  Settings and the command menu; `/` (`pages/overview.tsx::IndexPage`) renders it while
+  `/api/ontology` answers 404 `no_snapshot` and the dashboard once a snapshot exists. The
+  last settled answer decides while the snapshot refetches, so the page does not flicker.
+- **Overview** (`pages/overview.tsx`): five cards over `/api/ontology`, `/api/ontology/diff`
+  (latest against the one before), `/api/ontology/revisions`, `/api/review?size=5`,
+  `/api/sources/freshness`, `/api/runs` and `/api/exports`, polled every 30 s; the end of
+  an active run (SSE) invalidates them (`hooks/queries.ts::invalidateAfterRun`). The
+  notices are computed in `lib/ops.ts::opsNotices` (pure, unit-tested).
+- **Review** (`pages/review.tsx`, `components/review-card.tsx`, `hooks/use-review.ts`):
+  one category per tab, 20 items per page, category/status/page in the URL. A decision
+  patches the cached item in place (badge and Undo stay where the card was) and refreshes
+  the counts, not the list, so the list does not jump; the list is fetched again on a tab,
+  filter or page change. The apply banner (`components/apply-banner.tsx`) starts
+  `POST /api/runs {kind: "apply"}`, polls the run every second and invalidates every view
+  when it ends.
+- **Ontology** (`pages/ontology.tsx`, `components/revision-changes.tsx`): `?revision=`
+  reads an older snapshot (summary, concepts and the concept sheet); `?changed=1` shows the
+  diff of the shown revision against the one before it instead of the concept list.
+
 ## Internationalisation
 
 Two languages, English and Korean, with no extra dependency on either side.
@@ -413,7 +446,8 @@ Two languages, English and Korean, with no extra dependency on either side.
   (`i18n.remedy`), and `source rm` translates the known notices of `structured/remove.py`
   in the CLI (`i18n.notice`). Tables pad by display width (Hangul is double-width).
 - **Web UI** (`ui/src/i18n/`): `en.ts` is the key set (it spreads `en.explore.ts`, the
-  Ontology/Graph/Playground/Exports/Status strings) and `ko.ts` is typed as
+  Ontology/Graph/Playground/Exports/Status strings, and `en.ops.ts`, the Overview, Review
+  and apply strings) and `ko.ts` is typed as
   `Record<keyof typeof en, string>`, so a missing key fails `tsc`. The current language lives
   in `core.ts`, so pure helpers (label tables, the file classifier, durations) translate
   too; `LangProvider` re-mounts the tree under the query cache when it changes, and

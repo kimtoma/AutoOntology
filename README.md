@@ -18,7 +18,13 @@ OpenAI-compatible API.
 written for domain experts with no data-engineering background: words explained, a
 checklist, the 10-minute path, how to prepare your own files, and a troubleshooting table.
 
-![Get started page](docs/screenshots/home.png)
+![Overview page](docs/screenshots/overview.png)
+
+The web UI's sidebar: **Overview** (what changed, what needs you), **Review** (confirm what
+the models proposed), **Sources**, **Build**, **Ontology**, **Graph**, **Playground**,
+**Exports**, **Status** and **Settings**. Before the first build, the Overview is the
+five-step **Get started** checklist; afterwards the checklist stays under
+**Settings → Setup guide** (`/ui/setup`).
 
 ## Quickstart
 
@@ -423,6 +429,35 @@ revisions:
 30 2 * * * cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
 ```
 
+## Operating
+
+After the first build the ontology is something you run, not a one-off export. The cycle:
+
+1. **Add or change sources.** Drop new files into a source's folder or change a database.
+   The **Overview** lists each source's freshness in plain words ("3 files added, 1
+   changed").
+2. **Build changed sources.** The Overview's button (or `autoontology build --resume`)
+   rebuilds only what changed and keeps every other step.
+3. **Review.** The models propose; a person confirms. The **Review** page (with the count
+   on its sidebar entry) groups what waits for a person: *Proposals* (a document concept
+   the model thinks means the same as a table Term, which the policy did not fold by
+   itself), *Relations* (related, broader or narrower), *Unaligned* concepts, *Synonyms*
+   kept off a Term, and stale *Sources*. Accept (choosing same, related, narrower or
+   broader), reject, acknowledge or undo; `j`/`k` move and `a`/`r` decide. From the
+   command line: `autoontology review list`, `review accept <id>`, `review reject <id>`.
+4. **Apply.** **Apply** on the banner (or `autoontology apply`) writes the decisions into
+   a new revision: decisions, merge and snapshot, with no model call (under a second on
+   the quickstart set). With nothing pending it writes no revision. Decisions also hold on
+   every later build: the align judge never overrides them. The **Merged** tab lists the
+   automatic folds, so a person can reject one; it is not counted in the badge.
+5. **Export.** The Overview says when the latest export is behind the latest revision.
+
+The Ontology page shows any revision and what changed in it (**Changed in r{n}**); a
+concept's sheet says who accepted or rejected it and when. For an unattended nightly run,
+see [Reviewing and applying decisions](#reviewing-and-applying-decisions).
+
+![Review page](docs/screenshots/review.png)
+
 ## Reference
 
 ### Architecture
@@ -470,6 +505,9 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | `autoontology source rm N [--drop-db] [--force]` | Removes a source; `--drop-db` also drops its database. For a documents source it first removes, from the upstream Terms, the synonyms that source's alignments added (manual aliases, other sources' aliases and aliases still covered by another source's accepted `same` alignment are kept). This needs the engine database; if it fails, the source is kept unless `--force` is given. When `--force` cannot delete the upstream connection (backend down), `--drop-db` keeps the database and tells you to run `tools prune-connections <database> --include-unowned --drop-db` later. |
 | `autoontology build [--source N ...] [--resume]` | Builds every source into one snapshot. `--source` rebuilds only the named sources (align, merge and snapshot still cover all of them). `--resume` continues the latest build and keeps steps whose inputs did not change (see [Resuming a build](#resuming-a-build)). |
 | `autoontology ontology` | Shows the latest snapshot: revision, sources and counts. |
+| `autoontology review list [--category C] [--status pending\|decided\|all] [--limit N] [--json]` | Lists the review inbox (proposals, axioms, unaligned, aliases, stale sources). |
+| `autoontology review accept <id> [--relation same\|related\|narrower\|broader] [--term T] [--note N]` / `reject <id>` / `acknowledge <id>` / `undo <id>` | Records or removes a person's decision on one item. |
+| `autoontology apply` | Writes the pending decisions into a new revision (decisions, merge, snapshot) without any model call. |
 | `autoontology runs [--limit N]` | Shows recent runs and their steps. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
@@ -502,14 +540,20 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 | `GET /api/sources` | Lists the sources. |
 | `POST /api/sources` | Adds a source: JSON `{name, kind: files\|database\|documents, locator, recursive?}`, or a multipart upload. |
 | `DELETE /api/sources/{name}` | Removes a source (`?drop_db=true` also drops its database; `&force=true` removes it locally even when the engine's graph deletion or the alias cleanup fails or does not finish, like `source rm --force`). A documents source's alias additions are removed from the upstream Terms first, as with `source rm`. |
-| `POST /api/runs` | Starts a run: `{kind: "build", sources?, resume?}` or `{kind: "export", revision?, format?}`. |
+| `POST /api/runs` | Starts a run: `{kind: "build", sources?, resume?}`, `{kind: "export", revision?, format?}` or `{kind: "apply"}` (the review decisions into a new revision, no model call; 404 `no_snapshot` before the first build). |
 | `GET /api/runs`, `GET /api/runs/{id}` | Lists runs; shows one run with its steps. |
 | `GET /api/runs/{id}/events` | Server-sent events: the live log and step updates of a run. |
 | `POST /api/runs/{id}/cancel` | Cancels a run. |
 | `GET /api/ontology[?revision=]` | Snapshot header: revision, workspace, base IRI, sources and counts (404 `no_snapshot` before the first build). |
 | `GET /api/ontology/graph?layer=all\|structured\|documents\|aligned&evidence=&revision=` | The unified graph. Every node has an `origin`. |
 | `GET /api/ontology/concepts?q=&kind=&origin=&source=&page=&size=&revision=` | Terms and document concepts in one paged list. |
-| `GET /api/ontology/concepts/{term-…\|concept-…}[?revision=]` | One concept: definition, synonyms, columns, alignments, relations and evidence. |
+| `GET /api/ontology/concepts/{term-…\|concept-…}[?revision=]` | One concept: definition, synonyms, columns, alignments, relations, evidence and `decisions` (who accepted or rejected it, when, and the revision that applied it). |
+| `GET /api/ontology/revisions[?limit=]` | The snapshots, newest first: revision, time, run kind (`build`, `apply`), counts and sources. |
+| `GET /api/ontology/diff[?from=&to=]` | What changed between two revisions (default: the latest against the one before): classes added, removed and changed (with the fields), axioms, merges, sources and the change in counts. |
+| `GET /api/review?category=&status=pending\|decided\|all&page=&size=` | The review inbox: `counts` per category, `unapplied`, and the items with concept, Term, relation, confidence, rationale, evidence and `decision`. |
+| `GET /api/review/pending-count` | `{pending, counts, unapplied}` (the sidebar badge). |
+| `POST /api/review/{id}/decision`, `DELETE /api/review/{id}/decision` | Records `{decision: accept\|reject\|acknowledge, relation?, term_id?, note?}` on an item, or removes it. |
+| `GET /api/sources/freshness[?refresh=1]` | Per source: `state` (`fresh`, `stale`, `never_built`, `unknown`) and the reasons (files added, changed or removed, schema or reader changed), cached 60 s. |
 | `GET /api/exports` | The export folders and their files. |
 | `GET /api/exports/{rev}/{path}` | One exported file (`?inline=true` for a preview). |
 | `POST /api/playground/chat` | Chat with the ontology (SSE, with citations). |
@@ -748,7 +792,7 @@ See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
 ## Troubleshooting
 
-The [guide's troubleshooting table](docs/GUIDE.md#9-troubleshooting) lists every
+The [guide's troubleshooting table](docs/GUIDE.md#10-troubleshooting) lists every
 `doctor` and `init` remedy with its cause. The most common ones:
 
 | Symptom | Fix |
@@ -777,6 +821,7 @@ cd ui && pnpm install && pnpm lint && pnpm test && pnpm build
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+![Get started checklist](docs/screenshots/home.png)
 ![Graph page](docs/screenshots/graph.png)
 ![Exports page](docs/screenshots/exports.png)
 

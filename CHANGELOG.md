@@ -20,10 +20,39 @@ behaviour).
 - **`autoontology restart [--only backend]`** restarts the service and the backend with the
   current `.env`; `provider use` gains `--embed`, `--embed-model`, `--base-url` and
   `--openai-chat-model` (the key is never taken on the command line).
+- **Overview dashboard** (`/ui/` once a snapshot exists): the revision with its build time
+  and counts and the change since the previous revision (+added, −removed, ~changed,
+  **View changes**); what needs a person's confirmation (counts per category and the first
+  five items, decided in place); each source's freshness in plain words with **Build
+  changed sources** (a resume build of those sources); the last five runs; and operations
+  notices (a failed run, unapplied decisions with **Apply**, changed sources, a build older
+  than 7 days, an export behind the latest revision). It refreshes every 30 s and when a
+  run ends.
+- **Review page** (`/ui/review`, with the pending count on its sidebar entry): tabs for
+  Proposals, Relations, Unaligned, Synonyms and Sources; each card shows the concept and
+  its definition, the candidate Term and relation, the confidence, the rationale and up to
+  three evidence quotes. **Accept** (as same, related, narrower or broader for proposals and
+  relations), **Reject**, **Acknowledge** (unaligned concepts) and **Undo**; `j`/`k` move,
+  `a`/`r` decide. A banner applies the pending decisions (an `apply` run, no model call)
+  and follows the run to the new revision. Category, filter and page live in the URL.
+- **Ontology page**: a revision selector (older revisions read their own snapshot) and a
+  **Changed in r{n}** view listing the added, changed and removed classes, merges and
+  relation changes of that revision. The concept sheet shows the review decisions about a
+  concept (accepted or rejected by a person, who, when, and whether a revision applied it),
+  or that it is still a proposal.
+- `GET /api/ontology/concepts/{id}` returns `decisions` (the review decisions about the
+  concept, with `decided_by`, `decided_at`, `applied_revision` and the review `item_id`),
+  and the diff names the ends of changed axioms and merges (`subject_name`,
+  `object_name`, `term_name`).
+- Run kind `apply` is labelled "Apply decisions" on the Build page and in the run sheet.
 
 ### Changed
 
 - The `/settings` UI route is the Settings page (it used to redirect to `/status`).
+- The sidebar reads Overview, Review, Sources, Build, Ontology, Graph, Playground,
+  Exports, Status, Settings. The first-run **Get started** checklist left it: `/ui/`
+  shows the checklist only while there is no snapshot, and it stays at `/ui/setup`,
+  linked as **Setup guide** from Settings and the command menu (⌘K).
 
 ### Fixed
 
