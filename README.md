@@ -260,7 +260,7 @@ Build page.
    top 5 Terms by embedding cosine (floor `AUTOONTOLOGY_ALIGN_MIN_SIM`). An LLM judge
    returns `same`, `broader`, `narrower`, `related` or `none`, with a confidence and a
    rationale, and the verdict is validated fail-closed.
-4. **Identity policy `identity-v2.1`.** A `same` verdict is accepted only with confidence
+4. **Identity policy `identity-v2.2`.** A `same` verdict is accepted only with confidence
    ≥ max(`AUTOONTOLOGY_ALIGN_MIN_CONF`, 0.90) **and** an exact match between a whole
    alias of the concept (name, English name, synonyms) and a trusted alias of the Term.
    Aliases are compared after NFKC normalization, case folding and whitespace removal. An
@@ -269,7 +269,9 @@ Build page.
    are kept as they are). A stop-list of pairs that are different words keeps them apart:
    goods/good, customs/custom, news/new, arms/arm, glasses/glass and means/mean. It applies
    to whole aliases and to the last word of a multi-word alias (`Trade Goods` is not
-   `Trade Good`). Substrings never count. Any other `same` is downgraded to `related` and
+   `Trade Good`). Substrings never count. Instance-like names (record IDs such as `S037`,
+   numbers/dates, company names such as `주식회사 …`) are never evidence or synonyms, and a
+   concept named like one is never `same`. Any other `same` is downgraded to `related` and
    kept as a review proposal.
 5. **Merge.** An accepted `same` **folds** the concept into its Term: the concept's names
    become synonyms (`skos:altLabel`) of the Term, and its document definition and evidence

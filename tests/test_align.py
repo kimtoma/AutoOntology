@@ -888,7 +888,7 @@ def test_identity_case5_cached_bad_same_is_recomputed(approver_env, monkeypatch)
     assert "승인권자" in AlignmentStore(store).alias_additions()["t-contract"]
 
 
-@pytest.mark.parametrize("old_policy", [None, "identity-v2"])
+@pytest.mark.parametrize("old_policy", [None, "identity-v2", "identity-v2.1"])
 def test_identity_case5_resumed_bad_same_is_recomputed(approver_env, monkeypatch, old_policy):
     settings, store = approver_env
     client = FakeClient()
@@ -1003,7 +1003,7 @@ def test_identity_v2_stop_list_keeps_false_positive_pairs_apart(plural, single):
     verdict, proposal = al.apply_identity_policy(
         al.ValidatedVerdict("t", "same", 0.97, "ok"), concept, term, min_conf=0.7
     )
-    assert verdict.relation == "related" and proposal["policy"] == "identity-v2.1"
+    assert verdict.relation == "related" and proposal["policy"] == al.IDENTITY_POLICY_VERSION
     exact = al.ConceptInfo("c", "개념", "entity", "x", name_en=plural.upper())
     verdict, _ = al.apply_identity_policy(
         al.ValidatedVerdict("t", "same", 0.97, "ok"), exact, term, min_conf=0.7
@@ -1093,4 +1093,159 @@ def test_identity_policy_matches_english_plurals_only_as_whole_aliases():
     verdict, proposal = al.apply_identity_policy(
         al.ValidatedVerdict("t", "same", 0.95, "ok"), other, term, min_conf=0.7
     )
-    assert verdict.relation == "related" and proposal["policy"] == "identity-v2.1"
+    assert verdict.relation == "related" and proposal["policy"] == al.IDENTITY_POLICY_VERSION
+
+
+# --- instance-like aliases (identity-v2.2) -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("alias", "reason"),
+    [
+        ("S037", "identifier"),
+        ("C248", "identifier"),
+        ("K2025-105", "identifier"),
+        ("INV-20190001", "identifier"),
+        ("P-1018", "identifier"),
+        ("E041", "identifier"),
+        ("2025", "number/date"),
+        ("12,000", "number/date"),
+        ("2025-03-01", "number/date"),
+        ("2025년 3월", "number/date"),
+        ("주식회사 마루솔솔루션", "organisation name"),
+        ("㈜한빛", "organisation name"),
+        ("(주)한빛", "organisation name"),
+        ("한빛유한회사", "organisation name"),
+        ("한빛상사", "organisation name"),
+        ("마루솔솔루션", "organisation name"),
+        ("ACME Inc.", "organisation name"),
+        ("Foo Co., Ltd", "organisation name"),
+        ("Bar Corp.", "organisation name"),
+        ("Baz LLC", "organisation name"),
+        ("Qux GmbH", "organisation name"),
+    ],
+)
+def test_instance_like_names_are_recognised(alias, reason):
+    assert al.instance_like(alias) == reason
+
+
+@pytest.mark.parametrize(
+    "alias",
+    ["고객", "거래처", "Customer", "Customers", "공급사", "공급업체", "Supplier", "계약서"]
+    + ["시스템", "기업", "B2B", "Q4", "Incident", "LLCs", "Purchase Order"],
+)
+def test_ordinary_synonyms_are_not_instance_like(alias):
+    assert al.instance_like(alias) == ""
+
+
+def test_plan_patches_rejects_instance_like_synonyms_and_records_them():
+    terms = {
+        "t-c": al.TermInfo("t-c", "Customers", "고객 정보", []),
+        "t-s": al.TermInfo("t-s", "Suppliers", "공급사 정보", []),
+    }
+    matches = {
+        "t-c": [al.SameMatch(1, "고객", ["거래처", "Customer", "주식회사 마루솔솔루션"], "", 0.95)],
+        "t-s": [al.SameMatch(2, "공급사", ["공급업체", "Supplier", "S037", "S011"], "", 0.95)],
+    }
+    by = {p.term_id: p for p in al.plan_patches(matches, terms)}
+    assert by["t-c"].synonyms_added == ["고객", "거래처", "Customer"]
+    assert by["t-s"].synonyms_added == ["공급사", "공급업체", "Supplier"]
+    assert by["t-c"].rejected_aliases == [
+        {"alias": "주식회사 마루솔솔루션", "reason": "organisation name", "concept": "고객"}
+    ]
+    assert [r["alias"] for r in by["t-s"].rejected_aliases] == ["S037", "S011"]
+    assert {r["reason"] for r in by["t-s"].rejected_aliases} == {"identifier"}
+    assert by["t-s"].to_dict()["rejected_aliases"] == by["t-s"].rejected_aliases
+    writer = FakeWriter(terms)
+    result = al.apply_patch(by["t-s"], writer)
+    assert terms["t-s"].synonyms == ["공급사", "공급업체", "Supplier"]
+    assert result["rejected_aliases"] == by["t-s"].rejected_aliases
+
+
+@pytest.mark.parametrize(
+    ("name", "term"),
+    [
+        ("주식회사 마루솔솔루션", al.TermInfo("t", "Customers", "x", ["주식회사 마루솔솔루션"])),
+        ("S037", al.TermInfo("t", "Suppliers", "x", ["S037"])),
+        ("ACME Inc.", al.TermInfo("t", "Customers", "x", ["ACME Inc."])),
+    ],
+)
+def test_instance_like_concept_is_never_same(name, term):
+    concept = al.ConceptInfo("c", name, "entity", "x")
+    verdict, proposal = al.apply_identity_policy(
+        al.ValidatedVerdict("t", "same", 0.99, "ok"), concept, term, min_conf=0.7
+    )
+    assert verdict.relation == "related"
+    assert proposal["reason"].startswith("instance_like")
+    assert proposal["policy"] == al.IDENTITY_POLICY_VERSION == "identity-v2.2"
+
+
+def test_instance_like_alias_is_no_identity_evidence():
+    term = al.TermInfo("t", "Suppliers", "x", ["S037"])
+    concept = al.ConceptInfo("c", "협력사", "entity", "x", synonyms=["S037"])
+    verdict, proposal = al.apply_identity_policy(
+        al.ValidatedVerdict("t", "same", 0.99, "ok"), concept, term, min_conf=0.7
+    )
+    assert verdict.relation == "related" and "no identity evidence" in proposal["reason"]
+
+
+def test_ordinary_synonyms_still_fold_as_same():
+    for term, concept in [
+        (
+            al.TermInfo("t", "Customers", "x", []),
+            al.ConceptInfo(
+                "c", "고객", "entity", "x", name_en="Customer", synonyms=["거래처", "C248"]
+            ),
+        ),
+        (
+            al.TermInfo("t", "Suppliers", "x", ["공급업체"]),
+            al.ConceptInfo("c", "공급사", "entity", "x", name_en="Supplier", synonyms=["공급업체"]),
+        ),
+    ]:
+        verdict, proposal = al.apply_identity_policy(
+            al.ValidatedVerdict("t", "same", 0.97, "ok"), concept, term, min_conf=0.7
+        )
+        assert verdict.relation == "same" and proposal == {}
+    assert al.accepted_aliases(concept) == {"공급사", "supplier", "공급업체"}
+    assert al.accepted_aliases(
+        al.ConceptInfo("c", "고객", "entity", synonyms=["거래처", "C248", "주식회사 마루솔"])
+    ) == {"고객", "거래처"}
+
+
+def test_run_align_never_writes_instance_like_synonyms(env):
+    settings, store = env
+    docs = DocumentStore(store)
+    src = store.get_source("hanbit-docs")
+    chunk = docs.chunks_for_document(docs.list_documents(src.id)[0].id)[0]
+    ev = [EvidenceRecord(chunk.id, "계약은 고객과 맺는다", True)]
+    docs.replace_ontology(
+        src.id,
+        [
+            ConceptRecord(
+                "계약", "entity", "고객과 맺는 약정", "Contract", ["계약서"], evidence=ev
+            ),
+            ConceptRecord(
+                "고객",
+                "entity",
+                "계약 상대방",
+                "Customer",
+                ["거래처", "주식회사 마루솔솔루션", "C248"],
+                evidence=ev,
+            ),
+        ],
+        [],
+    )
+    client = FakeClient()
+    result = _align(settings, store, client, FakeJudge(), [])
+    assert result.status == "succeeded"
+    assert client.terms["t-customer"]["synonyms"] == ["고객", "거래처"]
+    rows = {a.concept_name: a for a in AlignmentStore(store).list(src.id)}
+    rejected = rows["고객"].applied["rejected_aliases"]
+    assert [(r["alias"], r["reason"]) for r in rejected] == [
+        ("주식회사 마루솔솔루션", "organisation name"),
+        ("C248", "identifier"),
+    ]
+    assert result.details["apply"]["rejected_aliases"] == 2
+    steps = {s.name: s for s in store.get_steps(result.run_id)}
+    detail = steps[aj.CONCEPT_STEP_PREFIX + rows["고객"].concept_id].detail
+    assert [r["alias"] for r in detail["rejected_aliases"]] == ["주식회사 마루솔솔루션", "C248"]

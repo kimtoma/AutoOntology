@@ -249,15 +249,17 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 3. **매칭.** 매칭 대상 문서 개념(entity, metric, attribute)마다 임베딩 코사인으로 상위 5개 용어를
    찾습니다(하한 `AUTOONTOLOGY_ALIGN_MIN_SIM`). LLM 판정자는 `same`, `broader`, `narrower`,
    `related`, `none` 중 하나를 신뢰도, 이유와 함께 반환하며, 판정은 fail-closed로 검증됩니다.
-4. **동일성 정책 `identity-v2.1`.** `same` 판정은 신뢰도가 max(`AUTOONTOLOGY_ALIGN_MIN_CONF`,
+4. **동일성 정책 `identity-v2.2`.** `same` 판정은 신뢰도가 max(`AUTOONTOLOGY_ALIGN_MIN_CONF`,
    0.90) 이상이고, **동시에** 개념의 별칭(이름, 영문 이름, 동의어) 하나가 통째로 용어의 신뢰할 수
    있는 별칭과 정확히 일치할 때만 수용됩니다. 별칭은 NFKC 정규화, 대소문자 접기, 공백 제거 후
    비교합니다. 3자보다 긴 라틴 문자 별칭은 영어 단수형으로도 일치합니다(`Contracts` = `Contract`,
    `categories` = `category`; `-ss`, `-us`, `-is`로 끝나는 단어는 그대로 둡니다). 서로 다른 단어인
    쌍은 금지 목록이 갈라놓습니다: goods/good, customs/custom, news/new, arms/arm, glasses/glass,
    means/mean. 금지 목록은 별칭 전체와, 여러 단어 별칭의 마지막 단어에 적용됩니다(`Trade Goods`는
-   `Trade Good`이 아닙니다). 부분 문자열은 절대 인정하지 않습니다. 그 밖의 `same`은 `related`로
-   낮추고 검토 제안으로 남깁니다.
+   `Trade Good`이 아닙니다). 부분 문자열은 절대 인정하지 않습니다. 인스턴스 같은 이름(`S037`
+   같은 레코드 ID, 숫자·날짜, `주식회사 …` 같은 회사 이름)은 근거도 동의어도 되지 않고, 그런
+   이름의 개념은 `same`이 되지 않습니다. 그 밖의 `same`은 `related`로 낮추고 검토 제안으로
+   남깁니다.
 5. **병합.** 수용된 `same`은 개념을 해당 용어로 **접습니다**. 개념의 이름들은 용어의
    동의어(`skos:altLabel`)가 되고, 문서 정의와 근거가 용어에 붙습니다. `broader` 판정은 개념을
    용어의 하위 클래스로 만들고(개념이 용어를 extends), `narrower` 판정은 용어를 개념의 하위

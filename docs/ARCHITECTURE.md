@@ -80,8 +80,9 @@ merge -> snapshot
     plus an LLM merge judge.
 - **Align.** Each documents source is aligned against the union of all structured
   sources' Terms: embedding retrieval, then an LLM judge, then the identity policy
-  (`identity-v2.1`, `unstructured/align.py`). Accepted `same` verdicts add the concept's
-  names to the Term's synonyms.
+  (`identity-v2.2`, `unstructured/align.py`). Accepted `same` verdicts add the concept's
+  names to the Term's synonyms, except instance-like names (record IDs such as `S037`,
+  numbers/dates, company names), which are logged as `rejected_aliases`.
 - **Merge** (`ontology/model.py`). `MergedOntology` combines Terms, document concepts,
   alignment axioms, relations and evidence into one model under `AUTOONTOLOGY_BASE_IRI`,
   and gives every node an origin (`structured`, `document` or `aligned`).

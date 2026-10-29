@@ -18,8 +18,12 @@
    ``customs/custom``, ``news/new``, ``arms/arm``, ``glasses/glass``, ``means/mean``) and
    only match exactly, also as the last word of a longer alias (``Trade Goods`` is not
    ``Trade Good``; :func:`last_word`). Whole aliases only, never substrings.
+   ``identity-v2.2``: instance-like names (record IDs such as ``S037``, numbers/dates,
+   company names such as ``주식회사 …``; :func:`instance_like`) are never evidence, and a
+   concept named like one is never ``same`` (reason ``instance_like``).
 4. Apply policy for accepted ``same`` verdicts: add the concept's
-   name and synonyms to the Term's synonyms (case-insensitive dedupe, never remove), and
+   name and synonyms to the Term's synonyms (case-insensitive dedupe, never remove; never
+   an instance-like name: those are recorded as ``rejected_aliases``), and
    set the description only when the Term has none or upstream's fallback.
 
 The pieces here are pure (no store, no HTTP): ``engine/align.py`` wires them.
@@ -359,7 +363,9 @@ def apply_kind_guard(
 #: ``contracts`` table vs. ``Contract``), still whole aliases only, never substrings.
 #: v2.1: the :data:`NO_SINGULAR` stop-list (a workspace aligned under v2 re-judges its
 #: stored verdicts on ``--resume``, no LLM call).
-IDENTITY_POLICY_VERSION = "identity-v2.1"
+#: v2.2: instance-like names (:func:`instance_like`: record IDs, numbers/dates, company
+#: names) are never identity evidence and a concept named like one is never ``same``.
+IDENTITY_POLICY_VERSION = "identity-v2.2"
 #: A destructive identity merge needs at least this confidence (and at least --min-conf).
 IDENTITY_MIN_CONF = 0.90
 
@@ -458,6 +464,85 @@ def trusted_term_aliases(term: TermInfo, auto_added: Sequence[str] = ()) -> set[
     return {norm_alias(n) for n in trusted_term_names(term, auto_added)}
 
 
+# --- instance-like aliases (identity-v2.2) -----------------------------------------------
+
+#: A record identifier: ``S037``, ``C248``, ``K2025-105``, ``INV-20190001``, ``P-1018``.
+_IDENTIFIER = re.compile(r"^[A-Za-z]{1,4}-?\d{2,}[A-Za-z0-9-]*$")
+#: A pure number or date: ``2025``, ``12,000``, ``2025-03-01``, ``2025.03``, ``2025년 3월``.
+_NUMBER_OR_DATE = re.compile(
+    r"^(?=.*\d)[\d\s.,/:\-]+$"
+    r"|^\d{2,4}\s*년(\s*\d{1,2}\s*월)?(\s*\d{1,2}\s*일)?$"
+    r"|^\d{1,2}\s*월(\s*\d{1,2}\s*일)?$"
+)
+_ORG_MARKER = re.compile(
+    r"주식회사|유한회사|\(주\)|\bco\.,?\s*ltd\b|\binc\.|\bcorp\.|\bllc\b|\bgmbh\b",
+    re.IGNORECASE,
+)
+_ORG_SUFFIXES = (
+    "상사",
+    "물산",
+    "건설",
+    "산업",
+    "테크",
+    "솔루션",
+    "시스템",
+    "전자",
+    "제약",
+    "식품",
+    "유통",
+    "기업",
+)
+
+
+def instance_like(alias: str) -> str:
+    """Why *alias* names an instance rather than a business concept (``""``: it does not):
+    ``identifier`` (``S037``, ``INV-20190001``), ``number/date`` or ``organisation name``
+    (a legal-form marker such as ``주식회사``/``㈜``/``Inc.``/``GmbH``, or a Korean company
+    suffix such as ``…솔루션``/``…상사``; the bare suffix word itself, ``시스템``, is not one).
+    Such an alias never becomes a Term synonym and is never identity evidence."""
+    import unicodedata
+
+    text = " ".join(unicodedata.normalize("NFKC", str(alias)).split())
+    if not text:
+        return ""
+    if _IDENTIFIER.fullmatch(text):
+        return "identifier"
+    if _NUMBER_OR_DATE.fullmatch(text):
+        return "number/date"
+    if _ORG_MARKER.search(text) or "㈜" in str(alias):
+        return "organisation name"
+    compact = text.replace(" ", "")
+    if any(compact.endswith(sfx) and len(compact) > len(sfx) for sfx in _ORG_SUFFIXES):
+        return "organisation name"
+    return ""
+
+
+def split_aliases(
+    names: Sequence[str], concept: str = ""
+) -> tuple[list[str], list[dict[str, str]]]:
+    """(*names* that may become Term synonyms, rejected ones as ``{alias, reason[, concept]}``)
+    (:func:`instance_like`)."""
+    kept: list[str] = []
+    rejected: list[dict[str, str]] = []
+    for name in names:
+        reason = instance_like(name)
+        if not reason:
+            kept.append(name)
+            continue
+        entry = {"alias": " ".join(str(name).split()), "reason": reason}
+        if concept:
+            entry["concept"] = concept
+        if entry not in rejected:
+            rejected.append(entry)
+    return kept, rejected
+
+
+def concept_rejected_aliases(concept: ConceptInfo) -> list[dict[str, str]]:
+    """The concept's names (name, English name, synonyms) an accepted ``same`` would not put
+    on its Term."""
+    return split_aliases(concept_names(concept))[1]
+
+
 def identity_bar(min_conf: float) -> float:
     return max(min_conf, IDENTITY_MIN_CONF)
 
@@ -473,17 +558,21 @@ def apply_identity_policy(
     """``same`` (an identity merge: the concept's names become the Term's synonyms) needs
     confidence >= ``max(min_conf, 0.90)`` **and** a normalized full-alias match between the
     concept (name, English name, synonyms) and the Term's trusted aliases
-    (:func:`trusted_term_aliases`); no substring matching. Otherwise the concepts stay
+    (:func:`trusted_term_aliases`); no substring matching; never for a concept whose name
+    is instance-like (:func:`instance_like`, reason ``instance_like``). Otherwise the concepts stay
     separate (``same -> related``) and the refused proposal is returned for review."""
     if verdict.relation != "same" or term is None:
         return verdict, {}
     bar = identity_bar(min_conf)
+    names, _ = split_aliases(concept_names(concept))  # an instance-like name is no evidence
     evidence = sorted(
-        identity_keys_of(concept_names(concept))
-        & identity_keys_of(trusted_term_names(term, auto_added))
+        identity_keys_of(names) & identity_keys_of(trusted_term_names(term, auto_added))
     )
     reason = ""
-    if verdict.confidence < bar:
+    kind = instance_like(concept.name)
+    if kind:
+        reason = f"instance_like ({kind}): {concept.name!r} names an instance, not a concept"
+    elif verdict.confidence < bar:
         reason = f"confidence {verdict.confidence:.2f} < {bar:.2f}"
     elif not evidence:
         reason = (
@@ -536,8 +625,9 @@ class StaleAlias:
 
 def accepted_aliases(concept: ConceptInfo) -> set[str]:
     """What an accepted ``same`` concept put (or would put) on its Term: name, English name,
-    synonyms, normalized."""
-    return {n for n in map(norm_alias, [concept.name, concept.name_en, *concept.synonyms]) if n}
+    synonyms, normalized, minus instance-like ones (never written, so never protected)."""
+    names, _ = split_aliases([concept.name, concept.name_en, *concept.synonyms])
+    return {n for n in map(norm_alias, names) if n}
 
 
 def stale_auto_aliases(
@@ -643,6 +733,8 @@ class TermPatch:
     kept_definitions: list[str] = field(default_factory=list)
     concepts: list[str] = field(default_factory=list)
     alignment_ids: list[int] = field(default_factory=list)
+    #: instance-like names left off the Term (:func:`split_aliases`): {alias, reason, concept}
+    rejected_aliases: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def synonyms_added(self) -> list[str]:
@@ -662,6 +754,7 @@ class TermPatch:
             "description": self.description,
             "kept_definitions": self.kept_definitions,
             "concepts": self.concepts,
+            "rejected_aliases": self.rejected_aliases,
         }
 
 
@@ -669,7 +762,8 @@ def plan_patches(
     matches: dict[str, list[SameMatch]], terms: dict[str, TermInfo]
 ) -> list[TermPatch]:
     """One patch per Term with accepted ``same`` matches, from the Term's *current* state
-    (so a re-run plans nothing for a Term that already has everything)."""
+    (so a re-run plans nothing for a Term that already has everything). Instance-like names
+    are not added; they are listed in ``rejected_aliases``."""
     patches = []
     for term_id in sorted(matches, key=lambda t: terms[t].name if t in terms else t):
         term = terms.get(term_id)
@@ -677,8 +771,11 @@ def plan_patches(
             continue
         group = sorted(matches[term_id], key=lambda m: (-m.confidence, m.concept_name))
         additions: list[str] = []
+        rejected: list[dict[str, str]] = []
         for m in group:
-            additions += [m.concept_name, *m.synonyms]
+            kept, dropped = split_aliases([m.concept_name, *m.synonyms], m.concept_name)
+            additions += kept
+            rejected += [r for r in dropped if r not in rejected]
         patch = TermPatch(
             term_id=term.id,
             term_name=term.name,
@@ -686,6 +783,7 @@ def plan_patches(
             synonyms_after=merge_synonyms(term.synonyms, additions, term.name),
             concepts=[m.concept_name for m in group],
             alignment_ids=[m.alignment_id for m in group if m.alignment_id is not None],
+            rejected_aliases=rejected,
         )
         definitions = [m.definition.strip() for m in group if m.definition.strip()]
         if term.is_fallback:
@@ -728,6 +826,8 @@ def apply_patch(patch: TermPatch, writer: TermWriter) -> dict[str, Any]:
         result["synonyms_added"] = list(written.get("added", patch.synonyms_added))
         result["synonyms"] = written.get("synonyms", patch.synonyms_after)
         result["embeddings_refreshed"] = written.get("embeddings_refreshed")
+    if patch.rejected_aliases:
+        result["rejected_aliases"] = list(patch.rejected_aliases)
     if patch.description is not None:
         writer.patch_description(patch.term_id, patch.description)
         result["description_set"] = True

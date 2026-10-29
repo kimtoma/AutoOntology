@@ -431,6 +431,8 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput, term_class: dict
             concept_ev.setdefault(row["concept_id"], []).append(local)
         if row.get("relation_id"):
             relation_ev.setdefault(row["relation_id"], []).append(local)
+    from autoontology.unstructured.align import split_aliases
+
     # committed verdicts only: a dry-run row (wherever it comes from) never folds, never
     # becomes an axiom and is not counted; it is only reported (dry_run_same)
     alignments = {a.concept_id: a for a in docs.alignments if not a.dry_run}
@@ -451,7 +453,8 @@ def _add_documents(model: MergedOntology, docs: DocumentsInput, term_class: dict
         term_local = term_class.get(a.term_id) if a and a.term_id else None
         if a and a.accepted and a.relation == "same" and term_local:
             cls = model.classes[term_local]
-            _add_unique(cls.alt_labels, c.name, *c.synonyms, c.name_en)
+            # never an instance-like name (record ID, company name) on the Term's class
+            _add_unique(cls.alt_labels, *split_aliases([c.name, *c.synonyms, c.name_en])[0])
             if c.definition:
                 _add_unique(cls.definitions, c.definition)
             cls.derived_from += evidence

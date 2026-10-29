@@ -507,6 +507,8 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
         if unconfirmed and path == "judged":  # after the put, which may carry the old record
             ctx.aligns.settle_legacy_descriptions({t.id: t.description for t in unconfirmed})
         counts[verdict.relation] += 1
+        # instance-like names an accepted fold would leave off the Term (identity-v2.2)
+        rejected = al.concept_rejected_aliases(concept) if verdict.relation == "same" else []
         seconds = round(time.monotonic() - started, 1)
         ctx.store.finish_step(
             ctx.run.id,
@@ -521,8 +523,15 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
                 "candidates": len(cand_terms),
                 "seconds": seconds,
                 "proposal": proposal,
+                **({"rejected_aliases": rejected} if rejected else {}),
             },
         )
+        if rejected:
+            logger.info(
+                "  %s: instance-like names never become synonyms: %s",
+                concept.name,
+                ", ".join(f"{r['alias']} ({r['reason']})" for r in rejected),
+            )
         logger.info(
             "  [%d/%d] %s (%s) -> %s %s (conf %.2f, sim %.3f)%s%s",
             index,
@@ -597,8 +606,16 @@ def _step_apply(ctx: _AlignCtx) -> dict[str, Any]:
     out: list[dict[str, Any]] = []
     changed = 0
     refresh_failed: list[str] = []
+    rejected_total = 0
     for patch in patches:
         entry = patch.to_dict()
+        if patch.rejected_aliases:
+            rejected_total += len(patch.rejected_aliases)
+            logger.info(
+                "  %s: rejected instance-like synonyms %s",
+                patch.term_name,
+                ", ".join(f"{r['alias']} ({r['reason']})" for r in patch.rejected_aliases),
+            )
         if not patch.changed:
             entry["action"] = "unchanged"
             logger.info(
@@ -683,6 +700,7 @@ def _step_apply(ctx: _AlignCtx) -> dict[str, Any]:
         "refreshed": sum(e["action"] == "refreshed" for e in out),
         "refresh_failed": refresh_failed,
         "pending_refreshes": pending,
+        "rejected_aliases": rejected_total,
     }
 
 

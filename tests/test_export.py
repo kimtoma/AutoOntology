@@ -178,6 +178,15 @@ def model():
     return merged.build("hanbit-docs", structured=[_snapshot()], documents=[_documents()])
 
 
+def test_instance_like_synonyms_never_fold_into_a_term_class():
+    docs = _documents()
+    docs.concepts[0] = _concept(
+        "c1", "계약", "entity", "고객과 맺는 약정", "Contract", ["계약서", "K2025-105", "㈜한빛"]
+    )
+    m = merged.build("hanbit-docs", structured=[_snapshot()], documents=[docs])
+    assert m.classes["term-t-c"].alt_labels == ["Contract", "계약", "계약서"]
+
+
 def test_merged_model_structure(model):
     c = model.counts()
     # 2 Terms + 계약금액, 신규 계약, 계약상태, 담당자 (계약 is folded into Contracts)
