@@ -90,7 +90,7 @@ export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function Re
         <ul className="grid gap-1.5" aria-label={t("review.evidence")}>
           {evidence.map((e, i) => (
             <li key={i} className="rounded-md border-l-2 border-primary/40 bg-muted/40 px-3 py-1.5">
-              <blockquote className="text-sm">“{e.quote}”</blockquote>
+              <blockquote className="text-sm">“{e.quote.replace(/^["“”]+|["“”]+$/g, "")}”</blockquote>
               <p className="text-xs break-all text-muted-foreground">
                 {e.document || e.path}{e.page ? ` · ${t("review.page.n", { n: e.page })}` : ""}
               </p>
