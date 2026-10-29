@@ -353,6 +353,8 @@ class _Build:
                 client=self.client,
                 backends=self.align_backends,
                 writer=self.writer,
+                # align-report.md of this documents source (replaced by every align pass)
+                report_dir=self.settings.home / "reports" / "align" / src.name,
                 min_sim=self.run.params.get("min_sim"),
                 min_conf=self.run.params.get("min_conf"),
                 top_k=int(self.run.params.get("top_k") or align_job.al.DEFAULT_TOP_K),

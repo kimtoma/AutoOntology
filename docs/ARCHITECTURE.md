@@ -82,8 +82,10 @@ merge -> snapshot
   sources' Terms: embedding retrieval, then an LLM judge, then the identity policy
   (`identity-v2.2`, `unstructured/align.py`). Accepted `same` verdicts add the concept's
   names to the Term's synonyms, except instance-like names (record IDs such as `S037`,
-  numbers/dates, company names with a legal-form marker), which are recorded as
-  `rejected_aliases` (align report, concept detail). An accepted `same` stored before
+  numbers/dates, company names with a legal-form marker) and names equal to a column
+  attribute of any built table (`계약ID`, `부서명`; reason `column_name`), which are recorded
+  as `rejected_aliases` (concept detail, and `align-report.md`, which every align pass
+  writes to `<home>/reports/align/<documents source>/`). An accepted `same` stored before
   v2.2 whose concept name is instance-like still folds on an export-only run (only its
   aliases are filtered) until the next align or `build --resume` re-applies the policy.
 - **Merge** (`ontology/model.py`). `MergedOntology` combines Terms, document concepts,

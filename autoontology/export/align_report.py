@@ -99,8 +99,8 @@ def render(
             "",
             f"## Rejected synonyms ({len(rejected)})",
             "",
-            "Instance-like names (record IDs, numbers/dates, company names) of accepted "
-            "concepts. They are never written to the Term.",
+            "Instance-like names (record IDs, numbers/dates, company names) and column "
+            "names of accepted concepts. They are never written to the Term.",
             "",
             "| Term | Name | Reason | Concept |",
             "|---|---|---|---|",

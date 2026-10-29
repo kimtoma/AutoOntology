@@ -1807,3 +1807,32 @@ def test_lowering_the_byte_cap_rejects_a_cached_oversized_document(env):
     ]
     assert _doc_text(env, "큰문서.md") is None  # no longer part of the ontology input
     assert _actions(second) == {"계약.md": "unchanged", "청구.md": "unchanged"}
+
+
+def test_build_writes_the_align_report_with_rejected_column_names(env):
+    """The build's align step writes ``align-report.md`` under
+    ``<home>/reports/align/<documents source>/``; a concept synonym equal to a column name
+    (계약ID: the contracts table's key column) is listed as rejected, never written."""
+
+    class LLM(FakeLLM):
+        def structured(self, system, human, schema):
+            out = super().structured(system, human, schema)
+            for concept in getattr(out, "concepts", []):
+                if concept.name == "계약":
+                    concept.synonyms = [*concept.synonyms, "계약ID", "계약서"]
+            return out
+
+    add_structured(env)
+    add_documents(env)
+    result = run(env, llm=LLM())
+    assert result.status == "succeeded", result.problems
+    synonyms = env["client"].terms["t-contract"]["synonyms"]
+    assert "계약" in synonyms and "계약서" in synonyms
+    assert "계약ID" not in synonyms
+    report = env["settings"].home / "reports" / "align" / "hanbit-docs" / "align-report.md"
+    assert report.is_file()
+    text = report.read_text(encoding="utf-8")
+    assert "## Rejected synonyms (1)" in text
+    assert "| Contract | 계약ID | column_name | 계약 |" in text
+    step = next(s for s in env["store"].get_steps(result.run_id) if s.name == "align:hanbit-docs")
+    assert step.detail["report"] == str(report)
