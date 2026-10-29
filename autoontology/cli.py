@@ -19,6 +19,11 @@ source_app = typer.Typer(help="Register structured and document sources.", no_ar
 app.add_typer(source_app, name="source")
 tools_app = typer.Typer(help="Optional tooling (kordoc, web UI build).", no_args_is_help=True)
 app.add_typer(tools_app, name="tools")
+review_app = typer.Typer(
+    help="The review inbox: list items, record decisions (then `autoontology apply`).",
+    no_args_is_help=True,
+)
+app.add_typer(review_app, name="review")
 
 
 def _settings():
@@ -575,6 +580,134 @@ def apply_decisions() -> None:
         f"apply {result.run_id}: revision {result.revision} in "
         f"{time.monotonic() - started:.1f}s; {applied} decision(s) applied"
     )
+
+
+def _inbox(settings, store, *, with_sources: bool = True):
+    from autoontology.ontology.model import MergedOntology
+    from autoontology.web.freshness import freshness
+    from autoontology.web.review import Inbox
+
+    snaps = store.list_snapshots(2)
+    models = [MergedOntology.from_dict(store.get_snapshot(s.revision).model) for s in snaps]
+    rows = freshness(store, settings) if with_sources else []
+    return Inbox(store, models[0] if models else None, models[1] if len(models) > 1 else None, rows)
+
+
+@review_app.command("list")
+def review_list(
+    category: str = typer.Option(
+        None, "--category", help="proposals | axioms | unaligned | aliases | stale_sources"
+    ),
+    status: str = typer.Option("pending", "--status", help="pending | decided | all"),
+    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+    as_json: bool = typer.Option(False, "--json", help="Print the items as JSON."),
+) -> None:
+    """List the review items (pending ones by default)."""
+    import json
+
+    from autoontology.web.review import CATEGORIES, STATUSES
+
+    if category and category not in CATEGORIES:
+        _fail(f"--category must be one of {', '.join(CATEGORIES)}", code=2)
+    if status not in STATUSES:
+        _fail(f"--status must be one of {', '.join(STATUSES)}", code=2)
+    settings = _settings()
+    listing = _inbox(settings, _store(settings)).listing(
+        category=category, status=status, page=1, size=limit
+    )
+    if as_json:
+        typer.echo(json.dumps(listing, ensure_ascii=False, indent=2, default=str))
+        return
+    counts = listing["counts"]
+    typer.echo(
+        " ".join(f"{c}={counts[c]}" for c in CATEGORIES)
+        + f"  unapplied decisions={listing['unapplied']}"
+    )
+    rows = []
+    for item in listing["items"]:
+        concept = (item.get("concept") or {}).get("name") or item.get("alias") or "-"
+        term = (item.get("term") or {}).get("name") or "-"
+        conf = item.get("confidence")
+        decision = item.get("decision")
+        rows.append(
+            (
+                item["id"],
+                concept,
+                item.get("relation") or "-",
+                term,
+                f"{conf:.2f}" if isinstance(conf, (int, float)) else "-",
+                decision["decision"] if decision else item["suggested_action"] + "?",
+            )
+        )
+    if rows:
+        typer.echo(_table(("ID", "CONCEPT", "RELATION", "TERM", "CONF", "DECISION"), rows))
+    else:
+        typer.echo("nothing to review")
+
+
+def _decide(item_id: str, decision: str, relation, term, note: str) -> None:
+    from autoontology.web.review import ReviewError
+
+    settings = _settings()
+    store = _store(settings)
+    inbox = _inbox(settings, store, with_sources=False)
+    try:
+        d = inbox.decide(
+            item_id,
+            decision=decision,
+            relation=relation,
+            term_id=term,
+            note=(note or "").strip(),
+            decided_by="local",
+        )
+    except ReviewError as exc:
+        _fail(f"{exc.error}: {exc.detail}")
+    rel = f" ({d.relation})" if d.relation else ""
+    typer.echo(f"{item_id}: {d.decision}{rel}; run `uv run autoontology apply` to snapshot it")
+
+
+@review_app.command("accept")
+def review_accept(
+    item_id: str = typer.Argument(..., help="al:<id>, ax:<id> or alias:<term id>|<alias>"),
+    relation: str = typer.Option(None, "--relation", help="same | related | narrower | broader"),
+    term: str = typer.Option(None, "--term", help="Term id (default: the item's)."),
+    note: str = typer.Option("", "--note"),
+) -> None:
+    """Accept an alignment proposal, an axiom or a rejected alias."""
+    _decide(item_id, "accept", relation, term, note)
+
+
+@review_app.command("reject")
+def review_reject(
+    item_id: str = typer.Argument(..., help="al:<id>, ax:<id> or alias:<term id>|<alias>"),
+    note: str = typer.Option("", "--note"),
+) -> None:
+    """Reject an alignment (the concept stays unaligned) or keep an alias off its Term."""
+    _decide(item_id, "reject", None, None, note)
+
+
+@review_app.command("acknowledge")
+def review_acknowledge(
+    item_id: str = typer.Argument(..., help="un:<concept id>"),
+    note: str = typer.Option("", "--note"),
+) -> None:
+    """Acknowledge an unaligned concept (it stays its own class)."""
+    _decide(item_id, "acknowledge", None, None, note)
+
+
+@review_app.command("undo")
+def review_undo(item_id: str = typer.Argument(...)) -> None:
+    """Remove the decision on an item (the align judge decides again)."""
+    from autoontology.web.review import ReviewError
+
+    settings = _settings()
+    try:
+        removed = _inbox(settings, _store(settings), with_sources=False).undo(item_id)
+    except ReviewError as exc:
+        _fail(f"{exc.error}: {exc.detail}")
+    if not removed:
+        _fail(f"no decision on {item_id}")
+    typer.echo(f"{item_id}: decision removed; run `uv run autoontology apply` to snapshot it")
 
 
 @app.command()

@@ -87,6 +87,8 @@ EXPORT_DIR_RE = re.compile(r"^r\d{4,}$")
 CONCEPT_ID_RE = re.compile(r"^(term|concept)-[a-z0-9_-]{1,100}$")
 ORIGINS: tuple[str, ...] = ("structured", "document", "aligned")
 STATUS_CACHE_S = 15.0
+#: ``GET /api/sources/freshness`` cache (``?refresh=1`` bypasses it)
+FRESHNESS_CACHE_S = 60.0
 
 
 class ApiError(Exception):
@@ -123,6 +125,16 @@ class SourceIn(BaseModel):
     kind: Literal["files", "database", "documents"]
     locator: str = Field(min_length=1, max_length=4096)
     recursive: bool = False
+
+
+class DecisionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: Literal["accept", "reject", "acknowledge"]
+    #: alignment accept: same | related | narrower | broader (default: the item's)
+    relation: Literal["same", "related", "narrower", "broader"] | None = None
+    #: alignment accept: the item's Term (default) or one of its candidates
+    term_id: str | None = Field(default=None, max_length=200)
+    note: str = Field(default="", max_length=2000)
 
 
 class RunIn(BaseModel):
@@ -223,6 +235,9 @@ class Api:
         self.providers: Any = None
         #: One provider test (``POST /api/providers/test``) at a time.
         self._provider_test_lock = threading.Lock()
+        #: ``GET /api/sources/freshness``: (monotonic time, rows), one computation at a time
+        self._freshness: tuple[float, list[dict[str, Any]]] | None = None
+        self._freshness_lock = threading.Lock()
 
     @property
     def store(self) -> Store:
@@ -384,6 +399,42 @@ class Api:
                     self._concepts.pop(next(iter(self._concepts)))
                 self._concepts[key] = index
         return head, model, index
+
+    def freshness(self, refresh: bool = False) -> tuple[list[dict[str, Any]], float]:
+        """``(rows, age in seconds)`` of the per-source freshness, computed at most every
+        :data:`FRESHNESS_CACHE_S` (``refresh``: now)."""
+        from autoontology.web.freshness import freshness
+
+        with self._freshness_lock:
+            cached = self._freshness
+            if cached and not refresh and time.monotonic() - cached[0] < FRESHNESS_CACHE_S:
+                return cached[1], time.monotonic() - cached[0]
+            rows = freshness(self.store, self.settings)
+            self._freshness = (time.monotonic(), rows)
+            return rows, 0.0
+
+    def inbox(self, *, with_freshness: bool = True) -> Any:
+        """The review :class:`~autoontology.web.review.Inbox` over the latest snapshot."""
+        from autoontology.web.review import Inbox
+
+        model = previous = None
+        head = self.store.latest_snapshot(with_model=False)
+        if head is not None:
+            _, model = self.snapshot(head.revision)
+            older = [s.revision for s in self.store.list_snapshots(2) if s.revision < head.revision]
+            if older:
+                _, previous = self.snapshot(older[0])
+        rows = self.freshness()[0] if with_freshness else []
+        return Inbox(self.store, model, previous, rows)
+
+    def decided_by(self, request: Request) -> str:
+        """The tailnet login of a request that came through a configured tailnet hostname
+        (``tailscale serve`` sets it), else ``local``."""
+        host = host_name(request.headers.get("host") or "")
+        login = (request.headers.get(TAILSCALE_LOGIN_HEADER) or "").strip().lower()
+        if host in self.settings.tailscale_hosts and login:
+            return login[:200]
+        return "local"
 
     def latest_model(self) -> tuple[int, Any]:
         """``(revision, model)`` of the latest snapshot (the playground's scope)."""
@@ -690,6 +741,117 @@ def build_router(api: Api) -> APIRouter:
     async def run_events(run_id: str, request: Request) -> EventSourceResponse:
         _run(run_id)
         return EventSourceResponse(_events(api, run_id, request), ping=15)
+
+    # review inbox, revisions, freshness (living ontology operations) --------------------
+
+    def _review(call: Any) -> Any:
+        from autoontology.web.review import ReviewError
+
+        try:
+            return call()
+        except ReviewError as exc:
+            raise ApiError(exc.status, exc.error, exc.detail) from exc
+
+    @router.get("/review")
+    def review(
+        category: str | None = Query(None, max_length=40),
+        status: str = Query("pending", max_length=20),
+        page: int = Query(1, ge=1),
+        size: int = Query(20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        from autoontology.web.review import CATEGORIES, STATUSES
+
+        if category and category not in CATEGORIES:
+            raise ApiError(
+                400, "invalid_category", f"category must be one of {', '.join(CATEGORIES)}"
+            )
+        if status not in STATUSES:
+            raise ApiError(400, "invalid_status", f"status must be one of {', '.join(STATUSES)}")
+        inbox = api.inbox()
+        head = api.store.latest_snapshot(with_model=False)
+        return {
+            "revision": head.revision if head else None,
+            **inbox.listing(category=category, status=status, page=page, size=size),
+        }
+
+    @router.get("/review/pending-count")
+    def review_pending_count() -> dict[str, Any]:
+        listing = api.inbox().listing(category=None, status="pending", page=1, size=1)
+        return {
+            "pending": listing["counts"]["total"],
+            "counts": listing["counts"],
+            "unapplied": listing["unapplied"],
+        }
+
+    @router.post("/review/{item_id:path}/decision")
+    def review_decide(item_id: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
+        try:
+            req = DecisionIn.model_validate(body)
+        except ValidationError as exc:
+            raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
+        inbox = api.inbox(with_freshness=item_id.startswith("src:"))
+        decision = _review(
+            lambda: inbox.decide(
+                item_id,
+                decision=req.decision,
+                relation=req.relation,
+                term_id=req.term_id,
+                note=req.note.strip(),
+                decided_by=api.decided_by(request),
+            )
+        )
+        item = {**inbox.items[item_id], "decision": decision.to_dict()}
+        return {"item": item, "decision": decision.to_dict()}
+
+    @router.delete("/review/{item_id:path}/decision")
+    def review_undo(item_id: str) -> dict[str, Any]:
+        inbox = api.inbox(with_freshness=False)
+        if not _review(lambda: inbox.undo(item_id)):
+            raise ApiError(404, "no_decision", f"no decision on {item_id[:80]!r}")
+        return {"removed": item_id}
+
+    @router.get("/ontology/revisions")
+    def ontology_revisions(limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
+        from autoontology.web.revisions import revision_list
+
+        return {"revisions": revision_list(api.store, limit)}
+
+    @router.get("/ontology/diff")
+    def ontology_diff(
+        from_: int | None = Query(None, alias="from", ge=1),
+        to: int | None = Query(None, ge=1),
+    ) -> dict[str, Any]:
+        from autoontology.web.revisions import diff
+
+        new_head, new = api.snapshot(to)
+        if from_ is None:
+            older = [
+                s.revision for s in api.store.list_snapshots(500) if s.revision < new_head.revision
+            ]
+            from_ = older[0] if older else None
+        old_head = old = None
+        if from_ is not None:
+            old_head, old = api.snapshot(from_)
+        return {
+            "from": from_,
+            "to": new_head.revision,
+            **diff(
+                old,
+                new,
+                old_sources=old_head.sources if old_head else [],
+                new_sources=new_head.sources,
+            ),
+        }
+
+    @router.get("/sources/freshness")
+    def sources_freshness(refresh: bool = False) -> dict[str, Any]:
+        rows, age = api.freshness(refresh)
+        return {
+            "sources": rows,
+            "stale": sum(bool(r.get("stale")) for r in rows),
+            "age_s": round(age, 1),
+            "cache_s": FRESHNESS_CACHE_S,
+        }
 
     # ontology (the latest snapshot) -----------------------------------------------------
 
