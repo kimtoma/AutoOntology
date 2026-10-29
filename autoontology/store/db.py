@@ -383,6 +383,16 @@ MIGRATIONS: list[tuple[int, str]] = [
         ON CONFLICT (term_id) DO NOTHING
         """,
     ),
+    (
+        5,
+        # Schema v5: documents.reader_fingerprint = the reader version and the settings its
+        # output depends on (table limits, byte cap, OCR readiness, vision model) when the
+        # document was read. A cached read is reused only while it matches; '' on older
+        # rows (read again once, kept as is when the chunks come out the same).
+        """
+        ALTER TABLE documents ADD COLUMN reader_fingerprint TEXT NOT NULL DEFAULT ''
+        """,
+    ),
 ]
 
 #: Seconds a lease stays valid without a heartbeat (the holder refreshes it every third).

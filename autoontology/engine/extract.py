@@ -126,6 +126,48 @@ def _ocr_ready(ctx: _ExtractCtx, engine: Any) -> bool:
     return bool(status["ready"]) or not status.get("known", True)
 
 
+#: Bump when a reader produces other output for the same bytes and settings: every cached
+#: read is then redone once (documents whose chunks come out the same keep them).
+READER_VERSION = "1"
+
+
+def reader_settings(settings: Settings) -> str:
+    """The reader settings every documents source depends on (for the ``--resume`` input
+    fingerprint; OCR readiness and the vision model are added there per input)."""
+    return (
+        f"reader={READER_VERSION};rows={settings.doc_table_max_rows};"
+        f"cols={readers.DOC_TABLE_MAX_COLS};bytes={settings.doc_max_bytes}"
+    )
+
+
+def reader_fingerprint(settings: Settings, path: Path, ocr: Callable[[], str]) -> str:
+    """What reading *path* depends on besides its bytes: the reader version, the byte cap
+    (native readers), the table limits (CSV/TSV), OCR readiness (PDFs and images: *ocr*
+    is called only for those) and the vision model (images)."""
+    ext = path.suffix.lower()
+    parts = [f"reader={READER_VERSION}"]
+    if ext in readers.NATIVE_EXTENSIONS:
+        parts.append(f"bytes={settings.doc_max_bytes}")
+    if ext in (".csv", ".tsv"):
+        parts.append(f"rows={settings.doc_table_max_rows};cols={readers.DOC_TABLE_MAX_COLS}")
+    if ext == ".pdf" or ext in formats.IMAGE_SUFFIXES:
+        parts.append(f"ocr={ocr()}")
+    if ext in formats.IMAGE_SUFFIXES and settings.vision_model:
+        parts.append(f"vision={settings.vision_model}")
+    return ";".join(parts)
+
+
+def _same_read(docs: DocumentStore, existing: Any, doc: readers.Document, chunks: list) -> bool:
+    """A re-read that gave exactly the stored document and chunks."""
+    if (existing.title, existing.engine, existing.pages) != (doc.title, doc.engine, doc.pages):
+        return False
+    stored = [
+        (c.idx, c.section_path, c.page, c.kind, c.text)
+        for c in docs.chunks_for_document(existing.id)
+    ]
+    return stored == [(c.index, c.section_path, c.page, c.kind, c.text) for c in chunks]
+
+
 def _needs_caption(ctx: _ExtractCtx, path: Path, stored_engine: str) -> bool:
     """An unchanged image read without the current vision model's caption."""
     from autoontology.unstructured import vision
@@ -209,6 +251,15 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             logger.info("  %s: content changed; its old content was removed", display_path(d.path))
     replaced_paths = {d.path for d in stale}
     engine = None
+    ocr_label: list[str] = []
+
+    def ocr() -> str:  # once per read step, only when a PDF or an image needs it
+        if not ocr_label:
+            from autoontology.engine.build import ocr_state
+
+            ocr_label.append(ocr_state(ctx.settings.home))
+        return ocr_label[0]
+
     for path in files:
         shown = str(path.resolve())  # displayed relative to the cwd
         sha = current[shown]
@@ -219,7 +270,9 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             )
             continue
         existing = stored.get(sha)
-        if existing is not None and not _needs_caption(ctx, path, existing.engine):
+        fingerprint = reader_fingerprint(ctx.settings, path, ocr)
+
+        def keep_cached(note: str = "") -> None:
             documents.append(
                 {
                     "path": shown,
@@ -228,8 +281,16 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
                     "chunks": len(ctx.docs.chunks_for_document(existing.id)),
                 }
             )
-            logger.info("  %s: unchanged", display_path(shown))
+            logger.info("  %s: unchanged%s", display_path(shown), note)
+
+        if (
+            existing is not None
+            and existing.reader_fingerprint == fingerprint
+            and not _needs_caption(ctx, path, existing.engine)
+        ):
+            keep_cached()
             continue
+        # a cached read made with other reader settings (or OCR readiness) is read again
         is_image = path.suffix.lower() in formats.IMAGE_SUFFIXES
         try:
             if path.suffix.lower() in readers.kordoc.EXTENSIONS and engine is None:
@@ -238,6 +299,9 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
                 if ocr_ready is None:
                     ocr_ready = _ocr_ready(ctx, engine)
                 if not ocr_ready:
+                    if existing is not None:  # the earlier OCR read stays until it can redo it
+                        keep_cached(" (OCR models not ready: the earlier read is kept)")
+                        continue
                     needs_ocr.append(
                         {
                             "path": shown,
@@ -264,6 +328,15 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
         except (readers.ReadError, readers.kordoc.KordocError) as exc:
             code = getattr(exc, "code", "READ_FAILED")
             message = getattr(exc, "message", None) or str(exc)
+            if existing is not None and code == "FILE_TOO_LARGE":
+                # over the (lowered) byte cap: the cached read no longer counts either
+                ctx.docs.delete_documents([existing.id])
+                existing = None
+            if existing is not None and (
+                code in KORDOC_UNAVAILABLE_CODES or _ocr_missing(path, code, message)
+            ):
+                keep_cached(" (could not read it again: the earlier read is kept)")
+                continue
             if code in KORDOC_UNAVAILABLE_CODES:
                 needs_kordoc.append({"path": shown, "code": code, "error": message})
                 continue
@@ -291,7 +364,12 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             )
             logger.warning("  %s: FAILED (%s) %s", display_path(shown), code, message)
             continue
+        if existing is not None and _same_read(ctx.docs, existing, doc, chunks):
+            ctx.docs.set_reader_fingerprint(existing.id, fingerprint)
+            keep_cached()
+            continue
         row, replaced = ctx.docs.replace_document(
+            reader_fingerprint=fingerprint,
             source_id=ctx.source.id,
             path=shown,
             title=doc.title,

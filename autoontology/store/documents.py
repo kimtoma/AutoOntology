@@ -33,6 +33,8 @@ class DocumentRow:
     pages: int | None
     created_at: str
     updated_at: str
+    #: what the document was read with (:func:`autoontology.engine.extract.reader_fingerprint`)
+    reader_fingerprint: str = ""
 
 
 @dataclass(frozen=True)
@@ -191,6 +193,15 @@ class DocumentStore:
                 (path, now_iso(), doc_id, path),
             )
 
+    def set_reader_fingerprint(self, doc_id: str, fingerprint: str) -> None:
+        """A re-read gave the same chunks: keep them (and their extraction), record what
+        they were read with."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE documents SET reader_fingerprint = ?, updated_at = ? WHERE id = ?",
+                (fingerprint, now_iso(), doc_id),
+            )
+
     def replace_document(
         self,
         *,
@@ -203,6 +214,7 @@ class DocumentStore:
         size: int,
         pages: int | None,
         chunks: Sequence[ChunkLike],
+        reader_fingerprint: str = "",
     ) -> tuple[DocumentRow, int]:
         """Insert a document with its chunks, deleting any earlier document at *path*
         (and, through ON DELETE CASCADE, its chunks and their evidence). Returns the new
@@ -216,8 +228,22 @@ class DocumentStore:
             ).rowcount
             conn.execute(
                 "INSERT INTO documents (id, source_id, path, title, mime, engine, sha256, "
-                "bytes, pages, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (doc_id, source_id, path, title, mime, engine, sha256, size, pages, ts, ts),
+                "bytes, pages, created_at, updated_at, reader_fingerprint) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    doc_id,
+                    source_id,
+                    path,
+                    title,
+                    mime,
+                    engine,
+                    sha256,
+                    size,
+                    pages,
+                    ts,
+                    ts,
+                    reader_fingerprint,
+                ),
             )
             conn.executemany(
                 "INSERT INTO chunks (id, doc_id, idx, section_path, page, kind, text, tokens) "

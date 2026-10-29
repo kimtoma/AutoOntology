@@ -153,12 +153,16 @@ def ocr_state(home: Path) -> str:
     return last if last in ("ready", "missing") else "unknown"
 
 
-def input_fingerprint(source: Source, home: Path | None = None, vision_model: str = "") -> str:
+def input_fingerprint(
+    source: Source, home: Path | None = None, vision_model: str = "", *, reader: str = ""
+) -> str:
     """A hash of what the per-source steps of *source* read: the locator plus, for files
     and documents sources, every input file's path and content hash -- and, for documents
     sources holding kordoc formats, whether kordoc is available (*home*), and for those
     holding images the OCR readiness and the vision model that captions them; for database
     sources, the live schema (:func:`autoontology.structured.pipeline.schema_fingerprint`).
+    *reader* (:func:`autoontology.engine.extract.reader_settings`) adds the reader settings
+    of documents sources (table limits, byte cap), so changing one re-reads on ``--resume``.
     "" when the inputs cannot be listed or the database cannot be reached -- never equal
     to a recorded fingerprint, so the steps run again."""
     digest = hashlib.sha256(f"{source.kind}\0{source.locator}\0".encode())
@@ -168,6 +172,8 @@ def input_fingerprint(source: Source, home: Path | None = None, vision_model: st
         elif source.kind == "documents":
             target, recursive = extract_job.documents_target(source)
             files = extract_job.readers.discover_documents(target, recursive=recursive)
+            if reader:
+                digest.update(f"reader\0{reader}\0".encode())
             if home is not None and any(
                 p.suffix.lower() in extract_job.readers.kordoc.EXTENSIONS for p in files
             ):
@@ -245,7 +251,10 @@ class _Build:
         def run() -> dict[str, Any]:
             if source.name not in self._fingerprints:
                 self._fingerprints[source.name] = input_fingerprint(
-                    self.fresh(source), self.settings.home, self.settings.vision_model
+                    self.fresh(source),
+                    self.settings.home,
+                    self.settings.vision_model,
+                    reader=extract_job.reader_settings(self.settings),
                 )
             detail = fn()
             detail[INPUTS_KEY] = self._fingerprints[source.name]
@@ -485,7 +494,12 @@ def _resume_reuse(
         kept = {n for n in already if n.startswith(f"{group}:{source.name}:")}
         if not kept:
             continue
-        current = input_fingerprint(source, settings.home, settings.vision_model)
+        current = input_fingerprint(
+            source,
+            settings.home,
+            settings.vision_model,
+            reader=extract_job.reader_settings(settings),
+        )
         if not current or any(rows[n].detail.get(INPUTS_KEY) != current for n in kept):
             logger.info("--resume: inputs of %s changed since run %s: rebuilt", source.name, run.id)
             already -= kept

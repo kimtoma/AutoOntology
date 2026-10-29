@@ -653,8 +653,9 @@ def test_v4_migration_keeps_a_baseline_confirmed_under_v3(env, tmp_path):
                     (_json.dumps(applied), row_id),
                 )
         conn.execute("DROP TABLE term_legacy_descriptions")
-        conn.execute("DELETE FROM schema_version WHERE version = 4")
-    env["store"] = Store(path)  # migrates v3 -> v4
+        conn.execute("DELETE FROM schema_version WHERE version >= 4")
+        conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
+    env["store"] = Store(path)  # migrates v3 -> v4 (and on)
     with sqlite3.connect(path) as conn:
         legacy = conn.execute(
             "SELECT term_id, baseline, confirmed_at FROM term_legacy_descriptions"
@@ -1716,3 +1717,93 @@ def test_build_keeps_instance_like_names_off_the_terms(env, monkeypatch):
     assert "주식회사 마루솔솔루션" not in customer.alt_labels
     assert {m.concept_name for m in model.merges} >= {"거래처"}
     assert "주식회사 마루솔솔루션" not in {m.concept_name for m in model.merges}
+
+
+# --- codex round 1, finding 4: cached documents follow the reader settings --------------
+
+
+def _doc_text(env, name: str) -> str | None:
+    from autoontology.store.documents import DocumentStore
+
+    docs = DocumentStore(env["store"])
+    source = env["store"].get_source("hanbit-docs")
+    found = [d for d in docs.list_documents(source.id) if Path(d.path).name == name]
+    if not found:
+        return None
+    return "\n".join(c.text for c in docs.chunks_for_document(found[0].id))
+
+
+def _actions(result) -> dict[str, str]:
+    read = result.details["documents:hanbit-docs:read"]
+    return {Path(d["path"]).name: d["action"] for d in read["documents"]}
+
+
+def test_raising_the_table_row_limit_rereads_a_csv_document(env):
+    import dataclasses
+
+    rows = "".join(f"고객{i},{i}\n" for i in range(1, 8))
+    (env["docs"] / "고객.csv").write_text("이름,번호\n" + rows, encoding="utf-8")
+    add_documents(env)
+    env["settings"] = dataclasses.replace(env["settings"], doc_table_max_rows=1)
+    assert run(env).status == "succeeded"
+    assert "고객1" in _doc_text(env, "고객.csv") and "고객7" not in _doc_text(env, "고객.csv")
+    env["settings"] = dataclasses.replace(env["settings"], doc_table_max_rows=20)
+    second = run(env)
+    assert second.status == "succeeded", second.problems
+    assert _actions(second) == {
+        "고객.csv": "replaced",
+        "계약.md": "unchanged",
+        "청구.md": "unchanged",
+    }
+    assert "고객7" in _doc_text(env, "고객.csv")
+    # --resume sees the changed setting too: the read runs again
+    env["settings"] = dataclasses.replace(env["settings"], doc_table_max_rows=3)
+    resumed = run(env, resume=True)
+    assert "documents:hanbit-docs:read" in resumed.details
+    assert "고객4" not in _doc_text(env, "고객.csv") and "고객3" in _doc_text(env, "고객.csv")
+
+
+def test_ocr_models_arriving_reread_a_mixed_text_and_scanned_pdf(env, monkeypatch, tmp_path):
+    """A PDF with a text page and a scanned page reads without OCR (text only, no
+    `needs_ocr`): once the models are ready the cached read is stale and redone."""
+    from autoontology.unstructured import kordoc
+
+    state = _fake_kordoc(monkeypatch, tmp_path, ready=False)
+
+    def parse(engine, path, **kw):
+        state["parsed"].append(Path(path).name)
+        text = kordoc.KordocChunk("c1", "text", (), "본문 페이지 계약 조건", 1)
+        if not state["ready"]:
+            return [text, kordoc.KordocChunk("c2", "text", (), "![image](image_001.png)", 2)]
+        return [text, kordoc.KordocChunk("c2", "text", (), "스캔 페이지 수납 확인서", 2)]
+
+    monkeypatch.setattr(kordoc, "parse_chunks", parse)
+    (env["docs"] / "mixed.pdf").write_bytes(b"%PDF mixed")
+    add_documents(env)
+    first = run(env)
+    assert first.status == "succeeded", first.problems
+    assert _actions(first)["mixed.pdf"] == "new"
+    assert "스캔 페이지" not in _doc_text(env, "mixed.pdf")
+    state["ready"] = True
+    after = run(env, resume=True)
+    assert _actions(after)["mixed.pdf"] == "replaced"
+    assert "스캔 페이지 수납 확인서" in _doc_text(env, "mixed.pdf")
+    # nothing changed since: the read is kept
+    assert _actions(run(env))["mixed.pdf"] == "unchanged"
+
+
+def test_lowering_the_byte_cap_rejects_a_cached_oversized_document(env):
+    import dataclasses
+
+    (env["docs"] / "큰문서.md").write_text("# 큰 문서\n\n" + "계약 조건 " * 200, "utf-8")
+    add_documents(env)
+    assert run(env).status == "succeeded"
+    assert _doc_text(env, "큰문서.md")
+    env["settings"] = dataclasses.replace(env["settings"], doc_max_bytes=500)
+    second = run(env)
+    read = second.details["documents:hanbit-docs:read"]
+    assert [(Path(f["path"]).name, f["code"]) for f in read["failed"]] == [
+        ("큰문서.md", "FILE_TOO_LARGE")
+    ]
+    assert _doc_text(env, "큰문서.md") is None  # no longer part of the ontology input
+    assert _actions(second) == {"계약.md": "unchanged", "청구.md": "unchanged"}

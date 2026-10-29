@@ -166,7 +166,7 @@ def test_schema_has_every_table_and_no_playground_tests(store):
     assert not {"playground_tests", "playground_test_runs", "ontology_revision"} & tables
     assert {"dry_run", "proposal_json"} <= cols and "incomplete" in msg_cols
     assert "scope" in conv_cols and "source_id" not in conv_cols  # v2: workspace-scoped
-    assert store.schema_version() == 4
+    assert store.schema_version() == MIGRATIONS[-1][0]
 
 
 def _hold_write_lock(path):
@@ -221,7 +221,8 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.execute("DROP TABLE term_legacy_descriptions")
-    conn.execute("DELETE FROM schema_version WHERE version = 4")
+    conn.execute("DELETE FROM schema_version WHERE version >= 4")  # back to a v3 store
+    conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
     for i, applied in enumerate(
         [
             {"term_id": "t-old", "description_set": True},
@@ -244,7 +245,7 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
     conn.commit()
     conn.close()
     store = Store(path)
-    assert store.schema_version() == 4 and store.migrate() == 4  # idempotent
+    assert store.schema_version() == MIGRATIONS[-1][0] and store.migrate() == MIGRATIONS[-1][0]
 
     def legacy():
         with sqlite3.connect(path) as conn:

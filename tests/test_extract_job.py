@@ -712,3 +712,28 @@ def test_same_settings_resume_checks_the_ontology_identity(env, identity):
         assert resumed.details["consolidate"]["action"] == "consolidated"
         assert resumed.details["consolidate"]["ontology_sha"] == docs.ontology_identity(src.id)
         assert "계약" in {c.name for c in docs.list_concepts(src.id)}
+
+
+def test_a_read_cached_before_reader_fingerprints_is_kept_when_it_reads_the_same(env):
+    """Rows from before schema v5 have no reader fingerprint: they are read again once,
+    and when the chunks come out the same they (and their extraction) are kept."""
+    settings, store, docs_dir = env
+    first = _run(settings, store, docs_dir, _backends(settings))
+    assert first.status == "succeeded"
+    src = store.get_source("hanbit_docs")
+    docs = DocumentStore(store)
+    chunk_ids = [c.id for c in docs.chunks_for_source(src.id)]
+    assert all(d.reader_fingerprint for d in docs.list_documents(src.id))
+    with store._conn() as conn:
+        conn.execute("UPDATE documents SET reader_fingerprint = ''")
+    again = _run(
+        settings,
+        store,
+        docs_dir,
+        ex.Backends(settings, llm=Boom(), judge_llm=Boom(), embedder=Boom().structured),
+    )
+    assert again.status == "succeeded"
+    assert {d["action"] for d in again.details["read"]["documents"]} == {"unchanged"}
+    assert again.details["extract"]["attempted"] == 0
+    assert [c.id for c in docs.chunks_for_source(src.id)] == chunk_ids
+    assert all(d.reader_fingerprint for d in docs.list_documents(src.id))
