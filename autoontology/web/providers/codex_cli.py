@@ -152,16 +152,29 @@ def sync_codex_home(home: Path) -> bool:
 
 
 def _sync_back(target: Path) -> bool:
+    """Write the private ``auth.json`` back and relink it, under the user's sync lock.
+
+    codex itself takes no lock, so a concurrent call (one private home, several in flight)
+    may rename a newer token over the private file at any moment. Content and metadata
+    therefore come from one open descriptor, and the private file is taken away with an
+    atomic rename whose result is checked against that descriptor's identity: a file that
+    arrived in between is put back (never deleted) and delivered by the next sync."""
     link = target / "auth.json"
+    parked = target / PARKED_NAME
+    if parked.exists() or parked.is_symlink():
+        _restore_parked(parked, link)
     if link.is_symlink() or not link.exists():
         return True
     source = user_codex_home() / "auth.json"
     try:
-        seen = _identity(link)
         with _locked(source.parent / USER_SYNC_LOCK):
-            newer = not source.exists() or link.stat().st_mtime > source.stat().st_mtime
-            if newer:
-                _replace_with_copy(link, source)
+            read = _read_private(link)
+            if read is None:
+                return False  # rewritten while it was read: the next sync takes it
+            data, seen = read
+            if _private_is_newer(data, seen, source):
+                _write_back(data, seen, source)
+            return _relink(link, parked, source, _identity_of(seen))
     except OSError as exc:
         # keep the private copy: it holds the only valid refresh token (no content logged)
         logger.warning(
@@ -172,38 +185,88 @@ def _sync_back(target: Path) -> bool:
             exc.errno,
         )
         return False
-    # a concurrent codex call (one private home, several in flight) may have renamed a
-    # newer token over the file since it was read: never delete that one, sync it next time
+
+
+#: Name the private file is renamed to while it is checked and removed (see _relink).
+PARKED_NAME = ".auth.json.parked"
+
+
+def _read_private(link: Path) -> tuple[bytes, os.stat_result] | None:
+    """The private file's bytes and the ``fstat`` of the same descriptor; None when the
+    file changed while it was read (an in-place write)."""
+    fd = os.open(link, os.O_RDONLY | os.O_NOFOLLOW)
     try:
-        changed = _identity(link) != seen
-    except OSError:
-        changed = True
-    if changed:
+        before = os.fstat(fd)
+        chunks = []
+        while chunk := os.read(fd, 1 << 16):
+            chunks.append(chunk)
+        after = os.fstat(fd)
+    finally:
+        os.close(fd)
+    if _identity_of(before) != _identity_of(after):
+        return None
+    return b"".join(chunks), before
+
+
+def _private_is_newer(data: bytes, seen: os.stat_result, source: Path) -> bool:
+    """Write back unless the user's file is strictly newer (their codex refreshed later)
+    or already holds these bytes. Equal mtimes with other bytes are written back: a
+    token renamed in on the same tick as the last one written must not be dropped."""
+    try:
+        user = os.stat(source)
+    except FileNotFoundError:
+        return True
+    if seen.st_mtime_ns != user.st_mtime_ns:
+        return seen.st_mtime_ns > user.st_mtime_ns
+    return source.read_bytes() != data
+
+
+def _relink(link: Path, parked: Path, source: Path, seen: tuple[int, int, int, int]) -> bool:
+    """Replace the private file by the symlink, unless it is no longer the one read."""
+    os.rename(link, parked)  # atomic: from here on codex can only create a new file
+    if _identity(parked) != seen:
+        # a newer token arrived after the read: put it back (no clobbering), sync it next
+        _restore_parked(parked, link)
         return False
-    # written back, or older than the user's own (their codex refreshed later): relink
-    link.unlink(missing_ok=True)
-    link.symlink_to(source)
+    parked.unlink()
+    try:
+        link.symlink_to(source)
+    except FileExistsError:
+        return False  # codex renamed a newer token in meanwhile: synced next time
     return True
+
+
+def _restore_parked(parked: Path, link: Path) -> None:
+    """Move a parked private file back; if codex already wrote an even newer one, that
+    one wins and the parked (older) token is dropped."""
+    try:
+        os.link(parked, link, follow_symlinks=False)
+    except FileExistsError:
+        if link.is_symlink():  # an interrupted relink: the parked file is the private copy
+            link.unlink()
+            os.link(parked, link, follow_symlinks=False)
+    parked.unlink()
+
+
+def _identity_of(st: os.stat_result) -> tuple[int, int, int, int]:
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
 
 
 def _identity(path: Path) -> tuple[int, int, int, int]:
     """What changes when codex renames a new file over *path* (no symlink following)."""
-    st = path.lstat()
-    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
+    return _identity_of(path.lstat())
 
 
-def _replace_with_copy(src: Path, dest: Path) -> None:
-    """Atomically replace *dest* by a copy of *src*: a 0600 temp file from creation
-    (``mkstemp``) next to *dest*, fsynced, with *src*'s mtime, then ``os.replace``."""
-    data = src.read_bytes()
-    stat = src.stat()
+def _write_back(data: bytes, seen: os.stat_result, dest: Path) -> None:
+    """Atomically replace *dest* by *data*: a 0600 temp file from creation (``mkstemp``)
+    next to *dest*, fsynced, with the private file's mtime, then ``os.replace``."""
     fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".auth.json.")
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        os.utime(tmp, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        os.utime(tmp, ns=(seen.st_atime_ns, seen.st_mtime_ns))
         os.replace(tmp, dest)
     except BaseException:
         with contextlib.suppress(OSError):

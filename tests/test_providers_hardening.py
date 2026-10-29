@@ -550,19 +550,118 @@ def test_a_token_renamed_in_during_the_sync_is_not_deleted(codex_user, isolated_
     home = isolated_env / "h"
     link = _refresh(home, json.dumps({"tokens": {"refresh_token": "first"}}))
     newer = json.dumps({"tokens": {"refresh_token": "second"}})
-    real = codex_cli._replace_with_copy
+    real = codex_cli._write_back
 
-    def copy_then_codex_refreshes_again(src, dest):
-        real(src, dest)
+    def copy_then_codex_refreshes_again(data, seen, dest):
+        real(data, seen, dest)
         # a second codex call renames an even newer token over the private file
         tmp = link.with_name("auth.json.codex-new")
         tmp.write_text(newer)
         os.replace(tmp, link)
 
-    monkeypatch.setattr(codex_cli, "_replace_with_copy", copy_then_codex_refreshes_again)
+    monkeypatch.setattr(codex_cli, "_write_back", copy_then_codex_refreshes_again)
     assert codex_cli.sync_codex_home(home) is False
     assert not link.is_symlink() and link.read_text() == newer  # not unlinked
-    monkeypatch.setattr(codex_cli, "_replace_with_copy", real)
+    monkeypatch.setattr(codex_cli, "_write_back", real)
     os.utime(link, (time.time() + 20,) * 2)
     assert codex_cli.sync_codex_home(home) is True  # the next sync delivers it
     assert (codex_user / "auth.json").read_text() == newer and link.is_symlink()
+
+
+# --- codex round 1, finding 1: the newest token is never lost ---------------------------
+
+
+def _same_shape_token(link: Path, content: str, mtime_ns: int) -> None:
+    """codex renaming token *content* over the private file, with the given mtime."""
+    tmp = link.with_name("auth.json.codex-new")
+    tmp.write_text(content)
+    os.utime(tmp, ns=(mtime_ns, mtime_ns))
+    os.replace(tmp, link)
+
+
+def _sync_until_linked(home: Path, link: Path, rounds: int = 4) -> None:
+    for _ in range(rounds):
+        if codex_cli.sync_codex_home(home) and link.is_symlink():
+            return
+
+
+def test_a_token_renamed_in_while_the_old_one_is_read_is_delivered(
+    codex_user, isolated_env, monkeypatch
+):
+    """Token A is read, then codex renames B (same size and mtime) over the private file
+    before its metadata is taken: B must reach the user's auth.json, never be deleted."""
+    home = isolated_env / "h"
+    first = json.dumps({"tokens": {"refresh_token": "AAAAAA"}})
+    second = json.dumps({"tokens": {"refresh_token": "BBBBBB"}})
+    link = _refresh(home, first)
+    a_ino = link.stat().st_ino
+    a_mtime = link.stat().st_mtime_ns
+    fired = []
+
+    def interleave() -> None:
+        if not fired:
+            fired.append(True)
+            _same_shape_token(link, second, a_mtime)
+
+    real_read, real_read_bytes = os.read, Path.read_bytes
+
+    def read(fd, n):
+        data = real_read(fd, n)
+        if os.fstat(fd).st_ino == a_ino and not data:  # A fully read
+            interleave()
+        return data
+
+    def read_bytes(self):
+        data = real_read_bytes(self)
+        if self == link:
+            interleave()
+        return data
+
+    monkeypatch.setattr(os, "read", read)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    codex_cli.sync_codex_home(home)
+    monkeypatch.undo()
+    monkeypatch.setenv("CODEX_HOME", str(codex_user))
+    assert fired
+    _sync_until_linked(home, link)
+    assert (codex_user / "auth.json").read_text() == second
+    assert link.is_symlink()
+    assert _mode(codex_user / "auth.json") == 0o600
+
+
+def test_a_token_renamed_in_right_before_the_relink_is_delivered(
+    codex_user, isolated_env, monkeypatch
+):
+    """B arrives after the identity check, just before the private file is removed."""
+    home = isolated_env / "h"
+    first = json.dumps({"tokens": {"refresh_token": "AAAAAA"}})
+    second = json.dumps({"tokens": {"refresh_token": "BBBBBB"}})
+    link = _refresh(home, first)
+    a_mtime = link.stat().st_mtime_ns
+    fired = []
+
+    def interleave(path) -> None:
+        if not fired and Path(path) == link and not link.is_symlink():
+            fired.append(True)
+            _same_shape_token(link, second, a_mtime)
+
+    real_unlink, real_rename = Path.unlink, os.rename
+
+    def unlink(self, missing_ok=False):
+        interleave(self)
+        return real_unlink(self, missing_ok=missing_ok)
+
+    def rename(src, dst, *a, **kw):
+        interleave(src)
+        return real_rename(src, dst, *a, **kw)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(os, "rename", rename)
+    codex_cli.sync_codex_home(home)
+    monkeypatch.undo()
+    monkeypatch.setenv("CODEX_HOME", str(codex_user))
+    assert fired
+    _sync_until_linked(home, link)
+    assert (codex_user / "auth.json").read_text() == second
+    assert link.is_symlink()
+    assert not [p.name for p in link.parent.iterdir() if p.name.startswith(".auth.json")]
