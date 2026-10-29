@@ -486,3 +486,10 @@ def test_spawned_helper_is_detached_and_logs_to_restart_log(isolated_env, monkey
     assert "helper here" in restart_mod.log_tail(settings.logs_dir, rid)
     log = (settings.logs_dir / "restart.log").read_text()
     assert json.dumps(rid)[1:-1] in log
+
+
+def test_put_makes_an_open_env_file_private(envfile, stubs):
+    envfile.chmod(0o644)
+    res = _client().put(API, json={"chat_provider": "codex"})
+    assert res.status_code == 200, res.text
+    assert stat.S_IMODE(envfile.stat().st_mode) == 0o600
