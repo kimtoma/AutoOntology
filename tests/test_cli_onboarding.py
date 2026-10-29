@@ -217,6 +217,24 @@ def test_init_interactive_default_is_the_current_provider(fakes):
     assert "AUTOONTOLOGY_CHAT_PROVIDER=claude\n" in env.read_text(encoding="utf-8")
 
 
+def test_init_does_not_mistake_the_old_env_value_for_a_shell_override(fakes, monkeypatch):
+    """The value this process loaded from .env (now rewritten) is not a shell variable."""
+    from autoontology import config
+
+    _calls, state, env = fakes
+    env.parent.mkdir(parents=True)
+    env.write_text("AUTOONTOLOGY_CHAT_PROVIDER=ollama\n", encoding="utf-8")
+    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env))
+    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "ollama")  # as load_env copied it
+    monkeypatch.setitem(config._DOTENV_LOADED, "AUTOONTOLOGY_CHAT_PROVIDER", "ollama")
+    state["det"] = {"claude": True}
+    res = runner.invoke(app, ["init", "--env", str(env)], input="claude\n\nn\n")
+    assert res.exit_code == 0, res.output
+    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude\n" in env.read_text(encoding="utf-8")
+    assert "AUTOONTOLOGY_CHAT_PROVIDER: ollama -> claude" in res.output
+    assert "your shell sets" not in res.output
+
+
 def test_init_without_env_selection_takes_the_recommendation(fakes):
     _calls, state, env = fakes
     state["det"] = {"codex": True}
