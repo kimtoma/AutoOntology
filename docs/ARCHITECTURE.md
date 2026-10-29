@@ -10,11 +10,11 @@ overview is in the [README](../README.md).
 |---|---|---|---|
 | AutoOntology service | `autoontology/web` (FastAPI, uvicorn) | `127.0.0.1:7800` (`AUTOONTOLOGY_PORT`) | REST API under `/api`, SSE run logs, the playground, the web UI under `/ui`, the `/v1` model router, and the `/ingest` shims the engine calls back. |
 | Engine backend | `vendor/auto-ontology` (NVIDIA Auto Ontology, git submodule) | `127.0.0.1:3101` (`BACKEND_PORT`) | Connections, catalog, semantic model, exports and NL-to-SQL, over HTTP `/api/...`. |
-| CLI | `autoontology/cli.py` (typer) | none | Runs `build` and `export` in-process; `up`/`down` supervise the two servers. |
+| CLI | `autoontology/cli.py` (typer), `autoontology/onboarding.py` | none | Runs `build` and `export` in-process; `up`/`down` supervise the two servers; `init`, `demo` and `provider` drive the onboarding. |
 | Postgres 17 + pgvector | `docker compose` or your own server | `5432` | The engine's catalog and vectors (`autoontology`) and one database per file source (`autoontology_src_<name>`). |
 | SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: sources, runs, documents, concepts, alignments, snapshots, playground. |
 | Model providers | Ollama (`:11434`), an OpenAI-compatible URL, or the user's `claude` / `codex` CLI (chat only) | none | Chat (extraction, judges, playground, engine compile) and embeddings. |
-| kordoc (optional) | `<AUTOONTOLOGY_HOME>/kordoc` (npm, Node 20 or newer) | none | Reads HWP/HWPX/PDF/DOCX/PPTX into Markdown, run as a subprocess with an argv list. |
+| kordoc (optional) | `<AUTOONTOLOGY_HOME>/kordoc` (npm, Node 20 or newer); OCR models in kordoc's model cache | none | Reads HWP/HWPX/PDF/DOCX/PPTX/XLS/XLSX into Markdown and OCRs images and scanned PDFs (PP-OCRv5 korean), run offline as a subprocess with an argv list. |
 
 `autoontology up` starts both servers as background processes (`engine/supervisor.py`),
 binds them to 127.0.0.1, writes PID files under `<home>/run/` and logs under
@@ -56,18 +56,23 @@ merge -> snapshot
 ```
 
 - **Structured path.**
-  - `load` reads the files with DuckDB (CSV/TSV, Parquet, JSON, XLSX, SQLite), normalizes
-    column names and writes the tables into `autoontology_src_<name>`. A database URL
+  - `load` reads the files with DuckDB (CSV/TSV, Parquet, JSON, XLSX, SQLite) or
+    python-calamine (XLS), normalizes column names and writes the tables into
+    `autoontology_src_<name>`. A database URL
     source skips this step and is registered as is.
   - `register` creates or updates the engine connection.
   - `ingest` runs the engine's catalog ingest and embeds the catalog.
   - `compile` runs the engine's semantic compilation, which produces Terms, column
     attributes and semantic foreign keys.
 - **Documents path.**
-  - `read` uses the native readers (`.md`, `.txt`, `.html`) or kordoc and produces
-    section-aware chunks (tiktoken). Without kordoc, documents that need it are skipped
-    with a run warning, not counted as failed; a source whose documents all need kordoc
-    reads 0 documents and `consolidate` stores an empty ontology for it.
+  - `read` uses the native readers (`.md`, `.txt`, `.html`, `.csv`/`.tsv` as one table
+    section, Word 97-2003 `.doc` through olefile) or kordoc (with `--ocr` for PDFs; images
+    are OCR'd) and produces section-aware chunks (tiktoken). With
+    `AUTOONTOLOGY_VISION_MODEL` set, an image first gets an "Image description" section
+    from an Ollama vision model (`unstructured/vision.py`). Without kordoc, documents that
+    need it are skipped with a run warning, not counted as failed; without the OCR models,
+    images and image-only PDFs are skipped the same way. A source whose documents are all
+    skipped reads 0 documents and `consolidate` stores an empty ontology for it.
   - `extract` makes one LLM call per chunk and returns concepts, relations and verbatim
     evidence. The output is schema-validated, and evidence quotes are checked against the
     chunk text.
@@ -85,7 +90,8 @@ merge -> snapshot
 `--source N` records the other sources' steps as skipped, but align, merge and snapshot
 still cover everything. `--resume` reuses the latest build run. Each per-source step
 stores an `inputs_sha` (the locator plus the path and sha256 of every input file; for a
-documents source also kordoc's availability; for a database-URL source its live schema
+documents source also kordoc's availability and, with images or PDFs, the OCR models'
+readiness and the vision model; for a database-URL source its live schema
 from `information_schema` on Postgres), and `--resume` keeps a step only when that hash is
 unchanged. A database source that cannot be read, or is MySQL or Snowflake (no bundled
 driver), never matches, so its steps always run again. align, merge and snapshot also run
@@ -166,6 +172,47 @@ The engine keeps its own state in Postgres: the catalog and semantic model table
 `autoontology` database, the `vdb.*` vector tables, and each file source's data in
 `autoontology_src_<name>`. `config.validate_pg_database_name` refuses every other
 database name.
+
+## Formats (`autoontology/formats.py`)
+
+One module holds every supported extension: `STRUCTURED_SUFFIXES` (and the per-loader sets
+the structured loaders import), `DOCUMENT_NATIVE_SUFFIXES`, `DOCUMENT_KORDOC_SUFFIXES` and
+`IMAGE_SUFFIXES`. `describe()` groups them by source kind with their engine (`native`,
+`kordoc`, `kordoc-ocr`) and a note; `GET /api/status` returns it as `formats`, and the web
+UI derives its upload `accept` lists, hints and file-by-file preview from it (a copy in
+`ui/src/test/fixtures/formats.json` is checked against it by `tests/test_ui_formats_fixture.py`).
+
+## Onboarding (`autoontology/onboarding.py`)
+
+The logic behind `init`, `demo`, `provider` and the samples API, without prompts (the CLI
+in `cli.py` adds the questions and the output):
+
+- `detect_environment` builds a `Detection` from the same checks `doctor` runs
+  (`check_postgres`, `check_node`, `check_kordoc`, `check_ocr_models`) plus
+  `provider_info` for each chat provider, which asks the provider's own `status()` (the
+  check `/api/status` uses). `recommend_provider` picks claude, then codex (when logged in),
+  else ollama; `init` keeps a provider already chosen in `.env` or the shell.
+- `EnvFile` edits `.env` in place: it replaces an active line or the first commented
+  `# KEY=` line, else appends under one `# --- Set by autoontology init ---` block; every
+  other byte stays. Writes are atomic, keep the file mode (0600 for a new file) and copy
+  the previous file to `.env.bak-<timestamp>` first. `describe_change` masks
+  KEY/PASSWORD/TOKEN/SECRET values.
+- Sample sets: `SAMPLE_SETS` (`quickstart`, `hanbit`) is the allowlist under
+  `settings.samples_dir` (`AUTOONTOLOGY_SAMPLES_DIR`). A set's `structured/`, `documents/`
+  and `images/` folders become the sources `<prefix>`, `<prefix>-docs` and
+  `<prefix>-images`. `register_sample_set` keeps a source already registered with the same
+  kind and path; a source of the same name holding other data is a `SampleConflict` unless
+  `replace=True` (then it is removed, with its database for a files source, and added
+  again). `DEMO_DURATIONS` holds the expected first-build time per set and chat provider,
+  marked measured or estimated.
+- `demo` is `up` + a prune of upstream connections whose database is gone (live ones that
+  no source here owns are only reported) + `register_sample_set` + `build` on the set's
+  sources + `export` + `ui`.
+
+The web API serves the same functions: `GET /api/samples` (`list_sample_sets`, with each
+source's formats and the durations) and `POST /api/samples/load {set, replace?}`, which
+holds the workspace through `RunManager.claim_idle` while it registers (409 `run_active`
+while a run is active, 409 `sample_conflict` with the conflicting locators).
 
 ## Provider routing
 
@@ -249,11 +296,12 @@ language list, and add it to the parity tests (`tests/test_i18n.py`,
 
 | To add | Start here |
 |---|---|
-| A structured file format | `structured/loaders.py` (`SUPPORTED_SUFFIXES`, the DuckDB readers). |
+| A structured file format | `formats.py` (the suffix sets), then `structured/loaders.py` (the DuckDB and calamine readers). |
 | A database type | `structured/pipeline.py` (`connection_for`, `_URL_SCHEMES`); the engine must have a connector for it. |
-| A document format | `unstructured/readers.py` (`NATIVE_EXTENSIONS`) or `unstructured/kordoc.py`. |
+| A document format | `formats.py` (the suffix sets), then `unstructured/readers.py` (native readers) or `unstructured/kordoc.py`. |
 | Extraction behaviour | `unstructured/prompts.py`, `unstructured/schemas.py`, `unstructured/extractor.py`. |
 | Alignment policy | `unstructured/align.py` (`apply_identity_policy`, `IDENTITY_POLICY_VERSION`). Bump the version so stored verdicts are re-judged. |
 | An export format | A module in `export/`, a step in `engine/export_job.py` (`EXPORT_STEPS`, `EXPORT_ENTRIES`, `FORMAT_ENTRIES`), and `web/runs.py` `TOP_STEPS`. |
 | A model provider | `web/providers/` (a `PassthroughProvider`, or a `CLIProvider` for a CLI login), `router.py` (`Registry`, `split_model`), `config.py` (`CHAT_PROVIDERS`, `expand_model_profile`). |
-| A UI page | `ui/src/pages`, then `uv run autoontology tools build-ui` and commit `autoontology/web/static/dist`. |
+| A sample set | A folder `samples/<set>/{structured,documents,images}` and its name in `onboarding.SAMPLE_SETS` / `SAMPLE_PREFIXES` (and `DEMO_DURATIONS`). |
+| A UI page | `ui/src/pages` (strings in `ui/src/i18n/en.ts` and `ko.ts`), then `uv run autoontology tools build-ui` and commit `autoontology/web/static/dist`. |
