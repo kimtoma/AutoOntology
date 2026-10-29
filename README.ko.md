@@ -89,9 +89,9 @@ uv run autoontology ui
 
 | 제공자 | `AUTOONTOLOGY_CHAT_PROVIDER` | 비용 | 데이터가 컴퓨터 밖으로 나감 | quickstart / hanbit 첫 빌드 | 준비 방법 |
 |---|---|---|---|---|---|
-| Ollama, 로컬 `qwen3:8b` | `ollama`(기본값) | 무료 | 아니요 | [[QS_OLLAMA_BUILD]] / 3~4시간(추정) | Ollama 설치, 모델은 `init`이 받음 |
-| Claude 구독(Claude Code CLI) | `claude` | 요금제 사용 한도 안에서 | 예, Anthropic으로 | [[QS_CLAUDE_BUILD]] / [[HB_CLAUDE_BUILD]] | `claude auth login` |
-| ChatGPT 구독(Codex CLI) | `codex` | 요금제 사용 한도 안에서 | 예, OpenAI로 | [[QS_CODEX_BUILD]] / [[HB_CODEX_BUILD]] | `codex login` |
+| Ollama, 로컬 `qwen3:8b` | `ollama`(기본값) | 무료 | 아니요 | 46분 / 4~5시간(추정) | Ollama 설치, 모델은 `init`이 받음 |
+| Claude 구독(Claude Code CLI) | `claude` | 요금제 사용 한도 안에서 | 예, Anthropic으로 | 8분 / 37분 | `claude auth login` |
+| ChatGPT 구독(Codex CLI) | `codex` | 요금제 사용 한도 안에서 | 예, OpenAI로 | ~15분(추정) / ~75분(추정) | `codex login` |
 | 임의의 OpenAI 호환 API | `openai` | 사용량만큼 | 예, 그 엔드포인트로 | 엔드포인트에 따라 다름 | `.env`에 기본 URL, 모델, 키 |
 
 시간은 2026-10-29에 Apple M4 Mac mini(16 GB)에서 새로 클론한 상태로 측정했습니다
@@ -177,10 +177,25 @@ AUTOONTOLOGY_EMBED_PROVIDER=ollama
 
 | 세트 | 소스 | 표 | 문서 | 이미지 | 문서 청크 | 첫 빌드: ollama | claude | codex |
 |---|---|---|---|---|---|---|---|---|
-| `quickstart` | `quick`, `quick-docs` | CSV 파일 3개, 155행 | 5개(MD, PDF, DOCX, HWP) | - | 28개(kordoc 없이 9개) | [[QS_OLLAMA_BUILD]] | [[QS_CLAUDE_BUILD]] | [[QS_CODEX_BUILD]] |
-| `hanbit` | `hanbit`, `hanbit-docs`, `hanbit-images` | 7가지 형식의 파일 9개, 표 11개, 5,603행 | 12가지 형식의 15개 | 6개(OCR) | 132개 + 이미지에서 9개(kordoc 없이 42개) | 3~4시간(추정) | [[HB_CLAUDE_BUILD]] | [[HB_CODEX_BUILD]] |
+| `quickstart` | `quick`, `quick-docs` | CSV 파일 3개, 155행 | 5개(MD, PDF, DOCX, HWP) | - | 28개(kordoc 없이 9개) | 46분 | 8분 | ~15분(추정) |
+| `hanbit` | `hanbit`, `hanbit-docs`, `hanbit-images` | 7가지 형식의 파일 9개, 표 11개, 5,603행 | 12가지 형식의 15개 | 6개(OCR) | 132개 + 이미지에서 9개(kordoc 없이 42개) | 4~5시간(추정) | 37분 | ~75분(추정) |
 
-[[SAMPLE_TIMES_NOTE]]
+시간을 잰 방법(Apple M4 Mac mini, 16 GB, 2026-10-29, 첫 빌드, kordoc과 OCR 설치, 임베딩은
+Ollama의 `bge-m3`):
+
+- **quickstart / ollama, 46분**: 새로 클론해 `init --yes --provider ollama --docs`(7초) 후
+  `demo --set quickstart`: 빌드 2,732초(컴파일 126초, 문서 추출 2,322초(청크 28개, 개당 약
+  83초), 통합 41초, 매칭 237초), demo 합계 2,748초. 대부분의 시간 동안 리허설 B가 같은 컴퓨터에서
+  동시에 돌았습니다.
+- **quickstart / claude, 8분**: 빌드 461초(demo 479초), 작업 사본에서 측정.
+- **hanbit / claude, 37분**: 새로 클론해 `init --yes --provider claude --docs`(9초) 후
+  `demo --set hanbit`: 컴파일 97초(표 11개), 추출 734초(청크 132개) + 39초(이미지), 통합 360초 +
+  36초, 매칭 645초 + 228초. 2,164초 지점에서 구독의 5시간 사용량 한도에 걸려 이미지 개념 58개 중
+  마지막 3개의 판정이 멈췄고, `demo --resume`이 34초 만에 마무리했습니다. 모델 호출은 모두 약
+  520번입니다.
+- **codex**: `provider test`가 6.8초에 응답했고, quickstart 표 3개 컴파일에 53초(claude 25초,
+  ollama 126초), 판정 하나에 약 7초(claude 약 3.5초)가 걸렸습니다. codex 행은 이를 바탕으로 한
+  추정입니다.
 
 ## 지원 형식
 

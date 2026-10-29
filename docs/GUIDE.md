@@ -29,8 +29,8 @@ customers, contracts and invoices plus five policy documents), asks a language m
 read all of it, and shows you one combined map of the business: which concepts exist
 (customer, contract, invoice, payment status, approver ...), how they relate, which table
 columns hold them, and the exact sentences in the documents that define them. With a Claude
-or ChatGPT subscription the whole sample takes about [[QS_CLAUDE_MIN]] minutes; with a
-local model on a laptop it takes [[QS_OLLAMA_MIN]] minutes (section 4 has the numbers). The
+or ChatGPT subscription the whole sample takes about 8 minutes; with a
+local model on a laptop it takes about 45 minutes (section 4 has the numbers). The
 **Get started** page of the web UI shows the five steps and ticks them off as they finish:
 
 ![Get started page after the demo](screenshots/home.png)
@@ -82,8 +82,8 @@ later with one command, so pick the one you can start with today.
 | | Ollama (local) | Claude subscription | ChatGPT subscription (Codex) | OpenAI-compatible API |
 |---|---|---|---|---|
 | Cost | Free | Included in your Claude Pro/Max plan; counts against its usage limits | Included in your ChatGPT plan; counts against its usage limits | Pay per use on your API account |
-| Quickstart sample (first build) | [[QS_OLLAMA_BUILD]] | [[QS_CLAUDE_BUILD]] | [[QS_CODEX_BUILD]] | depends on the endpoint |
-| Full hanbit sample (first build) | 3-4 h (estimate) | [[HB_CLAUDE_BUILD]] | [[HB_CODEX_BUILD]] | depends on the endpoint |
+| Quickstart sample (first build) | 46 min | 8 min | ~15 min (estimate) | depends on the endpoint |
+| Full hanbit sample (first build) | 4-5 h (estimate) | 37 min | ~75 min (estimate) | depends on the endpoint |
 | Does your data leave the machine? | **No** | Yes: prompts go to Anthropic under your account's terms | Yes: prompts go to OpenAI under your account's terms | Yes: to the endpoint you configure |
 | Setup effort | Install Ollama; `init` pulls `qwen3:8b` (5 GB) | `claude auth login` once | `codex login` once | Base URL, model name, and a key you type into `.env` yourself |
 | Quality notes | Small model: slower, finds fewer concepts and merges conservatively | Best results in our tests; fast | Good results; each call is slower than Claude | Depends on the model |
@@ -158,8 +158,8 @@ models: openai/qwen3:8b answers 'pong' with completion_tokens 2 (thinking off); 
 ```
 
 The last line is `next: uv run autoontology demo` (with `--set hanbit` for a
-subscription, because the larger sample is quick there). `init` took [[INIT_A]] (Ollama)
-and [[INIT_B]] (Claude) in our rehearsals once the tools were installed; installing
+subscription, because the larger sample is quick there). `init` took 7 s (Ollama)
+and 9 s (Claude) in our rehearsals once the tools were installed; installing
 kordoc the first time adds about a minute. `init --yes` answers every question with the
 suggested value, and `--provider claude` (or `ollama`, `codex`, `openai`) picks the
 provider without asking.
@@ -422,12 +422,12 @@ logged by AutoOntology.
 
 **What does it cost?** The software is free (MIT licence). Ollama is free. A subscription
 build counts against your plan's usage limits; the full hanbit sample makes
-[[HB_CLAUDE_CALLS]] model calls. An API is billed by your provider.
+about 520 model calls. An API is billed by your provider.
 
 **How long does it take?** See the table in section 4. Rule of thumb: count the document
 chunks (`demo` and the Build page show them); a local `qwen3:8b` takes one to two minutes
-per chunk, a subscription a few seconds. Tables add little: compiling the 11 hanbit tables
-took [[HB_COMPILE]] with Claude.
+per chunk, a subscription about 6 seconds (three calls run at once). Tables add little: compiling the 11 hanbit tables
+took 97 seconds with Claude.
 
 **Can I work offline?** Yes, with Ollama for chat and embeddings, after `init` has
 downloaded the models and kordoc once. kordoc always runs offline; only

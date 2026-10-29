@@ -327,5 +327,12 @@ def test_duration_comment_and_hanbit_counts_are_current():
 
     src = inspect.getsource(onboarding)
     assert "Measured on" not in src
-    assert "measured values are filled by the maintainers' rehearsal" in src
+    assert "Measured values come from fresh-clone rehearsals" in src
     assert "141 chunks" in onboarding.DEMO_DURATIONS["hanbit"]["ollama"][0]
+    measured = {
+        (set_name, provider)
+        for set_name, rows in onboarding.DEMO_DURATIONS.items()
+        for provider, (_, is_measured) in rows.items()
+        if is_measured
+    }
+    assert measured == {("quickstart", "ollama"), ("quickstart", "claude"), ("hanbit", "claude")}

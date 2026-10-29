@@ -93,9 +93,9 @@ and judges the matches. Embeddings (finding similar concepts) always use Ollama'
 
 | Provider | `AUTOONTOLOGY_CHAT_PROVIDER` | Cost | Data leaves the machine | quickstart / hanbit first build | Set up with |
 |---|---|---|---|---|---|
-| Ollama, local `qwen3:8b` | `ollama` (default) | free | no | [[QS_OLLAMA_BUILD]] / 3-4 h (estimate) | Ollama installed; `init` pulls the models |
-| Claude subscription (Claude Code CLI) | `claude` | your plan's usage limits | yes, to Anthropic | [[QS_CLAUDE_BUILD]] / [[HB_CLAUDE_BUILD]] | `claude auth login` |
-| ChatGPT subscription (Codex CLI) | `codex` | your plan's usage limits | yes, to OpenAI | [[QS_CODEX_BUILD]] / [[HB_CODEX_BUILD]] | `codex login` |
+| Ollama, local `qwen3:8b` | `ollama` (default) | free | no | 46 min / 4-5 h (estimate) | Ollama installed; `init` pulls the models |
+| Claude subscription (Claude Code CLI) | `claude` | your plan's usage limits | yes, to Anthropic | 8 min / 37 min | `claude auth login` |
+| ChatGPT subscription (Codex CLI) | `codex` | your plan's usage limits | yes, to OpenAI | ~15 min (estimate) / ~75 min (estimate) | `codex login` |
 | Any OpenAI-compatible API | `openai` | per use | yes, to that endpoint | depends on the endpoint | base URL, model, key in `.env` |
 
 Times were measured on an Apple M4 Mac mini (16 GB) from a fresh clone on 2026-10-29
@@ -184,10 +184,25 @@ UI) registers a set; [samples/README.en.md](samples/README.en.md)
 
 | Set | Sources | Tables | Documents | Images | Document chunks | First build: ollama | claude | codex |
 |---|---|---|---|---|---|---|---|---|
-| `quickstart` | `quick`, `quick-docs` | 3 CSV files, 155 rows | 5 (MD, PDF, DOCX, HWP) | - | 28 (9 without kordoc) | [[QS_OLLAMA_BUILD]] | [[QS_CLAUDE_BUILD]] | [[QS_CODEX_BUILD]] |
-| `hanbit` | `hanbit`, `hanbit-docs`, `hanbit-images` | 9 files in 7 formats, 11 tables, 5,603 rows | 15 in 12 formats | 6 (OCR) | 132 + 9 from images (42 without kordoc) | 3-4 h (estimate) | [[HB_CLAUDE_BUILD]] | [[HB_CODEX_BUILD]] |
+| `quickstart` | `quick`, `quick-docs` | 3 CSV files, 155 rows | 5 (MD, PDF, DOCX, HWP) | - | 28 (9 without kordoc) | 46 min | 8 min | ~15 min (estimate) |
+| `hanbit` | `hanbit`, `hanbit-docs`, `hanbit-images` | 9 files in 7 formats, 11 tables, 5,603 rows | 15 in 12 formats | 6 (OCR) | 132 + 9 from images (42 without kordoc) | 4-5 h (estimate) | 37 min | ~75 min (estimate) |
 
-[[SAMPLE_TIMES_NOTE]]
+How the times were measured (Apple M4 Mac mini, 16 GB, 2026-10-29, first build, kordoc and
+OCR installed, `bge-m3` embeddings through Ollama):
+
+- **quickstart / ollama, 46 min**: a fresh clone, `init --yes --provider ollama --docs`
+  (7 s), then `demo --set quickstart`: build 2,732 s, of which compile 126 s, document
+  extraction 2,322 s (28 chunks, about 83 s each), consolidation 41 s and alignment 237 s;
+  demo total 2,748 s. Rehearsal B ran on the same machine at the same time for most of it.
+- **quickstart / claude, 8 min**: build 461 s (demo 479 s), measured in a working copy.
+- **hanbit / claude, 37 min**: a fresh clone, `init --yes --provider claude --docs` (9 s),
+  then `demo --set hanbit`: compile 97 s (11 tables), extraction 734 s (132 chunks) + 39 s
+  (images), consolidation 360 s + 36 s, alignment 645 s + 228 s; 2,164 s until the
+  subscription's 5-hour usage limit stopped the last 3 of 58 image-concept judgments, then
+  `demo --resume` finished them in 34 s. About 520 model calls in total.
+- **codex**: `provider test` answered in 6.8 s; compiling the 3 quickstart tables took 53 s
+  (claude 25 s, ollama 126 s) and its judgments about 7 s each (claude about 3.5 s). The
+  codex rows are estimates scaled from that.
 
 ## Supported formats
 
