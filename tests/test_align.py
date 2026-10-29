@@ -1182,48 +1182,111 @@ def test_plan_patches_rejects_instance_like_synonyms_and_records_them():
     assert result["rejected_aliases"] == by["t-s"].rejected_aliases
 
 
+def _fk(table, column):
+    return {"table_id": f"tb-{table}", "table": table, "column": column}
+
+
 def _column_terms():
-    """Contract and Supplier carry their key columns; Department has no columns of its own,
-    its name column lives in the employees table (another Term's)."""
+    """Contract: own key column 계약ID, its 담당자 column, and 계약ID in invoices (a semantic
+    FK to contracts). Supplier: 공급사ID only as the FK column of products. Department: its
+    own 부서명. Employee: 사번, referenced by contracts.담당자ID; contracts.담당자 is a plain
+    column of contracts (no FK)."""
     return {
         "t-k": al.TermInfo(
             "t-k",
             "Contract",
             "계약 정보",
             [],
-            attributes=[{"name": "계약ID", "source_column": "계약id"}, {"name": "계약금액"}],
-            tables=[{"id": "tb-k", "name": "contracts"}],
+            attributes=[
+                {
+                    "name": "계약ID",
+                    "source_column": "계약id",
+                    "table_id": "tb-contracts",
+                    "column": "계약id",
+                    "referenced": [_fk("invoices", "계약ID")],
+                },
+                {"name": "계약금액", "table_id": "tb-contracts", "column": "계약금액"},
+                {"name": "담당자", "table_id": "tb-contracts", "column": "담당자"},
+                {"name": "담당자ID", "table_id": "tb-contracts", "column": "담당자ID"},
+            ],
+            tables=[{"id": "tb-contracts", "name": "contracts"}],
         ),
         "t-s": al.TermInfo(
             "t-s",
             "Supplier",
             "공급사 정보",
             [],
-            attributes=[{"name": "공급사ID", "source_column": "supplier_id"}],
+            attributes=[
+                {
+                    "name": "supplier_key",
+                    "table_id": "tb-suppliers",
+                    "column": "supplier_key",
+                    "referenced": [_fk("products", "공급사ID")],
+                }
+            ],
+            tables=[{"id": "tb-suppliers", "name": "suppliers"}],
         ),
-        "t-d": al.TermInfo("t-d", "Department", "부서 정보", []),
+        "t-p": al.TermInfo(
+            "t-p",
+            "Product",
+            "제품 정보",
+            [],
+            attributes=[{"name": "공급사 ID", "table_id": "tb-products", "column": "공급사ID"}],
+            tables=[{"id": "tb-products", "name": "products"}],
+        ),
+        "t-d": al.TermInfo(
+            "t-d",
+            "Department",
+            "부서 정보",
+            [],
+            attributes=[{"name": "부서명", "table_id": "tb-departments", "column": "부서명"}],
+            tables=[{"id": "tb-departments", "name": "departments"}],
+        ),
         "t-e": al.TermInfo(
-            "t-e", "Employee", "직원 정보", [], attributes=[{"name": "부서명", "column": "부서명"}]
+            "t-e",
+            "Employee",
+            "직원 정보",
+            [],
+            attributes=[
+                {
+                    "name": "사번",
+                    "table_id": "tb-employees",
+                    "column": "사번",
+                    "referenced": [_fk("contracts", "담당자ID")],
+                }
+            ],
+            tables=[{"id": "tb-employees", "name": "employees"}],
         ),
-        "t-c": al.TermInfo("t-c", "Customer", "고객 정보", [], attributes=[{"name": "고객ID"}]),
+        "t-c": al.TermInfo(
+            "t-c",
+            "Customer",
+            "고객 정보",
+            [],
+            attributes=[{"name": "고객ID", "table_id": "tb-customers", "column": "고객id"}],
+            tables=[{"id": "tb-customers", "name": "customers"}],
+        ),
     }
 
 
-def test_plan_patches_rejects_column_names_of_any_registered_table():
-    """Column names (계약ID, 공급사ID, 부서명) are attributes, never a Term's synonyms; a name
-    that merely contains a column name, and ordinary synonyms, still fold."""
+def test_plan_patches_rejects_own_and_foreign_key_column_names():
+    """Column names of the Term's own table (계약ID, 부서명) and FK columns pointing at it
+    (공급사ID in products) are attributes, never synonyms; a name that merely contains a
+    column name, ordinary synonyms, and another table's column that is not an FK to the
+    Term (contracts.담당자 for Employee) still fold."""
     terms = _column_terms()
     matches = {
         "t-k": [al.SameMatch(1, "계약", ["계약 id", "Contract"], "", 0.97)],
         "t-s": [al.SameMatch(2, "공급사", ["공급사ID", "공급업체"], "", 0.97)],
         "t-d": [al.SameMatch(3, "부서", ["부서명", "Department"], "", 0.97)],
         "t-c": [al.SameMatch(4, "고객", ["거래처", "고객ID 체계"], "", 0.97)],
+        "t-e": [al.SameMatch(5, "직원", ["담당자", "사원"], "", 0.97)],
     }
     by = {p.term_id: p for p in al.plan_patches(matches, terms)}
     assert by["t-k"].synonyms_added == ["계약"]  # (Contract is the Term's own name)
     assert by["t-s"].synonyms_added == ["공급사", "공급업체"]
     assert by["t-d"].synonyms_added == ["부서"]
     assert by["t-c"].synonyms_added == ["고객", "거래처", "고객ID 체계"]
+    assert by["t-e"].synonyms_added == ["직원", "담당자", "사원"]
     assert by["t-k"].rejected_aliases == [
         {"alias": "계약 id", "reason": "column_name", "concept": "계약"}
     ]
@@ -1233,13 +1296,19 @@ def test_plan_patches_rejects_column_names_of_any_registered_table():
     assert by["t-d"].rejected_aliases == [
         {"alias": "부서명", "reason": "column_name", "concept": "부서"}
     ]
-    assert by["t-c"].rejected_aliases == []
+    assert by["t-c"].rejected_aliases == [] and by["t-e"].rejected_aliases == []
 
 
-def test_column_names_use_the_alias_normalisation():
-    columns = al.column_names(_column_terms().values())
-    assert {"계약id", "공급사id", "supplier_id", "부서명", "계약금액", "고객id"} <= columns
-    kept, rejected = al.split_aliases(["계약ＩＤ", "부서 명", "고객", "거래처"], columns=columns)
+def test_column_names_are_the_terms_own_and_its_foreign_key_columns():
+    terms = _column_terms()
+    contract = al.column_names(terms["t-k"], terms.values())
+    # invoices.계약ID normalises to 계약id
+    assert contract == {"계약id", "계약금액", "담당자", "담당자id"}
+    assert al.column_names(terms["t-s"], terms.values()) == {"supplier_key", "공급사id"}
+    # contracts.담당자ID references employees (an FK column); contracts.담당자 does not
+    assert al.column_names(terms["t-e"], terms.values()) == {"사번", "담당자id"}
+    assert al.column_names(terms["t-c"], terms.values()) == {"고객id"}
+    kept, rejected = al.split_aliases(["계약ＩＤ", "계약 금액", "고객", "거래처"], columns=contract)
     assert kept == ["고객", "거래처"]
     assert [r["reason"] for r in rejected] == ["column_name", "column_name"]
     # no column data: nothing is a column name
@@ -1250,17 +1319,29 @@ def test_a_column_named_like_a_term_or_table_is_not_a_column_name():
     """A column that carries an entity's own name (a ``customer`` FK column) does not make
     that name a column-style synonym."""
     terms = {
-        "t-c": al.TermInfo("t-c", "Customer", "x", [], tables=[{"name": "customers"}]),
-        "t-o": al.TermInfo(
-            "t-o", "Order", "x", [], attributes=[{"name": "customer"}, {"name": "customers"}]
+        "t-c": al.TermInfo(
+            "t-c",
+            "Customer",
+            "x",
+            [],
+            attributes=[
+                {
+                    "name": "id",
+                    "table_id": "tb-c",
+                    "column": "id",
+                    "referenced": [_fk("orders", "customer"), _fk("orders", "customers")],
+                }
+            ],
+            tables=[{"id": "tb-c", "name": "customers"}],
         ),
     }
-    assert al.column_names(terms.values()) == set()
+    assert al.column_names(terms["t-c"], terms.values()) == {"id"}
 
 
 def test_judge_step_lists_column_names_as_rejected():
+    terms = _column_terms()
     concept = al.ConceptInfo("c1", "계약", "entity", synonyms=["계약ID", "S037"])
-    columns = al.column_names(_column_terms().values())
+    columns = al.column_names(terms["t-k"], terms.values())
     assert al.concept_rejected_aliases(concept, columns) == [
         {"alias": "계약ID", "reason": "column_name"},
         {"alias": "S037", "reason": "identifier"},

@@ -54,8 +54,8 @@ Korean interface.
 - Identity policy `identity-v2.2`: instance-like names (record IDs such as `S037`,
   numbers/dates, company names with a legal-form marker such as `주식회사`, `㈜` or `Inc.`)
   never become Term synonyms or identity evidence, and a concept named like one is never
-  `same`. Names equal to a column attribute of a built table (`계약ID`, `부서명`) never
-  become Term synonyms either. Both are listed as rejected synonyms in the concept detail
+  `same`. Names equal to a column of the Term's own table or an FK column pointing at
+  it (`계약ID`, `부서명`) never become Term synonyms either. Both are listed as rejected synonyms in the concept detail
   and in `align-report.md`, which `build` and `demo` write to
   `<home>/reports/align/<documents source>/`.
 - With a non-Ollama chat provider, `setup` pulls only the embedding model.

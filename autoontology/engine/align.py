@@ -299,7 +299,6 @@ def _accepts(ctx: _AlignCtx, relation: str, confidence: float | None) -> bool:
 def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
     snap = ctx.snapshot()
     terms = snap.term_map()
-    columns = al.column_names(snap.terms)  # every registered table's columns
     steps = {s.name: s for s in ctx.store.get_steps(ctx.run.id)}
     if "candidates" in ctx.details:
         candidates = ctx.details["candidates"].get("candidates", {})
@@ -510,7 +509,14 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
         counts[verdict.relation] += 1
         # instance-like and column names an accepted fold would leave off the Term
         rejected = (
-            al.concept_rejected_aliases(concept, columns) if verdict.relation == "same" else []
+            al.concept_rejected_aliases(
+                concept,
+                al.column_names(terms[verdict.term_id], snap.terms)
+                if verdict.term_id in terms
+                else (),
+            )
+            if verdict.relation == "same"
+            else []
         )
         seconds = round(time.monotonic() - started, 1)
         ctx.store.finish_step(

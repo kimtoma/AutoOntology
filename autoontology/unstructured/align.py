@@ -25,8 +25,9 @@
    ``same`` (reason ``instance_like``).
 4. Apply policy for accepted ``same`` verdicts: add the concept's
    name and synonyms to the Term's synonyms (case-insensitive dedupe, never remove; never
-   an instance-like name, nor one equal to a column attribute of any registered table
-   (:func:`column_names`, reason ``column_name``: ``계약ID``, ``부서명``): those are recorded
+   an instance-like name, nor one equal to a column of the Term's own table or an FK
+   column pointing at it (:func:`column_names`, reason ``column_name``: ``계약ID``,
+   ``부서명``): those are recorded
    as ``rejected_aliases``), and
    set the description only when the Term has none or upstream's fallback.
 
@@ -527,22 +528,32 @@ def instance_like(alias: str) -> str:
     return ""
 
 
-def column_names(terms: Iterable[TermInfo]) -> set[str]:
-    """Normalized (:func:`norm_alias`) names of every column attribute of *terms* (name,
-    source column and physical column), the compiled Terms of every registered structured
-    source. A column that carries an entity's own name (a Term or table name, also as its
-    English singular: a ``customer`` FK column) is left out, so it never turns that name
-    into a column-style alias."""
+def column_names(term: TermInfo, terms: Iterable[TermInfo] = ()) -> set[str]:
+    """Normalized (:func:`norm_alias`) column names that are *term*'s attributes: the columns
+    of its own table (attribute name, source column, physical column) and the columns of other
+    tables that are (semantic) foreign keys pointing at it (its attributes' ``referenced``
+    columns, plus the name of the referencing Term's attribute among *terms*). Other columns
+    of other tables never count (a plain ``contracts.담당자`` column is no column name of
+    Employee). A column that carries an entity's own name (a Term or table name of *term*
+    or *terms*, also as its English singular: a ``customer`` FK column) is left out, so it
+    never turns that name into a column-style alias."""
+    others = [t for t in terms if t.id != term.id]
+    keys = ("name", "source_column", "column")
     columns: set[str] = set()
-    entities: set[str] = set()
-    for term in terms:
-        entities |= identity_keys_of([term.name, *(t.get("name") or "" for t in term.tables)])
-        for a in term.attributes:
-            for key in ("name", "source_column", "column"):
-                n = norm_alias(a.get(key) or "")
-                if n:
-                    columns.add(n)
-    return {c for c in columns if c not in entities and singular(c) not in entities}
+    refs: set[tuple[str, str]] = set()
+    for a in term.attributes:
+        columns |= {norm_alias(a.get(k) or "") for k in keys}
+        for r in a.get("referenced") or []:
+            columns.add(norm_alias(r.get("column") or ""))
+            refs.add((str(r.get("table_id") or ""), norm_alias(r.get("column") or "")))
+    for t in others:
+        for a in t.attributes:
+            if (str(a.get("table_id") or ""), norm_alias(a.get("column") or "")) in refs:
+                columns |= {norm_alias(a.get(k) or "") for k in keys}
+    entities = identity_keys_of(
+        [n for t in [term, *others] for n in [t.name, *(x.get("name") or "" for x in t.tables)]]
+    )
+    return {c for c in columns if c and c not in entities and singular(c) not in entities}
 
 
 def split_aliases(
@@ -797,15 +808,15 @@ def plan_patches(
 ) -> list[TermPatch]:
     """One patch per Term with accepted ``same`` matches, from the Term's *current* state
     (so a re-run plans nothing for a Term that already has everything). Instance-like names
-    and column names of any of *terms* (:func:`column_names`) are not added; they are listed
-    in ``rejected_aliases``."""
-    columns = column_names(terms.values())
+    and the Term's column names (:func:`column_names`: its own table's and the FK columns
+    pointing at it) are not added; they are listed in ``rejected_aliases``."""
     patches = []
     for term_id in sorted(matches, key=lambda t: terms[t].name if t in terms else t):
         term = terms.get(term_id)
         if term is None:
             continue
         group = sorted(matches[term_id], key=lambda m: (-m.confidence, m.concept_name))
+        columns = column_names(term, terms.values())
         additions: list[str] = []
         rejected: list[dict[str, str]] = []
         for m in group:

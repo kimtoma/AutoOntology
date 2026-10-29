@@ -27,7 +27,7 @@ Modelling (README "Ontology modelling"):
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
@@ -410,7 +410,7 @@ def _add_documents(
     model: MergedOntology,
     docs: DocumentsInput,
     term_class: dict[str, str],
-    columns: Collection[str] = (),
+    columns: dict[str, set[str]] | None = None,
 ) -> None:
     for d in sorted(docs.documents, key=lambda d: d.path):
         model.documents[f"doc-{slug(d.id)}"] = ODocument(
@@ -462,7 +462,9 @@ def _add_documents(
             cls = model.classes[term_local]
             # never an instance-like name (record ID, company name) or a column name on the
             # Term's class
-            kept, rejected = split_aliases([c.name, *c.synonyms, c.name_en], c.name, columns)
+            kept, rejected = split_aliases(
+                [c.name, *c.synonyms, c.name_en], c.name, (columns or {}).get(a.term_id, ())
+            )
             _add_unique(cls.alt_labels, *kept)
             cls.rejected_aliases += [r for r in rejected if r not in cls.rejected_aliases]
             if c.definition:
@@ -663,7 +665,8 @@ def build(
         term_class.update(_add_structured(model, snap))
     from autoontology.unstructured.align import column_names
 
-    columns = column_names(t for snap in structured for t in snap.terms)
+    all_terms = [t for snap in structured for t in snap.terms]
+    columns = {t.id: column_names(t, all_terms) for t in all_terms}
     for docs in documents:
         _add_documents(model, docs, term_class, columns)
     model.expected_classes = expected_class_count(structured, documents)
