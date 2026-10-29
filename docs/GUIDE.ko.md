@@ -20,6 +20,65 @@
 9. [문제 해결](#9-문제-해결)
 10. [자주 묻는 질문](#10-자주-묻는-질문)
 
+## 프롬프트 한 번으로 시작하기
+
+[Claude Code](https://docs.claude.com/en/docs/claude-code/overview)를 쓰면 5장의 명령을
+직접 입력하지 않아도 됩니다. 프롬프트 하나를 붙여 넣으면 Claude가 저장소를 클론하고, 사전 조건을
+점검하고, 설치하고, Claude 제공자(내 Claude 로그인, API 키 없음)를 설정하고, quickstart 샘플
+세트를 빌드한 뒤 UI 주소를 알려 줍니다. 프롬프트 뒤에서 도는 것은
+[`scripts/bootstrap.sh`](../scripts/bootstrap.sh)이고, 저장소의 [`CLAUDE.md`](../CLAUDE.md) /
+[`AGENTS.md`](../AGENTS.md)와 프로젝트 스킬
+[`setup-autoontology`](../.claude/skills/setup-autoontology/SKILL.md)가 결과별 대처법을
+에이전트에게 알려 줍니다.
+
+**터미널의 Claude Code.** 홈 폴더에서 `claude`를 실행하고 다음을 붙여 넣습니다.
+
+```text
+https://github.com/kimtoma/AutoOntology 를 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
+```
+
+영어로는:
+
+```text
+Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there; when it finishes, open the UI URL it prints and tell me what was built.
+```
+
+**Claude 데스크톱 앱.** **Code** 탭(데스크톱 앱 안의 Claude Code)을 열고, 작업 폴더로 홈
+폴더를 고르고 로컬 환경을 선택한 다음(서비스가 클라우드 샌드박스가 아니라 내 컴퓨터에서 돌아야
+합니다) 같은 프롬프트를 붙여 넣습니다. Cowork는 작업을 별도의 격리된 환경에서 실행하므로 이
+설정에는 Code 탭을 쓰세요.
+
+이미 클론했다면 저장소에서 Claude Code를 열고 `/setup-autoontology`를 입력하거나,
+`scripts/bootstrap.sh --yes --provider claude`를 직접 실행합니다. `--dry-run`은 아무것도
+바꾸지 않고 계획만 출력하고, `--provider codex|ollama|openai`, `--set hanbit`,
+`--no-demo`, `--lang ko`로 기본값을 바꿉니다. 여러 번 실행해도 안전하며, 종료 코드가 다음 할
+일을 알려 줍니다. 3은 제공자 CLI에 로그인되어 있지 않다는 뜻이고, 4는 빠진 사전 조건(Docker
+또는 `POSTGRES_*`로 지정한 내 Postgres, 임베딩용 Ollama, uv, git)과 설치 방법을 출력합니다.
+
+**Claude Enterprise(그리고 Team, Pro, Max).** API 키가 필요 없습니다. AutoOntology는
+로그인되어 있는 `claude` CLI를 호출합니다.
+
+- `claude auth login`으로 한 번 로그인하면서 **조직 계정**을 고르고, `claude auth status`로
+  확인합니다(`loggedIn: true`). 로그인되어 있지 않으면 스크립트가 이 안내와 함께 종료 코드 3으로
+  멈춥니다.
+- Anthropic으로 보내는 것: 빌드 프롬프트입니다. 여기에는 표·컬럼 이름, 샘플 값, 문서 본문이
+  들어가며 조직의 약관이 적용됩니다. 나머지(Postgres, Ollama 임베딩, 파일, 스냅샷, 내보내기)는
+  모두 내 컴퓨터에 남습니다.
+- 사용량은 다른 Claude Code 사용과 똑같이 조직 플랜 한도에 포함됩니다. quickstart는 호출 약
+  10회, 큰 문서 묶음은 수백 회입니다.
+- 관리자가 Claude Code 사용을 제한했다면 로그인이나 호출이 실패합니다. `uv run autoontology
+  doctor`의 `chat provider` 행에 해결 방법이 나옵니다.
+
+**Claude Code가 없다면** 같은 스크립트를 직접 실행합니다. 먼저
+[`scripts/bootstrap.sh`](../scripts/bootstrap.sh)를 읽어 보세요. 인터넷의 스크립트를 `bash`로
+파이프하면 그 안의 내용이 그대로 실행됩니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/bootstrap.sh | bash -s -- --yes --provider claude
+```
+
+`./AutoOntology`에 클론합니다(`--dir`로 바꿀 수 있습니다).
+
 ## 1. 10분이면 얻는 것
 
 짧은 명령 여섯 개를 입력하면 AutoOntology가 컴퓨터 환경을 점검하고, 설정 파일을 쓰고, 작은 샘플

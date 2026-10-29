@@ -21,6 +21,67 @@ Contents:
 9. [Troubleshooting](#9-troubleshooting)
 10. [FAQ](#10-faq)
 
+## Start with one prompt
+
+With [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) you can skip
+the commands in section 5: paste one prompt and Claude clones the repository, checks the
+prerequisites, installs everything, configures the Claude provider (your own Claude login,
+no API key), builds the quickstart sample set and gives you the UI URL. Behind the prompt
+is [`scripts/bootstrap.sh`](../scripts/bootstrap.sh); the repository's
+[`CLAUDE.md`](../CLAUDE.md) / [`AGENTS.md`](../AGENTS.md) and the project skill
+[`setup-autoontology`](../.claude/skills/setup-autoontology/SKILL.md) tell the agent how to
+handle each outcome.
+
+**Claude Code in the terminal.** Start `claude` in your home folder and paste:
+
+```text
+Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there; when it finishes, open the UI URL it prints and tell me what was built.
+```
+
+In Korean:
+
+```text
+https://github.com/kimtoma/AutoOntology 를 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
+```
+
+**Claude desktop app.** Open the **Code** tab (Claude Code in the desktop app), choose
+your home folder as the working folder with the local environment (the services must run
+on your computer, not in a cloud sandbox), and paste the same prompt. Cowork runs tasks in
+its own isolated environment, so use the Code tab for this setup.
+
+Already cloned? Open Claude Code in the repository and type `/setup-autoontology`, or run
+`scripts/bootstrap.sh --yes --provider claude` yourself. `--dry-run` prints the plan
+without changing anything; `--provider codex|ollama|openai`, `--set hanbit`, `--no-demo`
+and `--lang ko` change the defaults. The script is safe to run again, and its exit code
+says what to do next: 3 means the provider CLI is not logged in, 4 names a missing
+prerequisite (Docker or your own Postgres via `POSTGRES_*`, Ollama for the embeddings, uv,
+git) with its install hint.
+
+**Claude Enterprise (and Team, Pro, Max).** No API key is needed: AutoOntology calls the
+`claude` CLI you are logged in to.
+
+- Log in once with `claude auth login` and pick your **organization account**; check it
+  with `claude auth status` (`loggedIn: true`). The script stops with exit 3 and this hint
+  when you are not logged in.
+- What is sent to Anthropic: the build's prompts, which contain your table and column
+  names, sample values and document text, under your organization's terms. Everything
+  else stays on your computer: Postgres, the embeddings (Ollama), the files, the
+  snapshots and the exports.
+- Usage counts against your organization's plan limits like any other Claude Code use;
+  the quickstart makes about ten calls, large document sets make hundreds.
+- If your administrator restricts Claude Code, the login or the calls fail; `uv run
+  autoontology doctor` shows the `chat provider` row with the remedy.
+
+**Without Claude Code**, run the same script directly. Read it first
+([`scripts/bootstrap.sh`](../scripts/bootstrap.sh)); piping a script from the internet into
+`bash` runs whatever it contains:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/bootstrap.sh | bash -s -- --yes --provider claude
+```
+
+It clones into `./AutoOntology` (change it with `--dir`).
+
 ## 1. What you get in 10 minutes
 
 You type six short commands. AutoOntology checks your computer, writes its settings file, loads a

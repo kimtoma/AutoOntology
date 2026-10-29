@@ -2,6 +2,7 @@
 """scripts/bootstrap.sh: flags, dry-run plan, exit codes (no network, no `uv run`)."""
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -51,7 +52,9 @@ def _fake_path(tmp_path: Path, claude_status: str) -> tuple[dict, Path]:
     # Ollama answers; nothing else is reachable and nothing is ever downloaded.
     _stub(bindir, "curl", rec + '\ncase "$*" in *api/tags*) exit 0;; esac\nexit 7')
     _stub(bindir, "nc", rec + "\nexit 1")
-    _stub(bindir, "claude", rec + f"\ncase \"$1 $2\" in 'auth status') echo '{claude_status}';; esac")
+    _stub(
+        bindir, "claude", rec + f"\ncase \"$1 $2\" in 'auth status') echo '{claude_status}';; esac"
+    )
     env = {
         "PATH": f"{bindir}:/usr/bin:/bin",
         "HOME": str(tmp_path / "home"),
@@ -138,7 +141,9 @@ def test_claude_not_logged_in_stops_with_exit_3(tmp_path):
 
 def test_claude_logged_in_passes_the_login_check(tmp_path):
     env, log = _fake_path(tmp_path, '{"loggedIn": true, "email": "someone@example.com"}')
-    proc = _run(["--dry-run", "--provider", "claude", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path)
+    proc = _run(
+        ["--dry-run", "--provider", "claude", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path
+    )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "logged in" in proc.stdout
     assert "someone@example.com" not in proc.stdout + proc.stderr  # never echo account details
@@ -184,3 +189,88 @@ def test_script_is_bash_32_compatible_syntax():
 def test_shellcheck_clean():
     proc = subprocess.run(["shellcheck", str(SCRIPT)], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stdout
+
+
+# --- Agent instructions, skill and docs -------------------------------------------------
+
+PROMPT_EN = (
+    "Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run "
+    "`scripts/bootstrap.sh --yes --provider claude` there"
+)
+CURL = (
+    "curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/bootstrap.sh"
+    " | bash -s -- --yes --provider claude"
+)
+SKILL = REPO / ".claude" / "skills" / "setup-autoontology" / "SKILL.md"
+ONE_PROMPT_DOCS = {
+    REPO / "README.md": "## Start with one prompt",
+    REPO / "README.ko.md": "## 프롬프트 한 번으로 시작하기",
+    REPO / "docs" / "GUIDE.md": "## Start with one prompt",
+    REPO / "docs" / "GUIDE.ko.md": "## 프롬프트 한 번으로 시작하기",
+}
+
+
+def test_agents_md_is_a_copy_of_claude_md():
+    agents = REPO / "AGENTS.md"
+    assert not agents.is_symlink()
+    assert agents.read_text() == (REPO / "CLAUDE.md").read_text()
+    text = agents.read_text()
+    for needle in (
+        "scripts/bootstrap.sh --yes --provider claude",
+        "vendor/",
+        "SPDX",
+        "autoontology_src_",
+    ):
+        assert needle in text
+
+
+def test_skill_frontmatter_and_command():
+    text = SKILL.read_text()
+    assert text.startswith("---\n")
+    front = text.split("---\n", 2)[1]
+    assert "name: setup-autoontology\n" in front
+    assert "description: " in front
+    assert "scripts/bootstrap.sh --yes --provider claude" in text
+    assert "AUTOONTOLOGY_LANG=ko" in text
+
+
+@pytest.mark.parametrize("doc", list(ONE_PROMPT_DOCS), ids=lambda p: p.name)
+def test_one_prompt_section(doc):
+    text = doc.read_text()
+    assert ONE_PROMPT_DOCS[doc] in text
+    assert PROMPT_EN in text
+    assert "~/AutoOntology 에 클론하고" in text  # the Korean prompt too
+    assert CURL in text
+    assert "claude auth login" in text and "claude auth status" in text
+
+
+def test_documented_commands_exist_in_agent_files():
+    from tests.test_doc_commands import test_documented_commands_exist
+
+    for doc in (REPO / "CLAUDE.md", SKILL):
+        try:
+            test_documented_commands_exist(doc)
+        except AssertionError as exc:
+            if "suspiciously few" not in str(exc):
+                raise
+
+
+LINK = re.compile(r"\]\(([^)\s]+)\)")
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [*ONE_PROMPT_DOCS, REPO / "CLAUDE.md", SKILL],
+    ids=lambda p: p.name,
+)
+def test_relative_links_resolve(doc):
+    missing = []
+    for target in LINK.findall(doc.read_text()):
+        if re.match(r"[a-z]+:", target) or target.startswith("#"):
+            continue
+        if "/" not in target and "." not in target:  # prose like "[[X]](Ollama)", not a path
+            continue
+        path = (doc.parent / target.split("#", 1)[0]).resolve()
+        if not path.exists():
+            missing.append(target)
+    assert not missing, missing
