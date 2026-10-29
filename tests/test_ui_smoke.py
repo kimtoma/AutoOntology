@@ -25,7 +25,7 @@ pytestmark = pytest.mark.integration
 #: Headless Chromium has no GPU: software WebGL (SwiftShader through ANGLE) for the 3D graph.
 GL_ARGS = ["--use-angle=swiftshader", "--use-gl=angle", "--enable-unsafe-swiftshader"]
 VIEWPORTS = {"mobile": (375, 812), "tablet": (768, 1024), "desktop": (1280, 800)}
-ROUTES = ("sources", "build", "ontology", "graph", "playground", "exports", "status")
+ROUTES = ("sources", "build", "ontology", "graph", "playground", "exports", "status", "settings")
 #: sidebar entries (data-nav): the Home page ("Get started", /ui/) comes first
 NAV_IDS = ("home", *ROUTES)
 STEPS = ["models", "sources", "build", "explore", "export"]
@@ -563,6 +563,112 @@ def test_korean_pages_fit(live, browser, name):
     # the choice is remembered: a reload without ?lang= stays Korean
     page.goto(f"{url}/ui/sources")
     page.locator("main h1", has_text="소스").wait_for()
+    assert page.errors == []
+    page.close()
+
+
+@pytest.fixture(scope="module")
+def service():
+    """The service URL; the Settings page needs no source nor snapshot."""
+    url = Settings.from_env().service_url
+    try:
+        httpx.get(f"{url}/health/live", timeout=3).raise_for_status()
+    except httpx.HTTPError:
+        pytest.skip("service not running (uv run autoontology up)")
+    return url
+
+
+def _json(route, body, status=200):
+    route.fulfill(status=status, content_type="application/json", body=json.dumps(body))
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+@pytest.mark.parametrize("name", ["mobile", "desktop"])
+def test_settings_page_renders_and_fits(service, browser, name, lang):
+    page = new_page(browser, VIEWPORTS[name], locale="ko-KR" if lang == "ko" else "en-US")
+    page.goto(f"{service}/ui/settings?lang={lang}")
+    page.locator("main h1", has_text="설정" if lang == "ko" else "Settings").wait_for()
+    options = page.locator("#settings-chat-providers [data-provider-option]")
+    options.first.wait_for()
+    assert options.count() == 4
+    assert page.locator("#settings-embed [data-embed-option]").count() == 2
+    # the OpenAI-compatible fields: a password field that never shows a saved key
+    page.locator("[data-provider-option=openai]").click()
+    key = page.locator("#settings-api-key")
+    key.wait_for()
+    assert key.get_attribute("type") == "password" and key.get_attribute("autocomplete") == "off"
+    assert key.input_value() == ""
+    assert_fits(page, f"/settings?lang={lang} at {name}")
+    assert page.errors == []
+    page.close()
+
+
+def test_settings_test_button_shows_the_result(service, browser):
+    page = new_page(browser, VIEWPORTS["desktop"])
+    sent = []
+
+    def answer(route):
+        sent.append(json.loads(route.request.post_data or "{}"))
+        _json(route, {
+            "chat": {"ok": True, "provider": "codex", "model": "gpt-6-astra", "seconds": 2.5,
+                     "answer": "pong", "error": None, "remedy": None},
+            "embed": {"ok": True, "provider": "ollama", "model": "bge-m3", "seconds": 0.2,
+                      "dimension": 1024, "mismatch_with_store": False, "stored_dimension": None},
+        })  # fmt: skip
+
+    page.route("**/api/settings/test", answer)
+    page.goto(f"{service}/ui/settings")
+    page.locator("[data-provider-option=codex]").click()
+    page.locator("#btn-settings-test").click()
+    page.locator("[data-test-chat=ok]").wait_for()
+    assert "gpt-6-astra" in page.locator("#settings-test-result").inner_text()
+    assert sent and sent[0].get("chat_provider") == "codex"
+    page.close()
+
+
+def test_settings_save_and_restart_flow(service, browser):
+    """Save -> PUT -> restart -> wait for the new service, every call intercepted (the
+    worktree service is never really restarted here)."""
+    page = new_page(browser, VIEWPORTS["mobile"])
+    calls = []
+    state = {"pid": None}
+
+    def settings(route):
+        if route.request.method == "PUT":
+            calls.append("PUT")
+            _json(route, {"written": ["AUTOONTOLOGY_CHAT_PROVIDER"], "backup": None,
+                          "restart_required": True})  # fmt: skip
+            return
+        resp = route.fetch()
+        body = resp.json()
+        state["pid"] = state["pid"] or body["service_pid"]
+        body["supervised"] = True
+        if "restarted" in calls:
+            body["running"]["chat_provider"] = "codex"
+            body["service_pid"] = state["pid"] + 1
+        _json(route, body)
+
+    def restart(route):
+        calls.append("restart")
+        _json(route, {"restart_id": "0123456789ab", "previous_pid": state["pid"]}, 202)
+
+    def restart_state(route):
+        calls.append("restarted")
+        _json(route, {"id": "0123456789ab", "state": "done", "service_pid": state["pid"] + 1})
+
+    page.route(re.compile(r".*/api/settings$"), settings)
+    page.route("**/api/settings/restart", restart)
+    page.route("**/api/settings/restart/0123456789ab", restart_state)
+    page.goto(f"{service}/ui/settings")
+    current = page.locator("[data-provider-option] input:checked").get_attribute("value")
+    target = "codex" if current != "codex" else "claude"
+    page.locator(f"[data-provider-option={target}]").click()
+    page.locator("#btn-settings-save").click()
+    page.locator("#settings-dialog").wait_for()
+    assert_fits(page, "settings dialog at mobile")
+    page.locator("#btn-settings-confirm").click()
+    page.get_by_text("Restarted", exact=False).first.wait_for(timeout=20000)
+    assert calls[:3] == ["PUT", "restart", "restarted"], calls
     assert page.errors == []
     page.close()
 
