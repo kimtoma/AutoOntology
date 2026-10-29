@@ -547,6 +547,36 @@ def build(
     )
 
 
+@app.command("apply")
+def apply_decisions() -> None:
+    """Reflect the review decisions in a new ontology snapshot: decisions -> merge ->
+    snapshot, without any model call (needs `autoontology up` for the structured Terms)."""
+    import time
+
+    from autoontology.engine import jobs
+    from autoontology.engine.apply import run_apply
+    from autoontology.engine.client import BackendError
+
+    settings = _settings()
+    store = _store(settings)
+    started = time.monotonic()
+    log_path = jobs.jobs_log_path(settings)
+    jobs.setup_job_logging(settings, console=True)
+    try:
+        result = run_apply(store, settings)
+    except (jobs.JobError, BackendError) as exc:
+        hint = f"\nlog: {exc.log_path}" if getattr(exc, "log_path", None) else ""
+        _fail(f"apply failed: {exc}{hint}")
+    except Exception as exc:  # noqa: BLE001 - one clean line; AUTOONTOLOGY_DEBUG=1 re-raises
+        _unexpected("apply", exc, log_path)
+    run = store.get_run(result.run_id)
+    applied = (run.params.get("decisions_applied") if run else 0) or 0
+    typer.echo(
+        f"apply {result.run_id}: revision {result.revision} in "
+        f"{time.monotonic() - started:.1f}s; {applied} decision(s) applied"
+    )
+
+
 @app.command()
 def runs(limit: int = typer.Option(20, "--limit")) -> None:
     """Show recent runs and their steps."""

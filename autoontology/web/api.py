@@ -127,7 +127,8 @@ class SourceIn(BaseModel):
 
 class RunIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["build", "export"]
+    #: apply: the review decisions -> a new snapshot, no model call (takes no other field)
+    kind: Literal["build", "export", "apply"]
     #: build: rebuild only these sources (align/merge/snapshot still cover everything)
     sources: list[str] | None = Field(default=None, max_length=100)
     #: build: continue the latest build run
@@ -1072,6 +1073,11 @@ def _job_call(api: Api, req: RunIn):
         if not api.store.list_sources():
             raise ApiError(400, "no_sources", "no sources: add one first")
         return lambda fn, store: fn(store, settings, sources=sources, resume=req.resume)
+    if req.kind == "apply":
+        if req.sources or req.resume or req.revision or req.format:
+            raise ApiError(400, "invalid_request", "apply takes no other field")
+        api.snapshot()  # 404 no_snapshot before a thread starts
+        return lambda fn, store: fn(store, settings)
     if req.sources or req.resume:
         raise ApiError(400, "invalid_request", "export takes only `revision` and `format`")
     api.snapshot(req.revision)  # 404 before a thread starts

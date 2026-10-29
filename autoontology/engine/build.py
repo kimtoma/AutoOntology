@@ -54,6 +54,8 @@ logger = logging.getLogger("autoontology.jobs")
 
 BUILD_KIND = "build"
 EXPORT_KIND = "export"
+#: ``autoontology apply`` (``engine/apply.py``): decisions -> merge -> snapshot, no model call
+APPLY_KIND = "apply"
 #: Lease name of the workspace itself (never a valid source name): build and export hold it.
 WORKSPACE_LEASE = "*workspace*"
 STRUCTURED_KINDS = ("files", "database")
@@ -237,6 +239,8 @@ class _Build:
         self.align_backends = align_backends
         self.writer = writer
         self.model: Any = None
+        #: the review decisions the merge read (:class:`~autoontology.store.decisions.Decision`)
+        self.decisions: list[Any] = []
         self.reuse_concepts = True
         #: sources whose inputs changed since the resumed run (full document re-scan)
         self.changed: set[str] = set()
@@ -426,6 +430,7 @@ class _Build:
             self.merge()
         sources = snapshot_sources(self.store, [self.fresh(s) for s in self.sources], self.model)
         revision = self.store.save_snapshot(self.run.id, self.model, sources=sources)
+        applied = self.mark_decisions(revision)
         counts = self.model.counts()
         logger.info(
             "  revision %d: %d class(es), %d propert(ies), %d individual(s), %d merged concept(s)",
@@ -438,7 +443,24 @@ class _Build:
         return {
             "revision": revision,
             "counts": {k: v for k, v in counts.items() if k != "by_source"},
+            **({"decisions_applied": applied} if applied else {}),
         }
+
+    def mark_decisions(self, revision: int) -> int:
+        """Record *revision* on the pending review decisions the merged model reflects: an
+        alias or concept decision always, an alignment one once its row carries it."""
+        from autoontology.engine.overlay import reflects
+        from autoontology.store.alignments import AlignmentStore
+        from autoontology.store.decisions import DecisionStore
+
+        aligns = AlignmentStore(self.store)
+        done = [
+            d
+            for d in self.decisions
+            if d.applied_revision is None
+            and (d.kind != "alignment" or reflects(aligns.get(d.subject_key), d))
+        ]
+        return DecisionStore(self.store).mark_applied(done, revision) if done else 0
 
 
 def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[dict[str, Any]]:
@@ -470,7 +492,7 @@ def refuse_if_active(store: Store, *, log_path: Path | None = None) -> None:
     """A :class:`JobError` while another build or export run is really active (runs left
     'running' by a dead process are reaped first)."""
     for run in store.active_runs():
-        if run.kind not in (BUILD_KIND, EXPORT_KIND):
+        if run.kind not in (BUILD_KIND, EXPORT_KIND, APPLY_KIND):
             continue
         reason = jobs.stale_reason(store, run)
         if reason is not None:

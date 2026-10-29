@@ -302,3 +302,95 @@ def test_accepted_alias_goes_onto_the_term():
     cls = decided.classes[term.local]
     assert alias in cls.alt_labels and alias not in [r["alias"] for r in cls.rejected_aliases]
     assert decided.decisions[0]["name"] == alias
+
+
+# --- the apply run ------------------------------------------------------------------------
+
+
+def _no_models(monkeypatch):
+    def refuse(*_a, **_kw):
+        raise AssertionError("apply must not reach a model")
+
+    from autoontology.engine import align as align_job
+    from autoontology.engine import extract as extract_job
+    from autoontology.engine import jobs
+
+    for module, name in (
+        (align_job, "upstream_backend"),
+        (align_job, "make_typed_embedder"),
+        (extract_job, "upstream_backend"),
+        (extract_job, "make_embedder"),
+        (jobs, "require_llm_proxy"),
+        (jobs, "upstream_compile"),
+    ):
+        monkeypatch.setattr(module, name, refuse)
+
+
+def _apply(ops):
+    from autoontology.engine.apply import run_apply
+    from tests.test_align import ClientWriter
+
+    return run_apply(
+        ops["store"], ops["settings"], client=ops["client"], writer=ClientWriter(ops["client"])
+    )
+
+
+def test_apply_reflects_the_decisions_in_a_new_revision_without_a_model(ops, monkeypatch):
+    rows = _rows(ops)
+    store = ops["store"]
+    assert store.latest_revision() == 1
+    _accept(ops, "수납", "same", "t-customer")
+    _accept(ops, "청구서", "narrower", "t-contract")
+    ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
+    ops["decisions"].put(Decision("concept", rows["고객"].concept_id, "acknowledge"))
+    _no_models(monkeypatch)
+    calls = ops["judge"].calls
+    result = _apply(ops)
+    assert result.status == "succeeded" and result.revision == 2
+    assert ops["judge"].calls == calls
+    run = store.get_run(result.run_id)
+    assert run.kind == "apply" and run.status == "succeeded"
+    assert run.params["applied_revision"] == 2 and run.params["decisions_applied"] == 4
+    steps = {s.name: s for s in store.get_steps(result.run_id)}
+    assert list(steps) == ["decisions", "merge", "snapshot"]
+    assert steps["decisions"].detail["written"] == 3
+    assert steps["decisions"].detail["synonyms_added"] >= 1
+    assert "수납" in ops["client"].terms["t-customer"]["synonyms"]
+    assert {d.applied_revision for d in ops["decisions"].list()} == {2}
+    model = MergedOntology.from_dict(store.latest_snapshot().model)
+    assert {m.concept_name for m in model.merges} == {"고객", "수납"}
+    axiom = next(a for a in model.axioms if a.source == "alignment")
+    assert (axiom.subject, axiom.kind, axiom.accepted) == ("term-t-contract", "subclass_of", True)
+    # nothing pending: a second apply still snapshots, and writes no row
+    again = _apply(ops)
+    detail = {s.name: s.detail for s in store.get_steps(again.run_id)}["decisions"]
+    assert again.revision == 3 and detail["written"] == 0 and detail["unchanged"] == 3
+    # a removed decision: apply gives the row its judged verdict back
+    ops["decisions"].delete("alignment", rows["계약"].concept_id)
+    _apply(ops)
+    row = _rows(ops)["계약"]
+    assert (row.relation, row.accepted, row.judged) == ("same", True, {})
+
+
+def test_apply_refuses_while_another_run_holds_the_workspace(ops):
+    from autoontology.engine.build import WORKSPACE_LEASE
+    from autoontology.engine.jobs import JobError
+
+    with ops["store"].lease([WORKSPACE_LEASE], "build"):
+        with pytest.raises(JobError, match="already has an active build"):
+            _apply(ops)
+
+
+def test_apply_needs_a_snapshot(env):  # noqa: F811
+    from autoontology.engine.jobs import JobError
+
+    tb.add_documents(env)
+    with pytest.raises(JobError, match="no ontology snapshot"):
+        _apply(env)
+
+
+def test_a_build_marks_the_decisions_it_reflects(ops):
+    rows = _rows(ops)
+    d = ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
+    result = tb.run(ops, judge=ops["judge"])
+    assert ops["decisions"].get("alignment", d.subject_key).applied_revision == result.revision

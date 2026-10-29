@@ -2,7 +2,7 @@
 """Background run manager for the web API (``POST /api/runs``).
 
 Each run executes one of the CLI job functions (``build.run_build``,
-``export_job.run_export``) in its own thread, so runs started from the UI persist exactly
+``export_job.run_export``, ``apply.run_apply``) in its own thread, so runs started from the UI persist exactly
 like CLI runs (``runs``/``steps`` rows, ``<home>/logs/jobs.log``).
 
 - One active run per workspace: an in-process lock on the workspace key, on top of the
@@ -32,7 +32,7 @@ from autoontology.store.db import Run, Store
 
 logger = logging.getLogger("autoontology.web.runs")
 
-RUN_KINDS: tuple[str, ...] = ("build", "export")
+RUN_KINDS: tuple[str, ...] = ("build", "export", "apply")
 #: The run manager's key for workspace-wide runs (build, export).
 WORKSPACE = "*workspace*"
 RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{6}$")
@@ -169,15 +169,16 @@ JobFn = Callable[..., Any]
 
 def default_jobs() -> dict[str, JobFn]:
     """The job entry points by run kind, looked up at call time (tests monkeypatch them)."""
-    from autoontology.engine import build, export_job
+    from autoontology.engine import apply, build, export_job
 
-    return {"build": build.run_build, "export": export_job.run_export}
+    return {"build": build.run_build, "export": export_job.run_export, "apply": apply.run_apply}
 
 
 #: Fixed top-level steps per kind (a build's steps depend on its sources).
 TOP_STEPS: dict[str, tuple[str, ...]] = {
     "build": (),
     "export": ("collect", "serialize", "upstream", "ossie", "okf", "report"),
+    "apply": ("decisions", "merge", "snapshot"),
 }
 
 
