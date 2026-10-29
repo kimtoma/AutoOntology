@@ -19,7 +19,7 @@ import {
   fmtSeconds, fmtTime, groupSteps, humanStep, progressText, RUN_LABEL, runSeconds, STATUS_LABEL,
   stepFailure, stepLabel, stepSeconds,
 } from "@/lib/labels"
-import { t, useT } from "@/i18n"
+import { t, tn, useT } from "@/i18n"
 
 /** Append *text* to the log, keeping it scrolled to the bottom when it already was. */
 function appendLog(el: HTMLPreElement, text: string) {
@@ -169,7 +169,7 @@ function runScope(run: Run): string {
   }
   if (run.kind === "apply") {
     const n = typeof p.pending_decisions === "number" ? p.pending_decisions : null
-    return `${n != null ? ` · ${t("runSheet.scope.decisions", { n })}` : ""}${p.applied_revision ? ` · ${t("runSheet.scope.revision", { revision: String(p.applied_revision) })}` : ""}`
+    return `${n != null ? ` · ${tn("runSheet.scope.decisions", n)}` : ""}${p.applied_revision ? ` · ${t("runSheet.scope.revision", { revision: String(p.applied_revision) })}` : ""}`
   }
   const sources = Array.isArray(p.sources) && p.sources.length ? ` · ${p.sources.join(", ")}` : t("runSheet.scope.all")
   return `${sources}${p.resume ? t("runSheet.scope.resume") : ""}`

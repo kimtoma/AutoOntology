@@ -20,7 +20,7 @@ import { keys, REVIEW_POLL_MS, retryServerErrors, useOntology, usePendingCount }
 import { useRunEnd } from "@/hooks/use-run-events"
 import { useBuildChanged, useReviewActions } from "@/hooks/use-review"
 import { useNow } from "@/hooks/use-now"
-import { fmtDate, fmtNumber, useT, type MessageKey } from "@/i18n"
+import { fmtDate, fmtNumber, tn, useT, type MessageKey } from "@/i18n"
 import { api, errorMessage, WAITING_CATEGORIES, type OntologySummary, type RunRequest } from "@/lib/api"
 import { isActiveRun } from "@/lib/checklist"
 import { fmtSeconds, RUN_LABEL, runSeconds } from "@/lib/labels"
@@ -47,7 +47,7 @@ function OpsCard({ id, title, action, children, className }: {
 function num(v: unknown): number { return typeof v === "number" ? v : 0 }
 
 /** ① Revision, when it was built, the counts and the change since the previous revision. */
-function OntologyCard({ o, now }: { o: OntologySummary; now: number }) {
+function OntologyCard({ o, now, className }: { o: OntologySummary; now: number; className?: string }) {
   const t = useT()
   const diff = useQuery({ queryKey: keys.diff(null, null), queryFn: () => api.diff(), retry: retryServerErrors,
                           refetchInterval: POLL })
@@ -61,7 +61,7 @@ function OntologyCard({ o, now }: { o: OntologySummary; now: number }) {
   ]
   const d = diff.data ? deltaSummary(diff.data) : null
   return (
-    <OpsCard id="ops-ontology" title={t("overview.ontology")}
+    <OpsCard id="ops-ontology" title={t("overview.ontology")} className={className}
              action={<Button size="sm" variant="ghost" asChild><Link to="/ontology"><BookOpen aria-hidden /> {t("nav.ontology")}</Link></Button>}>
       <div className="flex flex-wrap items-center gap-2 text-sm" id="ops-revision" data-revision={o.revision}>
         <Badge variant="secondary" className="font-normal tabular-nums">{t("overview.ontology.revision", { n: o.revision })}</Badge>
@@ -91,8 +91,8 @@ function OntologyCard({ o, now }: { o: OntologySummary; now: number }) {
                   <span className="font-medium tabular-nums" data-delta="changed">{t("overview.delta.changed", { n: d.changed })}</span>
                 </>
               )}
-              {d.axioms > 0 && <span className="text-xs text-muted-foreground">{t("overview.delta.axioms", { n: d.axioms })}</span>}
-              {d.merges > 0 && <span className="text-xs text-muted-foreground">{t("overview.delta.merges", { n: d.merges })}</span>}
+              {d.axioms > 0 && <span className="text-xs text-muted-foreground">{tn("overview.delta.axioms", d.axioms)}</span>}
+              {d.merges > 0 && <span className="text-xs text-muted-foreground">{tn("overview.delta.merges", d.merges)}</span>}
               <Button size="sm" variant="link" className="h-auto px-0" asChild>
                 <Link to={`/ontology?changed=${o.revision}`} id="btn-view-changes">{t("overview.viewChanges")} <ArrowRight aria-hidden /></Link>
               </Button>
@@ -104,7 +104,7 @@ function OntologyCard({ o, now }: { o: OntologySummary; now: number }) {
 }
 
 /** ② Counts per review category and the first five items, decided in place. */
-function ConfirmCard({ onBuild }: { onBuild: (sources: string[]) => void }) {
+function ConfirmCard({ onBuild, className }: { onBuild: (sources: string[]) => void; className?: string }) {
   const t = useT()
   const pending = usePendingCount()
   const top = useQuery({ queryKey: keys.reviewPage({ overview: true }), queryFn: () => api.review({ size: 5 }),
@@ -113,7 +113,7 @@ function ConfirmCard({ onBuild }: { onBuild: (sources: string[]) => void }) {
   const counts = pending.data?.counts
   const total = counts?.total ?? 0
   return (
-    <OpsCard id="ops-review" title={t("overview.confirm")}
+    <OpsCard id="ops-review" title={t("overview.confirm")} className={className}
              action={<Button size="sm" variant="ghost" asChild><Link to="/review" id="btn-open-review">{t("overview.confirm.open")} <ArrowRight aria-hidden /></Link></Button>}>
       {counts && (
         <ul className="flex flex-wrap gap-1.5" id="ops-review-counts">
@@ -148,12 +148,14 @@ function ConfirmCard({ onBuild }: { onBuild: (sources: string[]) => void }) {
 }
 
 /** ③ Each source's freshness, and a resume build of the changed ones. */
-function SourcesCard({ onBuild, building, now }: { onBuild: (s: string[]) => void; building: boolean; now: number }) {
+function SourcesCard({ onBuild, building, now, className }: {
+  onBuild: (s: string[]) => void; building: boolean; now: number; className?: string
+}) {
   const t = useT()
   const fresh = useQuery({ queryKey: keys.freshness, queryFn: () => api.freshness(), refetchInterval: POLL })
   const stale = staleSources(fresh.data?.sources)
   return (
-    <OpsCard id="ops-sources" title={t("overview.sources")}
+    <OpsCard id="ops-sources" title={t("overview.sources")} className={className}
              action={<Button size="sm" variant="ghost" asChild><Link to="/sources">{t("overview.sources.manage")}</Link></Button>}>
       {fresh.error ? <ErrorState error={fresh.error} onRetry={() => fresh.refetch()} />
         : !fresh.data ? <Skeleton className="h-20" />
@@ -189,12 +191,12 @@ function SourcesCard({ onBuild, building, now }: { onBuild: (s: string[]) => voi
 }
 
 /** ④ The last five runs (builds, exports, applies) in plain words. */
-function ActivityCard({ onOpen, now }: { onOpen: (id: string) => void; now: number }) {
+function ActivityCard({ onOpen, now, className }: { onOpen: (id: string) => void; now: number; className?: string }) {
   const t = useT()
   const runs = useQuery({ queryKey: keys.runs, queryFn: () => api.runs(40), refetchInterval: POLL })
   const last = (runs.data ?? []).slice(0, 5)
   return (
-    <OpsCard id="ops-activity" title={t("overview.activity")}
+    <OpsCard id="ops-activity" title={t("overview.activity")} className={className}
              action={<Button size="sm" variant="ghost" asChild><Link to="/build">{t("overview.activity.all")}</Link></Button>}>
       {runs.error ? <ErrorState error={runs.error} onRetry={() => runs.refetch()} />
         : !runs.data ? <Skeleton className="h-24" />
@@ -225,10 +227,11 @@ const NOTICE_ICON = { info: Info, warn: AlertTriangle, error: XCircle }
 
 /** ⑤ What needs doing: a failed run, unapplied decisions, changed sources, an old build, an
     export behind the latest revision. */
-function NoticesCard({ notices, onAction, busy }: {
+function NoticesCard({ notices, onAction, busy, className }: {
   notices: Notice[]
   onAction: (n: Notice) => void
   busy: boolean
+  className?: string
 }) {
   const t = useT()
   const actionLabel: Record<string, string> = {
@@ -236,14 +239,21 @@ function NoticesCard({ notices, onAction, busy }: {
   }
   // unapplied decisions get the apply banner (with its progress) instead of a plain row
   const rows = notices.filter((n) => n.id !== "unapplied")
-  return (
-    <OpsCard id="ops-notices" title={t("overview.notices")} className="lg:col-span-2">
-      <ApplyBanner />
-      {!notices.length ? (
+  if (!notices.length) {
+    // nothing to do: one quiet line, not a card
+    return (
+      <div id="ops-notices" data-empty className={className}>
+        <ApplyBanner />
         <p className="flex items-center gap-2 text-sm text-muted-foreground" id="ops-notices-none">
           <CheckCircle2 className="size-4 text-success" aria-hidden /> {t("overview.notices.none")}
         </p>
-      ) : rows.length > 0 && (
+      </div>
+    )
+  }
+  return (
+    <OpsCard id="ops-notices" title={t("overview.notices")} className={cn("gap-3", className)}>
+      <ApplyBanner />
+      {rows.length > 0 && (
         <ul className="grid gap-2" id="ops-notices-list">
           {rows.map((n) => {
             const Icon = NOTICE_ICON[n.tone]
@@ -252,7 +262,11 @@ function NoticesCard({ notices, onAction, busy }: {
                   className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm">
                 <Icon className={cn("size-4 shrink-0", n.tone === "error" ? "text-destructive" : n.tone === "warn" ? "text-warning" : "text-muted-foreground")} aria-hidden />
                 <span className="min-w-0 flex-1">{n.text}</span>
-                {n.action && n.action !== "apply" && (
+                {n.action === "open-build" ? (
+                  <Button size="sm" variant="outline" asChild data-notice-action={n.action}>
+                    <Link to="/build"><Hammer aria-hidden /> {t("overview.openBuild")}</Link>
+                  </Button>
+                ) : n.action && n.action !== "apply" && (
                   <Button size="sm" variant="outline" disabled={busy && n.action !== "open-run"} data-notice-action={n.action}
                           onClick={() => onAction(n)}>
                     {n.action === "export" ? <Download aria-hidden /> : n.action === "build" ? <Hammer aria-hidden /> : null}
@@ -299,12 +313,17 @@ export function OverviewDashboard({ ontology }: { ontology: OntologySummary }) {
   return (
     <>
       <PageHeader title={t("overview.title")} description={t("overview.description")} />
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2" id="overview">
-        <OntologyCard o={ontology} now={now} />
-        <ConfirmCard onBuild={(s) => build.mutate(s)} />
-        <SourcesCard onBuild={(s) => build.mutate(s)} building={build.isPending || active?.kind === "build"} now={now} />
-        <ActivityCard onOpen={setRunId} now={now} />
-        <NoticesCard notices={notices} onAction={onAction} busy={busy} />
+      {/* DOM order = phone order: what to do, the ontology, what needs a person, sources,
+          activity. On wide screens the left column stacks Ontology, Sources and Activity and
+          the confirmation card spans those rows on the right (no stretched cards). */}
+      <div id="overview"
+           className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2 lg:grid-rows-[auto_auto_auto_1fr] lg:items-start">
+        <NoticesCard notices={notices} onAction={onAction} busy={busy} className="lg:col-span-2 lg:row-start-1" />
+        <OntologyCard o={ontology} now={now} className="lg:col-start-1 lg:row-start-2" />
+        <ConfirmCard onBuild={(s) => build.mutate(s)} className="lg:col-start-2 lg:row-span-3 lg:row-start-2" />
+        <SourcesCard onBuild={(s) => build.mutate(s)} building={build.isPending || active?.kind === "build"} now={now}
+                     className="lg:col-start-1 lg:row-start-3" />
+        <ActivityCard onOpen={setRunId} now={now} className="lg:col-start-1 lg:row-start-4" />
       </div>
       <RunSheet runId={runId} onClose={() => setRunId(null)} />
     </>

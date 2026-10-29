@@ -23,13 +23,15 @@ export function ago(iso: string | null | undefined, now: number = Date.now()): s
   if (s < 60) return t("ago.now")
   if (s < 3600) return t("ago.m", { n: Math.floor(s / 60) })
   if (s < 86400) return t("ago.h", { n: Math.floor(s / 3600) })
-  return t("ago.d", { n: Math.floor(s / 86400) })
+  return tn("ago.d", Math.floor(s / 86400))
 }
 
 /** One freshness reason in plain words: "3 files added", "the database schema changed". */
-export function reasonText(r: FreshnessReason): string {
-  if (r.kind === "files_added" || r.kind === "files_changed" || r.kind === "files_removed") {
-    return tn(`fresh.${r.kind}`, r.count)
+export function reasonText(r: FreshnessReason, first = false): string {
+  if (r.kind === "files_added") return tn("fresh.files_added", r.count)
+  if (r.kind === "files_changed" || r.kind === "files_removed") {
+    // the noun goes on the first reason only: "3 files added, 1 changed" / "2 files changed"
+    return tn(first ? `fresh.${r.kind}.first` : `fresh.${r.kind}`, r.count)
   }
   const key = `fresh.${r.kind}` as MessageKey
   const text = t(key)
@@ -39,7 +41,7 @@ export function reasonText(r: FreshnessReason): string {
 /** Every reason of a source: "3 files added, 1 changed"; an unknown state names the error. */
 export function freshnessText(row: SourceFreshness): string {
   if (row.state === "unknown") return t("fresh.unknown", { error: row.error ?? "?" })
-  return row.reasons.map(reasonText).join(", ")
+  return row.reasons.map((r, i) => reasonText(r, i === 0)).join(", ")
 }
 
 /** Sources a resume build should cover (stale or never built; unknown ones are left out). */
@@ -67,7 +69,9 @@ export function previousRevision(revisions: RevisionEntry[] | undefined, revisio
   return older.length ? Math.max(...older) : null
 }
 
-export type NoticeAction = "apply" | "export" | "build" | "open-run"
+/** build = a resume build of the changed sources; open-build = the Build page (an old build
+    with no changed source: a resume build would be a no-op) */
+export type NoticeAction = "apply" | "export" | "build" | "open-build" | "open-run"
 export interface Notice {
   id: "old-build" | "unapplied" | "export" | "stale" | "failed"
   tone: "info" | "warn" | "error"
@@ -106,7 +110,10 @@ export function opsNotices(input: NoticeInput): Notice[] {
   const builtAt = lastBuild?.finished_at ?? lastBuild?.started_at ?? input.ontology?.created_at
   if (builtAt) {
     const days = Math.floor((now - new Date(builtAt).getTime()) / DAY_MS)
-    if (days >= OLD_BUILD_DAYS) out.push({ id: "old-build", tone: "info", action: "build", text: t("overview.notice.oldBuild", { days }) })
+    if (days >= OLD_BUILD_DAYS) {
+      out.push({ id: "old-build", tone: "info", action: stale > 0 ? "build" : "open-build",
+                 text: tn("overview.notice.oldBuild", days) })
+    }
   }
   if (input.ontology && input.exports) {
     const latest = latestExport(input.exports)

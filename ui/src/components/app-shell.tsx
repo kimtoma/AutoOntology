@@ -57,7 +57,16 @@ function ReviewBadge({ sr = false }: { sr?: boolean }) {
   const n = data?.pending ?? 0
   if (!n) return null
   // the visible badge sits outside the link; the link itself carries the count for readers
-  if (sr) return <span className="sr-only"> ({t("nav.review.badge", { n })})</span>
+  if (sr) {
+    return (
+      <>
+        <span className="sr-only"> ({t("nav.review.badge", { n })})</span>
+        {/* the collapsed (icon) sidebar hides the number badge: a dot on the icon instead */}
+        <span aria-hidden data-review-dot
+              className="absolute top-1 right-1 hidden size-2 rounded-full bg-primary group-data-[collapsible=icon]:block" />
+      </>
+    )
+  }
   return (
     <SidebarMenuBadge id="review-badge" data-count={n} aria-hidden
                       className="rounded-full bg-primary/10 text-primary">
@@ -100,7 +109,7 @@ function AppSidebar() {
                 <SidebarMenuItem key={item.path}>
                   <SidebarMenuButton asChild tooltip={item.label}
                                      isActive={isCurrent(item, pathname)}>
-                    <NavLink to={item.path} data-nav={item.id} end={item.path === "/"}
+                    <NavLink to={item.path} data-nav={item.id} end={item.path === "/"} className="relative"
                              onClick={() => isMobile && setOpenMobile(false)}>
                       <item.icon aria-hidden />
                       <span>{item.label}</span>

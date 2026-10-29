@@ -75,7 +75,7 @@ export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function Re
         )}
       </div>
       {item.concept?.definition && item.category !== "aliases" && (
-        <p className={cn("text-sm text-muted-foreground", compact && "line-clamp-2")}>{item.concept.definition}</p>
+        <p className={cn("text-sm text-muted-foreground", compact && "line-clamp-1")}>{item.concept.definition}</p>
       )}
       {item.category === "stale_sources" && item.source && (
         <p className="text-sm" data-reasons>{t("review.source.reasons", { list: freshnessText(item.source) })}</p>
@@ -130,6 +130,7 @@ export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function Re
               </Select>
             )}
             <Button size="sm" disabled={busy} data-action="accept"
+                    title={isAlignment(item) ? t("review.acceptAsRel", { relation: t(`review.rel.${relation}`) }) : undefined}
                     onClick={() => onDecide({ item, decision: "accept", relation: isAlignment(item) ? relation : undefined })}>
               {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Check aria-hidden />} {t("review.accept")}
             </Button>

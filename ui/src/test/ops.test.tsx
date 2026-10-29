@@ -4,6 +4,8 @@ import { Route, Routes } from "react-router"
 import { Toaster } from "sonner"
 
 import { AppShell } from "@/components/app-shell"
+import { CommandMenu } from "@/components/command-menu"
+import BuildPage from "@/pages/build"
 import { NAV } from "@/components/nav"
 import { setLang } from "@/i18n/core"
 import type { ReviewItem, Run } from "@/lib/api"
@@ -257,6 +259,100 @@ describe("Review page", () => {
   })
 })
 
+describe("Overview fixes", () => {
+  it("puts the notices first and acts on the top items in place", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockFetch(dashboardRoutes({
+      "POST /review/ax:c1/decision": () => ({ item: { ...item(1), decision: DECISION(1) }, decision: DECISION(1) }),
+    }))
+    renderPage(<IndexPage />)
+    const review = await screen.findByRole("region", { name: "Needs your confirmation" })
+    const ids = [...document.querySelectorAll("#overview > [id^=ops-]")].map((e) => e.id)
+    expect(ids).toEqual(["ops-notices", "ops-ontology", "ops-review", "ops-sources", "ops-activity"])
+    const card = (await within(review).findByText("계약ID1")).closest<HTMLElement>("[data-review-item]")!
+    expect(within(card).getByRole("button", { name: "Accept" })).toHaveAttribute("title", "Accept as “related to”")
+    await user.click(within(card).getByRole("button", { name: "Accept" }))
+    await waitFor(() => expect(card).toHaveAttribute("data-decided", "accept"))
+    expect(JSON.parse(String(calls.find((c) => c.method === "POST")!.init?.body))).toEqual({ decision: "accept", relation: "related" })
+    // singular counts
+    await waitFor(() => expect(document.getElementById("ops-delta")).toHaveTextContent("1 merge change"))
+  })
+
+  it("says when another run blocks the apply", async () => {
+    const user = userEvent.setup()
+    mockFetch(dashboardRoutes({
+      "POST /runs": () => json({ error: "busy", detail: "a build is running" }, 409),
+    }))
+    renderPage(<><IndexPage /><Toaster /></>)
+    await user.click(await screen.findByRole("button", { name: "Apply" }))
+    expect(await screen.findByText("Another run is active: try again when it ends.")).toBeInTheDocument()
+  })
+
+  it("links an old build with no changed source to the Build page", () => {
+    const now = new Date(NOW).getTime() + 86_400_000
+    const run: Run = { id: "b", kind: "build", status: "succeeded", started_at: NOW, finished_at: NOW, error: null,
+                       params: {}, managed: true, steps: [], progress: {}, source: null }
+    expect(opsNotices({ runs: [run], freshness: [], now: now + 6 * 86_400_000 })[0]).toMatchObject(
+      { id: "old-build", action: "open-build", text: "The last build was 7 days ago. Sources may have changed since." })
+    expect(ago(NOW, now)).toBe("1 day ago")
+  })
+})
+
+describe("Revision changes, paging, labels", () => {
+  it("lists merges taken apart and names the change kind for readers", async () => {
+    const split = { ...DIFF,
+      merges: { added: [], removed: [{ concept: "concept-b", concept_name: "계약", term: "term-c", term_name: "Contract" }],
+                totals: { added: 0, removed: 1 } },
+      axioms: { added: [], removed: [{ subject: "concept-b", kind: "related", object: "term-c", source: "alignment",
+                                       subject_name: "계약", object_name: "Contract" }], changed: [],
+                totals: { added: 0, removed: 1, changed: 0 } } }
+    mockFetch({ "GET /ontology": SUMMARY, "GET /ontology/revisions": { revisions: [] }, "GET /ontology/diff": split })
+    renderPage(<OntologyPage />, "/ontology?changed=1")
+    await waitFor(() => expect(document.querySelector("[data-changes=splits]")).not.toBeNull())
+    const group = document.querySelector<HTMLElement>("[data-changes=splits]")!
+    expect(group).toHaveTextContent("Split")
+    expect(group).toHaveTextContent("계약taken apart from Contract")
+    expect(document.querySelector("[data-changes=axioms] li")).toHaveTextContent("removed:")
+  })
+
+  it("clamps a page past the end to the last page", async () => {
+    const { calls } = mockFetch(dashboardRoutes({
+      "GET /review": (url: string) => (url.includes("page=9") ? { ...LISTING([]), page: 9, pages: 1 } : LISTING([item(1)])),
+    }))
+    renderPage(<ReviewPage />, "/review?category=axioms&page=9")
+    expect(await screen.findByText("계약ID1")).toBeInTheDocument()
+    expect(calls.filter((c) => c.path === "/review").length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText("Nothing to review")).toBeNull()
+  })
+
+  it("names an unaligned concept's action Keep separate (독립 유지)", async () => {
+    const un: ReviewItem = { ...item(5), id: "un:c5", category: "unaligned", relation: null, term: null, suggested_action: "acknowledge" }
+    mockFetch(dashboardRoutes({ "GET /review": LISTING([un]) }))
+    setLang("ko", false)
+    renderPage(<ReviewPage />, "/review?category=unaligned")
+    expect(await screen.findByRole("button", { name: "독립 유지" })).toBeInTheDocument()
+  })
+
+  it("labels apply runs on the Build page", async () => {
+    mockFetch({
+      "GET /sources": { sources: [] }, "GET /status": STATUS,
+      "GET /runs": { runs: [{ id: "a1", kind: "apply", status: "succeeded", started_at: NOW, finished_at: NOW, error: null,
+                              params: {}, managed: true, steps: [], progress: {}, source: null }] },
+    })
+    renderPage(<BuildPage />, "/build")
+    await waitFor(() => expect(document.querySelector("#runs-table tr[data-kind=apply]")).not.toBeNull())
+    const row = document.querySelector<HTMLElement>("#runs-table tr[data-kind=apply]")!
+    expect(row).toHaveTextContent("Apply decisions")
+  })
+
+  it("offers the setup guide in the command menu", async () => {
+    const user = userEvent.setup()
+    renderPage(<CommandMenu />)
+    await user.keyboard("{Control>}k{/Control}")
+    expect(await screen.findByText("Setup guide (first-run checklist)")).toBeInTheDocument()
+  })
+})
+
 describe("Navigation", () => {
   it("lists Overview and Review first and Settings last; Get started is gone", () => {
     expect(NAV.map((n) => n.id)).toEqual(
@@ -322,6 +418,9 @@ describe("Ontology page: revisions and changes", () => {
 describe("ops helpers", () => {
   it("say what changed in a source in plain words", () => {
     expect(freshnessText(FRESH.sources[1])).toBe("3 files added, 1 changed")
+    expect(freshnessText({ name: "d", kind: "documents", state: "stale", stale: true,
+                           reasons: [{ kind: "files_changed", count: 2, examples: [] }, { kind: "files_removed", count: 1, examples: [] }] }))
+      .toBe("2 files changed, 1 removed")
     expect(freshnessText({ name: "db", kind: "database", state: "stale", stale: true,
                            reasons: [{ kind: "schema_changed", count: 0, examples: [] }] })).toBe("the database schema changed")
     expect(freshnessText({ name: "x", kind: "files", state: "unknown", stale: null, reasons: [], error: "OSError" }))

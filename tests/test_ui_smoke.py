@@ -301,7 +301,7 @@ def test_home_sample_dialog_lists_the_sets(live, browser):
 
 
 @pytest.mark.parametrize("lang", ["en", "ko"])
-@pytest.mark.parametrize("name", ["mobile", "desktop"])
+@pytest.mark.parametrize("name", ["mobile", "tablet", "desktop"])
 def test_overview_renders_after_a_snapshot(live, browser, name, lang):
     url, _, summary = live
     page = new_page(browser, VIEWPORTS[name], locale="ko-KR" if lang == "ko" else "en-US")
@@ -315,19 +315,33 @@ def test_overview_renders_after_a_snapshot(live, browser, name, lang):
     page.locator("#ops-freshness [data-source], #ops-sources p").first.wait_for(timeout=30000)
     page.wait_for_timeout(300)
     assert_fits(page, f"overview {lang} at {name}")
+    # the notices (Apply, Export, an old build) come first, above the fold on a desktop;
+    # on wide screens the left column is not stretched to the confirmation card's height
+    order = page.locator("#overview > [id^=ops-]").evaluate_all("es => es.map(e => e.id)")
+    assert order == ["ops-notices", "ops-ontology", "ops-review", "ops-sources", "ops-activity"]
+    if name == "desktop":
+        notices = page.locator("#ops-notices").bounding_box()
+        assert notices["y"] + 40 < VIEWPORTS[name][1], notices
+        ontology = page.locator("#ops-ontology").bounding_box()
+        sources = page.locator("#ops-sources").bounding_box()
+        review = page.locator("#ops-review").bounding_box()
+        assert sources["y"] < ontology["y"] + ontology["height"] + 40, (ontology, sources)
+        assert abs(review["y"] - ontology["y"]) < 2 and review["x"] > ontology["x"]
     # the nav: Overview first, Review with the pending count
     if name == "mobile":
         page.get_by_role("button", name="메뉴 열기/닫기" if lang == "ko" else "Toggle menu").click()
         links = page.locator("[data-mobile=true] a[data-nav]")
     else:
         links = page.locator("a[data-nav]")
-    links.first.wait_for()
+    links.first.wait_for(state="attached")  # tablet: the sidebar starts collapsed
     assert links.evaluate_all("as => as.map(a => a.dataset.nav)") == list(NAV_IDS)
     pending = httpx.get(f"{url}/api/review/pending-count").json()["pending"]
     if pending:
         badge = page.locator("#review-badge").first
-        badge.wait_for()
+        badge.wait_for(state="attached")
         assert badge.get_attribute("data-count") == str(pending)
+        if name == "tablet":  # collapsed sidebar: the number is hidden, a dot shows instead
+            page.locator("a[data-nav=review] [data-review-dot]").first.wait_for()
     assert page.errors == []
     page.close()
 

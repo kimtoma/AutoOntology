@@ -58,12 +58,13 @@ export function RevisionChanges({ from, to, onOpen }: {
     </li>
   )
   const axioms = [
-    ...d.axioms.added.map((a) => ({ ...a, how: "+" })),
-    ...d.axioms.changed.map((a) => ({ ...a, how: "~" })),
-    ...d.axioms.removed.map((a) => ({ ...a, how: "−" })),
+    ...d.axioms.added.map((a) => ({ ...a, how: "+", word: t("ontology.changed.how.added") })),
+    ...d.axioms.changed.map((a) => ({ ...a, how: "~", word: t("ontology.changed.how.changed") })),
+    ...d.axioms.removed.map((a) => ({ ...a, how: "−", word: t("ontology.changed.how.removed") })),
   ]
   const axTotal = d.axioms.totals.added + d.axioms.totals.removed + (d.axioms.totals.changed ?? 0)
   const merges = d.merges.added
+  const splits = d.merges.removed
   const nothing = !d.classes.totals.added && !d.classes.totals.removed && !d.classes.totals.changed && !axTotal
     && !d.merges.totals.added && !d.merges.totals.removed
   return (
@@ -90,11 +91,22 @@ export function RevisionChanges({ from, to, onOpen }: {
           </li>
         ))}
       </Group>
+      <Group id="splits" title={t("ontology.changed.splits")} total={d.merges.totals.removed} shown={splits.length}>
+        {splits.map((m) => (
+          <li key={`${m.concept}-${m.term}`} className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
+            <button type="button" className="font-medium underline-offset-4 hover:underline" onClick={() => onOpen(m.concept)}>
+              {m.concept_name}
+            </button>
+            <span className="text-xs text-muted-foreground">{t("ontology.changed.splitFrom", { term: m.term_name || m.term })}</span>
+          </li>
+        ))}
+      </Group>
       <Group id="axioms" title={t("ontology.changed.axioms")} total={axTotal} shown={axioms.length}>
         {axioms.map((a) => (
           <li key={`${a.how}${a.subject}-${a.kind}-${a.object}-${a.source}`} data-how={a.how}
               className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
             <span aria-hidden className="w-3 text-center font-mono text-muted-foreground">{a.how}</span>
+            <span className="sr-only">{a.word}: </span>
             {isConcept(a.subject)
               ? <button type="button" className="font-medium underline-offset-4 hover:underline" onClick={() => onOpen(a.subject)}>{a.subject_name || a.subject}</button>
               : <span className="font-medium">{a.subject_name || a.subject}</span>}

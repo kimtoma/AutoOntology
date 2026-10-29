@@ -73,9 +73,11 @@ const isConcept = (id: string) => /^(term|concept)-/.test(id)
 /** The concept detail sections (Ontology sheet, graph detail panel). *omitBasics* drops the
     definition / synonyms when the caller already shows them. *onOpen* makes linked concepts
     (relations, alignments, the Term a concept folds into) clickable. */
-export function ConceptBody({ c, omitBasics = false, onOpen }: {
+export function ConceptBody({ c, omitBasics = false, onOpen, hideDecisions = false }: {
   c: ConceptDetail
   omitBasics?: boolean
+  /** an older revision: the decisions are today's, not that revision's */
+  hideDecisions?: boolean
   onOpen?: (id: string) => void
 }) {
   const t = useT()
@@ -169,7 +171,7 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
           </ul>
         ) : <p className="text-sm text-muted-foreground">{t("concept.noAlignment")}</p>}
       </Section>
-      <DecisionState c={c} />
+      {!hideDecisions && <DecisionState c={c} />}
       {c.relations.length > 0 && (
         <Section title={t("concept.relations", { n: c.relations.length })} id="relations">
           <ul className="grid gap-1 text-sm">
@@ -294,7 +296,7 @@ export function ConceptSheet({ conceptId, onClose, onOpen, revision }: {
           <div className="p-4">
             {q.error ? <ErrorState error={q.error} onRetry={() => q.refetch()} />
               : !c ? <div className="grid gap-3"><Skeleton className="h-5 w-1/2" /><Skeleton className="h-20" /><Skeleton className="h-32" /></div>
-              : <ConceptBody c={c} onOpen={onOpen} />}
+              : <ConceptBody c={c} onOpen={onOpen} hideDecisions={!!revision} />}
           </div>
         </ScrollArea>
       </SheetContent>

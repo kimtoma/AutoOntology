@@ -271,6 +271,12 @@ describe("Settings page", () => {
     expect(screen.getByRole("button", { name: "테스트" })).toBeInTheDocument()
   })
 
+  it("links the setup guide (the first-run checklist)", async () => {
+    mockFetch({ "GET /settings": settings() })
+    renderPage(<SettingsPage />)
+    expect(await screen.findByRole("link", { name: /Setup guide/ })).toHaveAttribute("href", "/setup")
+  })
+
   it("has a nav entry after Status", () => {
     const paths = NAV.map((n) => n.path)
     expect(paths.slice(-2)).toEqual(["/status", "/settings"])
