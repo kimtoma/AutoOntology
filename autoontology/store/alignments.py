@@ -42,6 +42,10 @@ class AlignmentRecord:
     proposal: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
     id: int | None = None
+    #: the judge's verdict a review decision replaced on this row ({relation, term_id,
+    #: term_name, confidence, rationale, accepted, proposal, judge_key}); restored when the
+    #: decision is removed. Empty on rows no decision touched (committed table only).
+    judged: dict[str, Any] = field(default_factory=dict)
 
 
 def _dumps(value: Any) -> str:
@@ -69,6 +73,7 @@ def _record(row: sqlite3.Row) -> AlignmentRecord:
         proposal=json.loads(row["proposal_json"] or "{}"),
         run_id=row["run_id"],
         created_at=row["created_at"],
+        judged=json.loads(row["judged_json"] or "{}") if "judged_json" in row.keys() else {},
     )
 
 
@@ -149,6 +154,11 @@ class AlignmentStore:
                     ts,
                 ),
             )
+            if record.judged and not record.dry_run:
+                conn.execute(
+                    "UPDATE alignments SET judged_json = ? WHERE id = ?",
+                    (_dumps(record.judged), cur.lastrowid),
+                )
             row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _record(row)
 

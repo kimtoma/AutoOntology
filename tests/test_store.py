@@ -157,6 +157,7 @@ def test_schema_has_every_table_and_no_playground_tests(store):
         "term_alias_additions",
         "term_refresh_pending",
         "term_legacy_descriptions",
+        "review_decisions",
         "playground_index",
         "playground_index_meta",
         "playground_conversations",
@@ -164,7 +165,7 @@ def test_schema_has_every_table_and_no_playground_tests(store):
         "schema_version",
     } <= tables
     assert not {"playground_tests", "playground_test_runs", "ontology_revision"} & tables
-    assert {"dry_run", "proposal_json"} <= cols and "incomplete" in msg_cols
+    assert {"dry_run", "proposal_json", "judged_json"} <= cols and "incomplete" in msg_cols
     assert "scope" in conv_cols and "source_id" not in conv_cols  # v2: workspace-scoped
     assert store.schema_version() == MIGRATIONS[-1][0]
 
@@ -223,6 +224,8 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
     conn.execute("DROP TABLE term_legacy_descriptions")
     conn.execute("DELETE FROM schema_version WHERE version >= 4")  # back to a v3 store
     conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
+    conn.execute("DROP TABLE review_decisions")
+    conn.execute("ALTER TABLE alignments DROP COLUMN judged_json")
     for i, applied in enumerate(
         [
             {"term_id": "t-old", "description_set": True},

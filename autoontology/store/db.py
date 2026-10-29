@@ -393,6 +393,30 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE documents ADD COLUMN reader_fingerprint TEXT NOT NULL DEFAULT ''
         """,
     ),
+    (
+        6,
+        # Schema v6: review_decisions = a person's decision on a review item (an alignment
+        # verdict, a rejected alias, an unaligned concept), one per (kind, subject_key); it
+        # overrides the align judge on every later pass and is reflected in the next
+        # snapshot by an `apply` run (applied_revision). alignments.judged_json = the
+        # judge's verdict a decision replaced on that row, restored when the decision is
+        # removed ('{}' on rows no decision touched).
+        """
+        CREATE TABLE IF NOT EXISTS review_decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL CHECK (kind IN ('alignment', 'alias', 'concept')),
+            subject_key TEXT NOT NULL,
+            decision TEXT NOT NULL CHECK (decision IN ('accept', 'reject', 'acknowledge')),
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            note TEXT NOT NULL DEFAULT '',
+            decided_by TEXT NOT NULL DEFAULT 'local',
+            decided_at TEXT NOT NULL,
+            applied_revision INTEGER,
+            UNIQUE (kind, subject_key)
+        );
+        ALTER TABLE alignments ADD COLUMN judged_json TEXT NOT NULL DEFAULT '{}'
+        """,
+    ),
 ]
 
 #: Seconds a lease stays valid without a heartbeat (the holder refreshes it every third).
