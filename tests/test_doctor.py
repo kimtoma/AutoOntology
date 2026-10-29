@@ -364,3 +364,13 @@ def test_every_fail_or_warn_row_has_a_remedy(isolated_env, monkeypatch, chat):
 def test_missing_env_file_points_at_init(isolated_env):
     check = doctor.check_env_file()
     assert check.status == "WARN" and "autoontology init" in check.remedy
+
+
+def test_no_think_remedy_names_an_existing_setup_flag(monkeypatch):
+    """`setup` has --force-alias, not --force: the remedy must be runnable as printed."""
+    from autoontology.engine import ollama
+
+    monkeypatch.setattr(ollama, "chat_probe", lambda endpoint, model: ("thinking…", 999))
+    check = doctor.check_no_think(Settings.from_env())
+    assert check.status == "FAIL"
+    assert check.remedy == "uv run autoontology setup --force-alias"

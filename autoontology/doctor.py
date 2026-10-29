@@ -475,10 +475,10 @@ def check_no_think(settings: Settings) -> Check:
             name,
             "FAIL",
             detail + f" (max {ollama.MAX_PROBE_COMPLETION_TOKENS})",
-            f"{SETUP_OLLAMA} --force",
+            f"{SETUP_OLLAMA} --force-alias",
         )
 
-    return _with_timeout(name, run, MODEL_CHECK_TIMEOUT_S, f"{SETUP_OLLAMA} --force")
+    return _with_timeout(name, run, MODEL_CHECK_TIMEOUT_S, f"{SETUP_OLLAMA} --force-alias")
 
 
 def check_vector_tables(settings: Settings) -> Check:
