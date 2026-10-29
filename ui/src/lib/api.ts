@@ -26,7 +26,7 @@ export const NETWORK_HINT = "Cannot reach the AutoOntology service (uv run autoo
 
 /** files / database = structured sources; documents = unstructured. */
 export type SourceKind = "files" | "database" | "documents"
-export type RunKind = "build" | "export"
+export type RunKind = "build" | "export" | "apply"
 export type RunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "skipped"
 
 export interface RunRef {
@@ -81,6 +81,8 @@ export type ExportFormat = "all" | "rdf" | "ossie" | "okf"
 export type RunRequest =
   | { kind: "build"; sources?: string[] | null; resume?: boolean }
   | { kind: "export"; revision?: number | null; format?: ExportFormat }
+  /** review decisions -> merge -> snapshot, no model call (engine/apply.py) */
+  | { kind: "apply" }
 
 /* --- ontology snapshot -------------------------------------------------------------------- */
 
@@ -180,6 +182,134 @@ export interface ConceptDetail extends ConceptItem {
   relations: ConceptRelation[]
   alignments: AlignmentLink[]
   evidence: Evidence[]
+  /** review decisions about this concept (web/concept_decisions.py; older services: absent) */
+  decisions?: ConceptDecision[]
+}
+
+export interface ConceptDecision {
+  kind: DecisionKind
+  decision: DecisionValue
+  relation: string | null
+  alias: string | null
+  term: { id: string; name: string } | null
+  note: string
+  decided_by: string
+  decided_at: string
+  applied_revision: number | null
+  item_id: string
+}
+
+/* --- review inbox, revisions, freshness (web/review.py, revisions.py, freshness.py) -------- */
+
+export type ReviewCategory = "proposals" | "axioms" | "unaligned" | "aliases" | "stale_sources"
+export const REVIEW_CATEGORIES: ReviewCategory[] = ["proposals", "axioms", "unaligned", "aliases", "stale_sources"]
+export type DecisionKind = "alignment" | "alias" | "concept"
+export type DecisionValue = "accept" | "reject" | "acknowledge"
+export type AcceptRelation = "same" | "related" | "narrower" | "broader"
+
+export interface Decision {
+  id: number
+  kind: DecisionKind
+  subject_key: string
+  decision: DecisionValue
+  relation: string | null
+  payload: Record<string, unknown>
+  note: string
+  decided_by: string
+  decided_at: string
+  applied_revision: number | null
+}
+
+export type FreshnessReasonKind =
+  | "files_added" | "files_changed" | "files_removed" | "schema_changed" | "reader_changed"
+  | "inputs_changed" | "never_built"
+export interface FreshnessReason { kind: FreshnessReasonKind | string; count: number; examples: string[] }
+export interface SourceFreshness {
+  name: string
+  kind: SourceKind | string
+  /** fresh | stale | never_built | unknown */
+  state: string
+  stale: boolean | null
+  reasons: FreshnessReason[]
+  last_built_at?: string | null
+  last_inputs_sha?: string | null
+  error?: string
+}
+export interface FreshnessList { sources: SourceFreshness[]; stale: number; age_s: number; cache_s: number }
+
+export interface ReviewItem {
+  /** al:<concept> | ax:<concept> | un:<concept> | alias:<term>|<alias> | src:<source> */
+  id: string
+  category: ReviewCategory
+  concept: { id: string; node: string; name: string; kind: string; source: string; definition: string } | null
+  term: { id: string; node: string; name: string } | null
+  relation: string | null
+  confidence: number | null
+  rationale?: string
+  evidence?: { quote: string; document: string; path?: string; page: number | null; verified?: boolean }[]
+  suggested_action: "accept" | "reject" | "acknowledge" | "build"
+  candidates?: { id: string; name: string; similarity: number }[]
+  decision: Decision | null
+  /** proposals: the policy refusal; aliases: why it was kept off (column_name, ...) */
+  reason?: string
+  /** unaligned: new since the previous revision */
+  new?: boolean
+  /** aliases */
+  alias?: string
+  /** stale_sources */
+  source?: SourceFreshness
+}
+
+export type ReviewCounts = Record<ReviewCategory, number> & { total: number }
+export type ReviewStatus = "pending" | "decided" | "all"
+
+export interface ReviewListing {
+  revision: number | null
+  counts: ReviewCounts
+  unapplied: number
+  status: ReviewStatus
+  category: ReviewCategory | null
+  page: number
+  size: number
+  total: number
+  pages: number
+  items: ReviewItem[]
+}
+
+export interface PendingCount { pending: number; counts: ReviewCounts; unapplied: number }
+
+export interface DecisionRequest {
+  decision: DecisionValue
+  relation?: AcceptRelation
+  term_id?: string
+  note?: string
+}
+
+export interface RevisionEntry {
+  revision: number
+  created_at: string
+  run_id: string
+  /** build | apply */
+  run_kind: string | null
+  counts: Record<string, number>
+  sources: { name: string; kind: string; included: boolean }[]
+}
+
+export interface DiffNode { id: string; name: string; type?: string; kind?: string; fields?: string[] }
+export interface DiffAxiom {
+  subject: string; kind: string; object: string; source: string; accepted?: boolean; fields?: string[]
+  subject_name?: string; object_name?: string
+}
+export interface DiffMerge { concept: string; concept_name: string; term: string; term_name?: string }
+export interface DiffTotals { added: number; removed: number; changed?: number }
+export interface OntologyDiff {
+  from: number | null
+  to: number
+  classes: { added: DiffNode[]; removed: DiffNode[]; changed: DiffNode[]; totals: DiffTotals }
+  axioms: { added: DiffAxiom[]; removed: DiffAxiom[]; changed: DiffAxiom[]; totals: DiffTotals }
+  merges: { added: DiffMerge[]; removed: DiffMerge[]; totals: DiffTotals }
+  sources: { added: unknown[]; removed: unknown[] }
+  counts_delta: Record<string, number>
 }
 
 /* --- graph -------------------------------------------------------------------------------- */
@@ -549,6 +679,11 @@ const json = (method: string, body: unknown): RequestInit => ({
 const enc = encodeURIComponent
 /** An export file path keeps its "/" separators; every segment is encoded (Hangul names). */
 const encPath = (p: string) => p.split("/").map(enc).join("/")
+/** A review item id in a URL path: `alias:<term>|<alias>` keeps its prefix readable. */
+const encItem = (id: string) => {
+  const i = id.indexOf(":")
+  return i < 0 ? enc(id) : `${id.slice(0, i)}:${enc(id.slice(i + 1))}`
+}
 
 export interface ConceptQuery {
   q?: string
@@ -591,7 +726,31 @@ export const api = {
   cancelRun: (id: string) =>
     request<{ run_id: string; cancel_requested: boolean }>(`/runs/${enc(id)}/cancel`, { method: "POST" }),
   runEventsUrl: (id: string) => `${API}/runs/${enc(id)}/events`,
-  ontology: () => request<OntologySummary>("/ontology"),
+  ontology: (revision?: number | null) =>
+    request<OntologySummary>(`/ontology${revision ? `?revision=${revision}` : ""}`),
+  revisions: (limit = 50) =>
+    request<{ revisions: RevisionEntry[] }>(`/ontology/revisions?limit=${limit}`).then((r) => r.revisions),
+  /** Defaults: *to* = the latest revision, *from* = the one before it. */
+  diff: (from?: number | null, to?: number | null) => {
+    const sp = new URLSearchParams()
+    if (from) sp.set("from", String(from))
+    if (to) sp.set("to", String(to))
+    const qs = sp.toString()
+    return request<OntologyDiff>(`/ontology/diff${qs ? `?${qs}` : ""}`)
+  },
+  freshness: (refresh = false) => request<FreshnessList>(`/sources/freshness${refresh ? "?refresh=1" : ""}`),
+  review: (params: { category?: ReviewCategory | null; status?: ReviewStatus; page?: number; size?: number } = {}) => {
+    const sp = new URLSearchParams({ status: params.status ?? "pending", page: String(params.page ?? 1),
+                                     size: String(params.size ?? 20) })
+    if (params.category) sp.set("category", params.category)
+    return request<ReviewListing>(`/review?${sp}`)
+  },
+  pendingCount: () => request<PendingCount>("/review/pending-count"),
+  /** Item ids keep their ":" and "|" (the route takes a path); each part is encoded. */
+  decide: (itemId: string, body: DecisionRequest) =>
+    request<{ item: ReviewItem; decision: Decision }>(`/review/${encItem(itemId)}/decision`, json("POST", body)),
+  undoDecision: (itemId: string) =>
+    request<{ removed: string }>(`/review/${encItem(itemId)}/decision`, { method: "DELETE" }),
   concepts: (params: ConceptQuery) => {
     const sp = new URLSearchParams({ page: String(params.page ?? 1), size: String(params.size ?? 30) })
     for (const k of ["q", "kind", "origin", "source"] as const) {

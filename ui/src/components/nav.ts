@@ -1,6 +1,7 @@
 import { t, type MessageKey } from "@/i18n/core"
 import {
-  Activity, BookOpen, Database, Download, FlaskConical, Hammer, Network, Rocket, Settings, type LucideIcon,
+  Activity, BookOpen, Database, Download, FlaskConical, Hammer, Inbox, LayoutDashboard, Network, Rocket,
+  Settings, type LucideIcon,
 } from "lucide-react"
 
 export interface NavItem { path: string; label: string; icon: LucideIcon; hint: string; id: string }
@@ -15,7 +16,8 @@ function item(path: string, icon: LucideIcon, id: string): NavItem {
 }
 
 export const NAV: NavItem[] = [
-  item("/", Rocket, "home"),
+  item("/", LayoutDashboard, "overview"),
+  item("/review", Inbox, "review"),
   item("/sources", Database, "sources"),
   item("/build", Hammer, "build"),
   item("/ontology", BookOpen, "ontology"),
@@ -25,6 +27,10 @@ export const NAV: NavItem[] = [
   item("/status", Activity, "status"),
   item("/settings", Settings, "settings"),
 ]
+
+/** Not in the sidebar: the first-run checklist (Settings and the command menu link it; `/`
+    shows it by itself while nothing is built). */
+export const SETUP: NavItem = item("/setup", Rocket, "setup")
 
 /** Whether *item* is the current page ("/" only on the home page itself). */
 export const isCurrent = (item: NavItem, pathname: string) =>

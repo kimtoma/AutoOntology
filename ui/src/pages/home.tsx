@@ -147,7 +147,7 @@ export default function HomePage() {
   const interval = () => (allDone(cachedStates(qc)) ? false : POLL_MS)
   const status = useQuery({ queryKey: keys.status, queryFn: api.status, refetchInterval: interval })
   const sources = useQuery({ queryKey: keys.sources, queryFn: api.sources, refetchInterval: interval })
-  const ontology = useQuery({ queryKey: keys.ontology, queryFn: api.ontology, retry: retryServerErrors,
+  const ontology = useQuery({ queryKey: keys.ontology, queryFn: () => api.ontology(), retry: retryServerErrors,
                               refetchInterval: interval })
   const runs = useQuery({ queryKey: keys.runs, queryFn: () => api.runs(40), refetchInterval: interval })
   const exports = useQuery({ queryKey: keys.exports, queryFn: api.exports, refetchInterval: interval })

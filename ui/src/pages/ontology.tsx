@@ -1,11 +1,12 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
-import { BookOpen, ChevronLeft, ChevronRight, Hammer, Search } from "lucide-react"
+import { BookOpen, ChevronLeft, ChevronRight, GitCompare, Hammer, History, Search } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Link, useSearchParams } from "react-router"
 
 import { ConceptSheet, OriginBadge, RelationChip } from "@/components/concept-sheet"
 import { EmptyState, ErrorState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
+import { RevisionChanges } from "@/components/revision-changes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,7 +18,7 @@ import { keys, retryServerErrors, useOntology } from "@/hooks/queries"
 import { useDebounced } from "@/hooks/use-debounced"
 import { api, isNoSnapshot, type OntologySummary } from "@/lib/api"
 import { fmtDate, fmtNumber, t, tn, useT } from "@/i18n"
-import { CKIND_LABEL, ORIGIN_LABEL } from "@/lib/labels"
+import { CKIND_LABEL, ORIGIN_LABEL, RUN_LABEL } from "@/lib/labels"
 
 const ALL = "__all"
 const KINDS = ["term", "entity", "metric", "attribute", "process", "rule", "other"]
@@ -76,6 +77,8 @@ export default function OntologyPage() {
   const origin = params.get("origin") ?? ""
   const page = Math.max(1, Number(params.get("page") ?? 1) || 1)
   const conceptId = params.get("concept")
+  const revisionParam = Number(params.get("revision")) || null
+  const changed = !!params.get("changed")
   const debounced = useDebounced(q.trim(), 300)
 
   const update = (patch: Record<string, string | null>) => {
@@ -92,13 +95,22 @@ export default function OntologyPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced])
 
-  const ontology = useOntology()
-  const query = { q: params.get("q") ?? "", kind, origin, page, size: SIZE }
+  const latestSummary = useOntology()
+  const revisions = useQuery({ queryKey: keys.revisions, queryFn: () => api.revisions(50), retry: retryServerErrors })
+  const latest = revisions.data?.[0]?.revision ?? latestSummary.data?.revision ?? null
+  // the latest revision is never pinned in the URL: a new build moves the page along
+  const revision = revisionParam && revisionParam !== latest ? revisionParam : null
+  const older = useQuery({ queryKey: [...keys.ontology, revision], queryFn: () => api.ontology(revision),
+                           enabled: !!revision, retry: retryServerErrors })
+  const ontology = revision ? older : latestSummary
+  const shown = revision ?? latest
+  const query = { q: params.get("q") ?? "", kind, origin, page, size: SIZE, revision }
   const concepts = useQuery({
     queryKey: keys.concepts(query),
     queryFn: () => api.concepts(query),
     placeholderData: keepPreviousData,
     retry: retryServerErrors,
+    enabled: !changed,
   })
   const noSnapshot = isNoSnapshot(ontology.error) || isNoSnapshot(concepts.error)
   // a stale ?page past the end (the list shrank after a rebuild): go to the last page
@@ -120,6 +132,43 @@ export default function OntologyPage() {
           {ontology.error ? <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />
             : ontology.data ? <Summary o={ontology.data} />
             : <Skeleton className="mb-6 h-28" />}
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center" id="revision-bar">
+            <Select value={String(shown ?? "")} onValueChange={(v) => update({ revision: Number(v) === latest ? null : v, page: null, concept: null })}>
+              <SelectTrigger aria-label={t("ontology.revision.select")} id="revision-select" className="w-full sm:w-72">
+                <History aria-hidden /><SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(revisions.data ?? (latest ? [{ revision: latest, run_kind: null, created_at: "" }] : [])).map((r) => (
+                  <SelectItem key={r.revision} value={String(r.revision)} data-revision={r.revision}>
+                    {r.revision === latest ? t("ontology.revision.latest", { n: r.revision })
+                      : t("ontology.revision.item", { n: r.revision, kind: RUN_LABEL[r.run_kind ?? ""] ?? r.run_kind ?? "-", date: fmtDate(r.created_at) })}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex flex-wrap gap-2" role="group">
+              <Button size="sm" variant={changed ? "outline" : "secondary"} aria-pressed={!changed} id="btn-all-concepts"
+                      onClick={() => update({ changed: null })}>
+                <BookOpen aria-hidden /> {t("ontology.changed.all")}
+              </Button>
+              {shown && (
+                <Button size="sm" variant={changed ? "secondary" : "outline"} aria-pressed={changed} id="btn-changed"
+                        onClick={() => update({ changed: "1", page: null })}>
+                  <GitCompare aria-hidden /> {t("ontology.changed", { n: shown })}
+                </Button>
+              )}
+            </div>
+          </div>
+          {revision && (
+            <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" id="old-revision">
+              {t("ontology.oldRevision", { n: revision })}
+              <Button size="sm" variant="link" className="h-auto px-0" onClick={() => update({ revision: null, concept: null })}>{t("ontology.toLatest")}</Button>
+            </p>
+          )}
+          {changed && shown ? (
+            <RevisionChanges from={null} to={shown} onOpen={(id) => update({ concept: id })} />
+          ) : (
+          <>
           <form role="search" id="concept-search" onSubmit={(e) => { e.preventDefault(); update({ q: q.trim() || null, page: null }) }}
                 className="mb-4 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
             <div className="relative">
@@ -203,9 +252,11 @@ export default function OntologyPage() {
                 )}
               </>
             )}
+          </>
+          )}
         </>
       )}
-      <ConceptSheet conceptId={conceptId} onClose={() => update({ concept: null })}
+      <ConceptSheet conceptId={conceptId} onClose={() => update({ concept: null })} revision={revision}
                     onOpen={(id) => update({ concept: id })} />
     </>
   )

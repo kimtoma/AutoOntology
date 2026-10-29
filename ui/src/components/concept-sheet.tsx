@@ -16,8 +16,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { keys, retryServerErrors } from "@/hooks/queries"
-import { api, type ConceptDetail, type Origin } from "@/lib/api"
-import { type MessageKey, t, tx, useT } from "@/i18n"
+import { api, type ConceptDecision, type ConceptDetail, type Origin } from "@/lib/api"
+import { fmtDate, type MessageKey, t, tx, useT } from "@/i18n"
 import { CKIND_LABEL, ORIGIN_LABEL, REL_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 
@@ -168,6 +168,7 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
           </ul>
         ) : <p className="text-sm text-muted-foreground">{t("concept.noAlignment")}</p>}
       </Section>
+      <DecisionState c={c} />
       {c.relations.length > 0 && (
         <Section title={t("concept.relations", { n: c.relations.length })} id="relations">
           <ul className="grid gap-1 text-sm">
@@ -203,16 +204,60 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
   )
 }
 
+const CATEGORY_OF_PREFIX: Record<string, string> = {
+  al: "proposals", ax: "axioms", un: "unaligned", alias: "aliases",
+}
+
+function DecisionLine({ d }: { d: ConceptDecision }) {
+  const t = useT()
+  const category = CATEGORY_OF_PREFIX[d.item_id.split(":")[0]]
+  return (
+    <li className="grid gap-0.5 text-sm" data-decision={d.decision}>
+      <span className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="outline" className={cn("font-normal", d.decision === "reject"
+          ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success")}>
+          {t(`concept.decision.${d.decision}`)}
+        </Badge>
+        {d.alias && <span>“{d.alias}”</span>}
+        {d.decision === "accept" && d.relation && <RelationChip relation={d.relation} term={d.term?.name} />}
+      </span>
+      <span className="text-xs text-muted-foreground">
+        {t("concept.decision.by", { who: d.decided_by, date: fmtDate(d.decided_at) })}
+        {" · "}{d.applied_revision ? t("review.decided.applied", { n: d.applied_revision }) : t("review.decided.pending")}
+        {d.note ? ` · ${d.note}` : ""}
+        {category && <> · <Link to={`/review?category=${category}&status=decided`} className="underline underline-offset-4">{t("concept.decision.open")}</Link></>}
+      </span>
+    </li>
+  )
+}
+
+/** Whether a person decided about this concept (and who, when), or it is still a proposal. */
+function DecisionState({ c }: { c: ConceptDetail }) {
+  const t = useT()
+  const decisions = c.decisions ?? []
+  const proposal = !decisions.length && !c.folded_into && c.alignments.some((a) => !a.accepted)
+  if (!decisions.length && !proposal) return null
+  return (
+    <Section title={t("concept.decisions")} id="decisions">
+      {decisions.length ? (
+        <ul className="grid gap-2" id="concept-decisions">{decisions.map((d) => <DecisionLine key={d.item_id} d={d} />)}</ul>
+      ) : <p className="text-sm text-muted-foreground" data-decision="proposal">{t("concept.decision.proposal")}</p>}
+    </Section>
+  )
+}
+
 /** The concept detail sheet of `/api/ontology/concepts/{id}`. */
-export function ConceptSheet({ conceptId, onClose, onOpen }: {
+export function ConceptSheet({ conceptId, onClose, onOpen, revision }: {
   conceptId: string | null
   onClose: () => void
+  /** an older revision (default: the latest) */
+  revision?: number | null
   /** open another concept (relations, alignments); default: not clickable */
   onOpen?: (id: string) => void
 }) {
   const q = useQuery({
-    queryKey: keys.concept(conceptId ?? ""),
-    queryFn: () => api.concept(conceptId!),
+    queryKey: [...keys.concept(conceptId ?? ""), revision ?? null],
+    queryFn: () => api.concept(conceptId!, revision),
     enabled: !!conceptId,
     retry: retryServerErrors,
   })

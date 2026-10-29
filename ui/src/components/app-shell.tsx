@@ -8,11 +8,11 @@ import {
 import { Separator } from "@/components/ui/separator"
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarHeader,
-  SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail,
+  SidebarInset, SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail,
   SidebarTrigger, useSidebar,
 } from "@/components/ui/sidebar"
-import { isCurrent, NAV } from "@/components/nav"
-import { useStatus } from "@/hooks/queries"
+import { isCurrent, NAV, SETUP } from "@/components/nav"
+import { usePendingCount, useStatus } from "@/hooks/queries"
 import { cn } from "@/lib/utils"
 import { useT } from "@/i18n"
 
@@ -47,6 +47,22 @@ function ServiceFooter() {
     <p className="px-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
       {host} · {t("shell.localOnly")}{data?.version ? ` · v${data.version}` : ""}
     </p>
+  )
+}
+
+/** The number of review items waiting (pending-count, polled every 30 s). */
+function ReviewBadge({ sr = false }: { sr?: boolean }) {
+  const t = useT()
+  const { data } = usePendingCount()
+  const n = data?.pending ?? 0
+  if (!n) return null
+  // the visible badge sits outside the link; the link itself carries the count for readers
+  if (sr) return <span className="sr-only"> ({t("nav.review.badge", { n })})</span>
+  return (
+    <SidebarMenuBadge id="review-badge" data-count={n} aria-hidden
+                      className="rounded-full bg-primary/10 text-primary">
+      {n > 99 ? "99+" : n}
+    </SidebarMenuBadge>
   )
 }
 
@@ -88,8 +104,10 @@ function AppSidebar() {
                              onClick={() => isMobile && setOpenMobile(false)}>
                       <item.icon aria-hidden />
                       <span>{item.label}</span>
+                      {item.id === "review" && <ReviewBadge sr />}
                     </NavLink>
                   </SidebarMenuButton>
+                  {item.id === "review" && <ReviewBadge />}
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>
@@ -106,7 +124,7 @@ function AppSidebar() {
 
 function Crumbs() {
   const { pathname } = useLocation()
-  const item = NAV.find((n) => isCurrent(n, pathname))
+  const item = [...NAV, SETUP].find((n) => isCurrent(n, pathname))
   const t = useT()
   return (
     <Breadcrumb>

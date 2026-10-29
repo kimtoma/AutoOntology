@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, type QueryClient } from "@tanstack/react-query"
 
 import { api, ApiError } from "@/lib/api"
 
@@ -14,6 +14,28 @@ export const keys = {
   graph: ["graph"] as const,
   samples: ["samples"] as const,
   settings: ["settings"] as const,
+  review: ["review"] as const,
+  reviewPage: (p: object) => ["review", p] as const,
+  pendingCount: ["review-pending"] as const,
+  revisions: ["revisions"] as const,
+  diff: (from: number | null | undefined, to: number | null | undefined) => ["diff", from ?? null, to ?? null] as const,
+  freshness: ["freshness"] as const,
+}
+
+/** The review inbox and its badge poll this often (and refresh after decisions and runs). */
+export const REVIEW_POLL_MS = 30_000
+
+/** Everything a finished run (build, export, apply) may have changed. */
+export function invalidateAfterRun(qc: QueryClient) {
+  for (const key of [keys.runs, keys.sources, keys.exports, keys.ontology, keys.graph, ["concepts"],
+                     ["concept"], keys.review, keys.pendingCount, keys.revisions, ["diff"], keys.freshness]) {
+    qc.invalidateQueries({ queryKey: key })
+  }
+}
+
+/** After a decision: the inbox, its badge and the concept details that show decisions. */
+export function invalidateAfterDecision(qc: QueryClient) {
+  for (const key of [keys.pendingCount, ["concept"]]) qc.invalidateQueries({ queryKey: key })
 }
 
 /** No retry for answers that will not change by retrying (404 no_snapshot, 400 ...). */
@@ -27,7 +49,12 @@ export const useSources = () => useQuery({ queryKey: keys.sources, queryFn: api.
 
 /** `/api/ontology`: revision, workspace and counts of the latest snapshot. */
 export const useOntology = () =>
-  useQuery({ queryKey: keys.ontology, queryFn: api.ontology, retry: retryServerErrors })
+  useQuery({ queryKey: keys.ontology, queryFn: () => api.ontology(), retry: retryServerErrors })
+
+/** `/api/review/pending-count`: the nav badge and the apply banner. */
+export const usePendingCount = () =>
+  useQuery({ queryKey: keys.pendingCount, queryFn: api.pendingCount, retry: retryServerErrors,
+             refetchInterval: REVIEW_POLL_MS })
 
 export const useSamples = () => useQuery({ queryKey: keys.samples, queryFn: api.samples })
 

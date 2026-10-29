@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router"
 
-import { NAV } from "@/components/nav"
+import { NAV, SETUP } from "@/components/nav"
 import { useT } from "@/i18n"
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
@@ -45,6 +45,10 @@ export function CommandMenu() {
               <span className="ml-auto text-xs text-muted-foreground">{n.hint}</span>
             </CommandItem>
           ))}
+          <CommandItem value={`${SETUP.label} ${SETUP.hint} /setup`} onSelect={() => go(SETUP.path)} data-cmd="setup">
+            <SETUP.icon aria-hidden /> {t("cmd.setup")}
+            <span className="ml-auto text-xs text-muted-foreground">/setup</span>
+          </CommandItem>
         </CommandGroup>
       </CommandList>
     </CommandDialog>

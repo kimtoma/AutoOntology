@@ -9,7 +9,7 @@ import {
   Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
-import { keys } from "@/hooks/queries"
+import { invalidateAfterRun } from "@/hooks/queries"
 import { api, errorMessage, type Progress, type Run, type RunStatus, type Step } from "@/lib/api"
 import { Code } from "@/components/provider-card"
 import { useSamples, useSources, useStatus } from "@/hooks/queries"
@@ -136,13 +136,9 @@ function useRunStream(runId: string, logEl: HTMLPreElement | null) {
           appendLine(t("runSheet.noLog"))
         }
         setLive((cur) => cur && { ...cur, ended: true })
-        qc.invalidateQueries({ queryKey: keys.runs })
-        qc.invalidateQueries({ queryKey: keys.sources })
-        qc.invalidateQueries({ queryKey: keys.exports })
-        // a build saves a new snapshot: every ontology view follows it
-        qc.invalidateQueries({ queryKey: keys.ontology })
-        qc.invalidateQueries({ queryKey: keys.graph })
-        qc.invalidateQueries({ queryKey: ["concepts"] })
+        // a build or an apply saves a new snapshot: every ontology view, the review inbox
+        // and the overview follow it
+        invalidateAfterRun(qc)
       })
       // EventSource reconnects by itself (sending Last-Event-ID); the end event closes it.
       // CLOSED without an end event = the server refused the stream (404/500): no retries.
@@ -170,6 +166,10 @@ function runScope(run: Run): string {
   const p = run.params
   if (run.kind === "export") {
     return `${p.revision ? t("runSheet.scope.revision", { revision: String(p.revision) }) : ""}${p.format ? ` · ${p.format === "all" ? t("runSheet.scope.allFormats") : p.format}` : ""}`
+  }
+  if (run.kind === "apply") {
+    const n = typeof p.pending_decisions === "number" ? p.pending_decisions : null
+    return `${n != null ? ` · ${t("runSheet.scope.decisions", { n })}` : ""}${p.applied_revision ? ` · ${t("runSheet.scope.revision", { revision: String(p.applied_revision) })}` : ""}`
   }
   const sources = Array.isArray(p.sources) && p.sources.length ? ` · ${p.sources.join(", ")}` : t("runSheet.scope.all")
   return `${sources}${p.resume ? t("runSheet.scope.resume") : ""}`

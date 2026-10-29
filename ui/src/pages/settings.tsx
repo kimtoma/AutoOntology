@@ -4,8 +4,9 @@
    service and the engine restart (a detached helper; this page waits for the new service). */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Loader2, RotateCcw, Save, Zap } from "lucide-react"
+import { Loader2, Rocket, RotateCcw, Save, Zap } from "lucide-react"
 import { useId, useMemo, useState, type ReactNode } from "react"
+import { Link } from "react-router"
 import { toast } from "sonner"
 
 import { ErrorState } from "@/components/empty-state"
@@ -386,7 +387,12 @@ export default function SettingsPage() {
   const busy = phase.kind === "saving" || phase.kind === "restarting"
   return (
     <>
-      <PageHeader title={t("settings.title")} description={t("settings.description")} />
+      <PageHeader title={t("settings.title")} description={t("settings.description")}
+                  actions={(
+                    <Button variant="outline" size="sm" asChild title={t("settings.setup.hint")}>
+                      <Link to="/setup" id="settings-setup-link"><Rocket aria-hidden /> {t("settings.setup")}</Link>
+                    </Button>
+                  )} />
       <div className="grid max-w-3xl gap-6" id="settings-page" data-dirty={dirty}>
         <p className="text-sm text-muted-foreground" id="settings-running">
           {t("settings.running", { chat: s.running.chat_provider, model: s.running.chat_model || "-",

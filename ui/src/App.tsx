@@ -8,7 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import BuildPage from "@/pages/build"
 import ExportsPage from "@/pages/exports"
 import HomePage from "@/pages/home"
+import IndexPage from "@/pages/overview"
 import OntologyPage from "@/pages/ontology"
+import ReviewPage from "@/pages/review"
 import SourcesPage from "@/pages/sources"
 import SettingsPage from "@/pages/settings"
 import StatusPage from "@/pages/status"
@@ -49,7 +51,9 @@ export default function App() {
       <CommandMenu />
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<HomePage />} />
+          <Route index element={<IndexPage />} />
+          <Route path="setup" element={<HomePage />} />
+          <Route path="review" element={<ReviewPage />} />
           <Route path="sources" element={<SourcesPage />} />
           <Route path="build" element={<BuildPage />} />
           <Route path="ontology" element={<OntologyPage />} />
