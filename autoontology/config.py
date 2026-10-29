@@ -244,6 +244,22 @@ def shell_value(name: str) -> str | None:
     return value
 
 
+def dotenv_copies() -> dict[str, str]:
+    """The values :func:`load_env` copied from ``.env`` into this process's ``os.environ``."""
+    return dict(_DOTENV_LOADED)
+
+
+def env_origin(name: str, env_file: Path | None = None) -> str:
+    """Where ``name``'s value comes from for a fresh read of the layers: ``shell`` (set in
+    the environment, not copied from ``.env`` by this process nor derived by a parent),
+    ``.env`` (set in the file now, even when this process loaded an older value) or
+    ``default``. Unlike :func:`shell_value` it stays right after ``.env`` was rewritten."""
+    value = os.environ.get(name)
+    if value is not None and name not in derived_env_keys() and _DOTENV_LOADED.get(name) != value:
+        return "shell"
+    return ".env" if name in dotenv_layer(env_file) else "default"
+
+
 def user_env(env_file: Path | None = None) -> dict[str, str]:
     """``os.environ`` as the user set it: keys a parent derived are dropped (their ``.env``
     value, if any, is put back)."""
