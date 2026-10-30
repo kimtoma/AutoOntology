@@ -36,6 +36,27 @@ additive `ops_*` tables in the workspace SQLite store. No existing source data o
 snapshot is rewritten. Workspaces that have never used Operations retain the
 legacy latest-snapshot behavior.
 
+The default UI, CLI and exporter share the same operational snapshot selection.
+Managed workspaces use the pinned published version, including when a newer
+candidate exists. A missing managed head does not fall back to a candidate. The
+existing first-completed-build baseline policy is retained; explicit initial
+approval and mandatory question-suite policies remain follow-up work.
+
+Use an explicit revision and preview flag to inspect an unpublished snapshot:
+
+```sh
+uv run autoontology ontology
+uv run autoontology ontology --revision 7 --preview
+uv run autoontology export --revision 7 --preview --out ./private-preview --format okf
+```
+
+Preview exports require a separate output parent outside the configured exports
+directory (including through symlinks). Their manifest and run parameters record
+`preview: true`; they never change the published head or appear in operational
+downloads. Historical published versions remain readable without the preview
+flag. Explicit web revision reads remain available for history and read-only
+candidate inspection; web export preparation only accepts operational versions.
+
 Decisions and validation tokens are bound to content, source evidence, configured
 checks and the model profile. Changed content invalidates earlier validation.
 Newly published quotes receive revision-qualified identifiers, so a reused source

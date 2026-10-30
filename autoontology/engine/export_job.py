@@ -530,6 +530,7 @@ def export_metadata(ctx: _ExportCtx) -> dict[str, Any]:
         "format": ctx.format,
         "formats": {k: formats[k] for k in sorted(formats)},
         "upstream_fetched_at": ctx.upstream_fetched_at,
+        **({"preview": True} if ctx.run.params.get("preview") else {}),
     }
 
 
@@ -663,13 +664,15 @@ def run_export(
     out: Path | None = None,
     client: BackendClient | None = None,
     format: str = "all",
+    preview: bool = False,
 ) -> RunResult:
-    """Export snapshot *revision* (default: the latest) to ``exports/r<rev>/`` or *out*;
+    """Export snapshot *revision* (default: operational) to ``exports/r<rev>/`` or *out*;
     *format* (``all`` | ``rdf`` | ``ossie`` | ``okf``) picks the formats written. The
     revision folder is replaced, but the files of the formats not chosen are carried over
     from its previous export of the same revision (``export.json`` ``formats`` says which
     run wrote each format)."""
     from autoontology.engine.build import WORKSPACE_LEASE, refuse_if_active
+    from autoontology.store.operations import OperationsError, read_snapshot
 
     log_path = setup_job_logging(settings)
     if format not in EXPORT_FORMATS:
@@ -677,11 +680,19 @@ def run_export(
             f"unknown export format {format!r} (choose {'|'.join(EXPORT_FORMATS)})",
             log_path=log_path,
         )
-    head = (
-        store.latest_snapshot(with_model=False)
-        if revision is None
-        else store.get_snapshot(revision, with_model=False)
-    )
+    try:
+        head = read_snapshot(store, revision, preview=preview, with_model=False)
+    except OperationsError as exc:
+        raise JobError(str(exc), log_path=log_path) from exc
+    if preview and (
+        out is None
+        or export_target(settings, revision, out)
+        .resolve()
+        .is_relative_to(settings.exports_dir.resolve())
+    ):
+        raise JobError(
+            "a preview requires --out outside the operational exports directory", log_path=log_path
+        )
     if head is None:
         raise JobError(
             "no ontology snapshot yet: run `uv run autoontology build` first"
@@ -707,6 +718,7 @@ def run_export(
             out=out,
             client=client,
             format=format,
+            preview=preview,
         )
 
 
@@ -720,6 +732,7 @@ def _run_export_held(
     out: Path | None,
     client: BackendClient | None,
     format: str = "all",
+    preview: bool = False,
 ) -> RunResult:
     final = export_target(settings, snapshot.revision, out)
     recover_interrupted_install(final)
@@ -741,6 +754,7 @@ def _run_export_held(
             "out": str(out) if out else None,
             "format": format,
             "pid": os.getpid(),
+            **({"preview": True} if preview else {}),
         },
     )
     # write next to the final folder, then swap: a failed export never leaves half a folder

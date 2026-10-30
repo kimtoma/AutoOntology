@@ -768,12 +768,28 @@ def runs(limit: int = typer.Option(20, "--limit")) -> None:
 
 
 @app.command()
-def ontology() -> None:
-    """Show the latest ontology snapshot: revision, sources and counts."""
+def ontology(
+    revision: int = typer.Option(
+        None, "--revision", min=1, help="A published historical revision."
+    ),
+    preview: bool = typer.Option(
+        False, "--preview", help="Inspect an explicit unpublished revision."
+    ),
+) -> None:
+    """Show the operational ontology: revision, sources and counts."""
+    from autoontology.store.operations import OperationsError, read_snapshot
+
     settings = _settings()
-    snap = _store(settings).latest_snapshot(with_model=False)
+    try:
+        snap = read_snapshot(_store(settings), revision, preview=preview, with_model=False)
+    except OperationsError as exc:
+        _fail(str(exc))
     if snap is None:
-        _fail("no ontology snapshot yet: run `uv run autoontology build`")
+        if revision is not None:
+            _fail(f"unknown revision {revision}")
+        _fail("no ontology snapshot yet: build or publish an ontology first")
+    if preview:
+        typer.echo("PREVIEW: explicitly selected snapshot; the operational version is unchanged")
     c = snap.counts
     typer.echo(f"revision {snap.revision}  ({snap.created_at}, run {snap.run_id})")
     typer.echo(f"workspace {settings.workspace}  base IRI {settings.base_iri}")
@@ -807,7 +823,9 @@ def ontology() -> None:
 
 @app.command()
 def export(
-    revision: int = typer.Option(None, "--revision", help="Snapshot revision (default: latest)."),
+    revision: int = typer.Option(
+        None, "--revision", min=1, help="Snapshot revision (default: operational)."
+    ),
     out: str = typer.Option(
         None, "--out", help="Parent directory: writes <DIR>/r<rev>/ (default: exports/r<rev>/)."
     ),
@@ -817,8 +835,11 @@ def export(
         help="all | rdf (ttl, jsonld, graphml, upstream/) | ossie (ossie/, upstream/) | okf. "
         "The other formats' files of the previous export of the revision are kept.",
     ),
+    preview: bool = typer.Option(
+        False, "--preview", help="Export an explicit revision to --out outside operational exports."
+    ),
 ) -> None:
-    """Write an ontology snapshot (default: the latest) as ontology.ttl, ontology.jsonld,
+    """Write an ontology snapshot (default: operational) as ontology.ttl, ontology.jsonld,
     ontology.graphml, an Apache Ossie bundle (ossie/) and an OKF bundle (okf/), plus
     report.md and the structured sources' upstream exports."""
     import time
@@ -833,14 +854,22 @@ def export(
     store = _store(settings)
     try:
         jobs.setup_job_logging(settings, console=True)
+        options = {"preview": True} if preview else {}
         result = export_job.run_export(
-            store, settings, revision=revision, out=Path(out) if out else None, format=format
+            store,
+            settings,
+            revision=revision,
+            out=Path(out) if out else None,
+            format=format,
+            **options,
         )
     except (jobs.JobError, BackendError) as exc:
         hint = f"\nlog: {exc.log_path}" if getattr(exc, "log_path", None) else ""
         _fail(f"export failed: {exc}{hint}")
     except Exception as exc:  # noqa: BLE001 - one clean line; AUTOONTOLOGY_DEBUG=1 re-raises
         _unexpected("export", exc, log_path)
+    if preview:
+        typer.echo("PREVIEW: separate export; the operational version is unchanged")
     collect = result.details.get("collect", {})
     counts = collect.get("counts", {})
     if counts:

@@ -42,7 +42,9 @@ function LegacyHashRedirect() {
 }
 
 const lazyPage = (Page: React.ComponentType) => (
-  <Suspense fallback={<Skeleton className="m-6 h-[60svh]" />}><Page /></Suspense>
+  <Suspense fallback={<Skeleton className="m-6 h-[60svh]" />}>
+    <Page />
+  </Suspense>
 )
 
 export default function App() {
@@ -53,11 +55,22 @@ export default function App() {
       <CommandMenu />
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <OperationsHome />} />
+          <Route
+            index
+            element={
+              SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HomePage afterBuild={<OperationsHome />} />
+            }
+          />
           <Route path="review" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <ReviewPage />} />
-          <Route path="history" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HistoryPage />} />
+          <Route
+            path="history"
+            element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HistoryPage />}
+          />
           <Route path="setup" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HomePage />} />
-          <Route path="sources" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <SourcesPage />} />
+          <Route
+            path="sources"
+            element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <SourcesPage />}
+          />
           <Route path="build" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <BuildPage />} />
           <Route path="ontology" element={<OntologyPage />} />
           <Route path="graph" element={lazyPage(GraphPage)} />
@@ -66,8 +79,14 @@ export default function App() {
           <Route path="status" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <StatusPage />} />
           <Route path="runs" element={<LegacyRedirect />} />
           <Route path="concepts" element={<LegacyRedirect />} />
-          <Route path="settings" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <SettingsPage />} />
-          <Route path="*" element={<EmptyState title={t("shell.pageMissing")} hint={t("shell.pageMissing.hint")} />} />
+          <Route
+            path="settings"
+            element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <SettingsPage />}
+          />
+          <Route
+            path="*"
+            element={<EmptyState title={t("shell.pageMissing")} hint={t("shell.pageMissing.hint")} />}
+          />
         </Route>
       </Routes>
     </>

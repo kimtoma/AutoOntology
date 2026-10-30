@@ -17,11 +17,10 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useOperations, useChanges, useLegacy, useFreshness } from "@/hooks/operations"
 import { keys, useOntology } from "@/hooks/queries"
-import { api, isNoSnapshot } from "@/lib/api"
+import { api } from "@/lib/api"
 import { knowledgeText } from "@/lib/operations"
 import { fmtTime, STATUS_LABEL } from "@/lib/labels"
 import { fmtNumber, useT } from "@/i18n"
-import HomePage from "@/pages/home"
 
 export default function OperationsHome() {
   const t = useT(),
@@ -31,7 +30,6 @@ export default function OperationsHome() {
     fresh = useFreshness(),
     legacy = useLegacy()
   const runs = useQuery({ queryKey: keys.runs, queryFn: () => api.runs(6), refetchInterval: 5000 })
-  if (isNoSnapshot(ontology.error)) return <HomePage />
   if (ontology.error) return <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />
   if (overview.error) return <ErrorState error={overview.error} onRetry={() => overview.refetch()} />
   if (!ontology.data || !overview.data) return <Skeleton className="h-80" />

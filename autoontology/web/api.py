@@ -366,18 +366,16 @@ class Api:
         """``(Snapshot without model, MergedOntology)`` of *revision* (default: published),
         parsed once per revision; 404 ``no_snapshot`` before the first build."""
         from autoontology.ontology.model import MergedOntology
-        from autoontology.store.operations import published_revision
+        from autoontology.store.operations import OperationsError, read_snapshot
 
-        live = published_revision(self.store) if revision is None else None
-        head = (
-            (
-                self.store.get_snapshot(live, with_model=False)
-                if live
-                else self.store.latest_snapshot(with_model=False)
+        try:
+            # An explicit revision is a read-only preview (history/diff/graph).
+            # Export preparation has a separate, strict operational selection.
+            head = read_snapshot(
+                self.store, revision, preview=revision is not None, with_model=False
             )
-            if revision is None
-            else self.store.get_snapshot(revision, with_model=False)
-        )
+        except OperationsError as exc:
+            raise ApiError(409, "publication_unavailable", str(exc)) from exc
         if head is None:
             if revision is None:
                 raise ApiError(

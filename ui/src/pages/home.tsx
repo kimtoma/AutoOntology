@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query"
 import {
   BookOpen, CheckCircle2, CircleDashed, Download, ExternalLink, FlaskConical, HelpCircle, Loader2,
   Network, PackageOpen, Play, Plus,
@@ -9,6 +9,7 @@ import { Link } from "react-router"
 import { toast } from "sonner"
 
 import { PageHeader } from "@/components/page-header"
+import { ErrorState } from "@/components/empty-state"
 import { ProviderCard } from "@/components/provider-card"
 import { RunSheet } from "@/components/run-sheet"
 import { SamplesDialog } from "@/components/samples-dialog"
@@ -141,14 +142,27 @@ function Counts({ ontology }: { ontology: OntologySummary }) {
   )
 }
 
-export default function HomePage() {
+/** One observer owns the empty-to-built transition; guidance never refetches on mount. */
+export default function HomePage({ afterBuild }: { afterBuild?: ReactNode } = {}) {
+  const ontology = useQuery({
+    queryKey: keys.ontology,
+    queryFn: api.ontology,
+    retry: retryServerErrors,
+    refetchInterval: (query) => query.state.data ? false : POLL_MS,
+  })
+  if (afterBuild && ontology.data) return afterBuild
+  if (afterBuild && ontology.error && !isNoSnapshot(ontology.error)) {
+    return <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />
+  }
+  return <OnboardingPage ontology={ontology} />
+}
+
+function OnboardingPage({ ontology }: { ontology: UseQueryResult<OntologySummary, unknown> }) {
   const t = useT()
   const qc = useQueryClient()
   const interval = () => (allDone(cachedStates(qc)) ? false : POLL_MS)
   const status = useQuery({ queryKey: keys.status, queryFn: api.status, refetchInterval: interval })
   const sources = useQuery({ queryKey: keys.sources, queryFn: api.sources, refetchInterval: interval })
-  const ontology = useQuery({ queryKey: keys.ontology, queryFn: api.ontology, retry: retryServerErrors,
-                              refetchInterval: interval })
   const runs = useQuery({ queryKey: keys.runs, queryFn: () => api.runs(40), refetchInterval: interval })
   const exports = useQuery({ queryKey: keys.exports, queryFn: api.exports, refetchInterval: interval })
   const samples = useSamples()

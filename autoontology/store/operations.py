@@ -15,7 +15,7 @@ import sqlite3
 from typing import Any
 
 from autoontology.ontology.model import MergedOntology
-from autoontology.store.db import Store, now_iso
+from autoontology.store.db import Snapshot, Store, now_iso
 
 
 class OperationsError(ValueError):
@@ -28,13 +28,78 @@ def digest(value: Any) -> str:
     ).hexdigest()
 
 
-def published_revision(store: Store) -> int | None:
-    """None means legacy/latest behavior, including a workspace not yet built."""
+def _publication_state(store: Store) -> tuple[bool, dict | None]:
+    """Read managed state without opting a legacy workspace in to Operations.
+
+    Preserve the existing first-build baseline policy in one place: only the first
+    completed snapshot can initialize an empty managed workspace's published head.
+    """
     with store._conn() as conn:
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='ops_state'").fetchone():
-            return None
-        row = conn.execute("SELECT published_revision FROM ops_state WHERE id=1").fetchone()
-    return int(row[0]) if row and row[0] is not None else None
+            return False, None
+        row = conn.execute("SELECT * FROM ops_state WHERE id=1").fetchone()
+    if row is None:
+        return True, None
+    state = dict(row)
+    if state["published_revision"] is None:
+        first = next(
+            (
+                s.revision
+                for s in reversed(store.list_snapshots(500))
+                if (run := store.get_run(s.run_id)) is None or run.status == "succeeded"
+            ),
+            None,
+        )
+        if first is not None:
+            with store._conn() as conn:
+                conn.execute(
+                    "UPDATE ops_state SET published_revision=?,initial_revision=?,updated_at=? WHERE id=1 AND published_revision IS NULL",
+                    (first, first, now_iso()),
+                )
+            return _publication_state(store)
+    return True, state
+
+
+def published_revision(store: Store) -> int | None:
+    """Published revision, or None for a legacy/empty workspace.
+
+    Use read_snapshot for consumers: None must not make a managed workspace fall
+    back to an arbitrary latest candidate.
+    """
+    _, state = _publication_state(store)
+    return state["published_revision"] if state else None
+
+
+def read_snapshot(
+    store: Store,
+    revision: int | None = None,
+    *,
+    preview: bool = False,
+    with_model: bool = True,
+) -> Snapshot | None:
+    """Select operational knowledge consistently for UI, CLI and exporters.
+
+    Explicit unpublished reads require preview=True and a concrete revision.
+    An incomplete/missing managed state never falls back to the latest snapshot.
+    """
+    if preview and revision is None:
+        raise OperationsError("a preview requires an explicit revision")
+    if revision is not None:
+        head = store.get_snapshot(revision, with_model=with_model)
+        if head and not preview and not visible_revision(store, revision):
+            raise OperationsError(
+                f"unpublished revision {revision}; use --revision {revision} --preview to inspect it"
+            )
+        return head
+    managed, state = _publication_state(store)
+    if not managed:
+        return store.latest_snapshot(with_model=with_model)
+    if not state or state["published_revision"] is None:
+        return None
+    head = store.get_snapshot(state["published_revision"], with_model=with_model)
+    if head is None:
+        raise OperationsError("the published snapshot is missing; restore the workspace")
+    return head
 
 
 class Operations:
@@ -78,18 +143,9 @@ class Operations:
             )
 
     def state(self) -> dict[str, Any]:
-        with self.store._conn() as conn:
-            row = dict(conn.execute("SELECT * FROM ops_state WHERE id=1").fetchone())
-        if row["published_revision"] is None:
-            snapshots = [s for s in reversed(self.store.list_snapshots(500)) if self._complete(s)]
-            if snapshots:
-                first = snapshots[0].revision
-                with self.store._conn() as conn:
-                    conn.execute(
-                        "UPDATE ops_state SET published_revision=?,initial_revision=?,updated_at=? WHERE id=1 AND published_revision IS NULL",
-                        (first, first, now_iso()),
-                    )
-                return self.state()
+        _, row = _publication_state(self.store)
+        if row is None:
+            raise OperationsError("publication state is missing; restore the workspace")
         candidates = [
             s
             for s in self.store.list_snapshots(500)
@@ -494,16 +550,15 @@ class Operations:
 
 def visible_revision(store: Store, revision: int) -> bool:
     """Exports of unreviewed/failed candidate snapshots are not operational downloads."""
-    with store._conn() as conn:
-        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='ops_state'").fetchone():
-            return True
-        state = conn.execute(
-            "SELECT initial_revision,published_revision FROM ops_state WHERE id=1"
-        ).fetchone()
-    if not state:
+    managed, state = _publication_state(store)
+    if not managed:
         return True
-    if revision <= state[0] or revision == state[1]:
+    if not state:
+        return False
+    if revision == state["published_revision"]:
         return True
     snap = store.get_snapshot(revision, with_model=False)
     run = store.get_run(snap.run_id) if snap else None
+    if revision <= state["initial_revision"]:
+        return bool(snap and (run is None or run.status == "succeeded"))
     return bool(run and run.kind == "publish" and run.status == "succeeded")
