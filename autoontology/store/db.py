@@ -473,6 +473,18 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE playground_messages ADD COLUMN trace_id TEXT
         """,
     ),
+    (
+        10,
+        """
+        CREATE TABLE IF NOT EXISTS restore_proposals (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL CHECK(status IN ('preparing','ready','blocked','failed','committed')),
+            prepare_run_id TEXT NOT NULL, execution_run_id TEXT,
+            result_revision INTEGER, packet_json TEXT NOT NULL,
+            sha256 TEXT NOT NULL, created_at TEXT NOT NULL
+        )
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration

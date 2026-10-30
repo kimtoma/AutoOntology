@@ -28,11 +28,12 @@ from pathlib import Path
 from typing import Any
 
 from autoontology.config import Settings
+from autoontology.engine.jobs import RunCancelled
 from autoontology.store.db import Run, Store
 
 logger = logging.getLogger("autoontology.web.runs")
 
-RUN_KINDS: tuple[str, ...] = ("build", "export", "apply", "publish")
+RUN_KINDS: tuple[str, ...] = ("build", "export", "apply", "publish", "restore")
 #: The run manager's key for workspace-wide runs (build, export).
 WORKSPACE = "*workspace*"
 RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{6}$")
@@ -40,14 +41,11 @@ RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{6}$")
 START_TIMEOUT_S = 60.0
 
 
-class RunCancelled(BaseException):  # noqa: N818 - BaseException so jobs never swallow it
-    """Raised inside the run's thread when a cancelled run reaches its next step."""
-
-
 class RunStartError(RuntimeError):
-    def __init__(self, message: str, *, status: int = 400) -> None:
+    def __init__(self, message: str, *, status: int = 400, code: str | None = None) -> None:
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 def run_log_path(settings: Settings, run_id: str) -> Path:
@@ -162,6 +160,7 @@ class _Active:
     started: threading.Event = field(default_factory=threading.Event)
     error: str | None = None
     error_status: int = 400
+    error_code: str | None = None
 
 
 JobFn = Callable[..., Any]
@@ -169,19 +168,21 @@ JobFn = Callable[..., Any]
 
 def default_jobs() -> dict[str, JobFn]:
     """The job entry points by run kind, looked up at call time (tests monkeypatch them)."""
-    from autoontology.engine import apply, build, export_job, operations
+    from autoontology.engine import apply, build, export_job, operations, restorations
 
     return {
         "build": build.run_build,
         "export": export_job.run_export,
         "apply": apply.run_apply,
         "publish": operations.run_publish,
+        "restore": restorations.run_restore,
     }
 
 
 #: Fixed top-level steps per kind (a build's steps depend on its sources).
 TOP_STEPS: dict[str, tuple[str, ...]] = {
     "build": (),
+    "restore": ("prepare", "publish"),
     "export": ("collect", "serialize", "upstream", "ossie", "okf", "report"),
     "apply": ("decisions", "merge", "snapshot"),
 }
@@ -303,7 +304,10 @@ class RunManager:
 
                 if store.run_id is None:
                     active.error = short_error(exc)
-                    active.error_status = 503 if isinstance(exc, BackendError) else 500
+                    active.error_status = getattr(
+                        exc, "status", 503 if isinstance(exc, BackendError) else 500
+                    )
+                    active.error_code = getattr(exc, "code", None)
                 elif (run := store.get_run(store.run_id)) and run.status == "running":
                     store.update_run(store.run_id, status="failed", error=short_error(exc))
                 logger.error(
@@ -333,6 +337,7 @@ class RunManager:
             raise RunStartError(
                 active.error or f"{kind} run for {source!r} did not start",
                 status=active.error_status,
+                code=active.error_code,
             )
         return active.run_id
 

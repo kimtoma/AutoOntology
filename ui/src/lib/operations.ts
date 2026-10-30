@@ -99,6 +99,8 @@ export interface LegacyInbox {
   total: number
 }
 export interface Revision {
+  run_status?: string | null
+  operational?: boolean
   revision: number
   created_at: string
   run_kind: string | null
@@ -150,7 +152,33 @@ export interface Publication {
     index: { model: string; elements: number }
   }
 }
+export interface Restoration {
+  id: string
+  status: "preparing" | "ready" | "blocked" | "failed" | "committed"
+  confirmation: string
+  sha256: string
+  result_revision: number | null
+  packet: {
+    target_revision: number
+    base_revision: number
+    reason: string
+    expires_at?: string
+    diff?: Record<string, unknown>
+    changes?: {collection:string;key:string;label:string;kind:string;before_text:string;after_text:string;fields:{name:string;before:unknown;after:unknown}[]}[]
+    originals?: {document_id:string;title:string;sha256:string;revision:number;versions:string[];original:OriginalReference}[]
+    validation?: { ok: boolean; checks_configured: boolean; indexed_elements: number; questions: { id:number; question:string; answer:string; ok:boolean }[] }
+  }
+}
+export function operationalRevision(revision: Revision, published: number | null | undefined): boolean {
+  if (revision.revision === published) return true
+  if (revision.operational !== undefined) return revision.operational
+  return ["publish", "restore"].includes(revision.run_kind ?? "") && revision.run_status === "succeeded"
+}
+
 export const operations = {
+  prepareRestore: (revision:number, reason:string) => request<Restoration>("/ops/restores", "POST", {revision,reason}),
+  restorations: () => request<{items:Restoration[]}>("/ops/restores"),
+  restore: (proposal:string, confirmation:string) => request<{run_id:string}>(`/ops/restores/${enc(proposal)}/execute`, "POST", {confirmation}),
   publication: (revision: number, verify = false) => request<Publication>(`/ops/publications/${revision}?verify=${verify}`),
   overview: () => request<Overview>("/ops"),
   changes: () => request<Changes>("/ops/changes"),

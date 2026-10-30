@@ -147,7 +147,10 @@ class Operations:
             for s in self.store.list_snapshots(500)
             if s.revision > row["initial_revision"]
             and self._complete(s)
-            and ((run := self.store.get_run(s.run_id)) is None or run.kind != "publish")
+            and (
+                (run := self.store.get_run(s.run_id)) is None
+                or run.kind not in ("publish", "restore")
+            )
         ]
         return {**row, "candidate_revision": candidates[0].revision if candidates else None}
 
@@ -506,6 +509,7 @@ class Operations:
         *,
         publication_id: str | None = None,
         run_id: str | None = None,
+        restore_proposal_id: str | None = None,
     ) -> None:
         with self.store._conn() as conn:
             if publication_id is not None:
@@ -524,6 +528,13 @@ class Operations:
                     or digest(json.loads(snapshot["model_json"])) != manifest["model_sha256"]
                 ):
                     raise OperationsError("prepared publication changed before commit")
+            if restore_proposal_id is not None:
+                restored = conn.execute(
+                    "UPDATE restore_proposals SET status='committed',result_revision=?,execution_run_id=? WHERE id=? AND status='ready' AND execution_run_id=?",
+                    (revision, run_id, restore_proposal_id, run_id),
+                ).rowcount
+                if restored != 1:
+                    raise OperationsError("restoration proposal changed before commit")
             changed = conn.execute(
                 "UPDATE ops_state SET published_revision=?,updated_at=? WHERE id=1 AND published_revision IS ?",
                 (revision, now_iso(), expected),
@@ -619,4 +630,4 @@ def visible_revision(store: Store, revision: int) -> bool:
     run = store.get_run(snap.run_id) if snap else None
     if revision <= state["initial_revision"]:
         return bool(snap and (run is None or run.status == "succeeded"))
-    return bool(run and run.kind == "publish" and run.status == "succeeded")
+    return bool(run and run.kind in ("publish", "restore") and run.status == "succeeded")

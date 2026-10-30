@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 import httpx
 import typer
@@ -14,13 +15,13 @@ def install(app, settings_for):
     def emit(value):
         typer.echo(json.dumps(value, ensure_ascii=False, indent=2))
 
-    def request(method, path, body=None, on_error=None):
+    def request(method, path, body=None, on_error=None, service_root="/api/playground"):
         report = on_error or emit
         settings = settings_for()
         try:
             response = httpx.request(
                 method,
-                f"http://127.0.0.1:{settings.port}/api/playground{path}",
+                f"http://127.0.0.1:{settings.port}{service_root}{path}",
                 json=body,
                 timeout=360,
             )
@@ -114,6 +115,46 @@ def install(app, settings_for):
             emit(receipt)
         if not done or error or receipt["status"] != "succeeded":
             raise typer.Exit(1)
+
+    @app.command("execution")
+    def execution(
+        run_id: str,
+        cancel: bool = typer.Option(False, "--cancel"),
+        watch: bool = typer.Option(False, "--watch"),
+    ):
+        from autoontology.web.runs import RUN_ID_RE
+
+        def report(value, event="execution"):
+            if watch:
+                typer.echo(json.dumps({"event": event, "data": value}, ensure_ascii=False))
+            else:
+                emit(value)
+
+        if not RUN_ID_RE.fullmatch(run_id):
+            report({"error": "invalid_run_id"}, "error")
+            raise typer.Exit(1)
+        options = {"service_root": "/api", "on_error": lambda value: report(value, "error")}
+        if cancel:
+            report(request("POST", f"/runs/{run_id}/cancel", **options), "cancel_requested")
+            if not watch:
+                return
+        previous = None
+        while True:
+            result = request("GET", f"/runs/{run_id}", **options)
+            if result != previous:
+                report(result)
+                previous = result
+            if result["status"] not in ("running", "pending"):
+                if (
+                    watch
+                    and result["status"] != "succeeded"
+                    and not (cancel and result["status"] == "cancelled")
+                ):
+                    raise typer.Exit(1)
+                return
+            if not watch:
+                return
+            time.sleep(1)
 
     @app.command("ask")
     def ask(

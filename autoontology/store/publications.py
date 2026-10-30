@@ -21,6 +21,11 @@ class PublicationError(OperationsError):
     """A publication's proof is unavailable or no longer matches its content."""
 
 
+def export_metadata(marker: dict) -> dict:
+    """Bind non-circular export metadata separately from artifact/receipt hashes."""
+    return {k: v for k, v in marker.items() if k not in ("files", "file_sha256", "publication_id")}
+
+
 def index_receipt(store: Store, scope: str, model: MergedOntology) -> dict:
     """Validate complete, finite vectors and hash their canonical float32 bytes."""
     try:
@@ -165,6 +170,8 @@ class Publications:
         profile: dict,
         scope: str,
         folder: Path,
+        restoration: dict | None = None,
+        source_bindings: list[dict] | None = None,
     ) -> dict:
         snapshot = self.store.get_snapshot(revision)
         model = MergedOntology.from_dict(snapshot.model)
@@ -172,7 +179,7 @@ class Publications:
         safe_profile = {k: v for k, v in profile.items() if k != "endpoint"}
         safe_profile["endpoint_sha256"] = digest(profile.get("endpoint"))
         manifest = {
-            "version": 1,
+            "version": 2,
             "revision": revision,
             "run_id": snapshot.run_id,
             "candidate_revision": candidate,
@@ -181,7 +188,9 @@ class Publications:
             "validation": validation,
             "profile": safe_profile,
             "decisions": [{"id": i["id"], "decision": i.get("decision")} for i in items],
-            "source_bindings": [
+            "source_bindings": source_bindings
+            if source_bindings is not None
+            else [
                 {
                     "revision": r,
                     "sources": [
@@ -199,6 +208,9 @@ class Publications:
             "originals": self.originals(model),
             "index": index_receipt(self.store, scope, model),
             "artifacts": artifact_hashes(folder),
+            "export_metadata_sha256": digest(
+                export_metadata(json.loads((folder / "export.json").read_text()))
+            ),
             "structured_rows": "live_at_execution; historical rows are not archived",
         }
         source_ids = {
@@ -227,6 +239,8 @@ class Publications:
         manifest["extraction_profile"] = (
             "Historical chat/extractor profiles were not recorded; reader fingerprints are included where known."
         )
+        if restoration:
+            manifest["restoration"] = restoration
         publication_id = "pub-" + digest(manifest)
         with self.store._conn() as conn:
             conn.execute(
@@ -325,6 +339,10 @@ class Publications:
             or marker.get("publication_id") != publication["id"]
             or set(marker.get("files", [])) != expected_files
             or marker.get("file_sha256") != expected_hashes
+            or (
+                "export_metadata_sha256" in manifest
+                and digest(export_metadata(marker)) != manifest["export_metadata_sha256"]
+            )
         ):
             raise PublicationError("publication artifact receipt differs from manifest")
         return {

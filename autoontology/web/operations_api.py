@@ -35,6 +35,14 @@ class PublishIn(CandidateIn):
     token: str = Field(min_length=64, max_length=64, pattern="^[0-9a-f]{64}$")
 
 
+class RestorePrepareIn(CandidateIn):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class RestoreExecuteIn(Strict):
+    confirmation: str = Field(min_length=1, max_length=160)
+
+
 class FeedbackIn(Strict):
     question: str = Field(min_length=1, max_length=2000)
     answer: str = Field(default="", max_length=20000)
@@ -70,10 +78,16 @@ def install(app, api):
         return Operations(api.store)
 
     def checked(call):
+        from autoontology.engine.jobs import JobError
         from autoontology.store.publications import PublicationError
+        from autoontology.store.restorations import RestoreError
 
         try:
             return call()
+        except RestoreError as exc:
+            raise ApiError(exc.status, exc.code, str(exc)) from exc
+        except JobError as exc:
+            raise ApiError(409, "workspace_busy", str(exc)) from exc
         except PublicationError as exc:
             raise ApiError(409, "publication_invalid", str(exc)) from exc
         except OperationsError as exc:
@@ -261,6 +275,62 @@ def install(app, api):
         except RunStartError as exc:
             raise ApiError(exc.status, "publish_failed", str(exc)) from exc
 
+    @router.post("/restores")
+    def prepare_restoration(body: RestorePrepareIn):
+        from autoontology.engine.restorations import prepare_restore
+
+        return checked(
+            lambda: prepare_restore(
+                api.store, api.settings, revision=body.revision, reason=body.reason
+            )
+        )
+
+    @router.get("/restores")
+    def restorations():
+        from autoontology.store.restorations import Restorations
+
+        return checked(lambda: {"items": Restorations(api.store).listing()})
+
+    @router.get("/restores/{proposal}")
+    def restoration(proposal: str):
+        from autoontology.store.restorations import Restorations
+
+        return checked(lambda: Restorations(api.store).get(proposal))
+
+    @router.post("/restores/{proposal}/execute", status_code=202)
+    def execute_restoration(proposal: str, body: RestoreExecuteIn):
+        from autoontology.engine.restorations import run_restore
+        from autoontology.store.restorations import Restorations
+
+        packet = checked(lambda: Restorations(api.store).get(proposal))
+        if packet["status"] == "committed":
+            return checked(
+                lambda: vars(
+                    run_restore(
+                        api.store, api.settings, proposal=proposal, confirmation=body.confirmation
+                    )
+                )
+            )
+        # Reject wrong acknowledgements before starting a worker, too.
+        if body.confirmation != packet["confirmation"]:
+            raise ApiError(
+                409,
+                "restore_confirmation_required",
+                "confirmation must match the exact restoration packet",
+            )
+        try:
+            return {
+                "run_id": api.runs.start(
+                    "restore",
+                    WORKSPACE,
+                    lambda fn, store: fn(
+                        store, api.settings, proposal=proposal, confirmation=body.confirmation
+                    ),
+                )
+            }
+        except RunStartError as exc:
+            raise ApiError(exc.status, exc.code or "restore_failed", str(exc)) from exc
+
     @router.post("/feedback", status_code=201)
     def feedback(body: FeedbackIn, request: Request):
         with edit(api, "feedback"):
@@ -286,4 +356,7 @@ def install(app, api):
                 conn.execute("DELETE FROM ops_checks WHERE id=?", (item_id,))
         return {"removed": item_id}
 
+    from autoontology.store.restorations import Restorations
+
+    Restorations(api.store).reap()
     app.include_router(router)

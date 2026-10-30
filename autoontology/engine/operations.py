@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 from autoontology.config import Settings
 from autoontology.engine.build import WORKSPACE_LEASE
-from autoontology.engine.jobs import hold_sources
+from autoontology.engine.jobs import RunCancelled, hold_sources
 from autoontology.playground import prompts
 from autoontology.playground.elements import elements_from_model
 from autoontology.playground.index import build_index
@@ -198,101 +198,168 @@ def run_publish(
                 "pid": os.getpid(),
             },
         )
-        folder = None
-        work = None
-        try:
-            store.start_step(run.id, "prepare")
-            new = store.save_snapshot(run.id, model)
-            pg = PlaygroundStore(store)
-            old = pg.index_rows(validated["scope"])
-            frozen_scope = f"{model.name}@publication-r{new}"
-            pg.replace_index(
-                frozen_scope,
-                list(old.values()),
-                revision=new,
-                model=profile(settings, embedder)["embed"],
-            )
-            frozen_index = index_receipt(store, frozen_scope, model)
-            if {**frozen_index, "scope": validated["scope"]} != validated["index"]:
-                raise PublicationError("validation index changed during preparation; revalidate")
-            folder = settings.exports_dir / f"r{new:04}"
-            if folder.exists():
-                raise OperationsError("refusing to replace an existing version export")
-            work = settings.exports_dir / f".publish-{run.id}"
-            if exporter:
-                exporter(model, work, new, run)
-            else:
-                from autoontology.engine.client import BackendClient
 
-                upstream = []
-                with BackendClient(settings.backend_url) as client:
-                    for name in model.structured_sources:
-                        source = store.get_source(name)
-                        represented = any(
-                            c.source == "structured" and c.structured_source == name
-                            for c in model.classes.values()
-                        )
-                        if source and source.catalog_database_id and represented:
-                            upstream.append(
-                                (
-                                    source.name,
-                                    client.export_model(
-                                        [source.catalog_database_id], "ossie", include_ontology=True
-                                    ),
-                                )
-                            )
-                write_exports(model, work, new, run, upstream=upstream)
-            publication = publications.prepare(
-                new,
-                candidate=revision,
-                previous=previous,
-                validation=validated,
-                items=items,
-                profile=profile(settings, embedder),
-                scope=frozen_scope,
-                folder=work,
-            )
-            for path in work.rglob("*"):
-                if path.is_file():
-                    with path.open("rb") as stream:
-                        os.fsync(stream.fileno())
-            for path in sorted(
-                (p for p in work.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True
-            ):
-                sync_directory(path)
-            sync_directory(work)
-            os.replace(work, folder)
-            sync_directory(folder.parent)
-            publications.verify(new, settings.exports_dir, prepared=True)
-            store.finish_step(
-                run.id,
-                "prepare",
-                status="succeeded",
-                detail={
-                    "revision": new,
-                    "indexed_elements": frozen_index["elements"],
-                    "export_dir": str(folder),
-                },
-            )
-            # Re-check decisions/checks after expensive preparation, before the switch.
+        def recheck():
             if ops.signature(revision, profile(settings, embedder)) != signature:
                 raise OperationsError("workspace changed; revalidate")
-            store.start_step(run.id, "publish")
-            ops.commit(new, previous, items, publication_id=publication["id"], run_id=run.id)
-            return SimpleNamespace(run_id=run.id, status="succeeded", revision=new)
-        except BaseException as exc:
-            committed = store.get_run(run.id).status == "succeeded"
-            if not committed:
-                store.update_run(
-                    run.id, status="failed", error=f"{type(exc).__name__}: {str(exc)[:250]}"
-                )
-            if work and work.exists():
-                shutil.rmtree(work)
-            if (
-                not committed
-                and folder
-                and folder.exists()
-                and ops.state()["published_revision"] == previous
-            ):
-                shutil.rmtree(folder)
-            raise
+
+        return install_publication(
+            store,
+            settings,
+            model=model,
+            items=items,
+            run=run,
+            revision=revision,
+            validated=validated,
+            previous=previous,
+            embedder=embedder,
+            exporter=exporter,
+            recheck=recheck,
+        )
+
+
+def install_publication(
+    store,
+    settings,
+    *,
+    model,
+    items,
+    run,
+    revision,
+    validated,
+    previous,
+    recheck,
+    embedder=None,
+    exporter=None,
+    frozen_upstream=None,
+    restoration=None,
+    sources=None,
+    source_bindings=None,
+):
+    """Prepare everything, then atomically commit one operational publication.
+
+    Callers hold the workspace lease and supply a content-bound final guard.
+    Restorations use frozen mappings; they never ask a mutable backend for old truth.
+    """
+    ops, publications = Operations(store), Publications(store)
+    folder = None
+    work = None
+    try:
+        store.start_step(run.id, "prepare")
+        new = store.save_snapshot(run.id, model, sources=sources)
+        pg = PlaygroundStore(store)
+        old = pg.index_rows(validated["scope"])
+        frozen_scope = f"{model.name}@publication-r{new}"
+        pg.replace_index(
+            frozen_scope,
+            list(old.values()),
+            revision=new,
+            model=profile(settings, embedder)["embed"],
+        )
+        frozen_index = index_receipt(store, frozen_scope, model)
+        if {**frozen_index, "scope": validated["scope"]} != validated["index"]:
+            raise PublicationError("validation index changed during preparation; revalidate")
+        folder = settings.exports_dir / f"r{new:04}"
+        if folder.exists():
+            raise OperationsError("refusing to replace an existing version export")
+        work = settings.exports_dir / f".publish-{run.id}"
+        if exporter:
+            exporter(model, work, new, run)
+        elif frozen_upstream is not None:
+            write_exports(model, work, new, run, upstream=frozen_upstream)
+        else:
+            from autoontology.engine.client import BackendClient
+
+            upstream = []
+            with BackendClient(settings.backend_url) as client:
+                for name in model.structured_sources:
+                    source = store.get_source(name)
+                    represented = any(
+                        c.source == "structured" and c.structured_source == name
+                        for c in model.classes.values()
+                    )
+                    if source and source.catalog_database_id and represented:
+                        upstream.append(
+                            (
+                                source.name,
+                                client.export_model(
+                                    [source.catalog_database_id], "ossie", include_ontology=True
+                                ),
+                            )
+                        )
+            write_exports(model, work, new, run, upstream=upstream)
+        if restoration and frozen_upstream:
+            marker_path = work / "export.json"
+            marker = json.loads(marker_path.read_text())
+            marker["upstream_fetched_at"] = restoration.get("upstream_fetched_at")
+            marker["upstream_origin"] = {
+                "restored_from_revision": restoration["target_revision"],
+                "publication_id": restoration.get("target_publication_id"),
+            }
+            marker_path.write_text(json.dumps(marker, ensure_ascii=False, indent=2))
+        publication = publications.prepare(
+            new,
+            candidate=revision,
+            previous=previous,
+            validation=validated,
+            items=items,
+            profile=profile(settings, embedder),
+            scope=frozen_scope,
+            folder=work,
+            restoration=restoration,
+            source_bindings=source_bindings,
+        )
+        for path in work.rglob("*"):
+            if path.is_file():
+                with path.open("rb") as stream:
+                    os.fsync(stream.fileno())
+        for path in sorted(
+            (p for p in work.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True
+        ):
+            sync_directory(path)
+        sync_directory(work)
+        os.replace(work, folder)
+        sync_directory(folder.parent)
+        publications.verify(new, settings.exports_dir, prepared=True)
+        store.finish_step(
+            run.id,
+            "prepare",
+            status="succeeded",
+            detail={
+                "revision": new,
+                "indexed_elements": frozen_index["elements"],
+                "export_dir": str(folder),
+            },
+        )
+        # Re-check decisions/checks after expensive preparation, before the switch.
+        recheck()
+        store.start_step(run.id, "publish")
+        ops.commit(
+            new,
+            previous,
+            items,
+            publication_id=publication["id"],
+            run_id=run.id,
+            restore_proposal_id=restoration["proposal_id"] if restoration else None,
+        )
+        return SimpleNamespace(run_id=run.id, status="succeeded", revision=new)
+    except BaseException as exc:
+        committed = store.get_run(run.id).status == "succeeded"
+        if not committed:
+            store.update_run(
+                run.id,
+                status="cancelled"
+                if isinstance(exc, (RunCancelled, KeyboardInterrupt))
+                else "failed",
+                error=f"{type(exc).__name__}: {str(exc)[:250]}",
+            )
+        if work and work.exists():
+            shutil.rmtree(work)
+        if (
+            not committed
+            and folder
+            and folder.exists()
+            and ops.state()["published_revision"] == previous
+        ):
+            shutil.rmtree(folder)
+        raise

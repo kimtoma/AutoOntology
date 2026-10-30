@@ -1,4 +1,5 @@
 import { VersionDiff } from "@/components/version-diff"
+import { RestoreButton, RestorationHistory } from "@/components/restoration"
 import { PublicationRecord } from "@/components/publication-record"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
@@ -12,7 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { RunSheet } from "@/components/run-sheet"
 import { refreshOperations, useOperations, useLegacy, opsKeys } from "@/hooks/operations"
-import { operations, type Validation } from "@/lib/operations"
+import { operations, operationalRevision, type Validation } from "@/lib/operations"
 import { api, errorMessage } from "@/lib/api"
 import { fmtTime } from "@/lib/labels"
 import { useT } from "@/i18n"
@@ -247,8 +248,10 @@ export default function HistoryPage() {
                         r{r.revision} ·{" "}
                         {r.revision === published
                           ? t("ops.published", { n: r.revision })
-                          : r.run_kind === "publish"
+                          : operationalRevision(r, published)
                             ? t("ops.history")
+                            : ["publish", "restore"].includes(r.run_kind ?? "")
+                            ? t("ops.unpublishedPreparation")
                             : r.revision === candidate
                               ? t("ops.candidate", { n: r.revision })
                               : r.run_kind}
@@ -258,6 +261,7 @@ export default function HistoryPage() {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      {r.revision !== published && operationalRevision(r, published) && <RestoreButton revision={r.revision} onRun={setRun} />}
                       {published && r.revision !== published && (
                         <Button
                           variant="outline"
@@ -268,18 +272,19 @@ export default function HistoryPage() {
                           {t("ops.compare")}
                         </Button>
                       )}
-                      {(r.revision === published || r.run_kind === "publish") && (
+                      {operationalRevision(r, published) && (
                         <Button asChild size="sm" variant="ghost">
                           <Link to={`/exports?revision=${r.revision}`}>{t("ops.download")}</Link>
                         </Button>
                       )}
                     </div>
-                    {(r.revision === published || r.run_kind === "publish") && <PublicationRecord revision={r.revision} />}
+                    {operationalRevision(r, published) && <PublicationRecord revision={r.revision} />}
                   </li>
                 ))}
               </ul>
             )}
           </section>
+          <RestorationHistory onRun={setRun} />
           {comparison && <VersionDiff value={comparison} />}
         </>
       )}

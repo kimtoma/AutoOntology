@@ -22,12 +22,16 @@ def commands(settings_for, store_for, fail):
         from autoontology.engine.jobs import JobError, hold_sources
         from autoontology.store.provenance import ProvenanceError
         from autoontology.store.publications import PublicationError
+        from autoontology.store.restorations import RestoreError
 
         try:
             settings = settings_for()
             store = store_for(settings)
             with hold_sources(store, [WORKSPACE_LEASE], edit) if edit else nullcontext():
                 return action(store, settings)
+        except RestoreError as exc:
+            emit({"error": exc.code, "detail": str(exc)})
+            raise typer.Exit(1) from exc
         except ProvenanceError as exc:
             fail(json.dumps({"error": exc.code, "detail": str(exc)}, ensure_ascii=False))
         except PublicationError as exc:
@@ -161,6 +165,48 @@ def commands(settings_for, store_for, fail):
             }
 
         emit(run(action))
+
+    @app.command("restore-prepare")
+    def restore_prepare(
+        revision: int = typer.Option(..., "--revision", min=1),
+        reason: str = typer.Option(..., "--reason"),
+    ):
+        from autoontology.engine.restorations import prepare_restore
+
+        result = run(
+            lambda store, settings: prepare_restore(
+                store, settings, revision=revision, reason=reason
+            )
+        )
+        emit(result)
+        if result["status"] != "ready":
+            raise typer.Exit(1)
+
+    @app.command("restores")
+    def restores():
+        from autoontology.store.restorations import Restorations
+
+        emit(run(lambda store, settings: {"items": Restorations(store).listing()}))
+
+    @app.command("restoration")
+    def restoration(proposal: str):
+        from autoontology.store.restorations import Restorations
+
+        emit(run(lambda store, settings: Restorations(store).get(proposal)))
+
+    @app.command("restore")
+    def restore(
+        proposal: str = typer.Option(..., "--proposal"),
+        confirmation: str = typer.Option(..., "--confirm"),
+    ):
+        from autoontology.engine.restorations import run_restore
+
+        result = run(
+            lambda store, settings: run_restore(
+                store, settings, proposal=proposal, confirmation=confirmation
+            )
+        )
+        emit(vars(result))
 
     @app.command("preserve-original")
     def preserve_original(

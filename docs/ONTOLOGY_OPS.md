@@ -295,3 +295,75 @@ states, corruption, deletion, legacy and manifested publications, exact backup
 restoration and UI/CLI inspection without repeated model calls. Complete query
 file-download parity, authenticated CLI identities and managed restore remain
 tracked in the broader implementation contract.
+
+## Managed publication restoration
+
+A managed restore republishes earlier **knowledge as a new version**. It does
+not rewind the SQLite database, delete later snapshots, restore Postgres rows,
+change source connections, or erase decision/feedback/usage history. Database
+queries remain live at execution. Full workspace disaster recovery uses the
+private checkpoint procedure in the implementation ledger.
+
+From **Change history**, choose **Prepare restoration** on an operational
+historical version. Enter a reason. Preparation verifies the target model,
+originals and available publication proof, checks frozen structured mappings,
+builds a private retrieval index and runs the current mandatory representative
+questions. It records a durable packet without changing the operational head.
+The packet includes actual before/after field values, a summary diff, pinned
+original downloads, question results, the base/target versions and a 30-minute
+confirmation expiry. Existing candidate review is recalculated against the
+restored base; earlier decisions are retained, not silently reapplied.
+
+Review the effect, then explicitly confirm that exact packet. The same shared
+publication preparation flushes files before atomically committing the new head,
+manifest, successful run/step and completed restoration receipt together. Frozen
+upstream mappings come from the target export, never the current backend; their
+original fetch time is retained. Legacy targets have no invented historical
+validation: their preserved bytes/model are evaluated again. A legacy structured
+target without a verified frozen mapping is blocked and requires a reviewed
+candidate workflow instead.
+
+```sh
+uv run autoontology ops restore-prepare --revision 12 --reason 'Revert an incorrect policy'
+uv run autoontology ops restores
+uv run autoontology ops restoration PROPOSAL_ID
+uv run autoontology ops restore --proposal PROPOSAL_ID --confirm 'EXACT_CONFIRMATION_FROM_PACKET'
+```
+
+The confirmation text is a content acknowledgement, **not authentication or
+human identity proof**. Current records explicitly use `local-unverified`;
+authenticated human/agent approval and permissions remain P0-03 work. These
+features are only installed in the isolated local preview.
+
+Changed base/candidate decisions, checks, model selection, target data, invalid
+vectors, failed questions and expired confirmation block execution. Expiry and
+target integrity are checked again after expensive preparation. A failed or
+cancelled attempt leaves the old head in place; an otherwise valid packet can
+be retried while it remains current and unexpired. Repeating a committed request
+returns its existing receipt without another publication, even if its original
+confirmation window has since passed. Process death before commit leaves a
+retryable prepared request; after commit it leaves a successful receipt. Failed
+restore snapshots are not operational download/restore targets.
+
+`POST /api/ops/restores` prepares a packet. `GET /api/ops/restores` and
+`GET /api/ops/restores/{id}` inspect durable preparation/receipt history;
+`POST /api/ops/restores/{id}/execute` requires the exact `confirmation` field.
+UI and CLI share this service logic and the same workspace lease. Restore packet
+hashes bind the complete reviewed input; publication manifest v2 additionally
+binds export metadata so restoration origin/fetch times cannot drift unnoticed.
+Existing v1 publications remain readable under their original proof format.
+
+For a restoration started by the local UI/service, the CLI can inspect its run,
+watch NDJSON progress, or request cancellation before the publication switch:
+
+```sh
+uv run autoontology ops execution RUN_ID
+uv run autoontology ops execution RUN_ID --watch
+uv run autoontology ops execution RUN_ID --cancel --watch
+```
+
+Cancellation uses the owning service's cooperative step boundary; it never kills
+another process or rewinds a committed publication. A cancelled restoration
+leaves its old operational head intact. Client-side dialog/navigation waits are
+not execution receipts: after an ambiguous UI response, inspect the proposal/run
+before deciding to retry. A completed idempotent request returns the same effect.

@@ -30,18 +30,24 @@ NODE_FIELDS: tuple[str, ...] = (
 
 def revision_list(store: Store, limit: int = 50) -> list[dict[str, Any]]:
     """Newest first: revision, time, the run that wrote it (and its kind), counts, sources."""
+    from autoontology.store.operations import visible_revision
+
     out = []
     kinds: dict[str, str] = {}
+    statuses: dict[str, str | None] = {}
     for snap in store.list_snapshots(limit):
         if snap.run_id not in kinds:
             run = store.get_run(snap.run_id)
             kinds[snap.run_id] = run.kind if run is not None else ""
+            statuses[snap.run_id] = run.status if run is not None else None
         out.append(
             {
                 "revision": snap.revision,
+                "operational": visible_revision(store, snap.revision),
                 "created_at": snap.created_at,
                 "run_id": snap.run_id,
                 "run_kind": kinds[snap.run_id] or None,
+                "run_status": statuses[snap.run_id],
                 "counts": {k: v for k, v in snap.counts.items() if k != "by_source"},
                 "sources": [
                     {"name": s.get("name"), "kind": s.get("kind"), "included": s.get("included")}

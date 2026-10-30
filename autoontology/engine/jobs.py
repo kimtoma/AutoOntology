@@ -41,6 +41,10 @@ INGEST_KIND = "ingest"
 SEMANTIC_FK = "SEMANTIC_FK"
 
 
+class RunCancelled(BaseException):  # noqa: N818 - cancellation must bypass step error handlers
+    """Cooperative cancellation at a top-level execution boundary."""
+
+
 class JobError(RuntimeError):
     def __init__(
         self,
