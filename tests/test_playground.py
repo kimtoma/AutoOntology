@@ -1092,7 +1092,12 @@ def test_graph_links_are_encoded_and_only_for_graph_nodes():
 
 
 def test_embedder_follows_the_selection(isolated_env, monkeypatch):
+    from autoontology.engine import model_artifacts
     from autoontology.playground import service as svc
+
+    monkeypatch.setattr(
+        model_artifacts, "embedding_identity", lambda *a, **kw: {"status": "unverified"}
+    )
 
     built = []
 

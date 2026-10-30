@@ -225,9 +225,9 @@ uv run autoontology export --revision 12 --format okf --out ./verified-copy
 `GET /api/ops/publications/12?verify=true` verifies a version. A candidate without
 a receipt is not a legacy publication. Operational versions created before this
 feature remain readable, with explicit `legacy: true` and no invented historical
-validation proof. Receipt inspection is separate from managed restore; restore
-proposals and usage traces are still planned. Principal-backed human/agent
-confirmation and complete CLI parity remain tracked in the implementation ledger.
+validation proof. Usage traces and managed restoration have separate protocols
+below. Principal-backed human/agent confirmation and complete CLI parity remain
+tracked in the implementation ledger.
 
 ## Query usage receipts
 
@@ -293,8 +293,8 @@ Coverage includes provider/preflight failures, truncated streams, disconnect
 before body iteration, invalid query vectors, process death, immutable terminal
 states, corruption, deletion, legacy and manifested publications, exact backup
 restoration and UI/CLI inspection without repeated model calls. Complete query
-file-download parity, authenticated CLI identities and managed restore remain
-tracked in the broader implementation contract.
+file-download parity and authenticated CLI identities remain tracked in the
+broader implementation contract.
 
 ## Managed publication restoration
 
@@ -367,3 +367,40 @@ another process or rewinds a committed publication. A cancelled restoration
 leaves its old operational head intact. Client-side dialog/navigation waits are
 not execution receipts: after an ambiguous UI response, inspect the proposal/run
 before deciding to retry. A completed idempotent request returns the same effect.
+
+## Embedding artifact identity
+
+A model name is mutable. For Ollama, publication validation records the manifest
+SHA-256 reported by its read-only [`GET /api/tags`](https://docs.ollama.com/api/tags)
+endpoint and a hash of the local retrieval-input adapter. Model discovery never
+pulls, copies, replaces or deletes a model. Neither provider credentials nor the
+raw endpoint is stored in this identity; the publication separately binds the
+endpoint by hash.
+
+```sh
+uv run autoontology ops model-identity
+```
+
+The command returns a JSON identity or a stable `embedding_identity_unavailable`
+error. UI publication details and usage receipts expose the same captured
+identity; `/api/playground/index` reports the current identity and whether it
+matches the operational publication. A non-Ollama provider without an immutable
+content identity is explicitly `unverified`; a caller-supplied test embedder does
+not become verified by naming itself.
+
+Each embedding call checks the observed identity before and after invoking the
+provider. Identity changes invalidate validation/restore preparation and block
+queries against incompatible frozen vectors. A change during publication export
+preparation is also rejected by the final content guard. A same-name model
+replacement changes the embedder cache and legacy retrieval scope. Existing
+legacy vector rows are retained, but unknown historical identities do not
+authorize passage reuse during a new validation or restoration. Previously
+manifested publications without an artifact identity need revalidation and a new
+publication before model-backed retrieval; their original receipts and files
+remain available for inspection and verification.
+
+This detects observable tag changes; it does not lock the shared model server
+atomically, archive the weights/runtime, or guarantee deterministic model output.
+Historical chat/extraction settings and complete runtime/weight recovery remain
+separate lineage work. A controlled read-only proxy is used in acceptance tests
+to simulate digest drift without changing the shared Ollama models.

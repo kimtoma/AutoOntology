@@ -20,6 +20,7 @@ def commands(settings_for, store_for, fail):
     def run(action, *, edit=None):
         from autoontology.engine.build import WORKSPACE_LEASE
         from autoontology.engine.jobs import JobError, hold_sources
+        from autoontology.engine.model_artifacts import ModelArtifactError
         from autoontology.store.provenance import ProvenanceError
         from autoontology.store.publications import PublicationError
         from autoontology.store.restorations import RestoreError
@@ -29,7 +30,7 @@ def commands(settings_for, store_for, fail):
             store = store_for(settings)
             with hold_sources(store, [WORKSPACE_LEASE], edit) if edit else nullcontext():
                 return action(store, settings)
-        except RestoreError as exc:
+        except (RestoreError, ModelArtifactError) as exc:
             emit({"error": exc.code, "detail": str(exc)})
             raise typer.Exit(1) from exc
         except ProvenanceError as exc:
@@ -81,6 +82,12 @@ def commands(settings_for, store_for, fail):
                 edit="checks",
             )
         )
+
+    @app.command("model-identity")
+    def model_identity():
+        from autoontology.engine.model_artifacts import embedding_identity
+
+        emit(run(lambda store, settings: embedding_identity(settings)))
 
     @app.command()
     def validate(revision: int = typer.Option(..., "--revision", min=1)):

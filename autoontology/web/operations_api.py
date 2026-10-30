@@ -79,12 +79,13 @@ def install(app, api):
 
     def checked(call):
         from autoontology.engine.jobs import JobError
+        from autoontology.engine.model_artifacts import ModelArtifactError
         from autoontology.store.publications import PublicationError
         from autoontology.store.restorations import RestoreError
 
         try:
             return call()
-        except RestoreError as exc:
+        except (RestoreError, ModelArtifactError) as exc:
             raise ApiError(exc.status, exc.code, str(exc)) from exc
         except JobError as exc:
             raise ApiError(409, "workspace_busy", str(exc)) from exc

@@ -187,6 +187,11 @@ def prepare_restore(store, settings, *, revision: int, reason: str, embedder=Non
             cases = ops.checks()
             questions, index = [], None
             if cases:
+                from autoontology.engine.model_artifacts import (
+                    embedding_identity,
+                    reusable_artifact,
+                )
+
                 selected = embedder or EmbedderCache(lambda: settings, settings)()
                 target = Publications(store).get(revision)
                 if (
@@ -194,6 +199,10 @@ def prepare_restore(store, settings, *, revision: int, reason: str, embedder=Non
                     and target["manifest"]["profile"]["embed"] == selected[1]
                     and target["manifest"]["profile"]["endpoint_sha256"]
                     == digest(profile(settings, embedder)["endpoint"])
+                    and reusable_artifact(
+                        target["manifest"]["profile"].get("embedding_artifact"),
+                        embedding_identity(settings, selected),
+                    )
                 ):
                     pg = PlaygroundStore(store)
                     pg.replace_index(

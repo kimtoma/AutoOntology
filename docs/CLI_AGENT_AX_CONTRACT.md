@@ -61,7 +61,7 @@ usable CLI parity.
 
 | Capability family | Required CLI operations | Current coverage |
 | --- | --- | --- |
-| Installation and health | initialize, provider/login status and test, configure models, doctor, start/stop/restart | Existing native CLI; audit parity and structured results |
+| Installation and health | initialize, provider/login status and test, configure models, doctor, start/stop/restart | Existing native CLI, including structured `ops model-identity`; audit full parity and recovery results |
 | Sources | register/upload/list/inspect/edit/remove, inspect revisions/originals/permissions, freshness, rescan | Registration/removal and original/input-history operations exist; complete edit/scope/automation parity remains |
 | Build and executions | plan, build/resume, inspect/watch, cancel, retry, recover partial execution | Build/resume/runs and native `ops execution RUN_ID [--watch] [--cancel]` exist; complete durable lifecycle/remote-session parity remains |
 | Ontology use | operational/history/preview reads, concepts, graph data, original evidence, compare revisions | Summary/preview, original inspection/download/recovery and source-revision CLI exist; complete graph/concept/diff parity remains |

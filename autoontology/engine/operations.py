@@ -26,21 +26,34 @@ from autoontology.store.publications import PublicationError, Publications, inde
 
 
 def profile(settings: Settings, embedder=None) -> dict:
+    from autoontology.engine.model_artifacts import embedding_identity
+
     return {
         "chat": settings.effective_chat_model,
         "chat_provider": settings.chat_provider,
         "embed": embedder[1] if embedder else settings.effective_embed_model,
         "endpoint": embed_triplet(settings)[0],
+        "embedding_artifact": embedding_identity(settings, embedder),
     }
 
 
 def prepare_index(store, settings, model, scope, revision, embedder=None):
+    from autoontology.engine.model_artifacts import embedding_identity, reusable_artifact
+
     embed, name = embedder or EmbedderCache(lambda: settings, settings)()
     pg = PlaygroundStore(store)
     # Reuse only content- and model-identical vectors from the published index.
     if not pg.index_rows(scope):
         pub = Operations(store).state()["published_revision"]
-        seed = pg.index_rows(f"{model.name}@r{pub}") or pg.index_rows(model.name)
+        receipt = Publications(store).get(pub) if pub is not None else None
+        seed = {}
+        if receipt and reusable_artifact(
+            receipt["manifest"]["profile"].get("embedding_artifact"),
+            embedding_identity(settings, (embed, name)),
+        ):
+            # Verify the immutable receipt before copying its vectors.
+            Publications(store).verify(pub, settings.exports_dir)
+            seed = pg.index_rows(receipt["manifest"]["index"]["scope"])
         if seed:
             pg.replace_index(
                 scope, [r for r in seed.values() if r.model == name], revision=revision, model=name
@@ -86,6 +99,8 @@ def validate(store: Store, settings: Settings, *, revision: int, embedder=None, 
         cited, unknown = prompts.parse_citations(text, prompts.context_tokens(hits))
         ok = case["expected"].casefold() in text.casefold() and bool(cited) and not unknown
         questions.append({**case, "answer": text, "citations": cited, "ok": ok})
+    if ops.signature(revision, profile(settings, embedder)) != signature:
+        raise OperationsError("workspace or model identity changed; revalidate")
     result = {
         "ok": bool(questions) and all(q["ok"] for q in questions),
         "revision": revision,

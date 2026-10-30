@@ -90,14 +90,20 @@ class EmbedderCache:
     def __init__(self, settings_fn: Callable[[], Any], boot_settings: Any) -> None:
         self.settings_fn = settings_fn
         self.boot_settings = boot_settings
-        self._key: tuple[str, str] | None = None
+        self._key: tuple | None = None
         self._value: tuple[Embedder, str] | None = None
         self._lock = threading.Lock()
 
     def __call__(self) -> tuple[Embedder, str]:
-        endpoint, key, model = embed_triplet(self.settings_fn())
+        from autoontology.engine.model_artifacts import GuardedEmbedder, embedding_identity
+        from autoontology.store.operations import digest
+
+        settings = self.settings_fn()
+        endpoint, key, model = embed_triplet(settings)
+        identity = embedding_identity(settings, endpoint=endpoint, model=model)
+        cache_key = (endpoint, key, model, digest(identity))
         with self._lock:
-            if self._value is not None and self._key == (endpoint, model):
+            if self._value is not None and self._key == cache_key:
                 return self._value
             from autoontology.engine.jobs import prepare_upstream_env
 
@@ -110,7 +116,12 @@ class EmbedderCache:
             def embed(texts: list[str], input_type: str) -> list[list[float] | None]:
                 return embed_texts(texts, params, input_type)  # type: ignore[arg-type]
 
-            self._key, self._value = (endpoint, model), (embed, model)
+            guarded = GuardedEmbedder(
+                embed,
+                identity,
+                lambda: embedding_identity(settings, endpoint=endpoint, model=model),
+            )
+            self._key, self._value = cache_key, (guarded, model)
             logger.info("playground embedder: %s", model)
             return self._value
 
@@ -183,12 +194,18 @@ class Playground:
 
     def embedder(self) -> tuple[Embedder, str]:
         """Asked on every use: the factory (``EmbedderCache``) follows the current selection."""
-        return self.embedder_factory()
+        from autoontology.engine.model_artifacts import ModelArtifactError
+
+        try:
+            return self.embedder_factory()
+        except ModelArtifactError as exc:
+            raise PlaygroundError(exc.status, exc.code, str(exc)) from exc
 
     def elements(self, scope: Scope) -> list[Element]:
         return elements_from_model(scope.model)
 
     def index(self, scope: Scope) -> ElementIndex:
+        from autoontology.engine.model_artifacts import ModelArtifactError
         from autoontology.store.publications import PublicationError, Publications, index_receipt
 
         embed, model_name = self.embedder()
@@ -209,26 +226,45 @@ class Playground:
                     raise PublicationError(
                         "embedding selection changed; validate and publish a new revision before using it"
                     )
+                from autoontology.engine.model_artifacts import GuardedEmbedder, embedding_identity
+
+                expected = publication["manifest"]["profile"].get("embedding_artifact")
+                if (
+                    isinstance(embed, GuardedEmbedder)
+                    or (expected or {}).get("status") == "verified"
+                ) and expected != embedding_identity(None, (embed, model_name)):
+                    raise PublicationError(
+                        "embedding model artifact changed or was not recorded; validate and publish a new revision"
+                    )
                 if index_receipt(self.store, receipt["scope"], scope.model) != receipt:
                     raise PublicationError("publication index integrity check failed")
                 rows = self.pg.index_rows(receipt["scope"])
                 elements = self.elements(scope)
-                return ElementIndex(
+                index = ElementIndex(
                     elements,
                     [rows[e.id].embedding for e in elements],
                     model=model_name,
                     revision=revision,
                     reused=len(elements),
                 )
+                index.embedding_artifact = expected
+                return index
         except PublicationError as exc:
             raise PlaygroundError(409, "publication_invalid", str(exc)) from exc
-        sid = f"{scope.key}@r{revision}"
+        except ModelArtifactError as exc:
+            raise PlaygroundError(exc.status, exc.code, str(exc)) from exc
+        from autoontology.engine.model_artifacts import GuardedEmbedder
+        from autoontology.store.operations import digest
+
+        # Preserve legacy rows, but never assume they came from today's mutable tag.
+        suffix = f"@{digest(embed.artifact)}" if isinstance(embed, GuardedEmbedder) else ""
+        sid = f"{scope.key}@r{revision}{suffix}"
         with self._index_lock:
             cached = self._indexes.get(sid)
             if cached and cached.revision == revision and cached.model == model_name:
                 return cached
         elements = self.elements(scope)
-        if not self.pg.index_rows(sid):
+        if not suffix and not self.pg.index_rows(sid):
             legacy = self.pg.index_rows(scope.key)
             if legacy:
                 self.pg.replace_index(
@@ -241,12 +277,15 @@ class Playground:
             idx = build_index(
                 self.pg, sid, elements, revision=revision, model=model_name, embed=embed
             )
+        except ModelArtifactError as exc:
+            raise PlaygroundError(exc.status, exc.code, str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 - the embed endpoint's own errors
             raise PlaygroundError(
                 502,
                 "embed_failed",
                 f"embedding the ontology failed: {type(exc).__name__}: {str(exc)[:300]}",
             ) from exc
+        idx.embedding_artifact = dict(getattr(embed, "artifact", {"status": "unverified"}))
         with self._index_lock:
             if len(self._indexes) >= 4:
                 self._indexes.pop(next(iter(self._indexes)))
@@ -254,6 +293,7 @@ class Playground:
         return idx
 
     def index_status(self, scope: Scope) -> dict[str, Any]:
+        from autoontology.store.operations import digest
         from autoontology.store.publications import Publications
 
         publication = Publications(self.store).check_model(scope.revision)
@@ -262,7 +302,25 @@ class Playground:
             if publication
             else f"{scope.key}@r{scope.revision}"
         )
-        meta = self.pg.index_meta(sid)
+        identity = None
+        if isinstance(self.embedder_factory, EmbedderCache):
+            try:
+                embed, _ = self.embedder()
+                identity = dict(embed.artifact)
+                if not publication:
+                    sid += f"@{digest(identity)}"
+            except PlaygroundError as exc:
+                identity = {"status": "unavailable", "error": exc.code}
+        meta = (
+            None
+            if identity and identity.get("status") == "unavailable"
+            else self.pg.index_meta(sid)
+        )
+        compatible = (
+            identity == publication["manifest"]["profile"].get("embedding_artifact")
+            if publication and identity
+            else None
+        )
         revision = scope.revision
         return {
             "workspace": scope.key,
@@ -270,8 +328,10 @@ class Playground:
             "warnings": scope.warnings,
             "revision": revision,
             "index": meta,
+            "embedding_artifact": identity,
+            "identity_matches_publication": compatible,
             "publication_id": publication["id"] if publication else None,
-            "stale": meta is None or meta["revision"] != revision,
+            "stale": meta is None or meta["revision"] != revision or compatible is False,
         }
 
     def retrieve(self, scope: Scope, question: str, top_k: int) -> tuple[ElementIndex, list[Hit]]:
@@ -279,6 +339,8 @@ class Playground:
         return idx, hits
 
     def retrieve_with_vector(self, scope: Scope, question: str, top_k: int):
+        from autoontology.engine.model_artifacts import ModelArtifactError
+
         embed, name = self.embedder()
         idx = self.index(scope)
         if name != idx.model or (
@@ -294,6 +356,8 @@ class Playground:
             vector = embed([question], "query")[0]
             if vector and (not np.isfinite(vector).all() or not any(vector)):
                 raise ValueError("invalid query vector")
+        except ModelArtifactError as exc:
+            raise PlaygroundError(exc.status, exc.code, str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
             raise PlaygroundError(
                 502,
@@ -346,6 +410,7 @@ class Playground:
                 "sha256": fingerprint,
                 "algorithm": "normalized-float32-v1",
                 "model": idx.model,
+                "embedding_artifact": getattr(idx, "embedding_artifact", {"status": "unverified"}),
                 "elements": len(idx.elements),
                 "publication_index": publication["manifest"]["index"] if publication else None,
             },
