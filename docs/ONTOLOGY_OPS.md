@@ -55,7 +55,9 @@ grouped into local tabs under their relevant main section.
 
 The workspace console takes layout cues from [Vercel Geist](https://vercel.com/geist/introduction)
 and its [Observability product](https://vercel.com/products/observability): a workspace
-header, horizontal navigation, restrained surfaces, thin rules, and compact rows.
+header, a collapsible left navigation rail, restrained surfaces, thin rules, and compact rows.
+The desktop rail can fold to icons and remembers its state across reloads; on
+mobile it opens as a drawer and closes after navigation.
 Review uses a split workbench with source evidence beside the decision, while the
 home page shows actual pending proposals, source freshness and the published
 version. No activity charts or synthetic metrics are introduced. Latin text uses

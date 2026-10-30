@@ -269,44 +269,6 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.console-nav-wrap {
-  max-width: 1440px;
-  margin: auto;
-  padding: 0 32px;
-}
-.console-nav {
-  display: flex;
-  align-items: stretch;
-  gap: 24px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.console-nav::-webkit-scrollbar {
-  display: none;
-}
-.console-nav-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 44px;
-  padding: 0 2px;
-  border-bottom: 2px solid transparent;
-  color: var(--muted-foreground);
-  font-size: 13px;
-  white-space: nowrap;
-  transition: color 0.15s;
-}
-.console-nav-link:hover,
-.console-nav-link.is-current {
-  color: var(--foreground);
-}
-.console-nav-link.is-current {
-  border-bottom-color: var(--foreground);
-  font-weight: 500;
-}
-.console-nav-link:last-child {
-  margin-left: auto;
-}
 .console-counter {
   background: var(--muted);
   color: var(--muted-foreground);
@@ -733,19 +695,6 @@
     height: 30px;
     width: 28px;
     padding: 6px;
-  }
-  .console-nav-wrap {
-    padding: 0 20px;
-  }
-  .console-nav {
-    gap: 22px;
-  }
-  .console-nav-link {
-    min-height: 42px;
-    font-size: 12px;
-  }
-  .console-nav-link:last-child {
-    margin-left: 0;
   }
   .console-main {
     padding: 26px 20px 36px;
@@ -1260,4 +1209,156 @@
 }
 .ops-activity-row time {
   white-space: nowrap;
+}
+
+/* The main navigation is a collapsible left rail; workspace tools stay in the header. */
+.console-layout {
+  --sidebar: var(--card);
+}
+.console-shell {
+  flex: 1;
+  min-width: 0;
+}
+.console-sidebar-header {
+  height: 64px;
+  padding: 0 18px;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.console-sidebar .console-brand {
+  height: 40px;
+  gap: 10px;
+  font-size: 14px;
+  overflow: hidden;
+}
+.console-sidebar .console-brand svg {
+  flex-shrink: 0;
+}
+.console-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 16px 12px 0;
+}
+.console-sidebar-menu {
+  flex: 1;
+  gap: 5px;
+}
+.console-sidebar-menu > :last-child {
+  margin-top: auto;
+  padding-top: 24px;
+}
+.console-sidebar-link {
+  height: 36px;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.console-sidebar-link[data-active="true"] {
+  color: var(--foreground);
+  font-weight: 500;
+  background: var(--accent);
+}
+.console-sidebar-link > svg {
+  width: 15px;
+  height: 15px;
+}
+.console-sidebar-count {
+  margin-left: auto;
+}
+.console-sidebar-footer {
+  min-height: 44px;
+  padding: 12px 22px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.group[data-collapsible="icon"] .console-sidebar-name,
+.group[data-collapsible="icon"] .console-sidebar-count {
+  display: none;
+}
+.group[data-collapsible="icon"] .console-sidebar-header {
+  padding: 0;
+  align-items: center;
+}
+.group[data-collapsible="icon"] .console-sidebar-nav {
+  padding: 16px 8px 0;
+}
+.group[data-collapsible="icon"] .console-sidebar-link {
+  width: 40px;
+  height: 36px;
+  justify-content: center;
+  padding: 0 !important;
+}
+.group[data-collapsible="icon"] .console-sidebar-footer {
+  padding: 0;
+}
+.console-main {
+  container-type: inline-size;
+}
+@container (max-width: 820px) {
+  .ops-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ops-aside {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+    gap: 24px;
+  }
+  .ops-aside > :last-child {
+    margin-top: 0;
+  }
+}
+@container (max-width: 700px) {
+  .review-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .review-list {
+    max-height: 210px;
+    overflow-y: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .source-freshness > ul {
+    grid-template-columns: 1fr;
+  }
+  .source-freshness > ul > li,
+  .source-freshness > ul > li:first-child {
+    padding: 14px 0;
+  }
+  .source-freshness > ul > li + li {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .source-freshness > ul > li > div {
+    flex-basis: 55%;
+  }
+}
+@container (max-width: 520px) {
+  .ops-aside {
+    display: block;
+  }
+  .ops-aside > :last-child {
+    margin-top: 24px;
+  }
+}
+@media (max-width: 767px) {
+  .console-topbar {
+    gap: 10px;
+    padding-inline: 16px;
+  }
+  .console-workspace {
+    max-width: 42vw;
+  }
+  .console-sidebar-header {
+    height: 56px;
+  }
+}
+
+@media (max-width: 767px) {
+  .console-sidebar .console-brand > span { display: inline; }
 }
