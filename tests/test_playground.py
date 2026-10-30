@@ -865,7 +865,7 @@ def test_chat_error_event_when_the_provider_fails(client):
         yield  # pragma: no cover
 
     llm.stream = broken
-    events = _sse(c.post(f"{API}/chat", json={"question": "x"}).text)
+    events = _sse(c.post(f"{API}/chat", json={"question": "계약?"}).text)
     assert events[-1] == (
         "error",
         {"status": 504, "error": "provider_timeout", "detail": "ollama did not answer within 270s"},
@@ -1129,7 +1129,7 @@ def test_conversation_delete_and_pruning(tmp_path, monkeypatch, client):
     assert len(kept) == 3 and set(kept) == set(ids[2:])
     # REST delete
     c = client[0]
-    done = _sse(c.post(f"{API}/chat", json={"question": "x"}).text)
+    done = _sse(c.post(f"{API}/chat", json={"question": "계약?"}).text)
     cid = done[-1][1]["conversation_id"]
     assert c.delete(f"{API}/conversations/{cid}").json() == {"deleted": cid}
     assert c.get(f"{API}/conversations/{cid}").status_code == 404

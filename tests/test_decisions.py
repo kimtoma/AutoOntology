@@ -24,6 +24,7 @@ def _downgrade(path, version):
     conn.execute("DROP TABLE review_decisions")
     conn.execute("DROP INDEX IF EXISTS alignments_review_idx")
     conn.execute("ALTER TABLE alignments DROP COLUMN judged_json")
+    conn.execute("ALTER TABLE playground_messages DROP COLUMN trace_id")
     if version < 5:
         conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
     if version < 4:

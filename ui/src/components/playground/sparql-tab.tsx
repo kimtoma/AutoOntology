@@ -5,6 +5,7 @@ import { Loader2, Play } from "lucide-react"
 import { useState } from "react"
 
 import { CopyButton, ResultTable } from "@/components/playground/shared"
+import { TraceButton } from "@/components/playground/usage-traces"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -74,6 +75,7 @@ export function SparqlTab() {
       )}
       {res && (
         <div className="grid gap-2" id="sparql-result" data-type={res.type}>
+          <TraceButton traceId={res.trace_id} />
           <p className="text-xs text-muted-foreground">
             {tx("playground.sparql.result", {
               rev: res.revision, ttl: <code key="ttl" className="break-all">{res.ttl}</code>,

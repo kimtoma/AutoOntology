@@ -1,4 +1,5 @@
 import { KnowledgeFeedback } from "@/components/knowledge-feedback"
+import { TraceButton } from "@/components/playground/usage-traces"
 /* Chat: RAG over the published ontology snapshot, with clickable citation chips. */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -17,6 +18,7 @@ import { fmtNumber, t, tn, useT } from "@/i18n"
 import { SHARED_DEMO } from "@/lib/demo"
 
 interface Msg {
+  traceId?: string
   role: "user" | "assistant"
   content: string
   citations?: Record<string, ElementChip>
@@ -84,6 +86,7 @@ export function ChatTab() {
     abort.current = ctrl
     const onEvent = (ev: SseEvent) => {
       const d = ev.data as Record<string, unknown>
+      if (d.trace_id) patchLast((m) => ({ ...m, traceId: String(d.trace_id) }))
       if (ev.event === "status") patchLast((m) => ({ ...m, phase: t("playground.chat.phase.checking") }))
       else if (ev.event === "retrieved") {
         patchLast((m) => ({ ...m, retrieved: d.elements as RetrievedElement[], phase: t("playground.chat.phase.writing") }))
@@ -168,6 +171,7 @@ export function ChatTab() {
                     )}
                   </div>
                 )}
+                {!m.pending && <TraceButton traceId={m.traceId} />}
                 {!SHARED_DEMO && !m.pending && m.content && <KnowledgeFeedback question={messages.slice(0,i).filter(x=>x.role==="user").at(-1)?.content || ""} answer={m.content} />}
                 {m.retrieved && <Retrieved items={m.retrieved} />}
               </>

@@ -156,13 +156,14 @@ class PlaygroundStore:
         provider: str = "",
         model: str = "",
         incomplete: bool = False,
+        trace_id: str | None = None,
     ) -> int:
         stamp = now_iso()
         with self._conn() as conn:
             cur = conn.execute(
                 "INSERT INTO playground_messages (conversation_id, role, content, "
-                "retrieved_json, citations_json, provider, model, incomplete, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "retrieved_json, citations_json, provider, model, incomplete, created_at, trace_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     conversation_id,
                     role,
@@ -173,6 +174,7 @@ class PlaygroundStore:
                     model,
                     int(incomplete),
                     stamp,
+                    trace_id,
                 ),
             )
             conn.execute(
@@ -198,6 +200,7 @@ class PlaygroundStore:
                 "model": r["model"],
                 "incomplete": bool(r["incomplete"]),
                 "created_at": r["created_at"],
+                "trace_id": r["trace_id"],
             }
             for r in rows
         ]

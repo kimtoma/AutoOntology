@@ -141,11 +141,11 @@ describe("playground page", () => {
     "GET /playground/index": INDEX,
   }
 
-  it("has exactly the Chat, SQL and SPARQL tabs", async () => {
+  it("offers Chat, SQL, SPARQL and saved usage history", async () => {
     mockFetch(BASE)
     renderPage(<PlaygroundPage />, "/playground")
     const tabs = await screen.findAllByRole("tab")
-    expect(tabs.map((t) => t.textContent?.trim())).toEqual(["Chat", "SQL", "SPARQL"])
+    expect(tabs.map((t) => t.textContent?.trim())).toEqual(["Chat", "SQL", "SPARQL", "Usage history"])
     expect(await screen.findByText(/ollama · openai\/qwen3:8b/)).toBeInTheDocument()
   })
 

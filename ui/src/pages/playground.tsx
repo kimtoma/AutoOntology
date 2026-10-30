@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/page-header"
 import { ChatTab } from "@/components/playground/chat-tab"
 import { ConceptOpener } from "@/components/playground/concept-opener"
 import { SparqlTab } from "@/components/playground/sparql-tab"
+import { UsageHistory } from "@/components/playground/usage-traces"
 import { SqlTab } from "@/components/playground/sql-tab"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -29,6 +30,7 @@ const TABS = [
   { key: "chat", label: () => t("playground.tab.chat"), icon: MessagesSquare },
   { key: "sql", label: () => "SQL", icon: Database },
   { key: "sparql", label: () => "SPARQL", icon: Sparkles },
+  { key: "usage", label: () => t("usage.history"), icon: MessagesSquare },
 ] as const
 type Tab = (typeof TABS)[number]["key"]
 const AUTO = "__auto"
@@ -113,6 +115,7 @@ export default function PlaygroundPage() {
               <SqlTab key={sqlSource ?? AUTO} source={sqlSource} />
             </TabsContent>
             <TabsContent value="sparql" forceMount hidden={tab !== "sparql"}><SparqlTab /></TabsContent>
+            <TabsContent value="usage">{tab === "usage" && <UsageHistory />}</TabsContent>
           </Tabs>
         )}
       <ConceptSheet conceptId={conceptId} onClose={() => set({ concept: null })} onOpen={openConcept} />

@@ -227,6 +227,7 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
     conn.execute("DROP TABLE review_decisions")
     conn.execute("DROP INDEX IF EXISTS alignments_review_idx")
     conn.execute("ALTER TABLE alignments DROP COLUMN judged_json")
+    conn.execute("ALTER TABLE playground_messages DROP COLUMN trace_id")
     for i, applied in enumerate(
         [
             {"term_id": "t-old", "description_set": True},

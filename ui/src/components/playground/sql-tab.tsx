@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, Send, Square } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { CopyButton, ResultTable } from "@/components/playground/shared"
+import { TraceButton } from "@/components/playground/usage-traces"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -24,6 +25,7 @@ const newConversation = () =>
 
 /** *source*: the structured source to query; null = the snapshot's first one. */
 export function SqlTab({ source }: { source: string | null }) {
+  const [traceId, setTraceId] = useState<string>()
   const t = useT()
   const [question, setQuestion] = useState("")
   const [asked, setAsked] = useState("")
@@ -39,6 +41,7 @@ export function SqlTab({ source }: { source: string | null }) {
 
   const run = async (q: string) => {
     if (!q.trim() || busy) return
+    setTraceId(undefined)
     setAsked(q.trim())
     setSteps([]); setSql(""); setAnswer(null); setError(null); setNotices([])
     setBusy(true)
@@ -46,6 +49,8 @@ export function SqlTab({ source }: { source: string | null }) {
     abort.current = ctrl
     const onEvent = (ev: SseEvent) => {
       const d = ev.data as Record<string, unknown>
+      if (d.trace_id) setTraceId(String(d.trace_id))
+      if (ev.event === "done" && d.status === "failed") setError(t("usage.sqlFailed"))
       if (ev.event === "meta") setNotices((d.notices as string[]) ?? [])
       else if (ev.event === "step") {
         const node = String(d.node ?? "")
@@ -96,6 +101,7 @@ export function SqlTab({ source }: { source: string | null }) {
           </div>
         </div>
       </form>
+      {!busy && <TraceButton traceId={traceId} />}
       {notices.map((n) => <p key={n} className="text-xs text-amber-700 dark:text-amber-300">{n}</p>)}
       {(steps.length > 0 || busy) && (
         <Card className="gap-2 py-4">

@@ -21,13 +21,13 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import ExitStack
+from contextlib import ExitStack, aclosing
 from pathlib import Path
 from typing import Any
 
 import anyio
 import httpx
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 from starlette.background import BackgroundTask
@@ -48,6 +48,7 @@ from autoontology.playground.sparql import (
     SparqlError,
     SparqlRunner,
 )
+from autoontology.store.traces import TraceError, UsageTraces, error_code
 from autoontology.web.api import PREFIX, Api, ApiError, mask
 
 logger = logging.getLogger("autoontology.web")
@@ -91,17 +92,53 @@ def _event(name: str, data: Any) -> dict[str, str]:
     return {"event": name, "data": json.dumps(mask(data), ensure_ascii=False, default=str)}
 
 
+def sql_result_complete(event: Any) -> bool:
+    if not isinstance(event, dict) or event.get("type") != "result":
+        return False
+    answer = event.get("answer")
+    if not isinstance(answer, dict) or answer.get("error") or not answer.get("sql_code"):
+        return False
+    rows = answer.get("sql_response_from_db")
+    if isinstance(rows, str):
+        try:
+            rows = json.loads(rows)
+        except ValueError:
+            return False
+    return isinstance(rows, (list, dict))
+
+
+def sql_receipt_event(event: Any) -> dict:
+    """Preserve execution evidence, excluding upstream's internal reasoning fields."""
+    if not isinstance(event, dict):
+        return {"type": "message"}
+    if event.get("type") == "result":
+        answer = event.get("answer") or {}
+        return {
+            "type": "result",
+            "answer": {
+                k: mask(answer[k])
+                for k in ("response", "sql_code", "sql_columns", "sql_response_from_db", "error")
+                if k in answer
+            },
+        }
+    if event.get("type") == "error":
+        return {"type": "error", "error": "upstream_query_failed"}
+    return {k: mask(event[k]) for k in ("type", "phase", "node", "label", "sql") if k in event}
+
+
 def _err(exc: Exception) -> tuple[int, str, str]:
     if isinstance(exc, (PlaygroundError, LLMError, SparqlError)):
         return exc.status, exc.code, exc.message
+    if isinstance(exc, TraceError):
+        return exc.status, exc.code, str(exc)
     if isinstance(exc, ApiError):
         return exc.status, exc.error, exc.detail
     return 500, "internal_error", f"{type(exc).__name__} (see service.log)"
 
 
-def _api_error(exc: Exception) -> ApiError:
+def _api_error(exc: Exception, trace_id: str | None = None) -> ApiError:
     status, code, message = _err(exc)
-    return ApiError(status, code, mask(message))
+    return ApiError(status, code, mask(message), **({"trace_id": trace_id} if trace_id else {}))
 
 
 async def _guarded(
@@ -117,12 +154,15 @@ async def _guarded(
             logger.error("playground stream failed", exc_info=exc)
         yield _event("error", {"status": status, "error": code, "detail": message})
     finally:
+        with anyio.CancelScope(shield=True):
+            await events.aclose()
         stack.close()
 
 
 def build_router(api: Api, app: FastAPI) -> APIRouter:
     router = APIRouter(prefix=f"{PREFIX}/playground")
     sparql = SparqlRunner()
+    UsageTraces(api.store).reap()
     app.state.sparql = sparql  # closed by the app's lifespan (web.app.create_app)
 
     def pg() -> Playground:
@@ -151,6 +191,44 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
 
     # --- index / chat -------------------------------------------------------------------
 
+    @router.get("/traces")
+    def traces(response: Response, limit: int = 50):
+        response.headers["Cache-Control"] = "private, no-store"
+        try:
+            return {
+                "items": UsageTraces(api.store).listing(
+                    workspace=api.settings.workspace, limit=limit
+                )
+            }
+        except TraceError as exc:
+            raise _api_error(exc) from exc
+
+    @router.get("/traces/{trace_id}")
+    def trace(trace_id: str, response: Response):
+        response.headers["Cache-Control"] = "private, no-store"
+        try:
+            return UsageTraces(api.store).get(trace_id)
+        except TraceError as exc:
+            raise _api_error(exc) from exc
+
+    @router.delete("/traces/{trace_id}")
+    def delete_trace(trace_id: str):
+        try:
+            if not UsageTraces(api.store).delete(trace_id):
+                raise TraceError("no usage trace with this identifier", "trace_missing", 404)
+            return {"deleted": trace_id}
+        except TraceError as exc:
+            raise _api_error(exc) from exc
+
+    @router.post("/retrieve")
+    async def retrieve(body: ChatIn):
+        s = scope()
+        with hold(s):
+            try:
+                return await anyio.to_thread.run_sync(pg().search, s, body.question, body.top_k)
+            except Exception as exc:
+                raise _api_error(exc) from exc
+
     @router.get("/index")
     def index_status() -> dict[str, Any]:
         return pg().index_status(scope())
@@ -176,27 +254,51 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                     "unknown_conversation",
                     f"no conversation {body.conversation_id!r} for {s.key!r}",
                 )
+        stack = hold(s)
+        try:
+            trace_id = pg().traces.begin(
+                kind="chat",
+                workspace=s.key,
+                revision=s.revision,
+                model=s.model,
+                request={"question": body.question, "top_k": body.top_k},
+                conversation_id=body.conversation_id,
+            )
+        except BaseException:
+            stack.close()
+            raise
         try:
             llm = pg().llm_factory()
-        except LLMError as exc:
-            raise _api_error(exc) from exc
-        stack = hold(s)
+        except Exception as exc:
+            pg().traces.finish(trace_id, "failed", {"error": error_code(exc)})
+            stack.close()
+            raise _api_error(exc, trace_id) from exc
 
         async def events() -> AsyncIterator[dict[str, Any]]:
-            async for ev in pg().ask(
-                s,
-                body.question,
-                history=[t.model_dump() for t in body.history],
-                top_k=body.top_k,
-                conversation_id=body.conversation_id,
-                llm=llm,
-            ):
-                yield ev
+            async with aclosing(
+                pg().ask(
+                    s,
+                    body.question,
+                    history=[t.model_dump() for t in body.history],
+                    top_k=body.top_k,
+                    conversation_id=body.conversation_id,
+                    llm=llm,
+                    trace_id=trace_id,
+                )
+            ) as stream:
+                async for ev in stream:
+                    yield ev
+
+        def cleanup_chat():
+            pg().traces.finish(
+                trace_id, "cancelled", {"error": "client_disconnected", "partial": True}
+            )
+            stack.close()
 
         # the generator's finally never runs when the client leaves before the body starts:
         # the background task (after the response, whatever happened) releases the slot too
         return EventSourceResponse(
-            _guarded(stack, events()), background=BackgroundTask(stack.close)
+            _guarded(stack, events()), background=BackgroundTask(cleanup_chat)
         )
 
     @router.get("/conversations")
@@ -220,18 +322,43 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
 
     @router.post("/sql")
     async def sql(body: SqlIn) -> EventSourceResponse:
+        s = scope()
         target_db = None
         if body.source:
             src = api.source(body.source)
             if src.kind not in ("files", "database"):
                 raise ApiError(400, "not_structured", f"source {src.name!r} is a {src.kind} source")
+            if src.name not in {x.name for x in s.structured}:
+                raise ApiError(
+                    409,
+                    "source_not_published",
+                    "the source is not included in operational knowledge",
+                )
             target_db = src.catalog_database_id
         else:  # the snapshot's first built structured source (none: upstream picks)
-            try:
-                structured = scope().structured
-            except ApiError:
-                structured = []
+            structured = s.structured
             target_db = next((x.catalog_database_id for x in structured), None)
+        if not target_db:
+            raise ApiError(
+                409, "sql_unavailable", "publish a structured source before querying its data"
+            )
+        traces = UsageTraces(api.store)
+        trace_id = traces.begin(
+            kind="sql",
+            workspace=s.key,
+            revision=s.revision,
+            model=s.model,
+            request=body.model_dump(mode="json"),
+        )
+        traces.context(
+            trace_id,
+            {
+                "target_db": target_db,
+                "data_time": "live_at_execution",
+                "provider": api.settings.chat_provider,
+                "model": api.settings.effective_chat_model,
+            },
+        )
         payload: dict[str, Any] = {"question": body.question}
         if target_db:
             payload["target_db"] = target_db
@@ -289,16 +416,28 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                 )
         except httpx.HTTPError as exc:
             await http.aclose()
+            traces.finish(trace_id, "failed", {"error": "backend_unavailable"})
             raise ApiError(
-                503, "backend_unavailable", f"upstream backend unreachable: {type(exc).__name__}"
+                503,
+                "backend_unavailable",
+                f"upstream backend unreachable: {type(exc).__name__}",
+                trace_id=trace_id,
             ) from exc
+        except BaseException as exc:
+            await http.aclose()
+            traces.finish(trace_id, "failed", {"error": error_code(exc)})
+            if isinstance(exc, ApiError):
+                exc.extra["trace_id"] = trace_id
+            raise
 
         async def relay() -> AsyncIterator[dict[str, str]]:
+            recorded, failed = [], False
             try:
                 yield _event(
                     "meta",
                     {
                         "target_db": target_db,
+                        "trace_id": trace_id,
                         "notices": notices,
                         "stateless": bool(notices) or not body.conversation_id,
                     },
@@ -308,14 +447,34 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                         continue  # ": ping" keep-alives
                     raw = line[5:].strip()
                     if raw == "[DONE]":
-                        yield _event("done", {})
+                        success = not failed and any(sql_result_complete(e) for e in recorded)
+                        traces.finish(
+                            trace_id,
+                            "succeeded" if success else "failed",
+                            {
+                                "events": recorded,
+                                "data_time": "live_at_execution",
+                                **({} if success else {"error": "upstream_query_failed"}),
+                            },
+                        )
+                        yield _event(
+                            "done",
+                            {"trace_id": trace_id, "status": "succeeded" if success else "failed"},
+                        )
                         return
                     try:
                         ev = json.loads(raw)
                     except ValueError:
                         continue
                     name = str(ev.get("type") or "message") if isinstance(ev, dict) else "message"
+                    failed = failed or name == "error"
+                    recorded.append(sql_receipt_event(ev))
                     yield _event(name, ev)
+                traces.finish(
+                    trace_id,
+                    "failed",
+                    {"events": recorded, "error": "stream_truncated", "partial": True},
+                )
                 yield _event(
                     "error",
                     {
@@ -325,6 +484,11 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                     },
                 )
             except httpx.HTTPError as exc:
+                traces.finish(
+                    trace_id,
+                    "failed",
+                    {"events": recorded, "error": "upstream_error", "partial": True},
+                )
                 yield _event(
                     "error",
                     {
@@ -333,13 +497,33 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                         "detail": f"upstream stream broke: {type(exc).__name__}",
                     },
                 )
+            except Exception as exc:
+                traces.finish(
+                    trace_id,
+                    "failed",
+                    {"events": recorded, "error": error_code(exc), "partial": True},
+                )
+                yield _event(
+                    "error",
+                    {
+                        "status": 502,
+                        "error": "upstream_error",
+                        "detail": "the SQL stream could not be processed",
+                    },
+                )
             finally:
+                traces.finish(
+                    trace_id,
+                    "cancelled",
+                    {"events": recorded, "error": "request_cancelled", "partial": True},
+                )
                 await cleanup()
 
         async def cleanup() -> None:
             # idempotent; also the background task, for a client gone before the body started
             await resp.aclose()
             await http.aclose()
+            traces.finish(trace_id, "cancelled", {"error": "client_disconnected", "partial": True})
 
         return EventSourceResponse(relay(), background=BackgroundTask(cleanup))
 
@@ -352,9 +536,22 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     @router.post("/sparql")
     async def run_sparql(body: SparqlIn) -> dict[str, Any]:
         head, model = api.snapshot()
+        traces = UsageTraces(api.store)
+        trace_id = traces.begin(
+            kind="sparql",
+            workspace=model.name,
+            revision=head.revision,
+            model=model,
+            request=body.model_dump(),
+        )
 
         def work() -> dict[str, Any]:
+            from autoontology.store.publications import Publications
+
+            if Publications(api.store).get(head.revision):
+                Publications(api.store).verify(head.revision, api.settings.exports_dir)
             path = snapshot_ttl(api.settings, head, model)
+            traces.context(trace_id, {"ttl_sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
             key = snapshot_key(api.settings, head)
             return {
                 **sparql.run_file(key, path, body.query, limit=body.limit),
@@ -363,9 +560,14 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             }
 
         try:
-            return mask(await anyio.to_thread.run_sync(work))
-        except SparqlError as exc:
-            raise _api_error(exc) from exc
+            result = mask(await anyio.to_thread.run_sync(work))
+            traces.finish(trace_id, "succeeded", {"result": result})
+            return {**result, "trace_id": trace_id}
+        except Exception as exc:
+            traces.finish(trace_id, "failed", {"error": error_code(exc)})
+            raise _api_error(exc, trace_id) from exc
+        finally:
+            traces.finish(trace_id, "cancelled", {"error": "request_cancelled", "partial": True})
 
     return router
 

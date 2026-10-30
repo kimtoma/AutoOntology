@@ -198,4 +198,7 @@ def commands(settings_for, store_for, fail):
 
         emit(run(action))
 
+    from autoontology.query_cli import install
+
+    install(app, settings_for)
     return app

@@ -458,6 +458,21 @@ MIGRATIONS: list[tuple[int, str]] = [
         )
         """,
     ),
+    (
+        9,
+        """
+        CREATE TABLE IF NOT EXISTS usage_traces (
+            id TEXT PRIMARY KEY, workspace TEXT NOT NULL, kind TEXT NOT NULL,
+            revision INTEGER NOT NULL, publication_id TEXT,
+            status TEXT NOT NULL CHECK(status IN ('running','succeeded','failed','cancelled','interrupted')),
+            conversation_id TEXT REFERENCES playground_conversations(id) ON DELETE CASCADE,
+            owner_pid INTEGER NOT NULL, started_at TEXT NOT NULL, finished_at TEXT,
+            data_json TEXT NOT NULL, sha256 TEXT
+        );
+        CREATE INDEX IF NOT EXISTS usage_traces_time ON usage_traces(workspace, started_at DESC);
+        ALTER TABLE playground_messages ADD COLUMN trace_id TEXT
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration

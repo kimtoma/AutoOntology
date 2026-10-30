@@ -433,6 +433,7 @@ export interface RetrievedElement extends ElementChip {
 export interface ChatTurn { role: "user" | "assistant"; content: string }
 export interface SparqlExample { id: string; title: string; description: string; query: string }
 export interface SparqlResult {
+  trace_id?: string
   type: "SELECT" | "ASK" | "CONSTRUCT" | "DESCRIBE"
   columns: string[]
   rows: unknown[][]
@@ -452,6 +453,22 @@ export interface IndexStatus {
   revision: number
   index: { revision: number; model: string; elements: number; built_at: string } | null
   stale: boolean
+}
+export interface UsageSummary {
+  id: string
+  kind: string
+  status: "running" | "succeeded" | "failed" | "cancelled" | "interrupted"
+  revision: number
+  started_at: string
+}
+export interface UsageTrace extends UsageSummary {
+  data: {
+    request: { question?: string; query?: string }
+    binding: { legacy: boolean; publication_id?: string | null }
+    duration_ms: number | null
+    context: { hits?: { ref: string; text: string }[]; data_time?: string }
+    outcome: { answer?: string; error?: string; result?: unknown; events?: unknown }
+  }
 }
 
 export interface SseEvent { event: string; data: unknown }
@@ -618,6 +635,9 @@ export const api = {
   exportText: (dir: string, file: string) =>
     requestText(`/exports/${enc(dir)}/${encPath(file)}?inline=true`),
   playground: {
+    traces: () => request<{ items: UsageSummary[] }>("/playground/traces"),
+    trace: (id: string) => request<UsageTrace>(`/playground/traces/${enc(id)}`),
+    forgetTrace: (id: string) => request(`/playground/traces/${enc(id)}`, json("DELETE", {})),
     index: () => request<IndexStatus>("/playground/index"),
     chat: (body: { question: string; history?: ChatTurn[]; top_k?: number; conversation_id?: string | null },
            onEvent: (ev: SseEvent) => void, signal?: AbortSignal) =>

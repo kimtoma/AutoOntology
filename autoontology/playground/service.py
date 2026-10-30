@@ -10,6 +10,7 @@ one runs at a time (409 ``playground_busy`` otherwise).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import anyio
+import numpy as np
 
 from autoontology.playground import prompts
 from autoontology.playground.elements import Element, elements_from_model
@@ -24,6 +26,7 @@ from autoontology.playground.index import DEFAULT_TOP_K, ElementIndex, Embedder,
 from autoontology.playground.llm import LLMError, PlaygroundLLM
 from autoontology.playground.store import PlaygroundStore
 from autoontology.store.db import Source, Store
+from autoontology.store.traces import UsageTraces, error_code
 
 logger = logging.getLogger("autoontology.playground")
 
@@ -123,6 +126,7 @@ class Playground:
     ) -> None:
         self.store = store
         self.pg = PlaygroundStore(store)
+        self.traces = UsageTraces(store)
         self.model_for = model_for
         self.llm_factory = llm_factory
         self.embedder_factory = embedder_factory
@@ -271,17 +275,32 @@ class Playground:
         }
 
     def retrieve(self, scope: Scope, question: str, top_k: int) -> tuple[ElementIndex, list[Hit]]:
+        idx, hits, _ = self.retrieve_with_vector(scope, question, top_k)
+        return idx, hits
+
+    def retrieve_with_vector(self, scope: Scope, question: str, top_k: int):
+        embed, name = self.embedder()
         idx = self.index(scope)
-        embed, _ = self.embedder()
+        if name != idx.model or (
+            isinstance(self.embedder_factory, EmbedderCache)
+            and self.embedder_factory._value[0] is not embed
+        ):
+            raise PlaygroundError(
+                409,
+                "embedding_selection_changed",
+                "embedding selection changed during retrieval; retry the request",
+            )
         try:
             vector = embed([question], "query")[0]
+            if vector and (not np.isfinite(vector).all() or not any(vector)):
+                raise ValueError("invalid query vector")
         except Exception as exc:  # noqa: BLE001
             raise PlaygroundError(
                 502,
                 "embed_failed",
                 f"embedding the question failed: {type(exc).__name__}: {str(exc)[:300]}",
             ) from exc
-        return idx, idx.retrieve(vector or [], top_k=top_k)
+        return idx, idx.retrieve(vector or [], top_k=top_k), vector
 
     # --- chat ---------------------------------------------------------------------------
 
@@ -304,7 +323,117 @@ class Playground:
             ]
         return None, list(history or [])
 
+    def retrieval_context(self, scope: Scope, idx: ElementIndex, hits: list[Hit], vector) -> dict:
+        from autoontology.store.operations import digest
+        from autoontology.store.publications import Publications
+
+        publication = Publications(self.store).get(scope.revision)
+        if not np.isfinite(idx._matrix).all():
+            raise PlaygroundError(
+                502, "invalid_embedding", "the retrieval index contains invalid vectors"
+            )
+        fingerprint = digest(
+            {
+                "texts": [(e.id, e.text_sha) for e in idx.elements],
+                "rows": idx._rows,
+                "vectors": idx._matrix.tolist(),
+                "model": idx.model,
+            }
+        )
+        return {
+            "query_vector": vector,
+            "index": {
+                "sha256": fingerprint,
+                "algorithm": "normalized-float32-v1",
+                "model": idx.model,
+                "elements": len(idx.elements),
+                "publication_index": publication["manifest"]["index"] if publication else None,
+            },
+            "hits": [
+                {
+                    "ref": f"E{i}",
+                    **h.element.chip(),
+                    "text": h.element.text,
+                    "text_sha256": h.element.text_sha,
+                    "score": h.score,
+                    "via": h.via,
+                }
+                for i, h in enumerate(hits, 1)
+            ],
+        }
+
+    def search(self, scope: Scope, question: str, top_k: int = DEFAULT_TOP_K) -> dict:
+        top_k = max(1, min(int(top_k), MAX_TOP_K))
+        trace = self.traces.begin(
+            kind="retrieval",
+            workspace=scope.key,
+            revision=scope.revision,
+            model=scope.model,
+            request={"question": question, "top_k": top_k},
+        )
+        try:
+            idx, hits, vector = self.retrieve_with_vector(scope, question, top_k)
+            context = self.retrieval_context(scope, idx, hits, vector)
+            self.traces.context(trace, context)
+            self.traces.finish(trace, "succeeded", {"hit_count": len(hits)})
+            return {"trace_id": trace, "revision": scope.revision, **context}
+        except BaseException as exc:
+            self.traces.finish(trace, "failed", {"error": error_code(exc)})
+            raise
+
     async def ask(
+        self, scope: Scope, question: str, *, trace_id: str | None = None, **options
+    ) -> AsyncIterator[dict[str, Any]]:
+        trace_id = trace_id or self.traces.begin(
+            kind="chat",
+            workspace=scope.key,
+            revision=scope.revision,
+            model=scope.model,
+            request={"question": question, "top_k": options.get("top_k", DEFAULT_TOP_K)},
+            conversation_id=options.get("conversation_id"),
+        )
+        parts, cid = [], options.get("conversation_id")
+        try:
+            async for event in self._ask(scope, question, trace_id=trace_id, **options):
+                name, data = event["event"], event["data"]
+                if name == "delta":
+                    parts.append(data["text"])
+                if name == "stream_truncated":
+                    cid = data.get("conversation_id") or cid
+                if name == "done":
+                    cid = data.get("conversation_id") or cid
+                    answer = event["answer"]
+                    self.traces.finish(
+                        trace_id,
+                        "succeeded",
+                        {
+                            "answer": answer.text,
+                            "citations": answer.citations,
+                            "unknown": answer.unknown,
+                            "provider": answer.provider,
+                            "model": answer.model,
+                            "partial": False,
+                        },
+                        conversation_id=cid,
+                    )
+                yield {**event, "data": {**data, "trace_id": trace_id}}
+        except Exception as exc:
+            self.traces.finish(
+                trace_id,
+                "failed",
+                {"answer": "".join(parts).strip(), "partial": True, "error": error_code(exc)},
+                conversation_id=cid,
+            )
+            raise
+        finally:
+            self.traces.finish(
+                trace_id,
+                "cancelled",
+                {"answer": "".join(parts).strip(), "partial": True, "error": "request_cancelled"},
+                conversation_id=cid,
+            )
+
+    async def _ask(
         self,
         scope: Scope,
         question: str,
@@ -314,6 +443,7 @@ class Playground:
         conversation_id: str | None = None,
         persist: bool = True,
         llm: PlaygroundLLM | None = None,
+        trace_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Events ``status`` / ``retrieved`` / ``delta`` / ``citations`` / ``done``; the last
         event's ``answer`` is the :class:`Answer`. The caller holds the source's slot. A
@@ -331,7 +461,9 @@ class Playground:
                 "scope": scope.names,
             },
         }
-        idx, hits = await anyio.to_thread.run_sync(self.retrieve, scope, question, top_k)
+        idx, hits, vector = await anyio.to_thread.run_sync(
+            self.retrieve_with_vector, scope, question, top_k
+        )
         tokens = prompts.context_tokens(hits)
         yield {
             "event": "retrieved",
@@ -350,6 +482,16 @@ class Playground:
             },
         }
         messages = prompts.chat_messages(question, hits, past)
+        self.traces.context(
+            trace_id,
+            {
+                **self.retrieval_context(scope, idx, hits, vector),
+                "messages": messages,
+                "prompt_sha256": hashlib.sha256(prompts.CHAT_SYSTEM.encode()).hexdigest(),
+                "provider": llm.provider,
+                "model": llm.model,
+            },
+        )
         parts: list[str] = []
         try:
             async for text in llm.stream(messages):
@@ -378,6 +520,7 @@ class Playground:
                         provider=llm.provider,
                         model=llm.model,
                         incomplete=True,
+                        trace_id=trace_id,
                     )
                     return cid, mid
 
@@ -402,6 +545,7 @@ class Playground:
                     citations=cited,
                     provider=llm.provider,
                     model=llm.model,
+                    trace_id=trace_id,
                 )
                 return cid, mid
 

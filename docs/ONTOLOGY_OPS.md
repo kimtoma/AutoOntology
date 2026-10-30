@@ -228,3 +228,70 @@ feature remain readable, with explicit `legacy: true` and no invented historical
 validation proof. Receipt inspection is separate from managed restore; restore
 proposals and usage traces are still planned. Principal-backed human/agent
 confirmation and complete CLI parity remain tracked in the implementation ledger.
+
+## Query usage receipts
+
+Schema v9 records `UsageTrace` receipts for RAG chat, standalone retrieval, SQL
+and SPARQL. A request binds the selected snapshot hash and publication ID (or an
+explicit legacy marker). RAG receipts preserve the query vector, actual normalized
+index fingerprint, full retrieved texts/scores, exact model messages, prompt hash,
+provider/model and output/citations. These are execution inputs and evidence, not
+hidden model reasoning. SQL receipts preserve the actual SQL and returned values
+with `live_at_execution`; they do not reconstruct historical database rows or
+retain upstream internal reasoning fields. SPARQL records its query, Turtle hash
+and result. Reading a receipt never re-executes a query or provider call.
+
+Receipts start as `running`. Completion, failure, cancellation and interruption
+are distinct terminal states, hashed with their saved context and output.
+Cleanup cannot overwrite a terminal outcome. A killed owner's unfinished request
+becomes `interrupted` on startup/listing and is not silently retried. A stream
+without its completion marker or with a provider error cannot produce a successful
+receipt. SQL additionally needs actual executed rows (including an empty result),
+not merely a final transport message or an explanation that no SQL ran.
+
+The UI's **Usage history** tab and answer-level **Usage record** actions show
+saved results, context and elapsed request time. Recovered interruptions use wall
+time through restart, including downtime; other durations use a monotonic clock.
+This duration is not measured
+human active time or a claim of time saved; Enterprise AX baseline/cohort
+instrumentation remains separate work. Actor identity is currently explicitly
+`local-unverified`; these receipts do not establish authenticated human/agent
+approval. Access-policy enforcement and delegated Principals remain P0-03 work.
+
+The CLI uses named operations against the same local service as the UI. Start
+`autoontology ui` first; these commands never fall back to another store or a
+privileged in-process query when the service is unavailable:
+
+```sh
+uv run autoontology ops ask 'Who approves this contract?'
+uv run autoontology ops ask 'Who approves this contract?' --watch
+uv run autoontology ops retrieve 'contract approval' --top-k 8
+uv run autoontology ops sql 'How many customers are registered?' --source sales
+uv run autoontology ops sparql 'ASK { ?s a owl:Class }'
+uv run autoontology ops traces
+uv run autoontology ops trace TRACE_ID
+uv run autoontology ops conversations
+uv run autoontology ops conversation CONVERSATION_ID
+uv run autoontology ops forget-trace TRACE_ID
+uv run autoontology ops forget-conversation CONVERSATION_ID
+```
+
+Normal results are JSON; `--watch` emits NDJSON stream events and a final receipt.
+Failed/partial requests exit nonzero. A transport failure is not evidence of
+completion: inspect the returned trace ID before deciding to retry. SQL requires
+a structured source included in the operational version; it never lets the
+backend choose an arbitrary unpublished database.
+
+Deleting a conversation (including automatic pruning) removes its linked usage
+receipts. Standalone receipts can be deleted explicitly, with a second action in
+the UI; running receipts must first reach a terminal state. Deleting a usage
+receipt does not delete a conversation's messages or alter ontology knowledge.
+Historical conversations are preserved during migration with no fabricated
+trace ID. Receipt responses use `Cache-Control: private, no-store`.
+
+Coverage includes provider/preflight failures, truncated streams, disconnect
+before body iteration, invalid query vectors, process death, immutable terminal
+states, corruption, deletion, legacy and manifested publications, exact backup
+restoration and UI/CLI inspection without repeated model calls. Complete query
+file-download parity, authenticated CLI identities and managed restore remain
+tracked in the broader implementation contract.
