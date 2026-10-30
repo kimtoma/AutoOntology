@@ -28,6 +28,11 @@ test('unauthenticated pages and API requests never reach the origin', async () =
   assert.equal((await worker.fetch(request('/api/ontology'), env)).status, 401);
 });
 
+test('the password form preserves the origin for browser POST navigation', async () => {
+  const response = await worker.fetch(request('/__demo/login'), environment());
+  assert.equal(response.headers.get('referrer-policy'), 'same-origin');
+});
+
 test('wrong passwords, cross-site login, and excessive attempts are rejected', async () => {
   const env = environment();
   assert.equal((await worker.fetch(request('/__demo/login', {
@@ -85,6 +90,7 @@ test('allowed requests stream through with an origin secret and no browser crede
   }), env);
   assert.equal(await response.text(), 'sample ontology');
   assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  assert.equal(response.headers.get('referrer-policy'), 'same-origin');
 });
 
 test('cross-site queries and queries above the rate limit are refused', async () => {

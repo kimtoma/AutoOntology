@@ -12,6 +12,8 @@ visitor -> Cloudflare Worker (password + signed cookie)
 ```
 
 The Mac mini, app, database, selected model provider and tunnel must remain running.
+See [the Mac mini runbook](MACMINI.md) for the installed ports, isolated workspace,
+login services, and start/stop commands on the deployed host.
 This is a hosted **sample viewer**, not an independent Cloudflare container deployment.
 It exposes ontology search, graph exploration, grounded chat, SQL, SPARQL and existing
 exports. Visitors cannot add/delete sources, build, access provider passthrough APIs, or

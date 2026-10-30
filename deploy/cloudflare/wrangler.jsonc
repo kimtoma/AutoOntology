@@ -1,9 +1,13 @@
 {
   "name": "autoontology-demo",
+  "account_id": "6b6547787512768c729390139aa756c3",
   "main": "worker.mjs",
   "compatibility_date": "2026-10-30",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "autoontology.kimtoma.com", "custom_domain": true }],
+  "vars": { "ORIGIN_URL": "https://autoontology-origin.kimtoma.com" },
   "ratelimits": [
     { "name": "LOGIN_LIMIT", "namespace_id": "26103078001", "simple": { "limit": 10, "period": 60 } },
     { "name": "QUERY_LIMIT", "namespace_id": "26103078002", "simple": { "limit": 12, "period": 60 } }

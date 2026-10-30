@@ -61,6 +61,23 @@ describe("playground helpers", () => {
       .toBe("n,s,t\r\n-5,-12.5,+3\r\n1500,계약 = 약정,a=b")
   })
 
+  it("unwraps the upstream query-id envelope into result rows and CSV", () => {
+    const result = [{ "4390611c-9cda-4d2c-875e-9fb8d61dcc22":
+      [JSON.stringify([{ customer: "한빛", count: 3 }, { customer: "새봄", count: 2 }])] }]
+    const table = tabulate(result)
+    expect(table).toEqual({ columns: ["customer", "count"], rows: [["한빛", 3], ["새봄", 2]] })
+    expect(tabulate(result, ["eb75da10-7d15-4bde-a736-73ca13c8bb4a", "4390611c-9cda-4d2c-875e-9fb8d61dcc22"]))
+      .toEqual(table)
+    expect(tabulate([{ customer: "한빛", count: 3 }], ["count", "customer"]))
+      .toEqual({ columns: ["count", "customer"], rows: [[3, "한빛"]] })
+    expect(toCsv(table!.columns, table!.rows)).toBe("customer,count\r\n한빛,3\r\n새봄,2")
+    expect(tabulate([{ "4390611c-9cda-4d2c-875e-9fb8d61dcc22": JSON.stringify([{ count: 40 }]) }]))
+      .toEqual({ columns: ["count"], rows: [[40]] })
+    expect(tabulate(['[{"count":40}]'])).toEqual({ columns: ["count"], rows: [[40]] })
+    expect(tabulate([{ note: '[{"text":"ordinary value"}]' }]))
+      .toEqual({ columns: ["note"], rows: [['[{"text":"ordinary value"}]']] })
+  })
+
   it("renders citation tokens as chips, text escaped", () => {
     renderPage(<CitedText text={'계약은 <b>약정</b> [E1]. 모름 [E1, E9]'} citations={{ E1: CHIP }} />)
     // outside the playground (no concept opener) a chip links to the Ontology page

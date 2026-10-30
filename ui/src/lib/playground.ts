@@ -34,8 +34,23 @@ export function toCsv(columns: string[], rows: unknown[][]): string {
 /** The executed result as columns/rows, whatever shape upstream returned. */
 export function tabulate(value: unknown, columns: string[] = []): { columns: string[]; rows: unknown[][] } | null {
   let v = value
-  if (typeof v === "string") {
-    try { v = JSON.parse(v) } catch { return null }
+  // Upstream wraps JSON records in list[str], sometimes under a query UUID.
+  for (let depth = 0; depth < 4; depth++) {
+    if (typeof v === "string") {
+      try { v = JSON.parse(v) } catch { return null }
+    } else if (Array.isArray(v) && v.length === 1) {
+      const item = v[0]
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        const keys = Object.keys(item)
+        if (keys.length !== 1 || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(keys[0])) break
+        v = item[keys[0]]
+      } else if (typeof item === "string") {
+        let records: unknown
+        try { records = JSON.parse(item) } catch { break }
+        if (!Array.isArray(records) || !records.every((r) => r !== null && typeof r === "object" && !Array.isArray(r))) break
+        v = records
+      } else break
+    } else break
   }
   if (!Array.isArray(v) || !v.length) return Array.isArray(v) ? { columns, rows: [] } : null
   if (Array.isArray(v[0])) {
@@ -44,7 +59,8 @@ export function tabulate(value: unknown, columns: string[] = []): { columns: str
     return { columns: cols, rows: v as unknown[][] }
   }
   if (typeof v[0] === "object" && v[0] !== null) {
-    const cols = columns.length ? columns : Object.keys(v[0] as object)
+    const first = v[0] as Record<string, unknown>
+    const cols = columns.length && columns.every((c) => Object.hasOwn(first, c)) ? columns : Object.keys(first)
     return { columns: cols, rows: v.map((r) => cols.map((c) => (r as Record<string, unknown>)[c])) }
   }
   return { columns: columns.length ? columns.slice(0, 1) : ["value"], rows: v.map((x) => [x]) }

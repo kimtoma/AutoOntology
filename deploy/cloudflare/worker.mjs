@@ -45,7 +45,7 @@ async function identity(request, env) {
 function headers(extra = {}) {
   return {
     'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff',
-    'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY',
+    'referrer-policy': 'same-origin', 'x-frame-options': 'DENY',
     'x-robots-tag': 'noindex, nofollow', ...extra,
   };
 }
@@ -56,7 +56,7 @@ function page(message = '', status = 200) {
   return new Response(`<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoOntology 체험</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#18252c;font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100svh;padding:24px}main{background:white;border:1px solid #e1e6e9;border-radius:16px;padding:40px;max-width:420px;width:100%;box-shadow:0 12px 40px #18252c08}small{color:#51756b;font-weight:700}h1{font-size:25px;margin:12px 0}p{color:#637079;font-size:15px;line-height:1.65}label{display:block;font-size:14px;margin-top:28px}input,button{width:100%;font:inherit;border-radius:8px;padding:12px;margin-top:8px}input{border:1px solid #b7c3ca}button{border:0;background:#234f43;color:white;cursor:pointer;margin-top:16px}input:focus,button:focus-visible{outline:3px solid #8bd9b6;outline-offset:2px}.error{color:#a32b28;font-size:14px}</style>
 <main><small>AutoOntology</small><h1>데이터와 문서를 하나의 지식으로</h1><p>공유받은 비밀번호를 입력해 주세요.<br>샘플 데이터의 개념과 관계를 살펴보고 질문할 수 있어요.</p><form method="post" action="/__demo/login"><label for="password">비밀번호</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256" autofocus><button type="submit">체험 시작하기</button>${message ? `<p role="alert" class="error">${message}</p>` : ''}</form></main></html>`, {
-    status, headers: headers({ 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" }),
+    status, headers: headers({ 'referrer-policy': 'same-origin', 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" }),
   });
 }
 function sameOrigin(request) {
