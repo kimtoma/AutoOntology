@@ -106,3 +106,20 @@ test('conversations remain browser-local in the shared demo', async () => {
   assert.deepEqual(await response.json(), { conversations: [] });
   assert.equal((await worker.fetch(request('/api/playground/conversations/' + 'a'.repeat(32), { headers: { Cookie: cookie } }), env)).status, 403);
 });
+
+test('follow-up chat keeps explicit history without opening a saved conversation', async () => {
+  const env = environment();
+  const cookie = (await login(env)).headers.get('set-cookie').split(';')[0];
+  env.FETCH = async (req) => {
+    const body = await req.json();
+    assert.equal(body.conversation_id, undefined);
+    assert.deepEqual(body.history, [{ role: 'user', content: 'first question' }]);
+    return new Response('event: done\ndata: {}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  };
+  const response = await worker.fetch(request('/api/playground/chat', {
+    method: 'POST', headers: { Cookie: cookie, Origin: base, 'content-type': 'application/json' },
+    body: JSON.stringify({ question: 'follow-up', conversation_id: 'a'.repeat(32), history: [{ role: 'user', content: 'first question' }] }),
+  }), env);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /event: done/);
+});
