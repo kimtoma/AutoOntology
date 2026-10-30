@@ -46,9 +46,7 @@ export function KindBadge({ kind }: { kind: string }) {
   const Icon = family === "documents" ? FileText : Database
   return (
     <Badge variant="outline" data-kind={family}
-           className={cn("font-normal", family === "documents"
-             ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300"
-             : "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300")}>
+           className={cn("font-normal border-border bg-transparent text-muted-foreground")}>
       <Icon aria-hidden /> {FAMILY_LABEL[family]}
     </Badge>
   )

@@ -18,7 +18,7 @@ import { knowledgeText } from "@/lib/operations"
 function EvidenceList({ items }: { items: Evidence[] }) {
   const t = useT()
   return (
-    <section className="mt-5">
+    <section className="review-evidence">
       <h3 className="mb-2 font-medium">{t("ops.evidence")}</h3>
       {items.length ? (
         <ul className="grid gap-3">
@@ -98,16 +98,25 @@ function ChangeDetail({ item }: { item: KnowledgeChange }) {
     save.mutate(d)
   }
   return (
-    <article className="min-w-0" id="review-detail">
-      <Badge variant="outline">{t(`ops.${item.kind}`)}</Badge>
-      <h2 className="my-3 text-lg font-semibold">{item.label}</h2>
-      <div className="grid gap-3 md:grid-cols-2">
+    <article className="review-detail" id="review-detail">
+      <div className="review-detail-heading">
+        <span className="review-kind">{t(`ops.${item.kind}`)}</span>
+        <h2>{item.label}</h2>
+      </div>
+      <div className="review-compare">
         {[
           ["ops.before", item.before],
           ["ops.after", item.after ? { ...item.after, ...item.decision?.edits } : null],
         ].map(([label, value]) => (
-          <div key={String(label)} className="min-w-0 rounded-lg bg-muted/60 p-4">
-            <p className="mb-2 text-xs text-muted-foreground">{t(label as MessageKey)}</p>
+          <div
+            key={String(label)}
+            className="review-diff-cell"
+            data-side={label === "ops.before" ? "before" : "after"}
+          >
+            <p className="review-diff-label">
+              <span aria-hidden>{label === "ops.before" ? "−" : "+"}</span>
+              {t(label as MessageKey)}
+            </p>
             <p className="break-words text-sm whitespace-pre-wrap">
               {label === "ops.before"
                 ? item.before_text || knowledgeText(value as Record<string, unknown> | null)
@@ -143,7 +152,7 @@ function ChangeDetail({ item }: { item: KnowledgeChange }) {
         </div>
       )}
       <EvidenceList items={item.evidence} />
-      <div className="mt-5">
+      <div className="review-reason">
         <label htmlFor="review-note" className="text-sm font-medium">
           {t("ops.note")}
         </label>
@@ -185,7 +194,7 @@ function ChangeDetail({ item }: { item: KnowledgeChange }) {
           </div>
         </div>
       ) : (
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="review-actions">
           <Button disabled={save.isPending || needsEvidence} onClick={() => decide("accept")}>
             {save.isPending && <Loader2 className="animate-spin" aria-hidden />}
             {t(editing ? "ops.acceptEdited" : "ops.accept")}
@@ -405,7 +414,7 @@ export default function ReviewPage() {
           </Button>
         }
       />
-      <div className="mb-5 flex flex-wrap gap-2" role="tablist" aria-label={t("ops.review")}>
+      <div className="review-tabs" role="tablist" aria-label={t("ops.review")}>
         {[
           ["changes", "ops.changes"],
           ["connections", "ops.alignments"],
@@ -424,18 +433,20 @@ export default function ReviewPage() {
             }}
           >
             {t(label as MessageKey)}
-            {id === "changes" && changes.data
-              ? " · " + changes.data.items.length
-              : id === "connections" && legacy.data
-                ? " · " + legacy.data.total
-                : id === "feedback" && changes.data
-                  ? " · " + changes.data.feedback.length
-                  : ""}
+            <span className="console-counter">
+              {id === "changes" && changes.data
+                ? changes.data.items.length
+                : id === "connections" && legacy.data
+                  ? legacy.data.total
+                  : id === "feedback" && changes.data
+                    ? changes.data.feedback.length
+                    : "—"}
+            </span>
           </Button>
         ))}
       </div>
       {tab !== "feedback" && (
-        <div className="mb-5 flex flex-wrap gap-2">
+        <div className="review-filters">
           {[
             ["all", "ops.all"],
             ["pending", "ops.onlyPending"],
@@ -446,6 +457,7 @@ export default function ReviewPage() {
               key={id}
               size="sm"
               variant={filter === id ? "secondary" : "ghost"}
+              aria-pressed={filter === id}
               onClick={() => {
                 setFilter(id)
                 setPage(1)
@@ -488,8 +500,8 @@ export default function ReviewPage() {
           )}
         </div>
       ) : (tab === "changes" ? items.length : legacy.data?.items.length) ? (
-        <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[15rem_minmax(0,1fr)]">
-          <div className="grid gap-2" aria-label={t("ops.review")}>
+        <div className="review-workbench">
+          <div className="review-list" aria-label={t("ops.review")}>
             {tab === "changes"
               ? visibleItems.map((i) => (
                   <button
@@ -497,7 +509,7 @@ export default function ReviewPage() {
                     key={i.id}
                     onClick={() => choose(i.id)}
                     aria-pressed={item?.id === i.id}
-                    className={`rounded-lg border p-3 text-left ${item?.id === i.id ? "border-primary bg-accent" : ""}`}
+                    className="review-list-item"
                   >
                     <p className="mb-1 text-xs text-muted-foreground">
                       {t(`ops.${i.kind}`)}
@@ -519,7 +531,7 @@ export default function ReviewPage() {
                     key={i.id}
                     onClick={() => choose(i.id)}
                     aria-pressed={connection?.id === i.id}
-                    className={`rounded-lg border p-3 text-left ${connection?.id === i.id ? "border-primary bg-accent" : ""}`}
+                    className="review-list-item"
                   >
                     <p className="mb-1 text-xs text-muted-foreground">{i.concept?.source}</p>
                     <p className="text-sm font-medium">{i.concept?.name || i.id}</p>

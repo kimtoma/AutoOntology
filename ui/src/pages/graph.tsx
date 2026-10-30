@@ -319,7 +319,7 @@ export default function GraphPage() {
   )
 
   return (
-    <div className={cn("relative h-[calc(100svh-3.5rem)] w-full overflow-hidden bg-background",
+    <div className={cn("ontology-graph relative w-full overflow-hidden bg-background",
                        fullscreen && "fixed inset-0 z-40 h-svh")}
          id="graph-page" data-renderer={webgl ? "3d" : "2d"}>
       <h1 className="sr-only">{t("graph.title")}</h1>

@@ -51,6 +51,17 @@ record their fetch time in the export manifest.
 The old graph, build, downloads and service-status routes remain accessible, now
 grouped into local tabs under their relevant main section.
 
+## Interface
+
+The workspace console takes layout cues from [Vercel Geist](https://vercel.com/geist/introduction)
+and its [Observability product](https://vercel.com/products/observability): a workspace
+header, horizontal navigation, restrained surfaces, thin rules, and compact rows.
+Review uses a split workbench with source evidence beside the decision, while the
+home page shows actual pending proposals, source freshness and the published
+version. No activity charts or synthetic metrics are introduced. Latin text uses
+Geist, metadata uses Geist Mono, and Korean uses Pretendard. Fonts and their OFL
+licenses are served locally. Light and dark themes use the same layout.
+
 ## Isolated local preview on this Mac
 
 The preview checkout is `data/ontology-ops-local/app`, on

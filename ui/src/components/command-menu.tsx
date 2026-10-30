@@ -4,8 +4,15 @@ import { useNavigate } from "react-router"
 import { NAV } from "@/components/nav"
 import { useT } from "@/i18n"
 import {
-  CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
 } from "@/components/ui/command"
+
+import { OPEN_COMMAND_MENU } from "@/lib/command-menu"
 
 /** ⌘K / Ctrl+K: jump to a page or search the ontology's concepts. */
 export function CommandMenu() {
@@ -21,19 +28,34 @@ export function CommandMenu() {
       }
     }
     document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
+    const openMenu = () => setOpen(true)
+    document.addEventListener(OPEN_COMMAND_MENU, openMenu)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener(OPEN_COMMAND_MENU, openMenu)
+    }
   }, [])
-  const go = (to: string) => { setOpen(false); setText(""); navigate(to) }
+  const go = (to: string) => {
+    setOpen(false)
+    setText("")
+    navigate(to)
+  }
   return (
-    <CommandDialog open={open} onOpenChange={setOpen} title={t("cmd.title")}
-                   description={t("cmd.description")}>
+    <CommandDialog
+      open={open}
+      onOpenChange={setOpen}
+      title={t("cmd.title")}
+      description={t("cmd.description")}
+    >
       <CommandInput placeholder={t("cmd.placeholder")} value={text} onValueChange={setText} />
       <CommandList>
         <CommandEmpty>{t("cmd.empty")}</CommandEmpty>
         {text.trim() && (
           <CommandGroup heading={t("cmd.concepts")}>
-            <CommandItem value={`concept-search ${text}`}
-                         onSelect={() => go(`/ontology?q=${encodeURIComponent(text.trim())}`)}>
+            <CommandItem
+              value={`concept-search ${text}`}
+              onSelect={() => go(`/ontology?q=${encodeURIComponent(text.trim())}`)}
+            >
               {t("cmd.search", { text: text.trim() })}
             </CommandItem>
           </CommandGroup>

@@ -32,7 +32,7 @@ export function SourceFreshness() {
     onError: (e) => toast.error(errorMessage(e)),
   })
   return (
-    <section className="mb-6 rounded-xl border bg-card p-5" id="source-freshness">
+    <section className="source-freshness" id="source-freshness">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="font-semibold">{t("ops.sourceChanges")}</h2>
@@ -48,7 +48,7 @@ export function SourceFreshness() {
       ) : fresh.isPending ? (
         <p className="text-sm text-muted-foreground">{t("shell.status.checking")}</p>
       ) : (
-        <ul className="divide-y">
+        <ul>
           {fresh.data.sources.map((s) => (
             <li key={s.name} className="flex flex-wrap items-center justify-between gap-3 py-3">
               <div className="min-w-0 flex-1">

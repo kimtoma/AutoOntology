@@ -94,13 +94,13 @@ export default function HistoryPage() {
     onError: (e) => setError(errorMessage(e)),
   })
   return (
-    <>
+    <div className="history-page">
       <PageHeader title={t("ops.history")} description={t("ops.historyHint")} />
       {overview.error ? (
         <ErrorState error={overview.error} onRetry={() => overview.refetch()} />
       ) : (
         <>
-          <section className="rounded-xl border bg-card p-5" id="publication-panel">
+          <section className="history-publication" id="publication-panel">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <h2 className="font-semibold">{t("ops.ready")}</h2>
               {published && <Badge variant="outline">{t("ops.published", { n: published })}</Badge>}
@@ -290,6 +290,6 @@ export default function HistoryPage() {
           refreshOperations(qc)
         }}
       />
-    </>
+    </div>
   )
 }

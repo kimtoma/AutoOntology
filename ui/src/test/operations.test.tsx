@@ -64,6 +64,20 @@ describe("Ontology Ops", () => {
     renderPage(<OperationsHome />)
     expect(await screen.findByText("Source status unknown")).toBeInTheDocument()
   })
+  it("links each pending proposal to its review and keeps decided items out of the queue", async () => {
+    mockFetch({
+      ...routes,
+      "GET /ops/changes": {
+        ...overview,
+        items: [item, { ...item, id: "done", label: "Already reviewed", decision: { decision: "reject" } }],
+        feedback: [],
+      },
+    })
+    renderPage(<OperationsHome />)
+    const proposal = await screen.findByRole("link", { name: /승인 기준/ })
+    expect(proposal).toHaveAttribute("href", "/review?tab=changes&item=abc")
+    expect(screen.queryByText("Already reviewed")).toBeNull()
+  })
   it("saves a review decision without calling publication", async () => {
     const user = userEvent.setup()
     const { calls } = mockFetch({ ...routes, "POST /ops/changes/abc/decision": { decision: "accept" } })

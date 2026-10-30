@@ -1,5 +1,4 @@
 import { Link, useLocation } from "react-router"
-import { Button } from "@/components/ui/button"
 import { useT, type MessageKey } from "@/i18n"
 /** Existing deep links remain valid while navigation follows the operational task. */
 export function SectionNav() {
@@ -26,11 +25,11 @@ export function SectionNav() {
   const group = groups.find((g) => g.some(([prefix]) => pathname.startsWith(prefix)))
   if (!group) return null
   return (
-    <nav aria-label={t("shell.mainMenu")} className="mb-5 flex flex-wrap gap-2">
+    <nav aria-label={t("shell.mainMenu")} className="console-section-nav">
       {group.map(([prefix, path, label]) => (
-        <Button key={path} asChild variant={pathname.startsWith(prefix) ? "secondary" : "ghost"} size="sm">
-          <Link to={path}>{t(label)}</Link>
-        </Button>
+        <Link key={path} to={path} aria-current={pathname.startsWith(prefix) ? "page" : undefined}>
+          {t(label)}
+        </Link>
       ))}
     </nav>
   )

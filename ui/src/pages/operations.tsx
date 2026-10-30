@@ -1,162 +1,294 @@
-import { knowledgeText } from "@/lib/operations"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowRight, Inbox, ScanLine } from "lucide-react"
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  ChevronRight,
+  Database,
+  FileText,
+  GitCommitHorizontal,
+  GitPullRequest,
+  Network,
+} from "lucide-react"
 import { Link } from "react-router"
 import { PageHeader } from "@/components/page-header"
-import { EmptyState, ErrorState } from "@/components/empty-state"
-import { Badge } from "@/components/ui/badge"
+import { ErrorState } from "@/components/empty-state"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useOperations, useLegacy, useFreshness } from "@/hooks/operations"
+import { useOperations, useChanges, useLegacy, useFreshness } from "@/hooks/operations"
 import { keys, useOntology } from "@/hooks/queries"
 import { api, isNoSnapshot } from "@/lib/api"
+import { knowledgeText } from "@/lib/operations"
 import { fmtTime, STATUS_LABEL } from "@/lib/labels"
-import { useT } from "@/i18n"
+import { fmtNumber, useT } from "@/i18n"
 import HomePage from "@/pages/home"
 
 export default function OperationsHome() {
   const t = useT(),
     ontology = useOntology(),
     overview = useOperations(),
+    changes = useChanges(),
     fresh = useFreshness(),
     legacy = useLegacy()
-  const runs = useQuery({ queryKey: keys.runs, queryFn: () => api.runs(8), refetchInterval: 5000 })
+  const runs = useQuery({ queryKey: keys.runs, queryFn: () => api.runs(6), refetchInterval: 5000 })
   if (isNoSnapshot(ontology.error)) return <HomePage />
   if (ontology.error) return <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />
   if (overview.error) return <ErrorState error={overview.error} onRetry={() => overview.refetch()} />
   if (!ontology.data || !overview.data) return <Skeleton className="h-80" />
   const o = overview.data,
-    unknown = !!fresh.error || fresh.data?.sources.some((s) => s.state === "unknown"),
-    pending = o.counts.pending + o.counts.held + o.counts.feedback + (legacy.data?.counts.total ?? 0)
-  const first = o.highlights.find((i) => !i.decision) || o.highlights[0]
+    model = ontology.data
+  const unknown = !!fresh.error || fresh.data?.sources.some((s) => s.state === "unknown")
+  const pending = o.counts.pending + o.counts.held + o.counts.feedback + (legacy.data?.counts.total ?? 0)
+  const queue = (changes.data?.items || o.highlights).filter((i) => !i.decision).slice(0, 6)
+  const counts = model.counts as Record<string, number>
   return (
-    <>
+    <div className="ops-overview">
       <PageHeader
         title={t("ops.title")}
         description={t("ops.description")}
         actions={
-          <Button asChild variant="outline">
-            <Link to="/sources">
-              <ScanLine aria-hidden />
-              {t("ops.scan")}
-            </Link>
-          </Button>
+          <>
+            <Button asChild variant="outline">
+              <Link to="/sources">{t("ops.scan")}</Link>
+            </Button>
+            <Button asChild>
+              <Link to="/review">
+                {t("ops.openReview")}
+                <ArrowRight aria-hidden />
+              </Link>
+            </Button>
+          </>
         }
       />
-      <div className="mb-6 flex flex-wrap items-center gap-2 text-sm">
-        <Badge variant="outline">
-          {t("ops.published", { n: o.published_revision ?? ontology.data.revision })}
-        </Badge>
-        <span className="text-muted-foreground">{o.workspace}</span>
-        {o.candidate_revision && (
-          <Badge variant="secondary">{t("ops.candidate", { n: o.candidate_revision })}</Badge>
-        )}
-      </div>
-      <div className="mb-6 grid gap-3 sm:grid-cols-3" id="operations-counts">
+      <div className="ops-metrics" id="operations-counts">
         {[
-          [t("ops.pending"), pending, "/review"],
-          [t("ops.changedSources"), unknown ? "—" : (fresh.data?.stale ?? "…"), "/sources"],
-          [t("ops.ready"), o.counts.approved + (legacy.data?.unapplied ?? 0), "/history"],
-        ].map(([label, value, path]) => (
-          <Link
-            to={String(path)}
-            key={String(label)}
-            className="rounded-xl border bg-card p-5 transition-colors hover:bg-accent"
-          >
-            <div className="text-sm text-muted-foreground">{label}</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums">{value}</div>
+          [t("ops.pending"), pending, "/review", t("console.pendingHint")],
+          [
+            t("ops.ready"),
+            o.counts.approved + (legacy.data?.unapplied ?? 0),
+            "/history",
+            t("console.readyHint"),
+          ],
+          [
+            t("ops.changedSources"),
+            unknown ? "—" : (fresh.data?.stale ?? "…"),
+            "/sources",
+            t("console.sourceHint"),
+          ],
+        ].map(([label, value, path, hint]) => (
+          <Link key={String(label)} to={String(path)} className="ops-metric">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              {label}
+              <ArrowUpRight className="ml-auto size-3.5" aria-hidden />
+            </div>
+            <div className="ops-metric-value">{value}</div>
+            <div className="text-xs text-muted-foreground">{hint}</div>
           </Link>
         ))}
       </div>
       {unknown && (
-        <div className="mb-6 rounded-xl border border-warning/40 bg-warning/5 p-5" role="status">
-          <h2 className="font-semibold">{t("ops.unknown")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{t("ops.unknownHint")}</p>
+        <div className="ops-notice" role="status">
+          <span className="status-dot bg-warning" aria-hidden />
+          <div>
+            <strong>{t("ops.unknown")}</strong>
+            <p>{t("ops.unknownHint")}</p>
+          </div>
         </div>
       )}
-      {first ? (
-        <section className="mb-7 rounded-xl border border-l-4 border-l-warning bg-card p-5">
-          <Badge variant="outline">{t(`ops.${first.kind}`)}</Badge>
-          <h2 className="my-3 text-lg font-semibold">{first.label}</h2>
-          <div className="grid gap-3 text-sm sm:grid-cols-[1fr_auto_1fr]">
-            <p className="text-muted-foreground">{knowledgeText(first.before)}</p>
-            <ArrowRight className="hidden size-4 self-center sm:block" aria-hidden />
-            <p>{knowledgeText(first.after)}</p>
-          </div>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">{t("ops.currentUnchanged")}</p>
-            <Button asChild>
-              <Link to={`/review?item=${first.id}`}>
-                {t("ops.inspect")}
-                <ArrowRight aria-hidden />
+      <div className="ops-columns">
+        <div className="min-w-0">
+          <section className="ops-panel" aria-labelledby="queue-title">
+            <div className="ops-panel-heading">
+              <h2 id="queue-title">{t("console.queue")}</h2>
+              <span className="console-counter">{o.counts.pending}</span>
+              <Link to="/review?tab=changes" className="ops-text-link ml-auto">
+                {t("console.viewAll")}
+                <ArrowUpRight aria-hidden />
               </Link>
-            </Button>
-          </div>
-        </section>
-      ) : pending ? (
-        <section className="mb-7 rounded-xl border bg-card p-5">
-          <h2 className="font-semibold">{t("ops.pending")}</h2>
-          <p className="my-2 text-sm text-muted-foreground">{t("ops.reviewHint")}</p>
-          <Button asChild>
-            <Link to="/review?tab=connections">
-              <Inbox aria-hidden />
-              {t("ops.openReview")}
-            </Link>
-          </Button>
-        </section>
-      ) : (
-        <EmptyState title={t("ops.noChanges")} hint={t("ops.noChangesHint")} />
-      )}
-      <section className="mb-7">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="font-semibold">{t("ops.newKnowledge")}</h2>
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/sources">
-              {t("nav.sources")}
-              <ArrowRight aria-hidden />
-            </Link>
-          </Button>
-        </div>
-        <ul className="divide-y">
-          {fresh.data?.sources.map((s) => (
-            <li key={s.name} className="flex flex-wrap items-center justify-between gap-2 py-3">
-              <span className="font-medium">{s.name}</span>
-              <Badge variant="outline">
-                {t(s.state === "unknown" ? "ops.unknownState" : `ops.${s.state}`)}
-              </Badge>
-            </li>
-          ))}
-        </ul>
-        {!fresh.data && <p className="text-sm text-muted-foreground">{t("shell.status.checking")}</p>}
-      </section>
-      <section>
-        <h2 className="mb-3 font-semibold">{t("ops.activity")}</h2>
-        {runs.error ? (
-          <ErrorState error={runs.error} onRetry={() => runs.refetch()} />
-        ) : (
-          <ul className="divide-y">
-            {runs.data?.map((r) => (
-              <li key={r.id} className="flex flex-wrap items-start justify-between gap-3 py-3">
-                <div>
-                  <Link to="/history" className="font-medium hover:underline">
-                    {r.kind === "publish"
-                      ? t("ops.history")
-                      : r.kind === "build"
-                        ? t("ops.sourceUpdate")
-                        : r.kind === "apply"
-                          ? t("ops.apply")
-                          : t("ops.exported")}
-                  </Link>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {fmtTime(r.finished_at || r.started_at || "")}
-                  </p>
+            </div>
+            {changes.error ? (
+              <ErrorState error={changes.error} onRetry={() => changes.refetch()} />
+            ) : queue.length ? (
+              <div className="ops-queue">
+                <div className="ops-queue-labels" aria-hidden>
+                  <span>{t("console.change")}</span>
+                  <span>{t("ops.evidence")}</span>
+                  <span>{t("console.type")}</span>
                 </div>
-                <Badge variant="outline">{STATUS_LABEL[r.status]}</Badge>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </>
+                {queue.map((item) => (
+                  <Link to={`/review?tab=changes&item=${item.id}`} key={item.id} className="ops-queue-row">
+                    <span className="ops-queue-main">
+                      <GitPullRequest className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="min-w-0">
+                        <strong>{item.label}</strong>
+                        <span className="ops-queue-description">
+                          {item.after_text || knowledgeText(item.after)}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="ops-queue-evidence">
+                      {item.evidence.find((e) => e.version === "candidate")?.document || "—"}
+                    </span>
+                    <span className="ops-queue-kind">
+                      <span className="status-dot bg-foreground/40" aria-hidden />
+                      {t(`ops.${item.kind}`)}
+                      <ChevronRight className="ml-auto size-3.5" aria-hidden />
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="ops-quiet-state">
+                <Check className="size-4 text-muted-foreground" aria-hidden />
+                <div>
+                  <p>{t("ops.noChanges")}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{t("ops.noChangesHint")}</p>
+                </div>
+              </div>
+            )}
+            <div className="ops-queue-footer">
+              <Link to="/review?tab=connections">
+                <Network className="size-3.5" aria-hidden />
+                {t("ops.alignments")}
+                <span className="font-mono">{legacy.data?.counts.total ?? "—"}</span>
+              </Link>
+              <Link to="/review?tab=feedback">
+                <FileText className="size-3.5" aria-hidden />
+                {t("ops.feedback")}
+                <span className="font-mono">{o.counts.feedback}</span>
+              </Link>
+            </div>
+          </section>
+          <section className="ops-panel mt-8" aria-labelledby="activity-title">
+            <div className="ops-panel-heading">
+              <h2 id="activity-title">{t("ops.activity")}</h2>
+              <Link to="/history" className="ops-text-link ml-auto">
+                {t("nav.history")}
+                <ArrowUpRight aria-hidden />
+              </Link>
+            </div>
+            {runs.error ? (
+              <ErrorState error={runs.error} onRetry={() => runs.refetch()} />
+            ) : (
+              <div className="ops-activity-list">
+                {runs.data?.map((r) => (
+                  <Link key={r.id} to="/history" className="ops-activity-row">
+                    <span
+                      className={
+                        r.status === "succeeded"
+                          ? "status-dot bg-success"
+                          : r.status === "failed"
+                            ? "status-dot bg-destructive"
+                            : "status-dot bg-warning"
+                      }
+                      aria-hidden
+                    />
+                    <span className="ops-activity-name">
+                      {r.kind === "publish"
+                        ? t("console.publishedActivity")
+                        : r.kind === "build"
+                          ? t("ops.sourceUpdate")
+                          : r.kind === "apply"
+                            ? t("ops.apply")
+                            : t("ops.exported")}
+                    </span>
+                    <span className="ops-activity-status">{STATUS_LABEL[r.status]}</span>
+                    <time>{fmtTime(r.finished_at || r.started_at || "")}</time>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+        <aside className="ops-aside">
+          <section className="ops-published" aria-labelledby="published-title">
+            <div className="flex items-center gap-2">
+              <span className="status-dot bg-success" aria-hidden />
+              <h2 id="published-title">{t("console.publishedModel")}</h2>
+              <span className="ml-auto font-mono text-xs">r{o.published_revision ?? model.revision}</span>
+            </div>
+            <p className="mt-3 truncate text-sm font-medium" title={o.workspace}>
+              {o.workspace}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("ops.published", { n: o.published_revision ?? model.revision })}
+            </p>
+            <dl className="ops-model-counts">
+              <div>
+                <dt>{t("console.concepts")}</dt>
+                <dd>{fmtNumber((counts.classes || 0) + (counts.individuals || 0))}</dd>
+              </div>
+              <div>
+                <dt>{t("console.documents")}</dt>
+                <dd>{fmtNumber(counts.documents || 0)}</dd>
+              </div>
+              <div>
+                <dt>{t("console.evidenceCount")}</dt>
+                <dd>{fmtNumber(counts.evidence || 0)}</dd>
+              </div>
+            </dl>
+            <p className="text-xs leading-relaxed text-muted-foreground">{t("console.publishedHint")}</p>
+            <div className="mt-5 flex gap-2">
+              <Button asChild size="sm" variant="outline">
+                <Link to="/graph">
+                  {t("ops.graph")}
+                  <ArrowUpRight aria-hidden />
+                </Link>
+              </Button>
+              <Button asChild size="sm" variant="ghost">
+                <Link to="/exports">{t("ops.exports")}</Link>
+              </Button>
+            </div>
+            {o.candidate_revision && (
+              <Link to="/history" className="ops-candidate-link">
+                <GitCommitHorizontal className="size-3.5" aria-hidden />
+                {t("ops.candidate", { n: o.candidate_revision })}
+                <ChevronRight className="ml-auto size-3" aria-hidden />
+              </Link>
+            )}
+          </section>
+          <section className="ops-panel mt-7" aria-labelledby="sources-title">
+            <div className="ops-panel-heading">
+              <h2 id="sources-title">{t("nav.sources")}</h2>
+              <Link to="/sources" className="ops-text-link ml-auto" aria-label={t("nav.sources")}>
+                <ArrowUpRight aria-hidden />
+              </Link>
+            </div>
+            <ul className="ops-source-list">
+              {fresh.data?.sources.map((s) => (
+                <li key={s.name}>
+                  <Link to="/sources">
+                    <span className="flex min-w-0 items-center gap-2">
+                      {s.kind === "documents" ? (
+                        <FileText className="size-3.5 shrink-0" aria-hidden />
+                      ) : (
+                        <Database className="size-3.5 shrink-0" aria-hidden />
+                      )}
+                      <span className="truncate">{s.name}</span>
+                    </span>
+                    <span className="ops-source-state">
+                      <span
+                        className={
+                          s.state === "fresh"
+                            ? "status-dot bg-success"
+                            : s.state === "unknown"
+                              ? "status-dot bg-muted-foreground"
+                              : "status-dot bg-warning"
+                        }
+                        aria-hidden
+                      />
+                      {t(s.state === "unknown" ? "ops.unknownState" : `ops.${s.state}`)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            {!fresh.data && (
+              <p className="py-4 text-xs text-muted-foreground">{t("shell.status.checking")}</p>
+            )}
+          </section>
+        </aside>
+      </div>
+    </div>
   )
 }
