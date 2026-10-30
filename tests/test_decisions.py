@@ -43,7 +43,7 @@ def test_migration_v6_upgrades_older_stores(tmp_path, version):
     Store(path)
     _downgrade(path, version)
     store = Store(path)
-    assert store.schema_version() == MIGRATIONS[-1][0] == 6
+    assert store.schema_version() == MIGRATIONS[-1][0] and store.schema_version() >= 6
     row = AlignmentStore(store).get("c1")
     assert row is not None and row.judged == {} and row.relation == "same"
     decisions = DecisionStore(store)
@@ -670,5 +670,5 @@ def test_a_v6_store_without_the_review_index_gets_it_on_open(tmp_path):
             return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
 
     assert "alignments_review_idx" not in indexes()
-    assert Store(path).schema_version() == 6
+    assert Store(path).schema_version() == MIGRATIONS[-1][0]
     assert "alignments_review_idx" in indexes()

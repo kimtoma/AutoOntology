@@ -131,7 +131,8 @@ def create(runtime: Path, label: str) -> Path:
             ["git", "archive", "--format=tar", "-o", str(payload / "source.tar"), revision], cwd=app
         )
         for path in payload.rglob("*"):
-            os.chmod(path, 0o700 if path.is_dir() else 0o600)
+            original = path.relative_to(payload).parts[:3] == ("workspace", "originals", "blobs")
+            os.chmod(path, 0o700 if path.is_dir() else 0o400 if original else 0o600)
         manifest = {
             "version": 1,
             "commit": revision,

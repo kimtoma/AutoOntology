@@ -503,18 +503,30 @@ def _invalidate_semantic(
 
 
 def _step_load(ctx: _Ctx) -> dict[str, Any]:
+    from autoontology.store.provenance import SourceArchive
     from autoontology.structured.loaders import load_files_to_postgres
 
     files = pipeline.files_locator(ctx.source).files()
+    target = Path(pipeline.files_locator(ctx.source).path)
+    archive = SourceArchive(ctx.store)
+    captured = archive.capture_files(
+        ctx.source,
+        files,
+        run_id=ctx.run.id,
+        root=target if target.is_dir() else target.parent,
+    )
     invalidated: dict[str, Any] = {}
     report = load_files_to_postgres(
-        files,
+        [captured.paths[p.resolve()] for p in files],
         ctx.database_name,
         ctx.settings,
         previous=ctx.store.get_file_manifest(ctx.source.id),
         on_changes=lambda changes: _invalidate_semantic(ctx, changes, invalidated),
     )
     ctx.store.set_file_manifest(ctx.source.id, report.manifest)
+    archive.mark_read(
+        captured.id, ctx.run.id, summary={"tables": len(report.tables), "rows": report.total_rows}
+    )
     for table in report.tables:
         logger.info("  loaded %s: %d rows, %d columns", table.name, table.rows, len(table.columns))
     for table in report.dropped_tables:
@@ -522,6 +534,7 @@ def _step_load(ctx: _Ctx) -> dict[str, Any]:
     for warning in report.warnings:
         logger.info("  warning: %s", warning)
     return {
+        "source_revision": captured.id,
         "report": report.to_dict(),
         "tables": len(report.tables),
         "rows": report.total_rows,
@@ -586,6 +599,12 @@ def _invalidate_database_source(
     from autoontology.structured.loaders import diff_manifest
 
     after = catalog_snapshot(ctx.database_name, ctx.settings)
+    if after:
+        from autoontology.store.provenance import SourceArchive
+
+        detail["source_revision"] = SourceArchive(ctx.store).capture_catalog(
+            ctx.source, after, run_id=ctx.run.id
+        )
     changes = (
         diff_manifest(baseline, after) if baseline else {"added": [], "removed": [], "changed": []}
     )

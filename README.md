@@ -84,6 +84,17 @@ uv run autoontology export      # exports the published operational version
 
 </details>
 
+### Original evidence
+
+New reads preserve the original document and structured-file bytes separately from
+mutable ingestion rows. Concept and review evidence links download the file bound
+to that ontology revision. Older originals can be recovered only when a file in
+the registered source has the exact recorded SHA-256; a changed current file is
+never silently substituted. CLI equivalents are `ops documents`,
+`ops source-revisions NAME`, `ops original DOC_ID --out FILE`, and
+`ops preserve-original DOC_ID` (candidate reads require `--revision N --preview`).
+See [originals and source revisions](docs/ONTOLOGY_OPS.md#originals-and-source-revisions).
+
 ### Language
 
 The web UI speaks English and Korean: pick one with the globe menu in the header (or open

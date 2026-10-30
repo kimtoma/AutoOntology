@@ -370,6 +370,24 @@ Markdown, TXT, HTML. 제목이 분명할수록 좋습니다. 리더가 제목을
 
 ![온톨로지 페이지](screenshots/ontology.ko.png)
 
+### 원본 파일과 입력 개정
+
+개념·지식 검토 화면의 **원본 파일 다운로드**는 표시 중인 버전의 보관된 바이트를 내려받습니다.
+같은 파일의 인용 여러 개에는 파일 작업을 한 번만 표시합니다. 원본 보관 도입 전의 기록은
+**원본 보관 복구**로 현재 등록된 소스 안에서 같은 바이트를 찾을 때만 복구할 수 있습니다.
+파일 이동·이름 변경은 허용하지만, 사라지거나 내용이 바뀐 과거 원본을 최신 파일로 대체하지 않습니다.
+
+```sh
+uv run autoontology ops documents
+uv run autoontology ops source-revisions quick-docs
+uv run autoontology ops preserve-original DOCUMENT_ID
+uv run autoontology ops original DOCUMENT_ID --out ./original-document.bin
+```
+
+미게시 변경안은 `--revision N --preview`로 명시합니다. 다운로드는 새 출력 파일명을 요구하며
+기존 파일을 덮어쓰지 않습니다. 소스 개정은 입력 보관과 읽기 단계 완료를 구분합니다.
+Postgres 소스 이력은 수집된 카탈로그 스키마를 기록하며 과거 행 데이터 전체를 보관했다는 뜻은 아닙니다.
+
 ### 그래프
 
 같은 온톨로지를 3D 네트워크로 보여 줍니다(브라우저가 3D를 지원하지 않으면 2D). **보기**의

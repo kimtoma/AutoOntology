@@ -246,6 +246,10 @@ class Operations:
                                     "page": ev.page,
                                     "verified": ev.verified,
                                     "document": doc.title if doc else "",
+                                    "document_id": doc.local if doc else None,
+                                    "snapshot_revision": state["published_revision"]
+                                    if version == "published"
+                                    else revision,
                                     "version": version,
                                 }
                             )

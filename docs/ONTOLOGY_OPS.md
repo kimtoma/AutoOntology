@@ -111,6 +111,55 @@ version. No activity charts or synthetic metrics are introduced. Latin text uses
 Geist, metadata uses Geist Mono, and Korean uses Pretendard. Fonts and their OFL
 licenses are served locally. Light and dark themes use the same layout.
 
+## Originals and source revisions
+
+SQLite migration v7 adds content-addressed file metadata, immutable source-input
+manifests, separate capture/read receipts and last-read source references. It
+does not rewrite old snapshots or delete original source files. Source deletion
+does not cascade into these history tables or the original-byte archive under
+`<home>/originals/`. Archive files are installed without overwriting an existing
+content identity and are owner-read-only; file and directory synchronization
+precedes recording successful installation. A hash mismatch or symlink is an
+integrity error, not a reason to silently replace history.
+
+The document reader and structured-file loader consume the captured copy. The
+document's displayed locator remains the original locator, while its hash names
+the bytes actually read. A source changing during capture fails before active
+document rows are removed. Build snapshot source entries record `source_id` and
+`source_revision`; legacy entries remain unchanged and may lack that reference.
+Database source revisions retain ingested columns/types and declared FK-column
+flags, excluding transient catalog/term IDs and connection credentials. This is
+not a database-row snapshot or a complete original DDL backup.
+
+Concept evidence and both sides of a knowledge review expose revision-qualified
+original-file actions. Downloads verify the complete SHA-256, use attachment and
+`nosniff` headers, and are never served by an arbitrary client-supplied file path.
+Source history and CLI output contain logical filenames, not private absolute
+archive locators. An explicit web revision supports read-only candidate/history
+inspection; the CLI requires `--revision N --preview` for a candidate.
+
+| Capability | API | CLI |
+| --- | --- | --- |
+| Inspect document originals | `GET /api/ontology/documents?revision=N` | `ops documents [--revision N --preview]` |
+| Inspect input revisions and capture/read counts | `GET /api/sources/NAME/revisions` | `ops source-revisions NAME` |
+| Download verified original bytes | `GET /api/ontology/documents/ID/original?revision=N` | `ops original ID --out NEW_FILE [--revision N --preview]` |
+| Preserve a matching legacy original | `POST /api/ontology/documents/ID/archive?revision=N` | `ops preserve-original ID [--revision N --preview]` |
+
+Recovery reads only the registered documents source and compares complete hashes,
+so moving/renaming a file need not lose its original bytes. Changed or missing
+bytes remain explicitly unavailable. Recovery records a capture receipt with
+`purpose: original_recovery`; it does not claim a new build/read, change the
+published ontology or mark knowledge approved. The API and CLI use the same
+workspace lease for this action. CLI downloads require a new output filename and
+use an atomic no-overwrite install. Provenance failures use stable error codes
+such as `original_unavailable`, `original_changed` and `original_corrupt`.
+
+This implements the original/input-history portion of P0-02. PublicationManifest,
+UsageTrace, authenticated source scopes and managed publication restoration
+remain separate required roadmap work. A source revision identifies preserved
+inputs; it does not by itself prove which subset a mixed approved publication
+contains or recreate past live SQL row values.
+
 ## Isolated local preview on this Mac
 
 The preview checkout is `data/ontology-ops-local/app`, on

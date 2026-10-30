@@ -11,6 +11,68 @@ from autoontology.unstructured.schemas import ChunkExtraction, MergeDecision
 VOCAB = ["계약", "고객", "청구서", "수납"]
 
 
+def test_read_archives_originals_before_active_documents_are_replaced(env):
+    from autoontology.store.provenance import SourceArchive
+
+    settings, store, docs_dir = env
+    original = (docs_dir / "계약.md").read_bytes()
+    first = _run(settings, store, docs_dir, _backends(settings))
+    assert first.status == "succeeded"
+    docs = DocumentStore(store)
+    source = store.get_source("hanbit_docs")
+    old = next(d for d in docs.list_documents(source.id) if d.path.endswith("계약.md"))
+    (docs_dir / "계약.md").write_text("# 계약 개정\n계약과 고객의 개정 내용")
+    second = _run(settings, store, docs_dir, _backends(settings))
+    assert second.status == "succeeded"
+    archive = SourceArchive(store)
+    assert archive.original(source.name, old.sha256, "계약.md").read_bytes() == original
+    assert first.details["read"]["source_revision"] != second.details["read"]["source_revision"]
+    assert archive.reference(source.id) == second.details["read"]["source_revision"]
+
+
+def test_reader_uses_captured_bytes_even_when_the_live_file_changes(env, monkeypatch):
+    from autoontology.unstructured import readers
+
+    settings, store, docs_dir = env
+    original = (docs_dir / "계약.md").read_bytes()
+    real = readers.read_document
+
+    def change_live_after_capture(path, **kwargs):
+        assert path.is_relative_to(settings.home / "originals")
+        if path.name == "계약.md":
+            (docs_dir / "계약.md").write_text("Changed during the read")
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(readers, "read_document", change_live_after_capture)
+    result = _run(settings, store, docs_dir, _backends(settings))
+    assert result.status == "succeeded"
+    import hashlib
+
+    source = store.get_source("hanbit_docs")
+    assert DocumentStore(store).find_document(source.id, hashlib.sha256(original).hexdigest())
+
+
+def test_capture_race_does_not_delete_the_previous_active_document(env, monkeypatch):
+    from autoontology.store.provenance import SourceArchive
+
+    settings, store, docs_dir = env
+    assert _run(settings, store, docs_dir, _backends(settings)).status == "succeeded"
+    source = store.get_source("hanbit_docs")
+    before = {d.id for d in DocumentStore(store).list_documents(source.id)}
+    (docs_dir / "계약.md").write_text("# Updated\n계약과 고객")
+    real = SourceArchive._capture
+
+    def race(self, path, expected):
+        if path.name == "계약.md":
+            path.write_text("Changed after hashing")
+        return real(self, path, expected)
+
+    monkeypatch.setattr(SourceArchive, "_capture", race)
+    with pytest.raises(jobs.JobError, match="changed during capture"):
+        _run(settings, store, docs_dir, _backends(settings))
+    assert {d.id for d in DocumentStore(store).list_documents(source.id)} == before
+
+
 class FakeLLM:
     def __init__(self):
         self.calls = 0

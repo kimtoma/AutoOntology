@@ -143,7 +143,15 @@ export interface ConceptPage {
   pages: number
 }
 
+export interface OriginalReference {
+  status: "archived" | "not_archived" | "missing" | "corrupt"
+  url: string | null
+  recover_url?: string | null
+}
+
 export interface Evidence {
+  document_id?: string | null
+  original?: OriginalReference
   quote: string
   verified: boolean
   page: number | null

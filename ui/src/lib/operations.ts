@@ -1,7 +1,9 @@
 /** Operational APIs keep the published ontology separate from build candidates. */
-import { ApiError } from "@/lib/api"
+import { ApiError, type OriginalReference } from "@/lib/api"
 
 export interface Evidence {
+  document_id?: string | null
+  original?: OriginalReference
   quote: string
   page: number | null
   verified: boolean

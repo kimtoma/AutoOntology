@@ -82,6 +82,16 @@ uv run autoontology export      # exports the published operational version
 
 </details>
 
+### 원문 근거
+
+새로 읽는 문서와 정형 파일의 원본 바이트는 활성 추출 데이터와 별도로 보관합니다.
+개념·검토 화면의 근거 링크에서 해당 온톨로지 버전에 묶인 파일을 다운로드할 수 있습니다.
+과거 원본은 현재 등록된 소스 안에서 기록된 SHA-256과 정확히 같은 파일이 있을 때만
+복구합니다. 내용이 달라진 현재 파일로 대체하지 않습니다. CLI에서는 `ops documents`,
+`ops source-revisions NAME`, `ops original DOC_ID --out FILE`,
+`ops preserve-original DOC_ID`를 사용합니다. 변경안은 `--revision N --preview`로 명시합니다.
+[원문·소스 개정 설명](docs/ONTOLOGY_OPS.md#originals-and-source-revisions)을 참고하세요.
+
 ### 언어
 
 웹 UI는 영어와 한국어를 지원합니다. 헤더의 지구본 메뉴에서 고르거나 `/ui/?lang=ko`로 열면

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from contextlib import nullcontext
+from pathlib import Path
 
 import typer
 
@@ -19,12 +20,15 @@ def commands(settings_for, store_for, fail):
     def run(action, *, edit=None):
         from autoontology.engine.build import WORKSPACE_LEASE
         from autoontology.engine.jobs import JobError, hold_sources
+        from autoontology.store.provenance import ProvenanceError
 
         try:
             settings = settings_for()
             store = store_for(settings)
             with hold_sources(store, [WORKSPACE_LEASE], edit) if edit else nullcontext():
                 return action(store, settings)
+        except ProvenanceError as exc:
+            fail(json.dumps({"error": exc.code, "detail": str(exc)}, ensure_ascii=False))
         except (OperationsError, JobError) as exc:
             fail(str(exc))
 
@@ -33,9 +37,15 @@ def commands(settings_for, store_for, fail):
 
     @app.command("list")
     def listing():
+        from autoontology.provenance import change_originals
+
         def action(store, settings):
             ops = Operations(store)
-            return {**ops.state(), "items": ops.changes(), "checks": ops.checks()}
+            return {
+                **ops.state(),
+                "items": change_originals(store, ops.changes()),
+                "checks": ops.checks(),
+            }
 
         emit(run(action))
 
@@ -89,5 +99,64 @@ def commands(settings_for, store_for, fail):
             lambda store, settings: run_publish(store, settings, revision=revision, token=token)
         )
         emit({"run_id": result.run_id, "status": result.status, "revision": result.revision})
+
+    @app.command()
+    def documents(
+        revision: int = typer.Option(None, "--revision", min=1),
+        preview: bool = typer.Option(False, "--preview"),
+    ):
+        from autoontology.provenance import document_rows, selected_model
+
+        def action(store, settings):
+            selected, model = selected_model(store, revision, preview=preview)
+            return {
+                "revision": selected,
+                "preview": preview,
+                "items": document_rows(store, model, selected),
+            }
+
+        emit(run(action))
+
+    @app.command("source-revisions")
+    def source_revisions(name: str):
+        from autoontology.store.provenance import SourceArchive
+
+        emit(run(lambda store, settings: {"items": SourceArchive(store).revisions(name)}))
+
+    @app.command("preserve-original")
+    def preserve_original(
+        document: str,
+        revision: int = typer.Option(None, "--revision", min=1),
+        preview: bool = typer.Option(False, "--preview"),
+    ):
+        from autoontology.provenance import preserve_original as preserve
+        from autoontology.provenance import selected_model
+
+        def action(store, settings):
+            selected, model = selected_model(store, revision, preview=preview)
+            return preserve(store, model, document, selected)
+
+        emit(run(action, edit="archive"))
+
+    @app.command()
+    def original(
+        document: str,
+        out: Path = typer.Option(
+            ..., "--out", help="New local file; existing files are never overwritten."
+        ),
+        revision: int = typer.Option(None, "--revision", min=1),
+        preview: bool = typer.Option(False, "--preview"),
+    ):
+        from autoontology.provenance import save_original, selected_model
+
+        def action(store, settings):
+            selected, model = selected_model(store, revision, preview=preview)
+            return {
+                "revision": selected,
+                "preview": preview,
+                **save_original(store, model, document, out),
+            }
+
+        emit(run(action))
 
     return app

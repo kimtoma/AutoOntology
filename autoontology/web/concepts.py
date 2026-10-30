@@ -206,6 +206,7 @@ def concept_detail(
                 "verified": row.verified,
                 "page": row.page,
                 "document": doc.title if doc else "",
+                "document_id": doc.local if doc else None,
                 "path": doc.path if doc else "",
             }
         )

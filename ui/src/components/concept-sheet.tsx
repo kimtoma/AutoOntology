@@ -4,6 +4,8 @@ import type { ReactNode } from "react"
 import { Link } from "react-router"
 
 import { ErrorState } from "@/components/empty-state"
+import { OriginalLink } from "@/components/original-link"
+import { isFirstOriginal } from "@/lib/originals"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -194,6 +196,7 @@ export function ConceptBody({ c, omitBasics = false, onOpen }: {
                   {e.document || e.path}{e.page ? ` · ${t("concept.page", { n: e.page })}` : ""}
                   {!e.verified && <span className="text-destructive"> · {t("concept.notVerbatim")}</span>}
                 </p>
+                {isFirstOriginal(c.evidence, i) && <OriginalLink original={e.original} />}
               </li>
             ))}
           </ul>

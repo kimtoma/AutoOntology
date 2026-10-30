@@ -928,6 +928,53 @@ def build_router(api: Api) -> APIRouter:
             "warnings": [],
         }
 
+    @router.get("/ontology/documents")
+    def ontology_documents(revision: int | None = Query(None, ge=1)):
+        from autoontology.provenance import document_rows
+
+        head, model = api.snapshot(revision)
+        return {"revision": head.revision, "items": document_rows(api.store, model, head.revision)}
+
+    @router.get("/ontology/documents/{document_id}/original")
+    def ontology_original(document_id: str, revision: int | None = Query(None, ge=1)):
+        from autoontology.provenance import document_original
+        from autoontology.store.provenance import ProvenanceError
+
+        _, model = api.snapshot(revision)
+        try:
+            document, path = document_original(api.store, model, document_id)
+        except ProvenanceError as exc:
+            raise ApiError(exc.status, exc.code, str(exc)) from exc
+        return FileResponse(
+            path,
+            filename=Path(document.path).name,
+            media_type="application/octet-stream",
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "X-Original-SHA256": document.sha256,
+                "Cache-Control": "private, no-store",
+            },
+        )
+
+    @router.get("/sources/{source_name}/revisions")
+    def source_revisions(source_name: str):
+        from autoontology.store.provenance import SourceArchive
+
+        return {"items": SourceArchive(api.store).revisions(source_name)}
+
+    @router.post("/ontology/documents/{document_id}/archive")
+    def preserve_original(document_id: str, revision: int | None = Query(None, ge=1)):
+        from autoontology.provenance import preserve_original as preserve
+        from autoontology.store.provenance import ProvenanceError
+        from autoontology.web.operations_api import edit
+
+        with edit(api, "archive"):
+            head, model = api.snapshot(revision)
+            try:
+                return preserve(api.store, model, document_id, head.revision)
+            except ProvenanceError as exc:
+                raise ApiError(exc.status, exc.code, str(exc)) from exc
+
     @router.get("/ontology/concepts")
     def ontology_concepts(
         q: str = Query("", max_length=200),
@@ -974,6 +1021,12 @@ def build_router(api: Api) -> APIRouter:
         detail = concept_detail(model, concept_id, index)
         if detail is None:
             raise ApiError(404, "unknown_concept", f"unknown concept {concept_id!r}")
+        from autoontology.provenance import original_metadata
+
+        for evidence in detail["evidence"]:
+            doc = model.documents.get(evidence.get("document_id"))
+            if doc:
+                evidence["original"] = original_metadata(api.store, doc, head.revision)
         return {"revision": head.revision, **detail}
 
     # exports ----------------------------------------------------------------------------

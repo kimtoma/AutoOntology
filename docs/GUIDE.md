@@ -393,6 +393,27 @@ origin and kind.
 
 ![Ontology page](screenshots/ontology.png)
 
+### Original files and input revisions
+
+Evidence in a concept or knowledge review has a **Download original** link for
+the exact preserved bytes of the displayed revision. Multiple quotes from the
+same file share one file action. When history predates preservation, **Recover
+original** only succeeds if identical bytes still exist inside the registered
+source, including a moved or renamed file. Missing or changed history remains
+unavailable; it is not replaced with the latest content.
+
+```sh
+uv run autoontology ops documents
+uv run autoontology ops source-revisions quick-docs
+uv run autoontology ops preserve-original DOCUMENT_ID
+uv run autoontology ops original DOCUMENT_ID --out ./original-document.bin
+```
+
+`--revision N --preview` explicitly selects an unpublished candidate. Downloads
+require a new output filename and never replace an existing local file. Source
+revisions distinguish capturing inputs from completing their read step. Postgres
+source history records the ingested catalog schema, not historical live row data.
+
 ### Graph
 
 The same ontology as a 3D network (a 2D view is used when the browser has no 3D support).

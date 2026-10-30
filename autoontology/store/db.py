@@ -420,6 +420,33 @@ MIGRATIONS: list[tuple[int, str]] = [
             WHERE judged_json != '{}' OR applied_json != '{}'
         """,
     ),
+    (
+        7,
+        # Original bytes and input revisions outlive mutable ingestion/source rows.
+        # Source IDs/names are provenance, not cascading foreign keys to live sources.
+        """
+        CREATE TABLE IF NOT EXISTS provenance_files (
+            sha256 TEXT NOT NULL, filename TEXT NOT NULL, bytes INTEGER NOT NULL,
+            created_at TEXT NOT NULL, PRIMARY KEY (sha256, filename)
+        );
+        CREATE TABLE IF NOT EXISTS source_revisions (
+            id TEXT PRIMARY KEY, source_id TEXT NOT NULL, source_name TEXT NOT NULL,
+            kind TEXT NOT NULL, manifest_json TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS source_revisions_source ON source_revisions (source_name, created_at);
+        CREATE TABLE IF NOT EXISTS source_revision_captures (
+            run_id TEXT NOT NULL, source_id TEXT NOT NULL,
+            revision_id TEXT NOT NULL REFERENCES source_revisions(id),
+            captured_at TEXT NOT NULL, read_at TEXT, summary_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (run_id, source_id)
+        );
+        CREATE TABLE IF NOT EXISTS source_revision_heads (
+            source_id TEXT PRIMARY KEY,
+            revision_id TEXT NOT NULL REFERENCES source_revisions(id),
+            read_at TEXT NOT NULL
+        )
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration

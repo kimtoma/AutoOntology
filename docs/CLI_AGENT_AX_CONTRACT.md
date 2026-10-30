@@ -62,9 +62,9 @@ usable CLI parity.
 | Capability family | Required CLI operations | Current coverage |
 | --- | --- | --- |
 | Installation and health | initialize, provider/login status and test, configure models, doctor, start/stop/restart | Existing native CLI; audit parity and structured results |
-| Sources | register/upload/list/inspect/edit/remove, inspect revisions/originals/permissions, freshness, rescan | Registration/removal exist; complete revision/scope/automation parity remains |
+| Sources | register/upload/list/inspect/edit/remove, inspect revisions/originals/permissions, freshness, rescan | Registration/removal and original/input-history operations exist; complete edit/scope/automation parity remains |
 | Build and executions | plan, build/resume, inspect/watch, cancel, retry, recover partial execution | Build/resume/runs exist; complete lifecycle parity remains |
-| Ontology use | operational/history/preview reads, concepts, graph data, original evidence, compare revisions | Summary/preview exists; complete graph/evidence/history parity remains |
+| Ontology use | operational/history/preview reads, concepts, graph data, original evidence, compare revisions | Summary/preview, original inspection/download/recovery and source-revision CLI exist; complete graph/concept/diff parity remains |
 | Questions and data | chat/retrieval/citations, conversations, SQL and result files, SPARQL | CLI parity remains for the interactive playground |
 | Review | list/filter/assign cases, inspect dependencies, edit/approve/hold/reject/undo, merge duplicate cases, hand off | Connection review and `ops list/decide` exist; case and full mutation parity remain |
 | Quality and publication | version question suites, run/inspect checks, prepare publication, request/inspect/approve confirmation, publish | `ops check/validate/publish` exist; full suites and authenticated confirmation remain |

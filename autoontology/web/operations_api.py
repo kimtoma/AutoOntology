@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from autoontology.engine.build import WORKSPACE_LEASE
 from autoontology.engine.jobs import hold_sources
+from autoontology.provenance import change_originals
 from autoontology.store.db import now_iso
 from autoontology.store.operations import Operations, OperationsError, digest
 from autoontology.web.api import ApiError
@@ -97,7 +98,7 @@ def install(app, api):
                 "feedback": len(op.feedback()),
             },
             "published_at": head.created_at if head else None,
-            "highlights": items[:3],
+            "highlights": change_originals(api.store, items[:3]),
             "checks": op.checks(),
             "initial_approval_required": state["published_revision"] is None,
             "publication_policy": {"minimum_questions": 1},
@@ -106,7 +107,11 @@ def install(app, api):
     @router.get("/changes")
     def changes():
         op = ops()
-        return {**op.state(), "items": op.changes(), "feedback": op.feedback()}
+        return {
+            **op.state(),
+            "items": change_originals(api.store, op.changes()),
+            "feedback": op.feedback(),
+        }
 
     @router.post("/changes/{item_id}/decision")
     def decide(item_id: str, body: ReviewIn, request: Request):

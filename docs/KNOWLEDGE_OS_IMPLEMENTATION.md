@@ -45,7 +45,7 @@ model, source and browser checks.
 | Recovery | Private stage checkpoint, hashes, restoration instructions and restore drill | Tooling `8aa9ee0`, WAL consolidation/immutable verification `a7c4262`; `stage-00-baseline-v2` restored on isolated port 55434: catalog 37 tables/168 rows and source 3 tables/155 rows matched, SQLite integrity and published r8 preserved |
 | CLI / Agent / AX | Complete semantic CLI parity; authenticated agent preparation and human confirmation; time-to-approved-result and human-effort baseline/targets | Contract recorded; current `ops` CLI is only partial coverage. Implementation and capability-by-capability acceptance remain required across all stages. |
 | P0-01 | Explicit first approval, mandatory representative question suite, failed validation, real initial-install acceptance including missing login/backend | Implemented; 1205 Python tests passed / 66 integration tests skipped; UI 158 passed, lint/build passed. New Postgres 55435 / app 7831 / backend 3132 acceptance used real Codex and qwen3-embedding:4b on Korean policy text, checked first publication r2, graph/index/download and browser operations home. Missing-login/backend cases use controlled route tests without logging the user out. Full Python run used process/port permissions and a verified same-commit read-only mapping to the main checkout's upstream source. |
-| P0-02 | Immutable originals and SourceRevision; PublicationManifest and UsageTrace; managed restore; failure/restart/backup acceptance | Pending |
+| P0-02 | Immutable originals and SourceRevision; PublicationManifest and UsageTrace; managed restore; failure/restart/backup acceptance | In progress: original/input-history portion implemented with schema v7, preserved file inputs, catalog schema revisions, API/UI/CLI retrieval and matching-byte legacy recovery. Python 1222 passed / 66 integration skipped; UI 161 passed, lint/build passed. Real r8 originals: all 6 CLI/API/browser downloads matched their hashes; all 29 pre-existing data tables and 421 export files matched the prior checkpoint. PublicationManifest, UsageTrace and managed publication restore remain required. |
 | P0-03 | Authenticated Principal, roles, workspace/domain scope; evidence/search/history/export/SQL enforcement; audit actors; SQL read-only limits | Pending |
 | P1-01 | ChangeSet/ReviewCase, dependencies, base publication, owner/due/priority/reasons, stale-base warning, append-only transitions, connection-review links | Pending |
 | P1-02 | Contract/billing rule scope, amount/operator, approval authority, effective dates, exceptions/conflicts; durable identity rename/merge/split; extraction quality and corrections; versioned deterministic evaluation and citation support | Pending |
@@ -60,7 +60,7 @@ model, source and browser checks.
 
 - [x] Empty installation → validated and approved first publication → operations home (real isolated initial-install acceptance; login/backend error branches tested with fixtures).
 - [ ] Default graph, answer, SQL and export use the same publication.
-- [ ] Old originals, citations, retrieval and questions remain reproducible after edits.
+- [ ] Old originals, citations, retrieval and questions remain reproducible after edits. Original-byte preservation and overwrite/delete/move/race/corruption tests are implemented; complete publication/question/retrieval traces remain pending.
 - [ ] Failed preparation, restart, publication switch and managed restoration keep
       graph, index, answers and downloads consistent.
 - [ ] Unprivileged direct API/search/file/history/SQL requests cannot bypass scope.
@@ -100,7 +100,8 @@ ports, checks that the cluster contains no unrelated databases, stops only the
 isolated services, copies a cleanly stopped Postgres cluster, consolidates the
 SQLite WAL with its backup API, and restarts the isolated services in `finally`.
 The private checkpoint includes a source archive, original configuration and
-file hashes. Its directory is mode 0700 and files are mode 0600.
+file hashes. Its directory is mode 0700 and files are mode 0600; preserved
+original-byte payloads retain owner-read-only mode 0400.
 
 ```sh
 OPS_RUNTIME=/Users/macmini/Projects/AutoOntology/data/ontology-ops-local

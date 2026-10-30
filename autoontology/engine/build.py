@@ -471,11 +471,16 @@ class _Build:
 
 def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[dict[str, Any]]:
     """The ``sources`` list of a snapshot: name, kind and what the model holds of each."""
+    from autoontology.store.provenance import SourceArchive
+
+    archive = SourceArchive(store)
     by_source = model.counts().get("by_source", {})
     included = set(model.structured_sources) | set(model.documents_sources)
     out = []
     for s in sources:
         entry: dict[str, Any] = {
+            "source_id": s.id,
+            "source_revision": archive.reference(s.id),
             "name": s.name,
             "kind": "documents" if s.kind == "documents" else "structured",
             "source_kind": s.kind,

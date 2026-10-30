@@ -37,6 +37,7 @@ from autoontology.engine.jobs import (
 )
 from autoontology.store.db import Run, Source, Store, now_iso
 from autoontology.store.documents import DocumentStore
+from autoontology.store.provenance import SourceArchive
 from autoontology.unstructured import chunker, consolidate, readers, report
 from autoontology.unstructured.extractor import (
     ChunkJob,
@@ -230,6 +231,14 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
     # rows are never trusted for a path whose file changed (e.g. A=X,B=Y -> A=Y,B=Z keeps
     # Y under A and reads Z for B).
     current = {str(p.resolve()): sha256_file(p) for p in files}  # stored absolute
+    archive = SourceArchive(ctx.store)
+    captured = archive.capture_files(
+        ctx.source,
+        files,
+        run_id=ctx.run.id,
+        root=ctx.target if ctx.target.is_dir() else ctx.target.parent,
+        expected=current,
+    )
     seen = set(current)
     paths_of: dict[str, list[str]] = {}
     for shown, sha in current.items():
@@ -312,7 +321,7 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
                     )
                     continue
             doc = readers.read_document(
-                path,
+                captured.paths[path.resolve()],
                 home=ctx.settings.home,
                 engine=engine,
                 max_table_rows=ctx.settings.doc_table_max_rows,
@@ -376,7 +385,7 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             mime=doc.mime,
             engine=doc.engine,
             sha256=sha,
-            size=path.stat().st_size,
+            size=captured.paths[path.resolve()].stat().st_size,
             pages=doc.pages,
             chunks=chunks,
         )
@@ -437,7 +446,18 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             len(failed),
             ", ".join(display_path(f["path"]) for f in failed),
         )
+    archive.mark_read(
+        captured.id,
+        ctx.run.id,
+        summary={
+            "documents": len(documents),
+            "failed": len(failed),
+            "needs_kordoc": len(needs_kordoc),
+            "needs_ocr": len(needs_ocr),
+        },
+    )
     return {
+        "source_revision": captured.id,
         "documents": documents,
         "failed": failed,
         "needs_kordoc": needs_kordoc,

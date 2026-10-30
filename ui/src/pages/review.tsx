@@ -4,6 +4,8 @@ import { Link, useSearchParams } from "react-router"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 import { PageHeader } from "@/components/page-header"
+import { OriginalLink } from "@/components/original-link"
+import { isFirstOriginal } from "@/lib/originals"
 import { EmptyState, ErrorState } from "@/components/empty-state"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -30,6 +32,7 @@ function EvidenceList({ items }: { items: Evidence[] }) {
                 {e.page !== null ? ` · p.${e.page}` : ""}
                 {e.version ? " · " + t(e.version === "candidate" ? "ops.after" : "ops.before") : ""}
               </p>
+              {isFirstOriginal(items, i) && <OriginalLink original={e.original} />}
             </li>
           ))}
         </ul>
