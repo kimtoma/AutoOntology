@@ -36,8 +36,8 @@ model, source and browser checks.
 | Stage | Scope | Status / evidence |
 | --- | --- | --- |
 | Baseline | Stable initial route; shared operational reads; explicit private preview exports | Completed `a723554`: 297 related Python / 154 UI tests; local r8/r7 contract and browser verification |
-| Recovery | Private stage checkpoint, hashes, restoration instructions and restore drill | In progress |
-| P0-01 | Explicit first approval, mandatory representative question suite, failed validation, real initial-install acceptance including missing login/backend | Pending |
+| Recovery | Private stage checkpoint, hashes, restoration instructions and restore drill | Tooling `8aa9ee0`, WAL consolidation/immutable verification `a7c4262`; `stage-00-baseline-v2` restored on isolated port 55434: catalog 37 tables/168 rows and source 3 tables/155 rows matched, SQLite integrity and published r8 preserved |
+| P0-01 | Explicit first approval, mandatory representative question suite, failed validation, real initial-install acceptance including missing login/backend | Implemented; 1205 Python tests passed / 66 integration tests skipped; UI 158 passed, lint/build passed. New Postgres 55435 / app 7831 / backend 3132 acceptance used real Codex and qwen3-embedding:4b on Korean policy text, checked first publication r2, graph/index/download and browser operations home. Missing-login/backend cases use controlled route tests without logging the user out. Full Python run used process/port permissions and a verified same-commit read-only mapping to the main checkout's upstream source. |
 | P0-02 | Immutable originals and SourceRevision; PublicationManifest and UsageTrace; managed restore; failure/restart/backup acceptance | Pending |
 | P0-03 | Authenticated Principal, roles, workspace/domain scope; evidence/search/history/export/SQL enforcement; audit actors; SQL read-only limits | Pending |
 | P1-01 | ChangeSet/ReviewCase, dependencies, base publication, owner/due/priority/reasons, stale-base warning, append-only transitions, connection-review links | Pending |
@@ -51,7 +51,7 @@ model, source and browser checks.
 
 ## End-to-end completion audit
 
-- [ ] Empty installation → validated and approved first publication → operations home.
+- [x] Empty installation → validated and approved first publication → operations home (real isolated initial-install acceptance; login/backend error branches tested with fixtures).
 - [ ] Default graph, answer, SQL and export use the same publication.
 - [ ] Old originals, citations, retrieval and questions remain reproducible after edits.
 - [ ] Failed preparation, restart, publication switch and managed restoration keep
@@ -81,3 +81,41 @@ The original Korean lifecycle report remains at the private local runtime's
 `ontology-lifecycle.html`; the complete dated roadmap remains at
 `knowledge-os-roadmap.md`. This ledger tracks implementation and does not replace
 or narrow their acceptance requirements.
+
+### Concrete local checkpoint commands
+
+Run from the isolated worktree, using its shared virtual environment. `create`
+requires a clean committed tree, restricts itself to the named local runtime and
+ports, checks that the cluster contains no unrelated databases, stops only the
+isolated services, copies a cleanly stopped Postgres cluster, consolidates the
+SQLite WAL with its backup API, and restarts the isolated services in `finally`.
+The private checkpoint includes a source archive, original configuration and
+file hashes. Its directory is mode 0700 and files are mode 0600.
+
+```sh
+OPS_RUNTIME=/Users/macmini/Projects/AutoOntology/data/ontology-ops-local
+.venv/bin/python scripts/local_ops_checkpoint.py create --runtime "$OPS_RUNTIME" --label stage-NN-name
+.venv/bin/python scripts/local_ops_checkpoint.py verify "$OPS_RUNTIME/checkpoints/stage-NN-name"
+.venv/bin/python scripts/local_ops_checkpoint.py stage "$OPS_RUNTIME/checkpoints/stage-NN-name" "$OPS_RUNTIME/verification/new-restore"
+```
+
+`stage` refuses existing destinations and verifies hashes before creating any
+restored file. Do not use the original backup itself as a running cluster. A
+Postgres drill must override both port and socket directory, for example
+`pg_ctl -D NEW_RESTORE/postgres -o '-p 55434 -h 127.0.0.1 -k /private/tmp' ...`.
+Deep workspace paths exceed macOS's Unix socket path limit. Stop the drill server
+after checking it; the live local cluster stays on 55433.
+
+To roll back the working preview after a successful drill, stop its app/backend
+and Postgres, retain its current directories in a separate private recovery
+folder, then copy the verified `workspace`, `exports`, `postgres` and `local.env`
+back to the original runtime paths. Switch **only the clean isolated worktree**
+to the manifest's commit (a detached checkout preserves later branch history).
+Start the local Postgres and `control.py start`, then check health, publication,
+graph, retrieval and downloads before deleting any pre-restore copy. This
+destructive-in-place step is not performed during checkpoint creation or drills.
+Full publication-level restoration and failure injection remain P0-02 work.
+
+The initial `stage-00-baseline` attempt is superseded by `stage-00-baseline-v2`;
+use the verified v2 checkpoint. The older attempt exposed the SQLite read-only
+WAL-sidecar issue and is not a recovery target.

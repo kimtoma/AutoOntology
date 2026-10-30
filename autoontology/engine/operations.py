@@ -61,11 +61,14 @@ def validate(store: Store, settings: Settings, *, revision: int, embedder=None, 
     model, items = ops.compose(revision)
     signature = ops.signature(revision, profile(settings, embedder))
     scope = f"{model.name}@proposal-{signature}"
-    index, embed = prepare_index(store, settings, model, scope, revision, embedder)
-    if len(index._rows) != len(index.elements):
-        raise OperationsError("some knowledge has no retrieval vector")
+    cases = ops.checks()
+    index = None
+    if cases:
+        index, embed = prepare_index(store, settings, model, scope, revision, embedder)
+        if len(index._rows) != len(index.elements):
+            raise OperationsError("some knowledge has no retrieval vector")
     questions = []
-    for case in ops.checks():
+    for case in cases:
         vector = embed([case["question"]], "query")[0]
         hits = index.retrieve(vector or [], top_k=12)
 
@@ -84,14 +87,19 @@ def validate(store: Store, settings: Settings, *, revision: int, embedder=None, 
         ok = case["expected"].casefold() in text.casefold() and bool(cited) and not unknown
         questions.append({**case, "answer": text, "citations": cited, "ok": ok})
     result = {
-        "ok": all(q["ok"] for q in questions),
+        "ok": bool(questions) and all(q["ok"] for q in questions),
         "revision": revision,
         "published_revision": ops.state()["published_revision"],
         "approved": len(items),
         "excluded": len(ops.changes()) - len(items),
-        "indexed_elements": len(index.elements),
+        "indexed_elements": len(index.elements) if index else 0,
         "questions": questions,
         "checks_configured": bool(questions),
+        "blocking_reasons": []
+        if questions
+        else [
+            "Configure at least one representative question and expected answer before publication."
+        ],
         "token": signature,
         "scope": scope,
         "validated_at": now_iso(),
@@ -161,7 +169,13 @@ def run_publish(
                 "SELECT result_json FROM ops_validations WHERE token=?", (token,)
             ).fetchone()
         validated = json.loads(row[0]) if row else None
-        if token != signature or not validated or not validated["ok"]:
+        if (
+            token != signature
+            or not validated
+            or not validated["ok"]
+            or not validated.get("checks_configured")
+            or not validated.get("questions")
+        ):
             raise OperationsError("validation changed or failed; revalidate before publication")
         model, items = ops.compose(revision)
         previous = ops.state()["published_revision"]

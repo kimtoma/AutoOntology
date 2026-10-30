@@ -253,7 +253,7 @@ provider without asking.
 
 **`uv run autoontology demo`** starts the two background services, registers the sample
 set as sources (`quick` for the tables, `quick-docs` for the documents), shows how long the
-first build should take with each provider, builds, exports and opens the web UI. While it
+first build should take with each provider, builds a candidate and opens the web UI. While it
 builds it prints one line per step:
 
 ```
@@ -263,8 +263,14 @@ builds it prints one line per step:
   [1/28] 한빛상사 계약관리규정 #0: 3 concept(s), 4 relation(s) via structured in 53.7s
 ```
 
-At the end it prints a table of every step with its time, `build total`, the export folder
-(`exports/r0001`) and the address of the web UI (http://127.0.0.1:7800/ui/). Add
+At the end it prints a table of every step with its time, `build total`, and the
+address of the web UI (http://127.0.0.1:7800/ui/). On a new workspace, approve the
+candidate in **Review inbox**, then add at least one representative question and
+expected answer in **Change history**. Validate the approved knowledge and publish
+the first operational version. Until then, it is not used for operational graphs,
+answers or downloads. The CLI equivalent is `uv run autoontology ops --help`.
+Existing operational workspaces keep their published version while a candidate
+is reviewed. See [publication details](ONTOLOGY_OPS.md). Add
 `--set hanbit` for the full sample company (11 tables, 15 documents in 12 formats and 6
 images), and `--no-open` to keep the browser closed.
 

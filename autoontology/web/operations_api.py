@@ -59,6 +59,10 @@ def edit(api, kind):
 
 
 def install(app, api):
+    # Opt empty workspaces in before any first build can be served as operational.
+    # Existing legacy workspaces retain their explicit migration baseline.
+    if api.store.latest_revision() is None:
+        Operations(api.store)
     router = APIRouter(prefix="/api/ops")
 
     def ops():
@@ -95,6 +99,8 @@ def install(app, api):
             "published_at": head.created_at if head else None,
             "highlights": items[:3],
             "checks": op.checks(),
+            "initial_approval_required": state["published_revision"] is None,
+            "publication_policy": {"minimum_questions": 1},
         }
 
     @router.get("/changes")
@@ -230,7 +236,7 @@ def install(app, api):
     @router.post("/checks", status_code=201)
     def check(body: CheckIn):
         with edit(api, "checks"):
-            return ops().add_check(body.question.strip(), body.expected.strip())
+            return checked(lambda: ops().add_check(body.question.strip(), body.expected.strip()))
 
     @router.delete("/checks/{item_id}")
     def delete_check(item_id: int):

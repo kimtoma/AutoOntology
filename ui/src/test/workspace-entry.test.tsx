@@ -1,19 +1,19 @@
-import { act, screen } from "@testing-library/react"
+import { act, screen, waitFor } from "@testing-library/react"
 import App from "@/App"
 import { mockFetch, renderPage } from "@/test/utils"
 
-function workspace(publicationError = false) {
+function workspace(publicationError = false, readiness: "ready" | "logged_out" | "backend_down" = "ready") {
   let built = false
   const result = mockFetch({
     "GET /status": {
       status: "ok",
-      checks: { backend: { status: "ok" }, postgres: { status: "ok" } },
+      checks: { backend: { status: readiness === "backend_down" ? "error" : "ok" }, postgres: { status: "ok" } },
       providers: {
         chat_provider: "codex",
         chat_model: "test",
         embed_provider: "ollama",
         embed_model: "test",
-        chat: { name: "codex", model: "test", available: true, logged_in: true, detail: "ready", remedy: "" },
+        chat: { name: "codex", model: "test", available: true, logged_in: readiness !== "logged_out", detail: "ready", remedy: "" },
       },
     },
     "GET /ontology": () =>
@@ -67,6 +67,23 @@ it("does not mistake an unavailable published snapshot for a new workspace", asy
   renderPage(<App />)
   expect(await screen.findByRole("alert")).toHaveTextContent("Restore the workspace")
   expect(document.querySelector("#checklist")).toBeNull()
+})
+
+it("keeps root onboarding actionable when the chat CLI is logged out", async () => {
+  const { calls } = workspace(false, "logged_out")
+  renderPage(<App />)
+  expect(await screen.findByText("codex login")).toBeInTheDocument()
+  expect(document.querySelector("[data-step=models]")).toHaveAttribute("data-state", "active")
+  expect(calls.filter((c) => c.path === "/ontology")).toHaveLength(1)
+})
+
+it("keeps the model step incomplete while the backend is unavailable", async () => {
+  const { calls } = workspace(false, "backend_down")
+  renderPage(<App />)
+  await screen.findByText("Models connected")
+  await waitFor(() => expect(document.querySelector("[data-step=models]")).toHaveAttribute("data-state", "active"))
+  expect(document.querySelector("[data-step=build]")).toHaveAttribute("data-state", "pending")
+  expect(calls.filter((c) => c.path === "/ontology")).toHaveLength(1)
 })
 
 it("moves from guidance to operations after the first build becomes available", async () => {

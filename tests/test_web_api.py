@@ -337,7 +337,7 @@ def test_export_run_takes_a_revision(env, isolated_env):
     ]
     run_id = c.post(f"{API}/runs", json={"kind": "export", "format": "okf"}).json()["run_id"]
     manager.join(run_id, 5)
-    assert fake.calls[-1] == ("export", {"revision": None, "format": "okf"})
+    assert fake.calls[-1] == ("export", {"revision": 1, "format": "okf"})
     bad = c.post(f"{API}/runs", json={"kind": "export", "format": "pdf"})
     assert bad.status_code == 400
 
@@ -476,8 +476,9 @@ def _snapshot():
 
 
 def _seed_snapshot(settings):
-    """The documents + structured fixture merged and saved as snapshot revision 1."""
+    """Seed a completed publication for read API tests (not an initial build)."""
     from autoontology.ontology import model as merged
+    from autoontology.store.operations import Operations
 
     src = _seed_documents(settings)
     store = _store(settings)
@@ -487,9 +488,12 @@ def _seed_snapshot(settings):
         documents=export_job.documents_inputs(store, [src]),
         base=settings.base_iri,
     )
-    run = store.create_run(kind="build", source_id=None)
+    run = store.create_run(kind="publish", source_id=None)
     store.update_run(run.id, status="succeeded")
-    return store.save_snapshot(run.id, model), model
+    revision = store.save_snapshot(run.id, model)
+    ops = Operations(store)
+    ops.commit(revision, ops.state()["published_revision"], [])
+    return revision, model
 
 
 def test_ontology_summary(env):
@@ -586,11 +590,12 @@ def test_concepts_take_a_revision(env):
     c, settings, _, _ = env
     _seed_snapshot(settings)
     _store(settings).save_snapshot("r2", merged.build(settings.workspace, structured=[_snapshot()]))
-    assert c.get(f"{API}/ontology/concepts").json()["total"] == 2  # latest: Terms only
+    assert c.get(f"{API}/ontology/concepts").json()["total"] == 6  # published
+    assert c.get(f"{API}/ontology/concepts?revision=2").json()["total"] == 2  # preview
     old = c.get(f"{API}/ontology/concepts", params={"revision": 1}).json()
     assert old["revision"] == 1 and old["total"] == 6
     folded = next(i for i in old["items"] if i["name"] == "계약")
-    assert c.get(f"{API}/ontology/concepts/{folded['id']}").status_code == 404  # not in r2
+    assert c.get(f"{API}/ontology/concepts/{folded['id']}?revision=2").status_code == 404
     one = c.get(f"{API}/ontology/concepts/{folded['id']}", params={"revision": 1}).json()
     assert one["revision"] == 1 and one["folded_into"]["id"] == "term-t-c"
     for path in ("/ontology/concepts", f"/ontology/concepts/{folded['id']}"):
@@ -716,17 +721,18 @@ def test_ontology_graph_evidence_layer_and_env_cap(env, monkeypatch):
     assert len(capped["nodes"]) == 2
 
 
-def test_ontology_follows_the_latest_snapshot(env):
+def test_ontology_stays_on_publication_when_a_new_candidate_exists(env):
     from autoontology.ontology import model as merged
 
     c, settings, _, _ = env
-    _seed_snapshot(settings)
+    _, model = _seed_snapshot(settings)
     assert c.get(f"{API}/ontology").json()["revision"] == 1
     store = _store(settings)
     store.save_snapshot("r2", merged.build(settings.workspace, structured=[_snapshot()]))
     body = c.get(f"{API}/ontology").json()
-    assert body["revision"] == 2 and body["counts"]["classes"] == 2
-    assert c.get(f"{API}/ontology/graph").json()["revision"] == 2
+    assert body["revision"] == 1 and body["counts"]["classes"] == len(model.classes)
+    assert c.get(f"{API}/ontology/graph").json()["revision"] == 1
+    assert c.get(f"{API}/ontology?revision=2").json()["counts"]["classes"] == 2
     old = c.get(f"{API}/ontology/graph", params={"revision": 1}).json()
     assert old["revision"] == 1 and old["counts"]["nodes"] > 2
 
@@ -778,6 +784,15 @@ def test_graph_alignment_subclass_relation_direction():
 
 def test_exports_list_and_path_safe_download(env):
     c, settings, _, _ = env
+    from autoontology.store.operations import Operations
+
+    _, model = _seed_snapshot(settings)
+    store = _store(settings)
+    for _ in range(2):
+        run = store.create_run(kind="publish", source_id=None)
+        revision = store.save_snapshot(run.id, model)
+        store.update_run(run.id, status="succeeded")
+    Operations(store).commit(revision, 1, [])
     rev_dir = Path(settings.exports_dir) / "r0003"
     (rev_dir / "upstream").mkdir(parents=True)
     (rev_dir / "ontology.ttl").write_text("@prefix ao: <x#> .\n", encoding="utf-8")

@@ -32,7 +32,7 @@ git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git && cd
 docker compose up -d            # or point POSTGRES_* in .env at your own Postgres 17 + pgvector
 uv sync
 uv run autoontology init        # checks what is installed, picks a model, writes .env, runs setup
-uv run autoontology demo        # builds the quickstart sample set, exports it and opens the web UI
+uv run autoontology demo        # builds the quickstart candidate and opens the web UI for review
 ```
 
 필요한 것은 [uv](https://docs.astral.sh/uv/)가 있는 Python 3.12, Docker 또는
@@ -49,9 +49,11 @@ uv run autoontology demo        # builds the quickstart sample set, exports it a
   `.env`에 이미 있는 제공자는 유지합니다.
 - `demo`는 서비스를 시작하고, 샘플 세트를 등록하고(`quick`, `quick-docs`; `--set hanbit`이면
   `hanbit`, `hanbit-docs`, `hanbit-images`), 제공자별 예상 빌드 시간을 출력한 뒤, 단계마다
-  소요 시간을 보여 주며 빌드하고, 내보내기를 하고 웹 UI를 엽니다. `--resume`은 중단된 빌드를
+  소요 시간을 보여 주며 빌드하고, 검토할 웹 UI를 엽니다. `--resume`은 중단된 빌드를
   이어 가고, `--replace`는 같은 이름에 다른 데이터를 가진 소스를 교체하며, `--no-open`은
-  브라우저를 열지 않습니다. 그다음 **온톨로지 → 그래프 → 플레이그라운드** 순서로 살펴보세요.
+  브라우저를 열지 않습니다. 먼저 **검토함 → 변경 이력**에서 반영할 지식을 승인하고 대표 질문을
+  추가한 뒤 검증·게시하세요. 첫 운영본이 생기면 **온톨로지 → 그래프 → 질문·활용**을 이용합니다.
+  기존 작업 공간은 사용 중인 운영본을 유지하며 재구축 결과는 변경안으로 남습니다.
 
 <details>
 <summary>수동 단계 (init/demo가 하는 일)</summary>
@@ -63,8 +65,9 @@ uv run autoontology up
 uv run autoontology source add samples/quickstart/structured --name quick
 uv run autoontology source add samples/quickstart/documents --name quick-docs --kind documents
 uv run autoontology build
-uv run autoontology export
 uv run autoontology ui
+# Review, configure questions, validate and publish in the UI (or `autoontology ops --help`).
+uv run autoontology export      # exports the published operational version
 ```
 
 - `up`은 엔진 백엔드(:3101)와 서비스(:7800)를 둘 다 백그라운드로 시작합니다. `down`은 둘을
@@ -434,7 +437,7 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 | `autoontology source list` | 소스 목록을 보여 줍니다. |
 | `autoontology source rm N [--drop-db] [--force]` | 소스를 제거합니다. `--drop-db`는 그 데이터베이스도 삭제합니다. 문서 소스라면 먼저 그 소스의 매칭이 업스트림 용어에 추가한 동의어를 지웁니다(수동 별칭, 다른 소스의 별칭, 다른 소스의 수용된 `same` 매칭이 여전히 덮는 별칭은 유지). 이 작업에는 엔진 데이터베이스가 필요하며, 실패하면 `--force`를 주지 않는 한 소스를 유지합니다. `--force`로도 업스트림 연결을 지우지 못하면(백엔드 꺼짐) `--drop-db`는 데이터베이스를 남기고, 나중에 `tools prune-connections <database> --include-unowned --drop-db`를 실행하라고 안내합니다. |
 | `autoontology build [--source N ...] [--resume]` | 모든 소스를 스냅샷 하나로 빌드합니다. `--source`는 지정한 소스만 다시 빌드합니다(align, merge, snapshot은 여전히 전체를 대상으로 합니다). `--resume`은 최근 빌드를 이어 가며, 입력이 바뀌지 않은 단계는 유지합니다([빌드 이어 가기](#빌드-이어-가기) 참고). |
-| `autoontology ontology` | 최신 스냅샷의 리비전, 소스, 개수를 보여 줍니다. |
+| `autoontology ontology` | 운영 스냅샷의 리비전, 소스, 개수를 보여 줍니다. 변경안은 --revision N --preview로 명시합니다. |
 | `autoontology runs [--limit N]` | 최근 실행과 그 단계들을 보여 줍니다. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
@@ -520,7 +523,7 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 
 ### 플레이그라운드
 
-- **채팅**은 최신 스냅샷에 대한 질문에 답합니다. 가장 관련 있는 요소(용어, 개념, 규칙, 관계,
+- **채팅**은 게시된 운영 스냅샷에 대한 질문에 답합니다. 가장 관련 있는 요소(용어, 개념, 규칙, 관계,
   근거)를 찾아 인용하며, 인용을 누르면 온톨로지 페이지나 그래프에서 그 개념이 열립니다. 시스템
   프롬프트는 샘플 데이터처럼 한국어로 답합니다. 대화는 워크스페이스별로 저장됩니다.
 - **SQL**은 엔진의 자연어→SQL 에이전트로 질문을 SQL로 바꾸고, 정형 소스에서 실행해 표로

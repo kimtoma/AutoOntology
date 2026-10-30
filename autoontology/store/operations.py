@@ -31,8 +31,8 @@ def digest(value: Any) -> str:
 def _publication_state(store: Store) -> tuple[bool, dict | None]:
     """Read managed state without opting a legacy workspace in to Operations.
 
-    Preserve the existing first-build baseline policy in one place: only the first
-    completed snapshot can initialize an empty managed workspace's published head.
+    A build in a new managed workspace is a candidate, including the first build.
+    Only explicit publication may initialize its operational head.
     """
     with store._conn() as conn:
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='ops_state'").fetchone():
@@ -40,24 +40,7 @@ def _publication_state(store: Store) -> tuple[bool, dict | None]:
         row = conn.execute("SELECT * FROM ops_state WHERE id=1").fetchone()
     if row is None:
         return True, None
-    state = dict(row)
-    if state["published_revision"] is None:
-        first = next(
-            (
-                s.revision
-                for s in reversed(store.list_snapshots(500))
-                if (run := store.get_run(s.run_id)) is None or run.status == "succeeded"
-            ),
-            None,
-        )
-        if first is not None:
-            with store._conn() as conn:
-                conn.execute(
-                    "UPDATE ops_state SET published_revision=?,initial_revision=?,updated_at=? WHERE id=1 AND published_revision IS NULL",
-                    (first, first, now_iso()),
-                )
-            return _publication_state(store)
-    return True, state
+    return True, dict(row)
 
 
 def published_revision(store: Store) -> int | None:
@@ -106,6 +89,9 @@ class Operations:
     def __init__(self, store: Store):
         self.store = store
         with store._conn() as conn:
+            managed = conn.execute("SELECT 1 FROM sqlite_master WHERE name='ops_state'").fetchone()
+            if managed and not conn.execute("SELECT 1 FROM ops_state WHERE id=1").fetchone():
+                raise OperationsError("publication state is missing; restore the workspace")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS ops_state (
                     id INTEGER PRIMARY KEY CHECK(id=1), published_revision INTEGER,
@@ -356,8 +342,12 @@ class Operations:
             raise OperationsError("candidate changed; refresh")
         base = self.model(state["published_revision"])
         draft = self.model(revision)
-        if base is None or draft is None:
+        if draft is None:
             raise OperationsError("build an ontology first")
+        if base is None:
+            if state["published_revision"] is not None:
+                raise OperationsError("the published snapshot is missing; restore the workspace")
+            base = MergedOntology(draft.name, draft.base)
         selected = [
             i for i in self.changes() if i["decision"] and i["decision"]["decision"] == "accept"
         ]
@@ -485,6 +475,7 @@ class Operations:
         return digest(
             {
                 "state": self.state(),
+                "publication_policy": {"version": 2, "minimum_questions": 1},
                 "revision": revision,
                 "changes": self.changes(),
                 "checks": self.checks(),
@@ -493,10 +484,10 @@ class Operations:
             }
         )
 
-    def commit(self, revision: int, expected: int, items: list[dict]) -> None:
+    def commit(self, revision: int, expected: int | None, items: list[dict]) -> None:
         with self.store._conn() as conn:
             changed = conn.execute(
-                "UPDATE ops_state SET published_revision=?,updated_at=? WHERE id=1 AND published_revision=?",
+                "UPDATE ops_state SET published_revision=?,updated_at=? WHERE id=1 AND published_revision IS ?",
                 (revision, now_iso(), expected),
             ).rowcount
             if changed != 1:
@@ -534,6 +525,11 @@ class Operations:
             )
 
     def add_check(self, question: str, expected: str) -> dict:
+        question, expected = question.strip(), expected.strip()
+        if not question or not expected or len(question) > 2000 or len(expected) > 2000:
+            raise OperationsError(
+                "representative questions and expected answers must be non-empty and at most 2000 characters"
+            )
         with self.store._conn() as conn:
             cursor = conn.execute(
                 "INSERT INTO ops_checks(question,expected,created_at) VALUES(?,?,?)",

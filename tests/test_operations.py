@@ -10,6 +10,11 @@ from autoontology.store.db import Store
 from autoontology.store.operations import Operations, OperationsError
 
 
+class CitedAnswer:
+    async def stream(self, messages):
+        yield "대표이사 승인입니다. [E1]"
+
+
 def snapshot(store, model, kind="build"):
     run = store.create_run(kind=kind, source_id=None)
     rev = store.save_snapshot(run.id, model)
@@ -170,8 +175,9 @@ def test_failed_preparation_never_switches_the_live_version(tmp_path, isolated_e
     ops.decide(ops.changes()[0]["id"], "accept", candidate=rev)
     settings = replace(Settings.from_env(), home=tmp_path, exports_dir=tmp_path / "exports")
     embed = (lambda texts, kind: [[1.0, 0.0, 0.0] for _ in texts], "test")
-    result = validate(store, settings, revision=rev, embedder=embed)
-    assert result["ok"] and result["questions"] == []
+    ops.add_check("승인권자는?", "대표이사")
+    result = validate(store, settings, revision=rev, embedder=embed, llm=CitedAnswer())
+    assert result["ok"] and len(result["questions"]) == 1
 
     def fail(*args):
         raise RuntimeError("artifact generation failed")
@@ -205,12 +211,13 @@ def test_stale_validation_and_partial_publication(tmp_path, isolated_env):
     ops.decide(change["id"], "accept", candidate=rev)
     settings = replace(Settings.from_env(), home=tmp_path, exports_dir=tmp_path / "exports")
     embed = (lambda texts, kind: [[1.0, 0.0, 0.0] for _ in texts], "test")
-    result = validate(store, settings, revision=rev, embedder=embed)
+    ops.add_check("승인권자는?", "대표이사")
+    result = validate(store, settings, revision=rev, embedder=embed, llm=CitedAnswer())
     ops.decide(change["id"], "hold", candidate=rev)
     with pytest.raises(OperationsError, match="revalidate"):
         run_publish(store, settings, revision=rev, token=result["token"], embedder=embed)
     ops.decide(change["id"], "accept", candidate=rev)
-    result = validate(store, settings, revision=rev, embedder=embed)
+    result = validate(store, settings, revision=rev, embedder=embed, llm=CitedAnswer())
     result = run_publish(store, settings, revision=rev, token=result["token"], embedder=embed)
     head = store.get_snapshot(ops.state()["published_revision"])
     assert head.revision > rev

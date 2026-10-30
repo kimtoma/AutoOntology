@@ -106,6 +106,9 @@ export default function HistoryPage() {
               {published && <Badge variant="outline">{t("ops.published", { n: published })}</Badge>}
             </div>
             <p className="mb-4 text-sm text-muted-foreground">{t("ops.publishHint")}</p>
+            {!overview.data?.checks.length && (
+              <p className="mb-4 text-sm text-warning" role="status">{t("ops.checksRequired")}</p>
+            )}
             {approved > 0 && candidate ? (
               <>
                 <Badge variant="secondary">
@@ -121,13 +124,13 @@ export default function HistoryPage() {
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Button
-                    disabled={validate.isPending || publish.isPending}
+                    disabled={validate.isPending || publish.isPending || !overview.data?.checks.length}
                     onClick={() => validate.mutate()}
                   >
                     {validate.isPending && <Loader2 aria-hidden className="animate-spin" />}
                     {t("ops.prepare")}
                   </Button>
-                  {validation?.ok && (
+                  {validation?.ok && !!overview.data?.checks.length && (
                     <Button disabled={publish.isPending} onClick={() => publish.mutate()}>
                       {publish.isPending && <Loader2 aria-hidden className="animate-spin" />}
                       {t("ops.publish", { n: validation.approved })}

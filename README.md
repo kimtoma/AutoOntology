@@ -32,7 +32,7 @@ git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git && cd
 docker compose up -d            # or point POSTGRES_* in .env at your own Postgres 17 + pgvector
 uv sync
 uv run autoontology init        # checks what is installed, picks a model, writes .env, runs setup
-uv run autoontology demo        # builds the quickstart sample set, exports it and opens the web UI
+uv run autoontology demo        # builds the quickstart candidate and opens the web UI for review
 ```
 
 You need Python 3.12 with [uv](https://docs.astral.sh/uv/), Docker or your own Postgres 17
@@ -50,10 +50,12 @@ has a checklist with "how to check" commands.
   keeps the provider already in `.env`.
 - `demo` starts the services, registers the sample set (`quick`, `quick-docs`; with
   `--set hanbit`: `hanbit`, `hanbit-docs`, `hanbit-images`), prints the expected build
-  time per provider, builds with the time of every step, exports and opens the web UI.
+  time per provider, builds with the time of every step and opens the web UI for review.
   `--resume` continues an interrupted build, `--replace` replaces sources of the same name
   that hold other data, and `--no-open` keeps the browser closed. Then look at
-  **Ontology → Graph → Playground**.
+  **Review inbox → Change history**: approve the knowledge, add representative questions,
+  validate and publish the first operational version. Then explore **Ontology → Graph → Playground**.
+  Existing operational workspaces keep their published version; rebuilding creates a candidate.
 
 <details>
 <summary>Manual steps (what init/demo do)</summary>
@@ -65,8 +67,9 @@ uv run autoontology up
 uv run autoontology source add samples/quickstart/structured --name quick
 uv run autoontology source add samples/quickstart/documents --name quick-docs --kind documents
 uv run autoontology build
-uv run autoontology export
 uv run autoontology ui
+# Review, configure questions, validate and publish in the UI (or `autoontology ops --help`).
+uv run autoontology export      # exports the published operational version
 ```
 
 - `up` starts the engine backend on :3101 and the service on :7800, both in the
@@ -463,7 +466,7 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | Command | What it does |
 |---|---|
 | `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | Step-by-step setup: checks Postgres (retry after `docker compose up -d`), detects and picks the chat provider, embeddings and documents, writes `.env` (other lines kept, previous file backed up) and runs `setup`. A provider and embeddings choice already in `.env` is kept (the recommendation is shown as a hint). `--yes` asks nothing; exits 2 with the fix when Postgres is down or the chosen CLI is not logged in. |
-| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | Starts the services (and prunes upstream connections whose `autoontology_src_*` database is gone; live ones no source here owns are only reported, since another checkout may share the catalog), registers the sample set's sources (already registered ones are kept; a source with the same name but other data is replaced only after you confirm, or with `--replace`, because its database and extracted concepts are deleted), prints the expected build time per provider, builds with per-step times, exports and opens the web UI. |
+| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | Starts the services (and prunes upstream connections whose `autoontology_src_*` database is gone; live ones no source here owns are only reported, since another checkout may share the catalog), registers the sample set's sources (already registered ones are kept; a source with the same name but other data is replaced only after you confirm, or with `--replace`, because its database and extracted concepts are deleted), prints the expected build time per provider, builds with per-step times and opens the UI for review and explicit publication. |
 | `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M] [--embed ollama\|openai] [--embed-model M] [--base-url URL] [--openai-chat-model M]` | Shows every chat provider (available, logged in, model, last test, remedy), runs one test call, or switches the providers in `.env` (warns when a shell variable overrides the file; the API key is never taken on the command line). |
 | `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | Idempotent preparation: creates the catalog database and the `vector` and `pg_trgm` extensions, runs the migrations, pulls the Ollama models (and `AUTOONTOLOGY_VISION_MODEL` when set) and builds the `openai/qwen3:8b` alias, and with `--docs` installs kordoc and its OCR models (`--skip-ocr-models` leaves the models out). |
 | `autoontology doctor [--skip-models]` | Checks Postgres, pgvector, migrations, model endpoints, the vector tables, the ports and (with the services up) orphaned upstream connections. |
@@ -474,7 +477,7 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | `autoontology source list` | Lists the sources. |
 | `autoontology source rm N [--drop-db] [--force]` | Removes a source; `--drop-db` also drops its database. For a documents source it first removes, from the upstream Terms, the synonyms that source's alignments added (manual aliases, other sources' aliases and aliases still covered by another source's accepted `same` alignment are kept). This needs the engine database; if it fails, the source is kept unless `--force` is given. When `--force` cannot delete the upstream connection (backend down), `--drop-db` keeps the database and tells you to run `tools prune-connections <database> --include-unowned --drop-db` later. |
 | `autoontology build [--source N ...] [--resume]` | Builds every source into one snapshot. `--source` rebuilds only the named sources (align, merge and snapshot still cover all of them). `--resume` continues the latest build and keeps steps whose inputs did not change (see [Resuming a build](#resuming-a-build)). |
-| `autoontology ontology` | Shows the latest snapshot: revision, sources and counts. |
+| `autoontology ontology` | Shows the operational snapshot: revision, sources and counts. Use --revision N --preview to inspect a candidate. |
 | `autoontology runs [--limit N]` | Shows recent runs and their steps. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
@@ -563,7 +566,7 @@ from its `.prev-*` backup when the service starts, or by the next export.
 
 ### Playground
 
-- **Chat** answers questions about the latest snapshot. It retrieves the most relevant
+- **Chat** answers questions about the published operational snapshot. It retrieves the most relevant
   elements (Terms, concepts, rules, relations, evidence) and cites them; each citation
   opens the concept on the Ontology page or in the graph. Its system prompt answers in
   Korean, like the sample data. Conversations are stored per workspace.

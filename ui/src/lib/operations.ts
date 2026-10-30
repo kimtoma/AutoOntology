@@ -44,6 +44,8 @@ export interface QualityCheck {
   expected: string
 }
 export interface Overview {
+  initial_approval_required?: boolean
+  publication_policy?: { minimum_questions: number }
   published_revision: number | null
   candidate_revision: number | null
   workspace: string
@@ -105,11 +107,12 @@ export interface Validation {
   ok: boolean
   token: string
   revision: number
-  published_revision: number
+  published_revision: number | null
   approved: number
   excluded: number
   indexed_elements: number
   checks_configured: boolean
+  blocking_reasons?: string[]
   questions: (QualityCheck & { answer: string; ok: boolean; citations: Record<string, unknown> })[]
   validated_at: string
 }

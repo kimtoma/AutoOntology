@@ -260,6 +260,7 @@ MESSAGES: dict[str, str] = {
     "demo.step.samples": "Sample sources ({set})",
     "demo.step.build": "Build",
     "demo.step.export": "Export",
+    "demo.review_required": "The first build is a candidate. Review its changes and add representative questions in the web UI, then validate and publish before operational downloads are available.",
     "demo.step.ui": "Web UI",
     "demo.live_connections": (
         "  note  upstream connections with no source in this checkout (kept: another "
@@ -307,7 +308,7 @@ MESSAGES: dict[str, str] = {
     "demo.resume": "demo stopped: continue with `uv run autoontology demo --resume`",
     "demo.build_total": "  build total: {seconds:.1f}s",
     "demo.finished": "\ndemo finished in {seconds:.1f}s",
-    "demo.look_next": "What to look at next: Ontology → Graph → Playground",
+    "demo.look_next": "What to look at next: Review inbox → Change history → Ontology → Graph → Playground",
     # --- provider -----------------------------------------------------------------------
     "provider.col.provider": "PROVIDER",
     "provider.col.available": "AVAILABLE",

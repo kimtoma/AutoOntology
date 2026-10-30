@@ -1277,13 +1277,18 @@ def test_cli_build_ontology_export_and_runs(env, monkeypatch):
     assert res.exit_code == 0, res.output
     assert "revision 1:" in res.output and "succeeded" in res.output
     res = runner.invoke(app, ["ontology"])
+    assert res.exit_code == 1 and "no ontology snapshot" in res.output
+    res = runner.invoke(app, ["ontology", "--revision", "1", "--preview"])
     assert res.exit_code == 0 and "revision 1" in res.output and "hanbit-docs" in res.output
-    res = runner.invoke(app, ["export"])
+    assert "PREVIEW" in res.output
+    assert runner.invoke(app, ["export"]).exit_code == 1
+    preview_args = ["--revision", "1", "--preview", "--out", str(env["settings"].home / "previews")]
+    res = runner.invoke(app, ["export", *preview_args])
     assert res.exit_code == 0, res.output
     assert "upstream/hanbit.ossie.zip" in res.output and "r0001" in res.output
     assert "ossie: semantic_model ok, roundtrip ok, ontology ok, mapping ok" in res.output
     assert "okf: ok (" in res.output and "okf/concepts/" not in res.output  # one summary line
-    res = runner.invoke(app, ["export", "--format", "rdf"])
+    res = runner.invoke(app, ["export", "--format", "rdf", *preview_args])
     assert res.exit_code == 0 and "ossie/" not in res.output and "ontology.ttl" in res.output
     assert "kept from the previous export of this revision: okf" in res.output
     res = runner.invoke(app, ["runs"])

@@ -8,6 +8,7 @@ import typer
 from autoontology import __version__
 from autoontology.i18n import msg
 from autoontology.i18n import remedy as localized_remedy
+from autoontology.ops_cli import commands as ops_commands
 
 app = typer.Typer(
     name="autoontology",
@@ -24,6 +25,12 @@ review_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(review_app, name="review")
+app.add_typer(
+    ops_commands(
+        lambda: _settings(), lambda settings: _store(settings), lambda error: _fail(error)
+    ),
+    name="ops",
+)
 
 
 def _settings():
@@ -361,8 +368,12 @@ def status() -> None:
 
 def _store(settings):
     from autoontology.store.db import Store
+    from autoontology.store.operations import Operations
 
-    return Store.for_home(settings.home)
+    store = Store.for_home(settings.home)
+    if store.latest_revision() is None:
+        Operations(store)
+    return store
 
 
 def _table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
@@ -1258,6 +1269,7 @@ def init(
     # 7. summary
     _step(7, INIT_STEPS, msg("init.step.summary"))
     settings = _settings()
+    _store(settings)  # first builds in this workspace require explicit publication
     summary = [
         (
             "postgres",
@@ -1479,7 +1491,12 @@ def demo(
     typer.echo(msg("demo.build_total", seconds=time.monotonic() - build_started))
 
     _step(4, total, msg("demo.step.export"))
-    export(revision=None, out=None, format="all")
+    from autoontology.store.operations import read_snapshot
+
+    if read_snapshot(store) is None:
+        typer.echo(msg("demo.review_required"))
+    else:
+        export(revision=None, out=None, format="all", preview=False)
 
     _step(5, total, msg("demo.step.ui"))
     ui(no_browser=no_open)

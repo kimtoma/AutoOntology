@@ -58,15 +58,16 @@ def test_legacy_reads_do_not_activate_operations(tmp_path):
         assert not conn.execute("SELECT 1 FROM sqlite_master WHERE name='ops_state'").fetchone()
 
 
-def test_first_completed_baseline_is_shared_and_incomplete_snapshots_stay_private(tmp_path):
+def test_first_completed_build_requires_explicit_initial_publication(tmp_path):
     store = Store.for_home(tmp_path)
     ops = Operations(store)
     incomplete = snapshot(store, complete=False)
     assert read_snapshot(store) is None
-    first = snapshot(store)
+    snapshot(store)
     snapshot(store, "Candidate")
-    assert read_snapshot(store).revision == first
-    assert ops.state()["published_revision"] == first
+    assert read_snapshot(store) is None
+    assert ops.state()["published_revision"] is None
+    assert ops.state()["candidate_revision"] == 3
     with pytest.raises(OperationsError, match="unpublished"):
         read_snapshot(store, incomplete)
 

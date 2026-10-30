@@ -242,6 +242,7 @@ MESSAGES: dict[str, str] = {
     "demo.step.samples": "샘플 소스 ({set})",
     "demo.step.build": "빌드",
     "demo.step.export": "내보내기",
+    "demo.review_required": "첫 구축 결과는 변경안입니다. 웹에서 변경을 검토하고 대표 질문을 추가한 뒤 검증·게시하면 운영 다운로드를 사용할 수 있습니다.",
     "demo.step.ui": "웹 UI",
     "demo.live_connections": (
         "  note  이 체크아웃에 소스가 없는 업스트림 연결 (다른 체크아웃이 쓸 수 있어 유지): {names}"
@@ -286,7 +287,7 @@ MESSAGES: dict[str, str] = {
     "demo.resume": "demo 중단: `uv run autoontology demo --resume`으로 이어서 실행",
     "demo.build_total": "  빌드 합계: {seconds:.1f}초",
     "demo.finished": "\ndemo 완료: {seconds:.1f}초",
-    "demo.look_next": "다음에 볼 곳: 온톨로지 → 그래프 → 플레이그라운드",
+    "demo.look_next": "다음에 볼 곳: 검토함 → 변경 이력 → 온톨로지 → 그래프 → 질문·활용",
     # --- provider -----------------------------------------------------------------------
     "provider.col.provider": "제공자",
     "provider.col.available": "사용 가능",

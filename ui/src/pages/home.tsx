@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import { keys, retryServerErrors, useSamples } from "@/hooks/queries"
+import { useOperations } from "@/hooks/operations"
 import { useNow } from "@/hooks/use-now"
 import {
   api, ApiError, errorMessage, isNoSnapshot, type ExportEntry, type OntologySummary, type Run, type RunRequest,
@@ -150,9 +151,29 @@ export default function HomePage({ afterBuild }: { afterBuild?: ReactNode } = {}
     retry: retryServerErrors,
     refetchInterval: (query) => query.state.data ? false : POLL_MS,
   })
+  const initial = useOperations(!!afterBuild && isNoSnapshot(ontology.error))
+  const t = useT()
   if (afterBuild && ontology.data) return afterBuild
   if (afterBuild && ontology.error && !isNoSnapshot(ontology.error)) {
     return <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />
+  }
+  if (afterBuild && isNoSnapshot(ontology.error) && initial.error) {
+    return <ErrorState error={initial.error} onRetry={() => initial.refetch()} />
+  }
+  if (afterBuild && initial.data?.candidate_revision && !initial.data.published_revision) {
+    return (
+      <div id="initial-publication">
+        <PageHeader title={t("ops.initialTitle")} description={t("ops.initialHint")} />
+        <section className="border-y py-6">
+          <Badge variant="outline">{t("ops.candidate", { n: initial.data.candidate_revision })}</Badge>
+          <p className="mt-4 max-w-2xl text-sm text-muted-foreground">{t("ops.initialSteps")}</p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button asChild><Link to="/review">{t("ops.initialReview")}</Link></Button>
+            <Button asChild variant="outline"><Link to="/history">{t("ops.initialPublish")}</Link></Button>
+          </div>
+        </section>
+      </div>
+    )
   }
   return <OnboardingPage ontology={ontology} />
 }

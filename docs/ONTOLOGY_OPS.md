@@ -38,9 +38,35 @@ legacy latest-snapshot behavior.
 
 The default UI, CLI and exporter share the same operational snapshot selection.
 Managed workspaces use the pinned published version, including when a newer
-candidate exists. A missing managed head does not fall back to a candidate. The
-existing first-completed-build baseline policy is retained; explicit initial
-approval and mandatory question-suite policies remain follow-up work.
+candidate exists. A missing managed head does not fall back to a candidate.
+New CLI/web workspaces start with no published head. The first successful build
+is a candidate: review its changes, configure at least one representative question
+and expected answer, validate, and explicitly publish. Existing operational
+workspaces keep their published version; legacy workspaces with completed
+snapshots retain their migration baseline when they opt in to Operations.
+
+The initial home screen links to the review inbox and publication checks until
+the first publication exists. Empty question suites block publication before any
+model call. Changing a question, decision, source, candidate or model profile
+invalidates its validation token. Successful text-and-citation checks are a
+minimum gate, not proof of full business correctness; expanded deterministic
+evaluations and citation-support checks are subsequent roadmap work.
+
+The same workflow is available from the CLI:
+
+```sh
+uv run autoontology ops list
+uv run autoontology ops decide CHANGE_ID --revision 1 --decision accept --note 'Original checked'
+uv run autoontology ops check 'Who approves this contract?' --expected 'Director'
+uv run autoontology ops validate --revision 1
+uv run autoontology ops publish --revision 1 --token VALIDATION_TOKEN
+```
+
+`ops validate` prints JSON and exits 1 for a failed/blocked suite. The token binds
+the validation to content and is not an authentication credential. CLI mutations
+and validation use the same workspace lease as web edits and publication. A new
+`demo` build opens the UI for review instead of creating operational downloads
+before its first approval.
 
 Use an explicit revision and preview flag to inspect an unpublished snapshot:
 

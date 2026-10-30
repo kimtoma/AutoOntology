@@ -477,11 +477,11 @@ def test_demo_runs_the_steps_in_order(demo_env):
     assert demo_env == [
         "up",
         ("build", ("quick", "quick-docs"), False),
-        "export",
         ("ui", True),
     ]
     assert "quick: created" in res.output and "≈ estimate" in res.output
-    assert "What to look at next: Ontology → Graph → Playground" in res.output
+    assert "The first build is a candidate" in res.output
+    assert "What to look at next: Review inbox → Change history" in res.output
     from autoontology.config import Settings
 
     store = Store.for_home(Settings.from_env().home)
