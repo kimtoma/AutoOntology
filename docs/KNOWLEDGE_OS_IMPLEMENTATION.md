@@ -6,6 +6,12 @@ The public checkout, service and Cloudflare configuration are out of scope.
 Each stage needs a tested local commit and a private data checkpoint. A code
 checkout alone cannot undo a database migration or recover an overwritten file.
 
+The 2026-10-31 direction adds cross-cutting requirements: all UI work must also
+be available through the CLI; human operation is the default; scoped agents
+prepare the work and humans confirm consequential decisions. Enterprise AX is
+measured primarily by reduced end-to-end lead time and human active effort.
+See [the CLI, delegation and time-outcome contract](CLI_AGENT_AX_CONTRACT.md).
+
 ## Architecture and invariants
 
 Use the existing SQLite store for operational metadata and a persistent local
@@ -37,6 +43,7 @@ model, source and browser checks.
 | --- | --- | --- |
 | Baseline | Stable initial route; shared operational reads; explicit private preview exports | Completed `a723554`: 297 related Python / 154 UI tests; local r8/r7 contract and browser verification |
 | Recovery | Private stage checkpoint, hashes, restoration instructions and restore drill | Tooling `8aa9ee0`, WAL consolidation/immutable verification `a7c4262`; `stage-00-baseline-v2` restored on isolated port 55434: catalog 37 tables/168 rows and source 3 tables/155 rows matched, SQLite integrity and published r8 preserved |
+| CLI / Agent / AX | Complete semantic CLI parity; authenticated agent preparation and human confirmation; time-to-approved-result and human-effort baseline/targets | Contract recorded; current `ops` CLI is only partial coverage. Implementation and capability-by-capability acceptance remain required across all stages. |
 | P0-01 | Explicit first approval, mandatory representative question suite, failed validation, real initial-install acceptance including missing login/backend | Implemented; 1205 Python tests passed / 66 integration tests skipped; UI 158 passed, lint/build passed. New Postgres 55435 / app 7831 / backend 3132 acceptance used real Codex and qwen3-embedding:4b on Korean policy text, checked first publication r2, graph/index/download and browser operations home. Missing-login/backend cases use controlled route tests without logging the user out. Full Python run used process/port permissions and a verified same-commit read-only mapping to the main checkout's upstream source. |
 | P0-02 | Immutable originals and SourceRevision; PublicationManifest and UsageTrace; managed restore; failure/restart/backup acceptance | Pending |
 | P0-03 | Authenticated Principal, roles, workspace/domain scope; evidence/search/history/export/SQL enforcement; audit actors; SQL read-only limits | Pending |
@@ -66,6 +73,9 @@ model, source and browser checks.
 - [ ] Contract approval draft action demonstrates permission, approval, duplicate
       suppression, failure compensation and audit without unauthorized external writes.
 - [ ] Each stage has a local commit, recoverable data checkpoint and verified drill.
+- [ ] Every UI task, including exceptions/recovery/approval, has a tested CLI equivalent with stable machine-readable results.
+- [ ] An agent prepares a complete decision packet; an authenticated human confirms the exact effect; revocation/expiry/stale context and retries cannot bypass or duplicate approval.
+- [ ] The contract/billing pilot has measured baseline and assisted end-to-end median/p90, human active time, correction burden and quality/permission guardrails; accountable owners set numeric reduction targets from those measurements.
 
 ## Recovery procedure
 
