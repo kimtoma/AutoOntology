@@ -20,8 +20,10 @@ def fixture(tmp_path):
     payload = root / "payload/workspace"
     payload.mkdir(parents=True)
     with sqlite3.connect(payload / "autoontology.db") as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("CREATE TABLE knowledge (value TEXT)")
         conn.execute("INSERT INTO knowledge VALUES ('preserved')")
+    conn.close()
     (root / "payload/local.env").write_text("PRIVATE_SETTING=local\n")
     (root / "manifest.json").write_text(
         json.dumps(
@@ -35,6 +37,9 @@ def test_checkpoint_roundtrip_into_new_directory(tmp_path):
     source = fixture(tmp_path)
     restored = tmp_path / "restore"
     result = checkpoint.stage(source, restored)
+    # Verification is repeatable and must not create SQLite WAL sidecars.
+    assert checkpoint.verify(source) == result
+    assert not (source / "payload/workspace/autoontology.db-wal").exists()
     assert result["label"] == "baseline"
     with sqlite3.connect(restored / "workspace/autoontology.db") as conn:
         assert conn.execute("SELECT value FROM knowledge").fetchone()[0] == "preserved"

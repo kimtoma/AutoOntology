@@ -16,6 +16,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 PG_CTL = Path("/opt/homebrew/opt/postgresql@17/bin/pg_ctl")
@@ -48,7 +49,9 @@ def verify(checkpoint: Path) -> dict:
         raise ValueError("checkpoint integrity check failed")
     database = checkpoint / "payload/workspace/autoontology.db"
     if database.exists():
-        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as conn:
+        # A checkpoint is offline and consolidated. Plain mode=ro still creates
+        # WAL sidecars, changing the very payload whose hashes we verified.
+        with closing(sqlite3.connect(f"file:{database}?mode=ro&immutable=1", uri=True)) as conn:
             if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite integrity check failed")
     return manifest
@@ -109,7 +112,18 @@ def create(runtime: Path, label: str) -> Path:
         service_stopped = True
         command([str(PG_CTL), "-D", str(runtime / "postgres"), "stop", "-m", "fast", "-w"])
         pg_stopped = True
-        for name in ("workspace", "exports", "postgres"):
+        shutil.copytree(
+            runtime / "workspace",
+            payload / "workspace",
+            symlinks=False,
+            ignore=shutil.ignore_patterns(
+                "autoontology.db", "autoontology.db-wal", "autoontology.db-shm"
+            ),
+        )
+        with closing(sqlite3.connect(runtime / "workspace/autoontology.db")) as source:
+            with closing(sqlite3.connect(payload / "workspace/autoontology.db")) as target:
+                source.backup(target)
+        for name in ("exports", "postgres"):
             shutil.copytree(runtime / name, payload / name, symlinks=False)
         for name in ("local.env", "control.py"):
             shutil.copy2(runtime / name, payload / name)
