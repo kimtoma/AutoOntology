@@ -7,6 +7,9 @@ import { EmptyState } from "@/components/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import BuildPage from "@/pages/build"
 import ExportsPage from "@/pages/exports"
+import OperationsHome from "@/pages/operations"
+import ReviewPage from "@/pages/review"
+import HistoryPage from "@/pages/history"
 import HomePage from "@/pages/home"
 import OntologyPage from "@/pages/ontology"
 import SourcesPage from "@/pages/sources"
@@ -50,7 +53,10 @@ export default function App() {
       <CommandMenu />
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HomePage />} />
+          <Route index element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <OperationsHome />} />
+          <Route path="review" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <ReviewPage />} />
+          <Route path="history" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HistoryPage />} />
+          <Route path="setup" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HomePage />} />
           <Route path="sources" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <SourcesPage />} />
           <Route path="build" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <BuildPage />} />
           <Route path="ontology" element={<OntologyPage />} />

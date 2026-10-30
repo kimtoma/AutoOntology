@@ -1,3 +1,4 @@
+import { koOps } from "@/i18n/ko.ops"
 /* Korean UI strings: the same keys as en.ts (a missing key fails tsc). Technical names
    (SPARQL, SQL, Turtle, JSON-LD, OKF, Ossie, kordoc, OCR, Postgres) stay as they are. */
 
@@ -374,7 +375,7 @@ const koCore = {
   "fmt.alt.message": "메시지를 .txt 또는 .pdf로 저장하세요",
   "fmt.or": "또는",
 
-  "build.title": "빌드",
+  "build.title": "변경안 생성",
   "build.description": "하나의 파이프라인이 등록된 모든 소스를 통합 온톨로지로 만들고, 내보내기가 파일로 저장합니다.",
   "build.start": "시작",
   "build.empty": "아직 빌드할 것이 없습니다",
@@ -523,4 +524,4 @@ const koCore = {
   "nav.settings.hint": "모델과 API 키",
 } as const
 
-export const ko: Record<keyof typeof en, string> = { ...koCore, ...koExplore }
+export const ko: Record<keyof typeof en, string> = { ...koCore, ...koExplore, ...koOps }

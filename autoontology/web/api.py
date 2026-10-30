@@ -363,12 +363,18 @@ class Api:
     # --- ontology snapshot ---------------------------------------------------------------
 
     def snapshot(self, revision: int | None = None) -> tuple[Any, Any]:
-        """``(Snapshot without model, MergedOntology)`` of *revision* (default: the latest),
+        """``(Snapshot without model, MergedOntology)`` of *revision* (default: published),
         parsed once per revision; 404 ``no_snapshot`` before the first build."""
         from autoontology.ontology.model import MergedOntology
+        from autoontology.store.operations import published_revision
 
+        live = published_revision(self.store) if revision is None else None
         head = (
-            self.store.latest_snapshot(with_model=False)
+            (
+                self.store.get_snapshot(live, with_model=False)
+                if live
+                else self.store.latest_snapshot(with_model=False)
+            )
             if revision is None
             else self.store.get_snapshot(revision, with_model=False)
         )
@@ -987,7 +993,11 @@ def build_router(api: Api) -> APIRouter:
             else []
         )
         out = []
+        from autoontology.store.operations import visible_revision
+
         for folder in folders:
+            if not visible_revision(api.store, int(folder.name[1:])):
+                continue
             files = sorted(
                 (
                     {"name": f.relative_to(folder).as_posix(), "bytes": f.stat().st_size}
@@ -1023,6 +1033,10 @@ def build_router(api: Api) -> APIRouter:
             rev = revision_dir_name(int(rev))
         if not EXPORT_DIR_RE.fullmatch(rev) or not _export_path_ok(file_path):
             raise ApiError(400, "invalid_path", "invalid export path")
+        from autoontology.store.operations import visible_revision
+
+        if not visible_revision(api.store, int(rev[1:])):
+            raise ApiError(404, "unpublished_export", "this revision has not been published")
         root = Path(api.settings.exports_dir).resolve()
         candidate = (root / rev / unicodedata.normalize("NFC", file_path)).resolve()
         if candidate.is_file() and candidate.is_relative_to(root / rev):
@@ -1282,9 +1296,16 @@ def _job_call(api: Api, req: RunIn):
         return lambda fn, store: fn(store, settings, force=req.force)
     if req.sources or req.resume:
         raise ApiError(400, "invalid_request", "export takes only `revision` and `format`")
-    api.snapshot(req.revision)  # 404 before a thread starts
+    head, _ = api.snapshot(req.revision)  # 404 before a thread starts
+    from autoontology.store.operations import visible_revision
+
+    if not visible_revision(api.store, head.revision):
+        raise ApiError(409, "unpublished_revision", "publish the reviewed changes before exporting")
     fmt = req.format or "all"
-    return lambda fn, store: fn(store, settings, revision=req.revision, format=fmt)
+    from autoontology.store.operations import published_revision
+
+    revision = head.revision if published_revision(api.store) else req.revision
+    return lambda fn, store: fn(store, settings, revision=revision, format=fmt)
 
 
 async def _events(api: Api, run_id: str, request: Request):
@@ -1395,6 +1416,9 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
     from autoontology.web import settings_api
 
     settings_api.install(app, api)
+    from autoontology.web import operations_api
+
+    operations_api.install(app, api)
 
     @app.middleware("http")
     async def _local_only(request: Request, call_next):

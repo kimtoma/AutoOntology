@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight, Download, Eye, FolderOpen, Hammer, Loader2 } from "lucide-react"
 import { useState } from "react"
-import { Link } from "react-router"
+import { Link, useSearchParams } from "react-router"
 import { toast } from "sonner"
 
 import { EmptyState, ErrorState } from "@/components/empty-state"
@@ -166,10 +166,14 @@ function ExportCard({ entry, latest, onPreview, loading }: {
 }
 
 export default function ExportsPage() {
+  const [params] = useSearchParams()
+  const revision = Number(params.get("revision")) || null
   const list = useQuery({ queryKey: keys.exports, queryFn: api.exports })
   const [preview, setPreview] = useState<Preview | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [shown, setShown] = useState(PAGE)
+
+  const entries = (list.data ?? []).filter(e => !revision || e.revision === revision)
 
   const open: Open = async (dir, file) => {
     setLoading(`${dir}/${file}`)
@@ -188,19 +192,19 @@ export default function ExportsPage() {
       <PageHeader title={t("exports.title")} description={t("exports.description")} />
       {list.error ? <ErrorState error={list.error} onRetry={() => list.refetch()} />
         : list.isPending ? <div className="grid gap-3"><Skeleton className="h-24" /><Skeleton className="h-24" /></div>
-        : !list.data.length ? (
+        : !entries.length ? (
           <EmptyState icon={FolderOpen} title={t("exports.empty.title")}
                       hint={t("exports.empty.hint")}
                       action={<Button asChild><Link to="/build"><Hammer aria-hidden /> {t("ontology.goBuild")}</Link></Button>} />
         ) : (
           <div id="exports-list" className="grid gap-4">
-            {list.data.slice(0, shown).map((e, i) => (
+            {entries.slice(0, shown).map((e, i) => (
               <ExportCard key={e.dir} entry={e} latest={i === 0} onPreview={open} loading={loading} />
             ))}
-            {list.data.length > shown && (
+            {entries.length > shown && (
               <Button variant="outline" className="justify-self-center" id="exports-more"
                       onClick={() => setShown((n) => n + PAGE)}>
-                {t("exports.more", { n: list.data.length - shown })}
+                {t("exports.more", { n: entries.length - shown })}
               </Button>
             )}
           </div>

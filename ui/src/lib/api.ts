@@ -79,6 +79,7 @@ export interface Run {
 export type ExportFormat = "all" | "rdf" | "ossie" | "okf"
 /** `POST /api/runs` (RunIn in api.py). */
 export type RunRequest =
+  | { kind: "apply"; force?: boolean }
   | { kind: "build"; sources?: string[] | null; resume?: boolean }
   | { kind: "export"; revision?: number | null; format?: ExportFormat }
 

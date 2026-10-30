@@ -1,3 +1,4 @@
+import { enOps } from "@/i18n/en.ops"
 /* English UI strings. Keys are grouped by page; `{name}` is a placeholder. The Korean
    dictionary (ko.ts) must have exactly these keys (tsc checks it, i18n.test.ts too). */
 
@@ -384,7 +385,7 @@ const enCore = {
   "fmt.or": "or",
 
   // Build page
-  "build.title": "Build",
+  "build.title": "Analyze changes",
   "build.description": "One pipeline turns every registered source into the unified ontology; export writes it out.",
   "build.start": "Start",
   "build.empty": "Nothing to build yet",
@@ -535,4 +536,4 @@ const enCore = {
   "nav.settings.hint": "Models and API keys",
 } as const
 
-export const en = { ...enCore, ...enExplore }
+export const en = { ...enCore, ...enExplore, ...enOps }

@@ -1,7 +1,7 @@
 import { t, type MessageKey } from "@/i18n/core"
 import { DEMO_PAGES, SHARED_DEMO } from "@/lib/demo"
 import {
-  Activity, BookOpen, Database, Download, FlaskConical, Hammer, Network, Rocket, Settings, type LucideIcon,
+  BookOpen, Database, FlaskConical, History, Inbox, LayoutDashboard, Settings, type LucideIcon,
 } from "lucide-react"
 
 export interface NavItem { path: string; label: string; icon: LucideIcon; hint: string; id: string }
@@ -16,17 +16,20 @@ function item(path: string, icon: LucideIcon, id: string): NavItem {
 }
 
 export const NAV: NavItem[] = [
-  item("/", Rocket, "home"),
+  item("/", LayoutDashboard, "home"),
+  item("/review", Inbox, "review"),
   item("/sources", Database, "sources"),
-  item("/build", Hammer, "build"),
   item("/ontology", BookOpen, "ontology"),
-  item("/graph", Network, "graph"),
   item("/playground", FlaskConical, "playground"),
-  item("/exports", Download, "exports"),
-  item("/status", Activity, "status"),
+  item("/history", History, "history"),
   item("/settings", Settings, "settings"),
 ].filter((entry) => !SHARED_DEMO || DEMO_PAGES.has(entry.path))
 
 /** Whether *item* is the current page ("/" only on the home page itself). */
 export const isCurrent = (item: NavItem, pathname: string) =>
-  item.path === "/" ? pathname === "/" : pathname.startsWith(item.path)
+  item.path === "/" ? pathname === "/"
+    : item.id === "ontology" ? pathname.startsWith("/ontology") || pathname.startsWith("/graph")
+    : item.id === "playground" ? pathname.startsWith("/playground") || pathname.startsWith("/exports")
+    : item.id === "sources" ? pathname.startsWith("/sources") || pathname.startsWith("/build")
+    : item.id === "settings" ? ["/settings", "/status", "/setup"].some(p => pathname.startsWith(p))
+    : pathname.startsWith(item.path)

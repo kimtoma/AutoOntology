@@ -8,7 +8,7 @@ export const KIND_LABEL = labelTable({
 export const FAMILY_LABEL = labelTable({ structured: "family.structured", documents: "family.documents" })
 export const familyOf = (kind: string) => (kind === "documents" ? "documents" : "structured")
 
-export const RUN_LABEL = labelTable({ build: "run.build", export: "run.export" })
+export const RUN_LABEL = labelTable({ build: "run.build", export: "run.export", apply: "ops.apply", publish: "ops.history" })
 export const STATUS_LABEL = labelTable({
   pending: "status.pending", running: "status.running", succeeded: "status.succeeded",
   failed: "status.failed", cancelled: "status.cancelled", skipped: "status.skipped",

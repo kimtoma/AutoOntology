@@ -1,3 +1,4 @@
+import { SourceFreshness } from "@/components/source-freshness"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Database, FileText, Hammer, Loader2, Plus, Trash2 } from "lucide-react"
 import { useState, type FormEvent } from "react"
@@ -87,6 +88,7 @@ export default function SourcesPage() {
         actions={<Button onClick={() => setAdding(true)} id="btn-new-source">
           <Plus aria-hidden /> {t("sources.add")}</Button>}
       />
+      <SourceFreshness />
       {error ? <ErrorState error={error} onRetry={() => refetch()} />
         : isPending ? <Skeleton className="h-48 w-full" />
         : !sources.length ? (

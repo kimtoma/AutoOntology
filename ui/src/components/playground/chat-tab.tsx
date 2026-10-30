@@ -1,4 +1,5 @@
-/* Chat: RAG over the latest ontology snapshot, answers with clickable citation chips. */
+import { KnowledgeFeedback } from "@/components/knowledge-feedback"
+/* Chat: RAG over the published ontology snapshot, with clickable citation chips. */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, Loader2, MessageSquarePlus, Send, Square } from "lucide-react"
@@ -167,6 +168,7 @@ export function ChatTab() {
                     )}
                   </div>
                 )}
+                {!SHARED_DEMO && !m.pending && m.content && <KnowledgeFeedback question={messages.slice(0,i).filter(x=>x.role==="user").at(-1)?.content || ""} answer={m.content} />}
                 {m.retrieved && <Retrieved items={m.retrieved} />}
               </>
             )}

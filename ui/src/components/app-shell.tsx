@@ -1,3 +1,4 @@
+import { SectionNav } from "@/components/section-nav"
 import { Link, NavLink, Outlet, useLocation } from "react-router"
 
 import { LangToggle } from "@/components/lang-toggle"
@@ -12,6 +13,7 @@ import {
   SidebarTrigger, useSidebar,
 } from "@/components/ui/sidebar"
 import { isCurrent, NAV } from "@/components/nav"
+import { useOperations, useLegacy } from "@/hooks/operations"
 import { useStatus } from "@/hooks/queries"
 import { cn } from "@/lib/utils"
 import { GATEWAY_ACCESS, SHARED_DEMO } from "@/lib/demo"
@@ -55,6 +57,9 @@ function AppSidebar() {
   const { pathname } = useLocation()
   const { setOpenMobile, isMobile } = useSidebar()
   const t = useT()
+  const operations = useOperations(!SHARED_DEMO)
+  const legacy = useLegacy(1, "pending", !SHARED_DEMO)
+  const pending = (operations.data?.counts.pending ?? 0) + (operations.data?.counts.held ?? 0) + (operations.data?.counts.feedback ?? 0) + (legacy.data?.counts.total ?? 0)
   return (
     <Sidebar collapsible="icon" aria-label={t("shell.mainMenu")}>
       <SidebarHeader>
@@ -81,7 +86,7 @@ function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV.map((item) => (
+              {NAV.filter(item => item.id !== "settings").map((item) => (
                 <SidebarMenuItem key={item.path}>
                   <SidebarMenuButton asChild tooltip={item.label}
                                      isActive={isCurrent(item, pathname)}>
@@ -89,6 +94,7 @@ function AppSidebar() {
                              onClick={() => isMobile && setOpenMobile(false)}>
                       <item.icon aria-hidden />
                       <span>{item.label}</span>
+                      {item.id === "review" && pending > 0 && <span className="ml-auto rounded border bg-background px-1.5 text-xs tabular-nums">{pending}</span>}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -98,6 +104,7 @@ function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
+        {!SHARED_DEMO && <SidebarMenu><SidebarMenuItem><SidebarMenuButton asChild><NavLink to="/settings" data-nav="settings">{t("nav.settings")}</NavLink></SidebarMenuButton></SidebarMenuItem></SidebarMenu>}
         {!GATEWAY_ACCESS && <ServiceFooter />}
       </SidebarFooter>
       <SidebarRail />
@@ -152,6 +159,7 @@ export function AppShell() {
         )}
         <main id="main" className={cn("mx-auto w-full min-w-0 flex-1",
                                       fullBleed ? "p-0" : "max-w-6xl px-4 py-6 sm:px-6")}>
+          <div className={fullBleed ? "px-4 pt-4" : undefined}><SectionNav /></div>
           <Outlet />
         </main>
       </SidebarInset>

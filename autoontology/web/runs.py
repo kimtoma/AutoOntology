@@ -32,7 +32,7 @@ from autoontology.store.db import Run, Store
 
 logger = logging.getLogger("autoontology.web.runs")
 
-RUN_KINDS: tuple[str, ...] = ("build", "export", "apply")
+RUN_KINDS: tuple[str, ...] = ("build", "export", "apply", "publish")
 #: The run manager's key for workspace-wide runs (build, export).
 WORKSPACE = "*workspace*"
 RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{6}$")
@@ -169,9 +169,14 @@ JobFn = Callable[..., Any]
 
 def default_jobs() -> dict[str, JobFn]:
     """The job entry points by run kind, looked up at call time (tests monkeypatch them)."""
-    from autoontology.engine import apply, build, export_job
+    from autoontology.engine import apply, build, export_job, operations
 
-    return {"build": build.run_build, "export": export_job.run_export, "apply": apply.run_apply}
+    return {
+        "build": build.run_build,
+        "export": export_job.run_export,
+        "apply": apply.run_apply,
+        "publish": operations.run_publish,
+    }
 
 
 #: Fixed top-level steps per kind (a build's steps depend on its sources).

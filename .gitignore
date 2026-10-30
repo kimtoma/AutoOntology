@@ -13,3 +13,6 @@ __pycache__/
 node_modules/
 .superpowers/
 .claude/settings.local.json
+
+# A local worktree may reuse the host Python environment through a symlink.
+/.venv

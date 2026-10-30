@@ -493,3 +493,22 @@ def test_pending_work_reads_only_the_review_rows(ops):  # noqa: F811
         )
     assert "alignments_review_idx" in plan
     assert rows
+
+
+def test_operations_connections_can_be_held_and_resumed(api):
+    client = api["api"]
+    assert client.get("/api/ops").status_code == 200
+    item = client.get("/api/ops/connections").json()["items"][0]
+    import urllib.parse
+
+    key = urllib.parse.quote(item["id"], safe="")
+    response = client.post(
+        "/api/ops/connections/" + key + "/hold", json={"note": "원문 담당자에게 확인"}
+    )
+    assert response.status_code == 200, response.text
+    assert item["id"] not in [i["id"] for i in client.get("/api/ops/connections").json()["items"]]
+    held = client.get("/api/ops/connections?status=held").json()["items"]
+    assert [i["id"] for i in held] == [item["id"]]
+    assert held[0]["hold"]["note"] == "원문 담당자에게 확인"
+    assert client.delete("/api/ops/connections/" + key + "/hold").status_code == 200
+    assert not client.get("/api/ops/connections?status=held").json()["items"]

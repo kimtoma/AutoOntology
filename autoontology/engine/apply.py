@@ -81,7 +81,8 @@ def pending_work(store: Store, model: Any | None = None) -> dict[str, Any]:
     removed = {
         (d.get("kind"), d.get("subject"))
         for d in (model.decisions if model is not None else [])
-        if (d.get("kind"), d.get("subject")) not in keys
+        if d.get("kind") in ("alignment", "alias", "concept")
+        and (d.get("kind"), d.get("subject")) not in keys
     }
     return {
         "decisions": len(pending),

@@ -1,5 +1,5 @@
 /* Playground: question the unified ontology. Chat (RAG with citations) and SPARQL run on the
-   latest snapshot; SQL goes through the upstream NL->SQL agent of one structured source.
+   published snapshot; SQL goes through the upstream NL->SQL agent of one structured source.
    Lazy-loaded from App. */
 
 import { Bot, Database, FlaskConical, Hammer, MessagesSquare, Sparkles } from "lucide-react"

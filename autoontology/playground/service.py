@@ -187,12 +187,21 @@ class Playground:
     def index(self, scope: Scope) -> ElementIndex:
         embed, model_name = self.embedder()
         revision = scope.revision
-        sid = scope.key
+        sid = f"{scope.key}@r{revision}"
         with self._index_lock:
             cached = self._indexes.get(sid)
             if cached and cached.revision == revision and cached.model == model_name:
                 return cached
         elements = self.elements(scope)
+        if not self.pg.index_rows(sid):
+            legacy = self.pg.index_rows(scope.key)
+            if legacy:
+                self.pg.replace_index(
+                    sid,
+                    [r for r in legacy.values() if r.model == model_name],
+                    revision=0,
+                    model=model_name,
+                )
         try:
             idx = build_index(
                 self.pg, sid, elements, revision=revision, model=model_name, embed=embed
@@ -204,11 +213,13 @@ class Playground:
                 f"embedding the ontology failed: {type(exc).__name__}: {str(exc)[:300]}",
             ) from exc
         with self._index_lock:
+            if len(self._indexes) >= 4:
+                self._indexes.pop(next(iter(self._indexes)))
             self._indexes[sid] = idx
         return idx
 
     def index_status(self, scope: Scope) -> dict[str, Any]:
-        meta = self.pg.index_meta(scope.key)
+        meta = self.pg.index_meta(f"{scope.key}@r{scope.revision}")
         revision = scope.revision
         return {
             "workspace": scope.key,

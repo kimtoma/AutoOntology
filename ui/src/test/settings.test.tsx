@@ -271,8 +271,10 @@ describe("Settings page", () => {
     expect(screen.getByRole("button", { name: "테스트" })).toBeInTheDocument()
   })
 
-  it("has a nav entry after Status", () => {
+  it("keeps settings after the operational navigation", () => {
     const paths = NAV.map((n) => n.path)
-    expect(paths.slice(-2)).toEqual(["/status", "/settings"])
+    expect(paths.slice(-2)).toEqual(["/history", "/settings"])
+    expect(paths).not.toContain("/build")
+    expect(paths).not.toContain("/status")
   })
 })
