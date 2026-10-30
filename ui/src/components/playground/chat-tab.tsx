@@ -98,7 +98,7 @@ export function ChatTab() {
     }
     try {
       await api.playground.chat({ question: q, ...(SHARED_DEMO
-        ? { history: messages.filter((m) => !m.pending && !m.error).map(({ role, content }) => ({ role, content })) }
+        ? { history: messages.filter((m) => !m.pending && !m.error).slice(-40).map(({ role, content }) => ({ role, content: content.slice(0, 8000) })) }
         : { conversation_id: conversationId }) }, onEvent,
                                 ctrl.signal)
     } catch (err) {
