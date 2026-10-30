@@ -12,7 +12,16 @@ case "${1:-status}" in
   ;;
  stop)
   for name in tunnel proxy backend service postgres; do
-   launchctl bootout "$domain/com.kimtoma.autoontology-demo.$name" 2>/dev/null || true
+   label="com.kimtoma.autoontology-demo.$name"
+   launchctl bootout "$domain/$label" 2>/dev/null || true
+   for ((attempt=0; attempt<150; attempt++)); do
+    if ! launchctl print "$domain/$label" >/dev/null 2>&1; then break; fi
+    sleep 0.2
+   done
+   if launchctl print "$domain/$label" >/dev/null 2>&1; then
+    echo "Timed out waiting for $label to unload" >&2
+    exit 1
+   fi
   done
   ;;
  status)
