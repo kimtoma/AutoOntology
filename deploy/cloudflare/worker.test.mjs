@@ -129,3 +129,69 @@ test('follow-up chat keeps explicit history without opening a saved conversation
   assert.equal(response.status, 200);
   assert.match(await response.text(), /event: done/);
 });
+
+test('full access forwards administration, provider APIs, and saved conversations', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full' };
+  const cookie = (await login(env)).headers.get('set-cookie').split(';')[0];
+  env.FETCH = async (req) => new Response(await req.text() || req.url, { status: 200 });
+  for (const [method, path] of [['GET', '/api/settings'], ['GET', '/api/review'], ['GET', '/api/playground/conversations'], ['GET', '/api/playground/conversations/' + 'a'.repeat(32)], ['PUT', '/api/settings'], ['POST', '/api/sources'], ['DELETE', '/api/sources/example'], ['POST', '/api/runs'], ['POST', '/api/settings/restart'], ['POST', '/v1/chat/completions']]) {
+    const response = await worker.fetch(request(path, { method, headers: { Cookie: cookie, Origin: base }, ...(!['GET', 'HEAD'].includes(method) ? { body: '{"conversation_id":"keep-me"}' } : {}) }), env);
+    assert.equal(response.status, 200, path);
+    if (!['GET', 'HEAD'].includes(method)) assert.equal(await response.text(), '{"conversation_id":"keep-me"}');
+  }
+});
+
+test('full access still rejects cross-site writes and unsigned requests', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full' };
+  const cookie = (await login(env)).headers.get('set-cookie').split(';')[0];
+  env.FETCH = () => assert.fail('forbidden request reached origin');
+  for (const path of ['/api/settings', '/api/sources', '/api/runs', '/v1/chat/completions']) {
+    assert.equal((await worker.fetch(request(path, { method: 'POST', headers: { Cookie: cookie, Origin: 'https://other.example.com' }, body: '{}' }), env)).status, 403);
+    assert.equal((await worker.fetch(request(path, { method: 'POST', body: '{}' }), env)).status, 401);
+  }
+});
+
+test('full access uploads stream binary multipart bodies beyond the sample query limit', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full' };
+  const cookie = (await login(env)).headers.get('set-cookie').split(';')[0];
+  const data = new Uint8Array(128 * 1024).fill(255);
+  env.FETCH = async (req) => {
+    assert.equal(req.headers.get('content-type'), 'multipart/form-data; boundary=test');
+    assert.deepEqual(new Uint8Array(await req.arrayBuffer()), data);
+    assert.equal(req.headers.get('cookie'), null);
+    return new Response('uploaded');
+  };
+  const response = await worker.fetch(request('/api/sources', { method: 'POST', headers: { Cookie: cookie, Origin: base, 'content-type': 'multipart/form-data; boundary=test' }, body: data }), env);
+  assert.equal(response.status, 200);
+});
+
+test('full access HTML identifies the full workspace without enabling sample restrictions', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full' };
+  const cookie = (await login(env)).headers.get('set-cookie').split(';')[0];
+  env.FETCH = async () => new Response('<html><head></head></html>', { headers: { 'content-type': 'text/html' } });
+  const previous = globalThis.HTMLRewriter;
+  globalThis.HTMLRewriter = class {
+    on(_selector, handler) { this.handler = handler; return this; }
+    transform(response) {
+      let injected = '';
+      this.handler.element({ append(text) { injected += text; } });
+      assert.match(injected, /content="full"/);
+      assert.doesNotMatch(injected, /content="sample"/);
+      return response;
+    }
+  };
+  try { assert.equal((await worker.fetch(request('/ui/settings', { headers: { Cookie: cookie } }), env)).status, 200); }
+  finally { globalThis.HTMLRewriter = previous; }
+});
+
+test('full workspace build event streams retain their resume cursor', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full' };
+  const cookie = (await login(env)).headers.get('set-cookie').split(';')[0];
+  env.FETCH = async (req) => {
+    assert.equal(req.headers.get('last-event-id'), '1234');
+    return new Response('event: end\ndata: {}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  };
+  const response = await worker.fetch(request('/api/runs/example/events', { headers: { Cookie: cookie, 'Last-Event-ID': '1234' } }), env);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /event: end/);
+});

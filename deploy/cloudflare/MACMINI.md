@@ -1,9 +1,9 @@
-# Mac mini sample deployment
+# Mac mini full workspace deployment
 
 Visitor URL: `https://autoontology.kimtoma.com`.
 
-This host runs a separate `public-demo` workspace containing only the quickstart
-sample, rebuilt from the existing extracted sample results. Existing `data/`, root
+This host runs a separate `public-demo` workspace initially populated with the
+quickstart sample. It now accepts uploads and exposes the complete application. Existing `data/`, root
 `exports/`, `.env`, the Postgres instance on 5432, and the `draftboard` tunnel are
 preserved. Historical snapshots and conversations were excluded from the demo copy.
 
@@ -18,8 +18,11 @@ preserved. Historical snapshots and conversations were excluded from the demo co
 Chat uses `AUTOONTOLOGY_CHAT_PROVIDER=codex`, model `gpt-6-astra`, and the owner's
 existing ChatGPT CLI login. Model requests run on the Mac mini and use the Codex
 subscription service. Embeddings use the existing local Ollama configuration.
-SQL source connections use `autoontology_demo_reader`, with SELECT privileges only.
-The catalog uses its own local application credential.
+Sources use the isolated Postgres application credential, so builds can manage their
+source databases. The former sample-only read account remains unused.
+The Worker variable `ACCESS_MODE=full` enables all UI pages and APIs behind the password.
+The backend entry point installs a pinned compatibility fix for single-table `COUNT(*)`
+queries in both the parent and spawned SQL workers; vendor files remain unchanged.
 
 The Worker `autoontology-demo` runs in the `kimtoma` account. Preview and workers.dev
 URLs are disabled. A separate locally managed tunnel
@@ -28,10 +31,12 @@ URLs are disabled. A separate locally managed tunnel
 used directly, without a credential in process arguments. The origin rejects
 requests without the independent Worker secret.
 
-Five LaunchAgents under `~/Library/LaunchAgents/com.kimtoma.autoontology-demo.*.plist`
-start Postgres, the service, backend, proxy, and tunnel after login and restart them
-if they exit. Postgres explicitly sets `LC_ALL=C`. Ollama already has its own login
-service.
+Four LaunchAgents under `~/Library/LaunchAgents/com.kimtoma.autoontology-demo.*.plist`
+start Postgres, an application guardian (`service`), the proxy, and the tunnel after login.
+The guardian runs `run_app.py`, which manages both service and backend with the native
+Supervisor and cooperates with web settings restarts. The old standalone backend
+LaunchAgent is preserved under the ignored runtime directory and is no longer loaded.
+Postgres explicitly sets `LC_ALL=C`. Ollama already has its own login service.
 
 From this checkout:
 
@@ -41,7 +46,7 @@ bash deploy/cloudflare/democtl.sh stop
 bash deploy/cloudflare/democtl.sh start
 ```
 
-`stop` unloads only these five demo agents for the current login session. The
+`stop` unloads only these four workspace agents for the current login session. The
 password screen remains on Cloudflare; authenticated app requests cannot reach the
 stopped origin. Agents start again at the next login. The existing Ollama and other
 services remain running.
@@ -52,8 +57,12 @@ Host-only files live under the ignored `data/cloudflare-demo/` directory:
 - `secrets.json`: shareable password and independent origin/session/reader secrets (0600).
 - `tunnel.yml`, `tunnel-credentials.json`: dedicated tunnel configuration and credential.
 - `workspace/`, `exports/`, `postgres/`: the demo's independent state and data.
-- `logs/`: component logs. Never enable debug header/body logging.
-- `browser-verification.json`, screenshots, and `verify-browser.py`: external verification.
+- `logs/`: LaunchAgent logs; `workspace/logs/`: supervised app/backend/job logs. Never enable debug header/body logging.
+- `full-verification.json`, screenshots, and `verify-full*.py`: external full-access verification.
+- `workspace/kordoc`: link to the existing document engine and OCR models.
+
+Uploads through the public route accept up to 90 MB per request. The full workspace
+shares sources, results, conversations, and settings among everyone using the password.
 
 Do not publish these runtime files. To rotate the sharing password, update its
 SHA-256 Worker secret and rotate `SESSION_SECRET` to expire existing cookies; update

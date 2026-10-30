@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Exercise the actual loopback HTTP boundary without model or database dependencies."""
 
+import hashlib
 import http.client
 import importlib.util
 import json
@@ -23,7 +24,12 @@ class Upstream(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         result = json.dumps(
-            {"path": self.path, "headers": dict(self.headers), "body": body.decode()}
+            {
+                "path": self.path,
+                "headers": dict(self.headers),
+                "body": body.decode(errors="replace"),
+                "sha256": hashlib.sha256(body).hexdigest(),
+            }
         ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -57,6 +63,7 @@ class OriginTests(unittest.TestCase):
                     "Cookie": "do-not-forward",
                     "Authorization": "do-not-forward",
                     "Content-Type": "application/json",
+                    "Last-Event-ID": "1234",
                 },
             )
             response = connection.getresponse()
@@ -67,11 +74,76 @@ class OriginTests(unittest.TestCase):
             for name in ("Origin", "Cookie", "Authorization", "X-AutoOntology-Gateway"):
                 self.assertNotIn(name, data["headers"])
             self.assertEqual(json.loads(data["body"]), {"question": "sample"})
+            self.assertEqual(data["headers"]["Last-Event-ID"], "1234")
             connection.close()
         finally:
             for server in (gateway, upstream):
                 server.shutdown()
                 server.server_close()
+
+    def test_large_fixed_and_chunked_uploads_keep_their_binary_contents(self):
+        upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        gateway = ThreadingHTTPServer(("127.0.0.1", 0), proxy.Proxy)
+        gateway.secret = "test-origin-secret-that-is-not-a-real-secret"
+        gateway.app_port = upstream.server_port
+        for server in (upstream, gateway):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        payload = bytes(range(256)) * 1024
+        try:
+            for chunked in (False, True):
+                with self.subTest(chunked=chunked):
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", gateway.server_port, timeout=3
+                    )
+                    connection.request(
+                        "POST",
+                        "/api/sources",
+                        body=iter([payload[:70000], payload[70000:]]) if chunked else payload,
+                        headers={
+                            "X-AutoOntology-Gateway": gateway.secret,
+                            "Content-Type": "multipart/form-data; boundary=test",
+                        },
+                        encode_chunked=chunked,
+                    )
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(
+                        json.loads(response.read())["sha256"], hashlib.sha256(payload).hexdigest()
+                    )
+                    connection.close()
+        finally:
+            for server in (gateway, upstream):
+                server.shutdown()
+                server.server_close()
+
+    def test_invalid_or_oversized_upload_framing_is_rejected(self):
+        gateway = ThreadingHTTPServer(("127.0.0.1", 0), proxy.Proxy)
+        gateway.secret = "test-origin-secret-that-is-not-a-real-secret"
+        gateway.app_port = 9
+        threading.Thread(target=gateway.serve_forever, daemon=True).start()
+        try:
+            cases = [
+                ({"Content-Length": str(proxy.MAX_BODY_BYTES + 1)}, None, 413),
+                ({"Content-Length": "0", "Transfer-Encoding": "chunked"}, b"0\r\n\r\n", 400),
+                ({"Transfer-Encoding": "chunked"}, b"gg\r\n", 400),
+                ({"Transfer-Encoding": "chunked"}, b"100000000\r\n", 413),
+            ]
+            for headers, body, status in cases:
+                with self.subTest(headers=headers, body=body):
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", gateway.server_port, timeout=3
+                    )
+                    connection.request(
+                        "POST",
+                        "/api/sources",
+                        body=body,
+                        headers={**headers, "X-AutoOntology-Gateway": gateway.secret},
+                    )
+                    self.assertEqual(connection.getresponse().status, status)
+                    connection.close()
+        finally:
+            gateway.shutdown()
+            gateway.server_close()
 
 
 if __name__ == "__main__":

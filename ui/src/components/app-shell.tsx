@@ -14,7 +14,7 @@ import {
 import { isCurrent, NAV } from "@/components/nav"
 import { useStatus } from "@/hooks/queries"
 import { cn } from "@/lib/utils"
-import { SHARED_DEMO } from "@/lib/demo"
+import { GATEWAY_ACCESS, SHARED_DEMO } from "@/lib/demo"
 import { useT } from "@/i18n"
 
 function StatusBadge() {
@@ -98,7 +98,7 @@ function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        {!SHARED_DEMO && <ServiceFooter />}
+        {!GATEWAY_ACCESS && <ServiceFooter />}
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -144,9 +144,9 @@ export function AppShell() {
             <ThemeToggle />
           </div>
         </header>
-        {SHARED_DEMO && (
+        {GATEWAY_ACCESS && (
           <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/40 px-4 py-2 text-sm" role="note">
-            <span>{t("shell.demo.hint")}</span>
+            <span>{t(SHARED_DEMO ? "shell.demo.hint" : "shell.remote.hint")}</span>
             <form action="/__demo/logout" method="post"><button className="underline underline-offset-4" type="submit">{t("shell.demo.logout")}</button></form>
           </div>
         )}

@@ -298,6 +298,7 @@ def test_build_specs_and_child_env(isolated_env, monkeypatch):
     service, backend = build_specs(settings)
     assert backend.name == "backend" and backend.port == 3101
     assert "--factory" in backend.argv and "3101" in backend.argv
+    assert backend.argv[2] == "autoontology.engine.backend"
     assert "3001" not in " ".join(backend.argv)
     assert backend.cwd.name == "auto-ontology"
     assert backend.health_urls == (

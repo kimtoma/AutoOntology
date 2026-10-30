@@ -136,7 +136,7 @@ def build_specs(settings: Settings) -> list[ProcessSpec]:
         argv=[
             sys.executable,
             "-m",
-            "uvicorn",
+            "autoontology.engine.backend",
             backend_app,
             "--factory",
             "--host",

@@ -21,6 +21,7 @@ const koCore = {
   "shell.notFound": "찾을 수 없음",
   "shell.localOnly": "로컬 전용",
   "shell.demo.hint": "샘플 체험 · 개념과 관계를 살펴보고, 플레이그라운드에서 질문해 보세요.",
+  "shell.remote.hint": "공유 작업 공간 · 데이터와 문서를 추가하고 온톨로지를 구축해 보세요.",
   "shell.demo.logout": "나가기",
   "shell.status.title": "서비스 상태",
   "shell.status.aria": "서비스 상태: {label}",

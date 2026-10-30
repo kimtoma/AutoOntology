@@ -1,8 +1,9 @@
 # AutoOntology guide for domain experts
 
-If you received a password-protected sample-demo link, open it and enter the shared
-password; no installation is needed. That viewer supports sample exploration, questions
-and existing exports. The setup below is for running your own full local workspace.
+If you received a password-protected workspace link, open it and enter the shared
+password; no installation is needed. Full-access workspaces support data uploads,
+builds, review, questions, exports and settings. A restricted sample viewer may expose
+fewer pages. The setup below is for running your own local workspace.
 Owners can follow the [Cloudflare deployment instructions](../deploy/cloudflare/README.md).
 
 **English** | [한국어](GUIDE.ko.md)

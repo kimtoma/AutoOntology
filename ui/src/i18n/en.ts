@@ -22,6 +22,7 @@ const enCore = {
   "shell.notFound": "Not found",
   "shell.localOnly": "local only",
   "shell.demo.hint": "Sample demo · Explore concepts and relationships, then ask a question in Playground.",
+  "shell.remote.hint": "Shared workspace · Add data and documents, build your ontology, and explore the results.",
   "shell.demo.logout": "Sign out",
   "shell.status.title": "Service status",
   "shell.status.aria": "Service status: {label}",

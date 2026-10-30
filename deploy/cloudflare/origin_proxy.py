@@ -12,8 +12,16 @@ import hmac
 import http.client
 import json
 import os
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+MAX_BODY_BYTES = 100_000_000
+CHUNK_BYTES = 65536
+
+
+class PayloadTooLarge(ValueError):
+    pass
 
 
 class Proxy(BaseHTTPRequestHandler):
@@ -31,23 +39,23 @@ class Proxy(BaseHTTPRequestHandler):
         ):
             self.send_error(403, "Gateway required")
             return
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            self.send_error(400)
-            return
-        if length < 0 or length > 65536 or self.headers.get("Transfer-Encoding"):
-            self.send_error(413)
-            return
         if not self.path.startswith("/") or self.path.startswith("//"):
             self.send_error(400)
             return
-        body = self.rfile.read(length) if length else None
+        try:
+            body, length = self.read_payload()
+        except PayloadTooLarge:
+            self.send_error(413)
+            return
+        except (ValueError, OSError):
+            self.send_error(400)
+            return
         forwarded = {
             name: self.headers[name]
-            for name in ("Accept", "Content-Type", "Range", "If-None-Match")
+            for name in ("Accept", "Content-Type", "Range", "If-None-Match", "Last-Event-ID")
             if self.headers.get(name)
         }
+        forwarded["Content-Length"] = str(length)
         forwarded["Host"] = f"127.0.0.1:{self.server.app_port}"
         connection = http.client.HTTPConnection("127.0.0.1", self.server.app_port, timeout=240)
         try:
@@ -78,6 +86,67 @@ class Proxy(BaseHTTPRequestHandler):
                 self.send_error(502, "Application unavailable")
         finally:
             connection.close()
+            body.close()
+
+    def read_payload(self):
+        """Spool uploads to disk and normalize HTTP framing before forwarding."""
+        self.connection.settimeout(60)
+        lengths = self.headers.get_all("Content-Length", [])
+        transfer = self.headers.get("Transfer-Encoding", "").lower().strip()
+        if len(lengths) > 1 or (lengths and transfer) or transfer not in ("", "chunked"):
+            raise ValueError("ambiguous request framing")
+        body = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
+        total = 0
+
+        def copy(size):
+            nonlocal total
+            if size < 0:
+                raise ValueError("negative length")
+            if total + size > MAX_BODY_BYTES:
+                raise PayloadTooLarge()
+            while size:
+                chunk = self.rfile.read(min(size, CHUNK_BYTES))
+                if not chunk:
+                    raise ValueError("incomplete body")
+                body.write(chunk)
+                total += len(chunk)
+                size -= len(chunk)
+
+        try:
+            if transfer:
+                while True:
+                    line = self.rfile.readline(128)
+                    size_text = line.removesuffix(b"\r\n").split(b";", 1)[0]
+                    if (
+                        not line.endswith(b"\r\n")
+                        or not size_text
+                        or any(ch not in b"0123456789abcdefABCDEF" for ch in size_text)
+                    ):
+                        raise ValueError("invalid chunk")
+                    size = int(size_text, 16)
+                    if not size:
+                        trailers = 0
+                        while True:
+                            line = self.rfile.readline(8193)
+                            trailers += len(line)
+                            if not line.endswith(b"\r\n") or trailers > 8192:
+                                raise ValueError("invalid trailers")
+                            if line == b"\r\n":
+                                break
+                        break
+                    copy(size)
+                    if self.rfile.read(2) != b"\r\n":
+                        raise ValueError("invalid chunk terminator")
+            else:
+                raw = lengths[0] if lengths else "0"
+                if not raw.isascii() or not raw.isdigit():
+                    raise ValueError("invalid content length")
+                copy(int(raw))
+            body.seek(0)
+            return body, total
+        except BaseException:
+            body.close()
+            raise
 
     do_GET = relay
     do_HEAD = relay
