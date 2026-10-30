@@ -1185,7 +1185,10 @@ def test_export_format_keeps_the_other_formats_of_the_revision(env, tmp_path):
     assert sorted(first["formats"]) == ["okf", "ossie", "rdf"]
     again = export_job.run_export(store, settings, format="ossie", client=client)
     assert again.export_dir == folder
-    assert sorted(p.name for p in folder.iterdir()) == sorted(export_job.EXPORT_ENTRIES)
+    # Legacy exports predate the receipt attached by reviewed publication.
+    assert sorted(p.name for p in folder.iterdir()) == sorted(
+        export_job.EXPORT_ENTRIES - {"publication.json"}
+    )
     assert (folder / "ontology.ttl").read_bytes() == ttl
     assert (folder / "okf/index.md").read_bytes() == okf_index
     marker = export_job.read_export_metadata(folder)

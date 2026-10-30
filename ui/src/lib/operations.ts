@@ -136,7 +136,22 @@ async function request<T>(path: string, method = "GET", body?: unknown): Promise
   return data
 }
 const enc = encodeURIComponent
+export interface Publication {
+  id?: string
+  revision: number
+  status?: string
+  legacy?: boolean
+  verification?: { ok: boolean }
+  manifest: null | {
+    candidate_revision: number
+    previous_revision: number | null
+    originals: { sha256: string }[]
+    artifacts: Record<string, string>
+    index: { model: string; elements: number }
+  }
+}
 export const operations = {
+  publication: (revision: number, verify = false) => request<Publication>(`/ops/publications/${revision}?verify=${verify}`),
   overview: () => request<Overview>("/ops"),
   changes: () => request<Changes>("/ops/changes"),
   decide: (

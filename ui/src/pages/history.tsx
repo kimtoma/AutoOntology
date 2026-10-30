@@ -1,4 +1,5 @@
 import { VersionDiff } from "@/components/version-diff"
+import { PublicationRecord } from "@/components/publication-record"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { Link } from "react-router"
@@ -273,6 +274,7 @@ export default function HistoryPage() {
                         </Button>
                       )}
                     </div>
+                    {(r.revision === published || r.run_kind === "publish") && <PublicationRecord revision={r.revision} />}
                   </li>
                 ))}
               </ul>

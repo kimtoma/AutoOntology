@@ -285,7 +285,7 @@ class RunManager:
                     getattr(result, "status", "done"),
                 )
             except RunCancelled as exc:
-                if store.run_id:
+                if store.run_id and store.get_run(store.run_id).status != "succeeded":
                     store.update_run(
                         store.run_id, status="cancelled", error=f"cancelled before step {exc}"
                     )

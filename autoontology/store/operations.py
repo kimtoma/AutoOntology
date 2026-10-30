@@ -73,6 +73,13 @@ def read_snapshot(
             raise OperationsError(
                 f"unpublished revision {revision}; use --revision {revision} --preview to inspect it"
             )
+        if head:
+            from autoontology.store.publications import Publications
+
+            receipts = Publications(store)
+            receipt = receipts.get(head.revision)
+            if receipt and receipt["status"] == "committed":
+                receipts.check_model(head.revision)
         return head
     managed, state = _publication_state(store)
     if not managed:
@@ -82,6 +89,9 @@ def read_snapshot(
     head = store.get_snapshot(state["published_revision"], with_model=with_model)
     if head is None:
         raise OperationsError("the published snapshot is missing; restore the workspace")
+    from autoontology.store.publications import Publications
+
+    Publications(store).check_model(head.revision)
     return head
 
 
@@ -488,8 +498,32 @@ class Operations:
             }
         )
 
-    def commit(self, revision: int, expected: int | None, items: list[dict]) -> None:
+    def commit(
+        self,
+        revision: int,
+        expected: int | None,
+        items: list[dict],
+        *,
+        publication_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
         with self.store._conn() as conn:
+            if publication_id is not None:
+                receipt = conn.execute(
+                    "SELECT * FROM publications WHERE id=? AND revision=? AND status='prepared'",
+                    (publication_id, revision),
+                ).fetchone()
+                snapshot = conn.execute(
+                    "SELECT run_id,model_json FROM ontology_snapshots WHERE revision=?", (revision,)
+                ).fetchone()
+                if not receipt or not snapshot or snapshot["run_id"] != run_id:
+                    raise OperationsError("publication receipt does not match the prepared run")
+                manifest = json.loads(receipt["manifest_json"])
+                if (
+                    digest(manifest) != receipt["manifest_sha256"]
+                    or digest(json.loads(snapshot["model_json"])) != manifest["model_sha256"]
+                ):
+                    raise OperationsError("prepared publication changed before commit")
             changed = conn.execute(
                 "UPDATE ops_state SET published_revision=?,updated_at=? WHERE id=1 AND published_revision IS ?",
                 (revision, now_iso(), expected),
@@ -500,6 +534,30 @@ class Operations:
                 "UPDATE ops_reviews SET applied_revision=? WHERE id=?",
                 [(revision, i["id"]) for i in items],
             )
+            if publication_id is not None:
+                stamp = now_iso()
+                conn.execute(
+                    "UPDATE publications SET status='committed',committed_at=? WHERE id=?",
+                    (stamp, publication_id),
+                )
+                run = conn.execute("SELECT params_json FROM runs WHERE id=?", (run_id,)).fetchone()
+                params = {
+                    **json.loads(run[0]),
+                    "published_revision": revision,
+                    "publication_id": publication_id,
+                }
+                conn.execute(
+                    "UPDATE runs SET status='succeeded',finished_at=?,error=NULL,params_json=? WHERE id=?",
+                    (stamp, json.dumps(params), run_id),
+                )
+                conn.execute(
+                    "UPDATE steps SET status='succeeded',finished_at=?,detail_json=? WHERE run_id=? AND name='publish'",
+                    (
+                        stamp,
+                        json.dumps({"revision": revision, "publication_id": publication_id}),
+                        run_id,
+                    ),
+                )
 
     def add_feedback(self, question: str, answer: str, note: str, *, actor="local") -> dict:
         with self.store._conn() as conn:

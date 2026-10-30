@@ -21,6 +21,7 @@ def commands(settings_for, store_for, fail):
         from autoontology.engine.build import WORKSPACE_LEASE
         from autoontology.engine.jobs import JobError, hold_sources
         from autoontology.store.provenance import ProvenanceError
+        from autoontology.store.publications import PublicationError
 
         try:
             settings = settings_for()
@@ -29,6 +30,9 @@ def commands(settings_for, store_for, fail):
                 return action(store, settings)
         except ProvenanceError as exc:
             fail(json.dumps({"error": exc.code, "detail": str(exc)}, ensure_ascii=False))
+        except PublicationError as exc:
+            emit({"error": "publication_invalid", "detail": str(exc)})
+            raise typer.Exit(1) from exc
         except (OperationsError, JobError) as exc:
             fail(str(exc))
 
@@ -122,6 +126,41 @@ def commands(settings_for, store_for, fail):
         from autoontology.store.provenance import SourceArchive
 
         emit(run(lambda store, settings: {"items": SourceArchive(store).revisions(name)}))
+
+    @app.command("publications")
+    def publications():
+        from autoontology.store.publications import Publications
+
+        emit(run(lambda store, settings: {"items": Publications(store).listing()}))
+
+    @app.command("publication")
+    def publication(
+        revision: int = typer.Option(..., "--revision", min=1),
+        verify: bool = typer.Option(False, "--verify"),
+    ):
+        from autoontology.store.publications import Publications
+
+        def action(store, settings):
+            receipts = Publications(store)
+            receipt = receipts.get(revision)
+            if receipt is None:
+                if not store.get_snapshot(revision):
+                    raise OperationsError("unknown revision")
+                from autoontology.store.operations import visible_revision
+
+                if not visible_revision(store, revision):
+                    raise OperationsError("this candidate has not been published")
+                return {"revision": revision, "legacy": True, "manifest": None}
+            return {
+                **receipt,
+                **(
+                    {"verification": receipts.verify(revision, settings.exports_dir)}
+                    if verify
+                    else {}
+                ),
+            }
+
+        emit(run(action))
 
     @app.command("preserve-original")
     def preserve_original(

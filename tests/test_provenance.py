@@ -159,7 +159,7 @@ def test_v7_additive_migration_preserves_legacy_sources_and_snapshots(tmp_path, 
         snapshot = old.get_snapshot(revision)
         assert old.schema_version() == 6
     current = Store(path)
-    assert current.schema_version() == 7
+    assert current.schema_version() == db.MIGRATIONS[-1][0]
     assert current.get_source("rules") == src
     assert current.get_snapshot(revision) == snapshot
     assert SourceArchive(current).revisions("rules") == []

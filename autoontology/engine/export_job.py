@@ -88,6 +88,7 @@ EXPORT_ENTRIES = frozenset(
         "ontology.jsonld",
         "ontology.graphml",
         "report.md",
+        "publication.json",
         EXPORT_MARKER,
         UPSTREAM_DIR,
         ossie.OSSIE_DIR,
@@ -709,6 +710,13 @@ def run_export(
         refuse_if_active(store, log_path=log_path)
         snapshot = store.get_snapshot(head.revision)
         assert snapshot is not None
+        from autoontology.store.publications import Publications
+
+        publications = Publications(store)
+        receipt = publications.get(snapshot.revision)
+        if receipt and receipt["status"] == "committed":
+            publications.verify(snapshot.revision, settings.exports_dir)
+            return _export_publication(store, settings, snapshot, out=out, format=format)
         return _run_export_held(
             settings=settings,
             store=store,
@@ -720,6 +728,64 @@ def run_export(
             format=format,
             preview=preview,
         )
+
+
+def _export_publication(
+    store: Store, settings: Settings, snapshot: Snapshot, *, out: Path | None, format: str
+) -> RunResult:
+    """Copy selected, verified frozen files; never serialize from a mutable backend."""
+    source = settings.exports_dir / f"r{snapshot.revision:04}"
+    final = export_target(settings, snapshot.revision, out)
+    marker = json.loads((source / EXPORT_MARKER).read_text())
+    run = store.create_run(
+        kind=EXPORT_KIND,
+        source_id=None,
+        params={
+            "revision": snapshot.revision,
+            "out": str(out) if out else None,
+            "format": format,
+            "publication_id": marker["publication_id"],
+            "pid": os.getpid(),
+        },
+    )
+    if final.resolve() == source.resolve():
+        store.update_run(run.id, status="succeeded")
+        return RunResult(run.id, "succeeded", export_dir=source)
+    # Another official publication must never be replaced by an export view.
+    if final.resolve().is_relative_to(settings.exports_dir.resolve()):
+        store.update_run(run.id, status="failed", error="publication exports are immutable")
+        raise JobError("copy a publication with --out outside operational exports")
+    wanted = {"report.md", "publication.json"}
+    for kind in CONCRETE_FORMATS[format]:
+        wanted.update(FORMAT_ENTRIES[kind])
+    files = [
+        n for n in marker["files"] if n != EXPORT_MARKER and PurePosixPath(n).parts[0] in wanted
+    ]
+    work = final.parent / f".{final.name}.{run.id}.tmp"
+    try:
+        work.mkdir(parents=True, exist_ok=False)
+        for name in files:
+            dest = work / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source / name, dest)
+        view = {
+            **marker,
+            "view_of_publication": marker["publication_id"],
+            "export_run": run.id,
+            "format": format,
+            "files": [*files, EXPORT_MARKER],
+            "formats": {k: marker["formats"][k] for k in CONCRETE_FORMATS[format]},
+            "file_sha256": {n: marker["file_sha256"][n] for n in files},
+        }
+        (work / EXPORT_MARKER).write_text(json.dumps(view, ensure_ascii=False, indent=2))
+        _install(store, run, work, settings, final)
+        store.update_run(run.id, status="succeeded")
+        return RunResult(run.id, "succeeded", export_dir=final)
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        if store.get_run(run.id).status == "running":
+            store.update_run(run.id, status="failed", error="frozen publication export failed")
+        raise
 
 
 def _run_export_held(

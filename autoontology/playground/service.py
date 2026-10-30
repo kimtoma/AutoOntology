@@ -108,7 +108,7 @@ class EmbedderCache:
                 return embed_texts(texts, params, input_type)  # type: ignore[arg-type]
 
             self._key, self._value = (endpoint, model), (embed, model)
-            logger.info("playground embedder: %s at %s", model, endpoint)
+            logger.info("playground embedder: %s", model)
             return self._value
 
 
@@ -185,8 +185,39 @@ class Playground:
         return elements_from_model(scope.model)
 
     def index(self, scope: Scope) -> ElementIndex:
+        from autoontology.store.publications import PublicationError, Publications, index_receipt
+
         embed, model_name = self.embedder()
         revision = scope.revision
+        try:
+            publication = Publications(self.store).check_model(revision)
+            if publication:
+                receipt = publication["manifest"]["index"]
+                if isinstance(self.embedder_factory, EmbedderCache):
+                    from autoontology.store.operations import digest
+
+                    endpoint = embed_triplet(self.embedder_factory.settings_fn())[0]
+                    if digest(endpoint) != publication["manifest"]["profile"]["endpoint_sha256"]:
+                        raise PublicationError(
+                            "embedding endpoint changed; validate and publish a new revision"
+                        )
+                if model_name != receipt["model"]:
+                    raise PublicationError(
+                        "embedding selection changed; validate and publish a new revision before using it"
+                    )
+                if index_receipt(self.store, receipt["scope"], scope.model) != receipt:
+                    raise PublicationError("publication index integrity check failed")
+                rows = self.pg.index_rows(receipt["scope"])
+                elements = self.elements(scope)
+                return ElementIndex(
+                    elements,
+                    [rows[e.id].embedding for e in elements],
+                    model=model_name,
+                    revision=revision,
+                    reused=len(elements),
+                )
+        except PublicationError as exc:
+            raise PlaygroundError(409, "publication_invalid", str(exc)) from exc
         sid = f"{scope.key}@r{revision}"
         with self._index_lock:
             cached = self._indexes.get(sid)
@@ -219,7 +250,15 @@ class Playground:
         return idx
 
     def index_status(self, scope: Scope) -> dict[str, Any]:
-        meta = self.pg.index_meta(f"{scope.key}@r{scope.revision}")
+        from autoontology.store.publications import Publications
+
+        publication = Publications(self.store).check_model(scope.revision)
+        sid = (
+            publication["manifest"]["index"]["scope"]
+            if publication
+            else f"{scope.key}@r{scope.revision}"
+        )
+        meta = self.pg.index_meta(sid)
         revision = scope.revision
         return {
             "workspace": scope.key,
@@ -227,6 +266,7 @@ class Playground:
             "warnings": scope.warnings,
             "revision": revision,
             "index": meta,
+            "publication_id": publication["id"] if publication else None,
             "stale": meta is None or meta["revision"] != revision,
         }
 

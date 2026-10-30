@@ -447,6 +447,17 @@ MIGRATIONS: list[tuple[int, str]] = [
         )
         """,
     ),
+    (
+        8,
+        """
+        CREATE TABLE IF NOT EXISTS publications (
+            id TEXT PRIMARY KEY, revision INTEGER NOT NULL UNIQUE,
+            manifest_json TEXT NOT NULL, manifest_sha256 TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('prepared','committed')),
+            created_at TEXT NOT NULL, committed_at TEXT
+        )
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration

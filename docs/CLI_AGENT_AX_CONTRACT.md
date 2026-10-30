@@ -68,7 +68,7 @@ usable CLI parity.
 | Questions and data | chat/retrieval/citations, conversations, SQL and result files, SPARQL | CLI parity remains for the interactive playground |
 | Review | list/filter/assign cases, inspect dependencies, edit/approve/hold/reject/undo, merge duplicate cases, hand off | Connection review and `ops list/decide` exist; case and full mutation parity remain |
 | Quality and publication | version question suites, run/inspect checks, prepare publication, request/inspect/approve confirmation, publish | `ops check/validate/publish` exist; full suites and authenticated confirmation remain |
-| History and recovery | receipts, manifests, diff, restore proposal, validate/approve restore, checkpoint verification/drill | Private development checkpoint tooling exists; managed product restore remains |
+| History and recovery | receipts, manifests, diff, restore proposal, validate/approve restore, checkpoint verification/drill | `ops publications` and `ops publication --revision N --verify` share receipts and integrity checks with UI/API; private checkpoint tooling exists; managed product restore remains |
 | Feedback and metrics | capture/link/assign/reopen/resolve feedback, resolution publication, timing/quality cohorts | Full CLI and connected workflow remain |
 | Organization and security | principals, roles, domains, scope policies, credential lifecycle and audit | Remains P0-03 / P3; model-provider login is not a human/agent identity system |
 | Automation and connectors | schedules/cursors/events, queue/watch/cancel/retry, outbox, notification policies, handoff | Remains P2 |

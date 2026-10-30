@@ -20,7 +20,7 @@ import time
 import unicodedata
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import anyio
 import httpx
@@ -1088,9 +1088,47 @@ def build_router(api: Api) -> APIRouter:
 
         if not visible_revision(api.store, int(rev[1:])):
             raise ApiError(404, "unpublished_export", "this revision has not been published")
+        from autoontology.store.publications import PublicationError, Publications
+
+        receipts = Publications(api.store)
+        try:
+            publication = receipts.get(int(rev[1:]))
+            if publication:
+                receipts.verify(int(rev[1:]), api.settings.exports_dir)
+        except PublicationError as exc:
+            raise ApiError(409, "publication_invalid", str(exc)) from exc
         root = Path(api.settings.exports_dir).resolve()
         candidate = (root / rev / unicodedata.normalize("NFC", file_path)).resolve()
         if candidate.is_file() and candidate.is_relative_to(root / rev):
+            if publication:
+                import hashlib
+
+                data = candidate.read_bytes()
+                marker = json.loads((root / rev / "export.json").read_text())
+                if file_path != "export.json" and hashlib.sha256(data).hexdigest() != marker.get(
+                    "file_sha256", {}
+                ).get(file_path):
+                    raise ApiError(409, "publication_invalid", "publication artifact changed")
+                if inline and len(data) > 5 * 1024 * 1024:
+                    raise ApiError(413, "too_large", "file too large to preview")
+                return Response(
+                    data,
+                    media_type="text/plain; charset=utf-8"
+                    if inline
+                    else "application/octet-stream",
+                    headers={
+                        "Cache-Control": "private, no-store",
+                        "X-Content-Type-Options": "nosniff",
+                        **(
+                            {}
+                            if inline
+                            else {
+                                "Content-Disposition": "attachment; filename*=UTF-8''"
+                                + quote(candidate.name)
+                            }
+                        ),
+                    },
+                )
             if inline:
                 if candidate.stat().st_size > 5 * 1024 * 1024:
                     raise ApiError(413, "too_large", "file too large to preview")

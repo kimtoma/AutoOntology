@@ -17,10 +17,12 @@ from autoontology.engine.jobs import hold_sources
 from autoontology.playground import prompts
 from autoontology.playground.elements import elements_from_model
 from autoontology.playground.index import build_index
-from autoontology.playground.service import EmbedderCache
+from autoontology.playground.service import EmbedderCache, embed_triplet
 from autoontology.playground.store import PlaygroundStore
 from autoontology.store.db import Store, now_iso
 from autoontology.store.operations import Operations, OperationsError
+from autoontology.store.provenance import sync_directory
+from autoontology.store.publications import PublicationError, Publications, index_receipt
 
 
 def profile(settings: Settings, embedder=None) -> dict:
@@ -28,9 +30,7 @@ def profile(settings: Settings, embedder=None) -> dict:
         "chat": settings.effective_chat_model,
         "chat_provider": settings.chat_provider,
         "embed": embedder[1] if embedder else settings.effective_embed_model,
-        "endpoint": settings.ollama_endpoint
-        if settings.embed_provider == "ollama"
-        else settings.openai_base_url,
+        "endpoint": embed_triplet(settings)[0],
     }
 
 
@@ -103,6 +103,7 @@ def validate(store: Store, settings: Settings, *, revision: int, embedder=None, 
         "token": signature,
         "scope": scope,
         "validated_at": now_iso(),
+        "index": index_receipt(store, scope, model) if index else None,
     }
     with store._conn() as conn:
         conn.execute(
@@ -178,6 +179,14 @@ def run_publish(
         ):
             raise OperationsError("validation changed or failed; revalidate before publication")
         model, items = ops.compose(revision)
+        try:
+            current_index = index_receipt(store, validated["scope"], model)
+        except PublicationError as exc:
+            raise PublicationError("validation index is incomplete or changed; revalidate") from exc
+        if current_index != validated.get("index"):
+            raise PublicationError("validation index changed; revalidate")
+        publications = Publications(store)
+        publications.originals(model)
         previous = ops.state()["published_revision"]
         run = store.create_run(
             kind="publish",
@@ -196,15 +205,16 @@ def run_publish(
             new = store.save_snapshot(run.id, model)
             pg = PlaygroundStore(store)
             old = pg.index_rows(validated["scope"])
+            frozen_scope = f"{model.name}@publication-r{new}"
             pg.replace_index(
-                f"{model.name}@r{new}",
+                frozen_scope,
                 list(old.values()),
                 revision=new,
                 model=profile(settings, embedder)["embed"],
             )
-            index, _ = prepare_index(store, settings, model, f"{model.name}@r{new}", new, embedder)
-            if len(index._rows) != len(index.elements):
-                raise OperationsError("retrieval index is incomplete")
+            frozen_index = index_receipt(store, frozen_scope, model)
+            if {**frozen_index, "scope": validated["scope"]} != validated["index"]:
+                raise PublicationError("validation index changed during preparation; revalidate")
             folder = settings.exports_dir / f"r{new:04}"
             if folder.exists():
                 raise OperationsError("refusing to replace an existing version export")
@@ -232,14 +242,35 @@ def run_publish(
                                 )
                             )
                 write_exports(model, work, new, run, upstream=upstream)
+            publication = publications.prepare(
+                new,
+                candidate=revision,
+                previous=previous,
+                validation=validated,
+                items=items,
+                profile=profile(settings, embedder),
+                scope=frozen_scope,
+                folder=work,
+            )
+            for path in work.rglob("*"):
+                if path.is_file():
+                    with path.open("rb") as stream:
+                        os.fsync(stream.fileno())
+            for path in sorted(
+                (p for p in work.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True
+            ):
+                sync_directory(path)
+            sync_directory(work)
             os.replace(work, folder)
+            sync_directory(folder.parent)
+            publications.verify(new, settings.exports_dir, prepared=True)
             store.finish_step(
                 run.id,
                 "prepare",
                 status="succeeded",
                 detail={
                     "revision": new,
-                    "indexed_elements": len(index.elements),
+                    "indexed_elements": frozen_index["elements"],
                     "export_dir": str(folder),
                 },
             )
@@ -247,18 +278,21 @@ def run_publish(
             if ops.signature(revision, profile(settings, embedder)) != signature:
                 raise OperationsError("workspace changed; revalidate")
             store.start_step(run.id, "publish")
-            ops.commit(new, previous, items)
-            store.finish_step(run.id, "publish", status="succeeded", detail={"revision": new})
-            store.update_run(
-                run.id, status="succeeded", params={**run.params, "published_revision": new}
-            )
+            ops.commit(new, previous, items, publication_id=publication["id"], run_id=run.id)
             return SimpleNamespace(run_id=run.id, status="succeeded", revision=new)
         except BaseException as exc:
-            store.update_run(
-                run.id, status="failed", error=f"{type(exc).__name__}: {str(exc)[:250]}"
-            )
+            committed = store.get_run(run.id).status == "succeeded"
+            if not committed:
+                store.update_run(
+                    run.id, status="failed", error=f"{type(exc).__name__}: {str(exc)[:250]}"
+                )
             if work and work.exists():
                 shutil.rmtree(work)
-            if folder and folder.exists() and ops.state()["published_revision"] == previous:
+            if (
+                not committed
+                and folder
+                and folder.exists()
+                and ops.state()["published_revision"] == previous
+            ):
                 shutil.rmtree(folder)
             raise

@@ -180,3 +180,51 @@ The controller manages only the preview app and backend. The dedicated Postgres
 cluster is managed separately using Homebrew PostgreSQL 17 `pg_ctl` and
 `data/ontology-ops-local/postgres` as its data directory. Runtime configuration,
 verification artifacts and secrets remain in ignored local files.
+
+## Publication receipts
+
+New reviewed publications record a `PublicationManifest` in schema v8. It binds
+candidate and previous operational revisions, the approved model hash, decision
+records, representative-question results, preserved originals and source-input
+revision hashes, a dedicated frozen retrieval scope, and export hashes. The
+embedding endpoint is hashed; credentials and raw endpoints are not copied into
+receipts. Known reader fingerprints are recorded. Historical extractor/chat
+profiles were not saved and are explicitly marked unknown rather than inferred
+from the current settings. Connected database rows remain live at execution;
+source revisions preserve input files or catalog schemas, not historical rows.
+
+Publication copies the exact validated vectors without embedding passages again.
+Missing/corrupt originals, changed validation vectors, nonfinite/mixed vectors,
+changed decisions or failed preparation block the switch. Files and directories
+are flushed before the SQLite transaction commits the operational pointer,
+applied decisions, receipt and successful run/step together. A process killed
+before that commit leaves only a private prepared record; one killed after it
+leaves a committed successful publication. Prepared folders are not operational
+downloads and are never selected as a fallback.
+
+Operational retrieval uses and verifies the dedicated frozen index. A different
+embedding model or endpoint requires validation and another publication. Export
+commands reuse verified publication files without querying the current backend.
+`--out` outside operational exports copies the selected format with a
+`view_of_publication` marker; the full original receipt travels with that view
+and its original artifact list describes the complete publication. Running an
+export without a separate output returns the existing full publication folder;
+it does not remove other formats. Downloads verify model, originals, source
+inputs, vectors and files, and refuse damaged publications.
+
+In **Change history**, select **Verify publication** to inspect the same record
+and integrity result available through the API and CLI:
+
+```sh
+uv run autoontology ops publications
+uv run autoontology ops publication --revision 12 --verify
+uv run autoontology export --revision 12 --format okf --out ./verified-copy
+```
+
+`GET /api/ops/publications` lists committed receipts;
+`GET /api/ops/publications/12?verify=true` verifies a version. A candidate without
+a receipt is not a legacy publication. Operational versions created before this
+feature remain readable, with explicit `legacy: true` and no invented historical
+validation proof. Receipt inspection is separate from managed restore; restore
+proposals and usage traces are still planned. Principal-backed human/agent
+confirmation and complete CLI parity remain tracked in the implementation ledger.

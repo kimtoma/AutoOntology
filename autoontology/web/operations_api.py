@@ -70,8 +70,12 @@ def install(app, api):
         return Operations(api.store)
 
     def checked(call):
+        from autoontology.store.publications import PublicationError
+
         try:
             return call()
+        except PublicationError as exc:
+            raise ApiError(409, "publication_invalid", str(exc)) from exc
         except OperationsError as exc:
             raise ApiError(409, "operations_changed", str(exc)) from exc
 
@@ -209,6 +213,38 @@ def install(app, api):
 
         with edit(api, "validation"):
             return checked(lambda: validate(api.store, api.settings, revision=body.revision))
+
+    @router.get("/publications")
+    def publications():
+        from autoontology.store.publications import Publications
+
+        return checked(lambda: {"items": Publications(api.store).listing()})
+
+    @router.get("/publications/{revision}")
+    def publication(revision: int, verify: bool = False):
+        from autoontology.store.publications import Publications
+
+        def result():
+            receipts = Publications(api.store)
+            receipt = receipts.get(revision)
+            if receipt is None:
+                if not api.store.get_snapshot(revision):
+                    raise ApiError(404, "revision_missing", "unknown revision")
+                from autoontology.store.operations import visible_revision
+
+                if not visible_revision(api.store, revision):
+                    raise ApiError(409, "not_published", "this candidate has not been published")
+                return {"revision": revision, "legacy": True, "manifest": None}
+            return {
+                **receipt,
+                **(
+                    {"verification": receipts.verify(revision, api.settings.exports_dir)}
+                    if verify
+                    else {}
+                ),
+            }
+
+        return checked(result)
 
     @router.post("/publish", status_code=202)
     def publish(body: PublishIn):
