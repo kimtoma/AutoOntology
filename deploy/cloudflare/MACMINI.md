@@ -13,11 +13,15 @@ preserved. Historical snapshots and conversations were excluded from the demo co
 | Authenticated origin proxy | 7821 |
 | Upstream backend | 3121 |
 | Dedicated Postgres 17 + pgvector | 55432 |
-| Existing Ollama embeddings (`bge-m3`) | 11434 |
+| Existing Ollama embeddings (`qwen3-embedding:4b`) | 11434 |
 
 Chat uses `AUTOONTOLOGY_CHAT_PROVIDER=codex`, model `gpt-6-astra`, and the owner's
 existing ChatGPT CLI login. Model requests run on the Mac mini and use the Codex
 subscription service. Embeddings use the existing local Ollama configuration.
+The embedding model was selected by the [Korean retrieval evaluation](EMBEDDING_EVALUATION.md).
+The 891 live vectors were re-embedded at 2560 dimensions, with SQLite/Postgres backups
+retained under the ignored `data/cloudflare-demo/embedding-evaluation/` directory.
+The primary local workspace keeps its previous embedding configuration.
 Sources use the isolated Postgres application credential, so builds can manage their
 source databases. The former sample-only read account remains unused.
 The Worker variable `ACCESS_MODE=full` enables all UI pages and APIs behind the password.

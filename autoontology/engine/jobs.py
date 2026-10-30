@@ -122,6 +122,9 @@ def prepare_upstream_env(settings: Settings) -> None:
         apply_model_env(settings)
         os.environ.update(wanted)
         os.environ[DERIVED_ENV_VAR] = ",".join(sorted(derived))
+        from autoontology.engine.embeddings import install
+
+        install()
         _APPLIED_ENV = wanted
 
 
