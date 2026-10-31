@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils"
 import { GATEWAY_ACCESS, SHARED_DEMO } from "@/lib/demo"
 import { useT } from "@/i18n"
 import { CanUse, IdentityControls } from "@/components/identity-gate"
-import { useCanUse } from "@/lib/identity"
+import { useCanUse, useIdentity } from "@/lib/identity"
 
 const navigationAuthority: Record<string, string> = { home: "candidate.read", review: "candidate.read", sources: "source.read", ontology: "knowledge.read", playground: "query.run", history: "candidate.read", settings: "settings.read" }
 
@@ -67,6 +67,7 @@ function StatusBadge() {
 }
 
 function WorkspaceNavigation() {
+  const identity = useIdentity()
   const { pathname } = useLocation()
   const { isMobile, setOpenMobile } = useSidebar()
   const t = useT()
@@ -126,6 +127,7 @@ function WorkspaceNavigation() {
         </nav>
       </SidebarContent>
       <SidebarFooter className="console-sidebar-footer">
+        {identity && <Link to="/access" data-nav="access" className="console-sidebar-link text-xs" onClick={() => isMobile && setOpenMobile(false)}>{t("access.title")}</Link>}
         <span className="console-sidebar-name">Ontology Ops</span>
       </SidebarFooter>
     </Sidebar>

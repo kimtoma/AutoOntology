@@ -122,12 +122,14 @@ _policies(
     "/api/playground/conversations/{conversation_id}",
 )
 _policies(None, "GET", "/api/identity/me")
+_policies(None, "GET", "/api/identity/credentials")
 _policies(None, "POST", "/api/identity/logout")
 _policies(None, "DELETE", "/api/identity/credentials/{credential_id}")
 _policies(
     "identity.admin",
     "GET",
     "/api/identity/principals",
+    "/api/identity/management",
     "/api/identity/domains",
     "/docs",
     "/openapi.json",
@@ -138,6 +140,7 @@ _policies(
     "POST",
     "/api/identity/principals",
     "/api/identity/principals/{principal_id}/disable",
+    "/api/identity/principals/{principal_id}/enable",
     "/api/identity/domains",
     "/api/identity/delegations",
 )

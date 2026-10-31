@@ -1,6 +1,8 @@
 import type { enIdentity } from "@/i18n/en.identity"
+import { koAccess } from "@/i18n/ko.access"
 
 export const koIdentity: Record<keyof typeof enIdentity, string> = {
+  ...koAccess,
   "identity.checking": "작업 공간 접근 권한을 확인하고 있습니다…",
   "identity.title": "작업 공간에 로그인",
   "identity.hint": "작업 공간 관리자가 부여한 개인 계정으로 로그인하세요.",

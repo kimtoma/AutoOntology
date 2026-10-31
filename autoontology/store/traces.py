@@ -13,6 +13,7 @@ import time
 import uuid
 from datetime import datetime
 
+from autoontology.security.context import authorize
 from autoontology.store.db import Store, now_iso, pid_alive
 from autoontology.store.operations import digest
 from autoontology.store.publications import Publications
@@ -63,7 +64,17 @@ class UsageTraces:
             "outcome": {},
             "duration_ms": None,
         }
-        with self.store._conn() as conn:
+        with self.store._immediate() as conn:
+            authority = authorize(self.store, "query.run", conn=conn)
+            if authority is not None:
+                data["actor"] = {
+                    "id": authority.actor.principal_id,
+                    "verified": True,
+                    "kind": authority.actor.kind,
+                    "credential_id": authority.actor.credential_id,
+                    "workspace_id": authority.workspace_id,
+                    "policy_version": authority.policy_version,
+                }
             conn.execute(
                 "INSERT INTO usage_traces VALUES(?,?,?,?,?,'running',?,?,?,NULL,?,NULL)",
                 (

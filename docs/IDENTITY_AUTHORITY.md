@@ -3,7 +3,7 @@
 P0-03 is in progress. The durable core now has initial HTTP, native CLI and browser
 session adapters and guarded review/publication effects. Unfiltered resources
 currently require **whole-workspace scope**. Mixed-domain projection, complete
-effect/stream/queue revocation, administration UI, exact approval lifecycle and
+effect/stream/queue revocation, exact approval lifecycle and
 local-owner recovery are not complete. There is no anonymous enrollment endpoint
 or normal-workspace enrollment command. Do not enroll the normal workspace until
 the activation gates below pass. The existing shared access password and
@@ -90,11 +90,12 @@ are redacted; explicit `.reveal()` belongs only at a storage/transport boundary.
   unfiltered data. It must not be described as permitting legitimate mixed-domain
   access. Complete native mutation/read parity and effect-boundary checks, including
   source/settings/connection-review writes and resource ownership.
-- Finish principal/domain/role/delegation/session administration UI and the missing
-  native administration operations. Initial CLI login/logout, whoami, people,
-  provisioning/roles/disable/domain/classification/delegation/revocation/audit exist;
-  this is not full lifecycle or remote-session parity. Finish bounded credential
-  renewal/recovery and explicit scope selection before enrollment.
+- Administration now has a human UI and native commands for people, roles, password
+  reset, disabling/re-enabling people, domains, source classification, preparation
+  delegation, credential inspection/revocation and audit. Finish bounded credential
+  renewal, remote CLI sessions, owner enrollment/recovery and approval lifecycle
+  before normal-workspace activation. Domain-specific business access remains a
+  separate gate from selecting a domain in administration.
 - Complete managed ingestion callback compatibility and internal job authorization.
   The model router has a separate purpose-limited key; configured unauthenticated
   ingestion shims are denied. Raw backend access/host-path registration, approved
@@ -167,3 +168,62 @@ transmission. The exact proposed input was frozen for user approval, separately
 from these successful checks. Controlled model tests cover authenticated review,
 publication and revocation during preparation; they are not real document-model
 acceptance. See the private stage-11 report for source, hashes and recovery evidence.
+
+## Administration and request attribution
+
+Stage 12 adds `/ui/access` for individually configured workspaces. Every signed-in
+principal can inspect/revoke their own sessions. Only a current human administrator
+can inspect another person's sessions or administer people, roles, domains, source
+classifications and delegation. Unknown/expired/revoked credentials still fail at
+the shared service boundary. The management packet is a coherent read transaction
+containing public principals, current grants, safe delegation metadata, role/action
+catalogs, domains and source bindings; it contains no password or credential hashes.
+
+The interface shows the exact target, selected roles/actions/domains and effect
+before applying a change. Pending submissions cannot be repeated. Failure keeps
+the confirmation available without claiming success. A password reset invalidates
+existing sessions. Re-enabling a disabled human increments the credential epoch;
+it permits a new login but never restores old sessions. At least one active human
+workspace administrator must remain. Agents cannot be re-enabled after delegation
+revocation; create an explicitly reviewed new delegation instead.
+
+Agent credentials appear masked in a transient browser view and can be revealed
+for explicit transfer to the agent's private store. They never enter query caches,
+browser storage, audit detail or logs. Closing the view removes its secret state;
+the browser does not retain a downloadable session file. Native `auth delegate`
+continues to write the owner-only credential file directly.
+
+Native administration uses the same operations:
+
+```sh
+autoontology auth administration
+autoontology auth domains
+autoontology auth sessions                      # own sessions
+autoontology auth sessions --principal ID       # human administrator
+autoontology auth sessions --principal '*'      # all, human administrator
+autoontology auth reset-password ID --password-file PRIVATE_FILE
+autoontology auth disable ID
+autoontology auth enable ID
+autoontology auth revoke-session CREDENTIAL_ID
+```
+
+The existing `add-person`, `roles`, `domain`, `classify-source`, `delegate`,
+`revoke-agent` and `audit` commands remain available. `enable` is a compensating
+operation for human disablement, not a rollback of session revocations or audit.
+
+Usage trace creation now rechecks `query.run` inside its write transaction and
+records the verified principal, credential, workspace and policy version when
+configured. Previously completed legacy receipts remain unchanged; they are not
+retroactively attributed. Per-resource history/conversation ownership and stream
+revocation still require their separate implementation.
+
+After explicit user approval of a frozen 2,292-character model payload, actual
+individual native CLI -> protected HTTP -> local Ollama retrieval -> Codex
+`gpt-6-astra` completed the exact approved request. The first receipt exposed the
+missing actor binding; it was preserved. A second call with the same approved
+messages verified the corrected actor and the answer's E1 citation. The browser
+then recovered that completed answer from its trace without a model call. Actual
+copied-data administration verified role changes, password reset, disable/re-enable,
+source classification, agent-only preparation, revoked delegation/session behavior
+through the native CLI, and the audit chain. Light-mode desktop/mobile captures
+and remaining activation gates are recorded in the private stage-12 evidence.

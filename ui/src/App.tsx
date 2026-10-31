@@ -15,6 +15,7 @@ import OntologyPage from "@/pages/ontology"
 import SourcesPage from "@/pages/sources"
 import SettingsPage from "@/pages/settings"
 import StatusPage from "@/pages/status"
+import AccessPage from "@/pages/access"
 import { legacyTarget } from "@/lib/routes"
 import { useT } from "@/i18n"
 import { SHARED_DEMO } from "@/lib/demo"
@@ -80,6 +81,7 @@ export default function App() {
           <Route path="playground" element={access("query.run", lazyPage(PlaygroundPage))} />
           <Route path="exports" element={access("exports.read", <ExportsPage />)} />
           <Route path="status" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : access("settings.read", <StatusPage />)} />
+          <Route path="access" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <AccessPage />} />
           <Route path="runs" element={<LegacyRedirect />} />
           <Route path="concepts" element={<LegacyRedirect />} />
           <Route

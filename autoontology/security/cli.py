@@ -352,6 +352,49 @@ def install(app, settings_for):
     def people():
         _emit(call(lambda service, actor, settings: {"items": service.principals(actor)}))
 
+    @auth.command("administration")
+    def administration():
+        _emit(call(lambda service, actor, settings: service.administration(actor)))
+
+    @auth.command("domains")
+    def domains():
+        _emit(
+            call(
+                lambda service, actor, settings: {"items": service.administration(actor)["domains"]}
+            )
+        )
+
+    @auth.command("sessions")
+    def sessions(
+        principal: str = typer.Option(
+            None, "--principal", help="Principal ID, or * for all (human admin only)."
+        ),
+    ):
+        _emit(
+            call(
+                lambda service, actor, settings: {
+                    "items": service.credentials(actor, principal_id=principal)
+                }
+            )
+        )
+
+    @auth.command("revoke-session")
+    def revoke_session(credential: str):
+        def revoke(service, actor, settings):
+            service.revoke_credential(actor, credential)
+            return {"revoked": credential}
+
+        _emit(call(revoke))
+
+    @auth.command("reset-password")
+    def reset_password(principal: str, password_file: Path = typer.Option(None, "--password-file")):
+        def change(service, actor, settings):
+            service.require(actor, "identity.admin")
+            service.change_password(actor, principal, _password(password_file, new=True))
+            return {"changed": principal, "sessions_invalidated": True}
+
+        _emit(call(change))
+
     @auth.command("add-person")
     def add_person(
         username: str,
@@ -385,6 +428,10 @@ def install(app, settings_for):
     @auth.command("disable")
     def disable(principal: str):
         _emit(call(lambda service, actor, settings: service.disable(actor, principal)))
+
+    @auth.command("enable")
+    def enable(principal: str):
+        _emit(call(lambda service, actor, settings: service.enable(actor, principal)))
 
     @auth.command("domain")
     def domain(slug: str, name: str = typer.Option(..., "--name")):

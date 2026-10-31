@@ -1,4 +1,6 @@
+import { enAccess } from "@/i18n/en.access"
 export const enIdentity = {
+  ...enAccess,
   "identity.checking": "Checking workspace access…",
   "identity.title": "Sign in to your workspace",
   "identity.hint": "Use the individual account provided by your workspace administrator.",

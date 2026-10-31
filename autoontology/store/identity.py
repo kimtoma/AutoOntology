@@ -623,6 +623,38 @@ class Identity:
                 ).fetchone()
             )
 
+    def enable(self, actor, principal_id):
+        """Restore a human's access without restoring any old credential."""
+        with self.store._immediate() as conn:
+            actor = self.require(actor, "identity.admin", conn=conn).actor
+            row = conn.execute(
+                "SELECT * FROM identity_principals WHERE id=?", (principal_id,)
+            ).fetchone()
+            if not row or row["kind"] != "human":
+                raise AccessError(
+                    "Choose a human account; revoked agents need a new delegation.",
+                    "invalid_principal",
+                    400,
+                )
+            if row["status"] != "active":
+                conn.execute(
+                    "UPDATE identity_principals SET status='active',epoch=epoch+1 WHERE id=?",
+                    (principal_id,),
+                )
+                self._bump(conn)
+                self._event(
+                    conn,
+                    actor,
+                    "identity.enabled",
+                    principal_id,
+                    {"old_sessions_invalidated": True},
+                )
+            return self._public(
+                conn.execute(
+                    "SELECT * FROM identity_principals WHERE id=?", (principal_id,)
+                ).fetchone()
+            )
+
     def change_password(self, actor, principal_id, password):
         self.require(actor, "identity.admin")
         record = hash_password(password)
@@ -820,6 +852,97 @@ class Identity:
             return [
                 self._public(row)
                 for row in conn.execute("SELECT * FROM identity_principals ORDER BY created_at,id")
+            ]
+
+    def administration(self, actor):
+        """One coherent, secret-free policy packet for human administration UI/CLI."""
+        with self._read() as conn:
+            self.require(actor, "identity.admin", conn=conn)
+            state = self._state(conn)
+            people = []
+            for row in conn.execute("SELECT * FROM identity_principals ORDER BY created_at,id"):
+                person = self._public(row)
+                person["grants"] = [
+                    dict(grant)
+                    for grant in conn.execute(
+                        "SELECT role,domain_id FROM identity_grants WHERE principal_id=? AND revoked_at IS NULL ORDER BY role,domain_id",
+                        (row["id"],),
+                    )
+                ]
+                delegation = conn.execute(
+                    "SELECT delegator_id,actions_json,domains_json,expires_at,revoked_at FROM identity_delegations WHERE principal_id=?",
+                    (row["id"],),
+                ).fetchone()
+                person["delegation"] = (
+                    None
+                    if not delegation
+                    else {
+                        "delegator_id": delegation["delegator_id"],
+                        "actions": json.loads(delegation["actions_json"]),
+                        "domains": json.loads(delegation["domains_json"]),
+                        "expires_at": delegation["expires_at"],
+                        "revoked_at": delegation["revoked_at"],
+                    }
+                )
+                people.append(person)
+            return {
+                "workspace_id": state["workspace_id"],
+                "policy_version": state["policy_version"],
+                "principals": people,
+                "roles": {name: sorted(actions) for name, actions in ROLES.items()},
+                "delegatable_actions": sorted(
+                    a for a, c in CAPABILITIES.items() if not c.human_only
+                ),
+                "domains": [
+                    dict(row)
+                    for row in conn.execute(
+                        "SELECT id,slug,name FROM identity_domains ORDER BY slug"
+                    )
+                ],
+                "sources": [
+                    dict(row)
+                    for row in conn.execute(
+                        "SELECT s.id,s.name,d.domain_id,d.version FROM sources s LEFT JOIN identity_source_domains d ON d.source_id=s.id AND d.version=(SELECT max(version) FROM identity_source_domains WHERE source_id=s.id) ORDER BY s.name,s.id"
+                    )
+                ],
+            }
+
+    def credentials(self, actor, *, principal_id=None):
+        """List own sessions by default; inspecting another principal needs admin."""
+        with self._read() as conn:
+            actor = self._actor(conn, actor)
+            selected = actor.principal_id if principal_id is None else principal_id
+            if selected != actor.principal_id:
+                self.require(actor, "identity.admin", conn=conn)
+            rows = conn.execute(
+                "SELECT c.id,c.principal_id,c.created_at,c.expires_at,c.revoked_at,c.epoch AS credential_epoch,p.epoch AS principal_epoch,p.status AS principal_status,p.username,p.kind FROM identity_credentials c JOIN identity_principals p ON p.id=c.principal_id WHERE (?='*' OR c.principal_id=?) ORDER BY c.created_at DESC,c.id",
+                (selected, selected),
+            ).fetchall()
+            return [
+                {
+                    **{
+                        k: row[k]
+                        for k in (
+                            "id",
+                            "principal_id",
+                            "username",
+                            "kind",
+                            "created_at",
+                            "expires_at",
+                            "revoked_at",
+                        )
+                    },
+                    "current": row["id"] == actor.credential_id,
+                    "status": "revoked"
+                    if row["revoked_at"] is not None
+                    else "invalidated"
+                    if row["credential_epoch"] != row["principal_epoch"]
+                    or row["principal_status"] != "active"
+                    else "expired"
+                    if row["expires_at"] <= self.clock()
+                    else "active",
+                }
+                for row in rows
             ]
 
     def audit(self, actor):

@@ -124,6 +124,16 @@ def install(app, api):
     def principals():
         return {"items": service.principals(actor())}
 
+    @router.get("/management")
+    def management(response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        return service.administration(actor())
+
+    @router.get("/credentials")
+    def credentials(response: Response, principal_id: str | None = None):
+        response.headers["Cache-Control"] = "no-store"
+        return {"items": service.credentials(actor(), principal_id=principal_id)}
+
     @router.post("/principals", status_code=201)
     def human(body: HumanIn):
         return service.create_human(
@@ -138,6 +148,10 @@ def install(app, api):
     def disable(principal_id: str):
         return service.disable(actor(), principal_id)
 
+    @router.post("/principals/{principal_id}/enable")
+    def enable(principal_id: str):
+        return service.enable(actor(), principal_id)
+
     @router.put("/principals/{principal_id}/password")
     def password(principal_id: str, body: PasswordIn):
         service.change_password(actor(), principal_id, body.password)
@@ -145,16 +159,7 @@ def install(app, api):
 
     @router.get("/domains")
     def domains():
-        with api.store._conn() as conn:
-            service.require(actor(), "identity.admin")
-            return {
-                "items": [
-                    dict(row)
-                    for row in conn.execute(
-                        "SELECT id,workspace_id,slug,name FROM identity_domains ORDER BY slug"
-                    )
-                ]
-            }
+        return {"items": service.administration(actor())["domains"]}
 
     @router.post("/domains", status_code=201)
     def domain(body: DomainIn):

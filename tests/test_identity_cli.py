@@ -148,3 +148,27 @@ def test_explicit_credential_against_legacy_workspace_never_falls_back(
     result = invoke("--credential-file", path, "ops", "list")
     assert result.exit_code == 1 and json.loads(result.stdout)["error"] == "identity_unconfigured"
     assert not (tmp_path / "other/autoontology.db").exists()
+
+
+def test_native_admin_lists_resets_and_revokes_sessions(managed):
+    _, service, issued, _, _, password = managed
+    assert invoke("auth", "login", "owner", "--password-file", str(password)).exit_code == 0
+    owner = service.authenticate(issued.secret.reveal())
+    person = service.create_human(
+        owner, "reset_reader", "Reset reader", "CLI reader old password", ["viewer"]
+    )
+    old = service.login("reset_reader", "CLI reader old password")
+    packet = invoke("auth", "administration")
+    assert packet.exit_code == 0 and json.loads(packet.stdout)["roles"]["viewer"]
+    assert invoke("auth", "domains").exit_code == 0
+    sessions = invoke("auth", "sessions", "--principal", person["id"])
+    assert (
+        sessions.exit_code == 0
+        and json.loads(sessions.stdout)["items"][0]["id"] == old.credential_id
+    )
+    reset = invoke("auth", "reset-password", person["id"], "--password-file", str(password))
+    assert reset.exit_code == 0 and json.loads(reset.stdout)["sessions_invalidated"]
+    with pytest.raises(AccessError):
+        service.authenticate(old.secret.reveal())
+    revoke = invoke("auth", "revoke-session", old.credential_id)
+    assert revoke.exit_code == 0 and json.loads(revoke.stdout)["revoked"] == old.credential_id
