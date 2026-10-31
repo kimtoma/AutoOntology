@@ -162,7 +162,7 @@ export const koOps = {
   "ops.firstBuild": "첫 구축",
   "ops.exported": "다운로드 파일 생성",
   "ops.reason.never_built": "이전 변경 확인 기록 없음",
-  "ops.reason.reader_changed": "문서 읽기 설정 변경",
+  "ops.reason.reader_changed": "문서 처리 설정 변경",
   "ops.reason.inputs_changed": "소스 내용 변경",
   "ops.diffFields": "달라진 항목",
   "ops.diffEmpty": "이 항목의 변경 없음",
@@ -233,4 +233,9 @@ export const koOps = {
   "restore.originals": "비교할 원문 파일",
   "restore.field.comment": "설명",
   "restore.field.evidence": "근거",
+  "ops.processingHistory": "지식 처리 이력",
+  "ops.processingCounts": "원문 읽기 기록 {read}개 · 성공한 추출 기록 {extract}개 · 통합 기록 {consolidate}개",
+  "ops.processingProfiles": "기록된 추출 설정",
+  "ops.processingUnknown": "일부 입력은 과거 처리 설정을 확인할 수 없습니다. 오늘의 설정으로 그 이력을 채우지 않습니다.",
+  "ops.processingScope": "입력·설정·결과를 보존한 기록입니다. 모델 가중치와 외부 문서 엔진의 실행 환경은 보관하지 않습니다.",
 } as const

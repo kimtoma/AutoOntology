@@ -143,7 +143,7 @@ def source_freshness(store: Store, settings: Settings, source: Source) -> dict[s
             source,
             settings.home,
             settings.vision_model,
-            reader=extract_job.reader_settings(settings),
+            reader=extract_job.pipeline_settings(settings),
             schema=schema,
         )
         if not current:  # it swallows errors: read the inputs again to name the error

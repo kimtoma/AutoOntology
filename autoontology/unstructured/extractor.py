@@ -94,7 +94,19 @@ def upstream_backend(
     )
 
     factory = get_llm_client if role == "reasoning" else get_non_reasoning_llm_client
-    llm = factory(temperature=0.0, max_tokens=max_tokens)
+    # Imported upstream defaults are frozen; the selected model is per operation.
+    from autoontology.config import expand_model_profile, resolve_triplet_field
+
+    configured = expand_model_profile(settings)
+    prefix = "REASONING" if role == "reasoning" else "NON_REASONING"
+    selected = resolve_triplet_field(configured, prefix, "MODEL")
+    llm = factory(model=selected, temperature=0.0, max_tokens=max_tokens)
+    observed_endpoint = getattr(llm, "openai_api_base", None)
+    expected_endpoint = resolve_triplet_field(configured, prefix, "ENDPOINT")
+    if observed_endpoint and str(observed_endpoint).rstrip("/") != expected_endpoint.rstrip("/"):
+        raise RuntimeError(
+            "The extraction client has stale provider settings. Restart the local worker before retrying."
+        )
     # Upstream leaves temperature unset on its ChatOpenAI path (gpt-5.x rejects it). The
     # local Ollama alias accepts it, and extraction should be deterministic.
     if settings.chat_provider == "ollama" and getattr(llm, "temperature", 0.0) is None:
@@ -247,6 +259,8 @@ class Extractor:
                 )
 
     def extract(self, job: ChunkJob) -> ChunkOutcome:
+        if hasattr(self.backend, "begin_capture"):
+            self.backend.begin_capture()
         human = prompts.human_message(
             doc_title=job.doc_title,
             section_path=job.section_path,
@@ -266,6 +280,8 @@ class Extractor:
             llm_timeout_s=timeout,
             over_timeout=bool(timeout and outcome.detail.get("seconds", 0) > timeout),
         )
+        if hasattr(self.backend, "end_capture"):
+            outcome.detail["invocations"] = self.backend.end_capture()
         return outcome
 
     def _extract(
@@ -406,14 +422,12 @@ def make_judge(
 
 
 def make_embedder(settings: Settings) -> Callable[[list[str]], list[list[float] | None]]:
-    from autoontology.engine.jobs import prepare_upstream_env
+    from autoontology.playground.service import EmbedderCache
 
-    prepare_upstream_env(settings)
-    from auto_ontology.utils.embedding import embed_texts, get_embed_params
-
-    params = get_embed_params()
+    guarded, _ = EmbedderCache(lambda: settings, settings)()
 
     def embed(texts: list[str]) -> list[list[float] | None]:
-        return embed_texts(texts, params, "passage")
+        return guarded(texts, "passage")
 
+    embed.identity = guarded.check
     return embed

@@ -80,12 +80,13 @@ def install(app, api):
     def checked(call):
         from autoontology.engine.jobs import JobError
         from autoontology.engine.model_artifacts import ModelArtifactError
+        from autoontology.store.processing import ProcessingError
         from autoontology.store.publications import PublicationError
         from autoontology.store.restorations import RestoreError
 
         try:
             return call()
-        except (RestoreError, ModelArtifactError) as exc:
+        except (RestoreError, ModelArtifactError, ProcessingError) as exc:
             raise ApiError(exc.status, exc.code, str(exc)) from exc
         except JobError as exc:
             raise ApiError(409, "workspace_busy", str(exc)) from exc
@@ -93,6 +94,18 @@ def install(app, api):
             raise ApiError(409, "publication_invalid", str(exc)) from exc
         except OperationsError as exc:
             raise ApiError(409, "operations_changed", str(exc)) from exc
+
+    @router.get("/processing")
+    def processing(source: str = Query(min_length=1, max_length=128)):
+        from autoontology.store.processing import Processing
+
+        return checked(lambda: Processing(api.store).listing(source))
+
+    @router.get("/processing/{receipt_id}")
+    def processing_record(receipt_id: str):
+        from autoontology.store.processing import Processing
+
+        return checked(lambda: Processing(api.store).get(receipt_id))
 
     @router.get("")
     def overview():

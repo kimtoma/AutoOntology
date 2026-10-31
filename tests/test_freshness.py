@@ -62,6 +62,15 @@ def test_reader_settings_change_is_named(built, monkeypatch):
     assert row["state"] == "stale" and [r["kind"] for r in row["reasons"]] == ["reader_changed"]
 
 
+def test_extraction_selection_change_marks_processing_stale(built):
+    from dataclasses import replace
+
+    changed = replace(built["settings"], chat_provider="codex", codex_model="next-model")
+    rows = {r["name"]: r for r in freshness(built["store"], changed)}
+    assert rows["hanbit-docs"]["state"] == "stale"
+    assert [r["kind"] for r in rows["hanbit-docs"]["reasons"]] == ["reader_changed"]
+
+
 def test_files_source_changed_file(built):
     src = built["store"].get_source("hanbit")
     loaded = {"contracts": {"source_file": str(built["data"] / "contracts.csv")}}

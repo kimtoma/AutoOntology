@@ -489,11 +489,20 @@ class Operations:
     def signature(self, revision: int, profile: dict) -> str:
         from autoontology.store.decisions import DecisionStore
 
+        inputs = {}
+        for selected in {revision, self.state()["published_revision"]} - {None}:
+            snapshot = self.store.get_snapshot(selected, with_model=False)
+            if snapshot is None:
+                raise OperationsError(
+                    "candidate or operational snapshot is missing; recover it before validation"
+                )
+            inputs[str(selected)] = snapshot.sources
         return digest(
             {
                 "state": self.state(),
                 "publication_policy": {"version": 2, "minimum_questions": 1},
                 "revision": revision,
+                "input_bindings": inputs,
                 "changes": self.changes(),
                 "checks": self.checks(),
                 "connection_decisions": [d.to_dict() for d in DecisionStore(self.store).list()],

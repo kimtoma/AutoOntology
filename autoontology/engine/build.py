@@ -264,7 +264,7 @@ class _Build:
                     self.fresh(source),
                     self.settings.home,
                     self.settings.vision_model,
-                    reader=extract_job.reader_settings(self.settings),
+                    reader=extract_job.pipeline_settings(self.settings),
                 )
             detail = fn()
             detail[INPUTS_KEY] = self._fingerprints[source.name]
@@ -471,6 +471,7 @@ class _Build:
 
 def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[dict[str, Any]]:
     """The ``sources`` list of a snapshot: name, kind and what the model holds of each."""
+    from autoontology.store.processing import Processing
     from autoontology.store.provenance import SourceArchive
 
     archive = SourceArchive(store)
@@ -491,6 +492,7 @@ def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[di
             entry["database"] = pipeline.catalog_database_name(s)
         else:
             entry["documents"] = len(DocumentStore(store).list_documents(s.id))
+            entry["processing"] = Processing(store).binding(s.id)
         out.append(entry)
     return out
 
@@ -537,7 +539,7 @@ def _resume_reuse(
             source,
             settings.home,
             settings.vision_model,
-            reader=extract_job.reader_settings(settings),
+            reader=extract_job.pipeline_settings(settings),
         )
         if not current or any(rows[n].detail.get(INPUTS_KEY) != current for n in kept):
             logger.info("--resume: inputs of %s changed since run %s: rebuilt", source.name, run.id)

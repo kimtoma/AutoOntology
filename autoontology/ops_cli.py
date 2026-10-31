@@ -21,6 +21,7 @@ def commands(settings_for, store_for, fail):
         from autoontology.engine.build import WORKSPACE_LEASE
         from autoontology.engine.jobs import JobError, hold_sources
         from autoontology.engine.model_artifacts import ModelArtifactError
+        from autoontology.store.processing import ProcessingError
         from autoontology.store.provenance import ProvenanceError
         from autoontology.store.publications import PublicationError
         from autoontology.store.restorations import RestoreError
@@ -30,7 +31,7 @@ def commands(settings_for, store_for, fail):
             store = store_for(settings)
             with hold_sources(store, [WORKSPACE_LEASE], edit) if edit else nullcontext():
                 return action(store, settings)
-        except (RestoreError, ModelArtifactError) as exc:
+        except (RestoreError, ModelArtifactError, ProcessingError) as exc:
             emit({"error": exc.code, "detail": str(exc)})
             raise typer.Exit(1) from exc
         except ProvenanceError as exc:
@@ -88,6 +89,18 @@ def commands(settings_for, store_for, fail):
         from autoontology.engine.model_artifacts import embedding_identity
 
         emit(run(lambda store, settings: embedding_identity(settings)))
+
+    @app.command("processing")
+    def processing(source: str):
+        from autoontology.store.processing import Processing
+
+        emit(run(lambda store, settings: Processing(store).listing(source)))
+
+    @app.command("processing-record")
+    def processing_record(receipt_id: str):
+        from autoontology.store.processing import Processing
+
+        emit(run(lambda store, settings: Processing(store).get(receipt_id)))
 
     @app.command()
     def validate(revision: int = typer.Option(..., "--revision", min=1)):

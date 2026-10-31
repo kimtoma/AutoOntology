@@ -485,6 +485,22 @@ MIGRATIONS: list[tuple[int, str]] = [
         )
         """,
     ),
+    (
+        11,
+        """
+        CREATE TABLE IF NOT EXISTS processing_receipts (
+            id TEXT PRIMARY KEY, source_id TEXT NOT NULL, source_name TEXT NOT NULL,
+            stage TEXT NOT NULL, record_json TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS processing_receipts_source ON processing_receipts(source_name, created_at);
+        CREATE TABLE IF NOT EXISTS processing_document_reads (
+            document_id TEXT PRIMARY KEY, receipt_id TEXT NOT NULL REFERENCES processing_receipts(id)
+        );
+        CREATE TABLE IF NOT EXISTS processing_source_heads (
+            source_id TEXT PRIMARY KEY, receipt_id TEXT NOT NULL REFERENCES processing_receipts(id)
+        )
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration

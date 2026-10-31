@@ -150,6 +150,8 @@ export interface Publication {
     originals: { sha256: string }[]
     artifacts: Record<string, string>
     index: { model: string; elements: number }
+    source_bindings?: { sources: { kind?: string; included?: boolean; processing?: { status: string } }[] }[]
+    processing_receipts?: { id: string; record: { stage: string; status: string; configuration?: { model?: string; mode?: string } } }[]
   }
 }
 export interface Restoration {

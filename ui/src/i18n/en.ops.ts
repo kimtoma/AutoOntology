@@ -163,7 +163,7 @@ export const enOps = {
   "ops.firstBuild": "First build",
   "ops.exported": "Download files generated",
   "ops.reason.never_built": "Change baseline not recorded",
-  "ops.reason.reader_changed": "Document reader changed",
+  "ops.reason.reader_changed": "Document processing settings changed",
   "ops.reason.inputs_changed": "Source inputs changed",
   "ops.diffFields": "Changed fields",
   "ops.diffEmpty": "No changes in this category",
@@ -234,4 +234,9 @@ export const enOps = {
   "restore.originals": "Original files for comparison",
   "restore.field.comment": "Explanation",
   "restore.field.evidence": "Supporting evidence",
+  "ops.processingHistory": "Processing history",
+  "ops.processingCounts": "Read records {read} · successful extraction records {extract} · consolidation records {consolidate}",
+  "ops.processingProfiles": "Captured extraction selections",
+  "ops.processingUnknown": "Historical processing settings are unknown for some inputs; today's settings do not fill those gaps.",
+  "ops.processingScope": "These records preserve captured inputs, configuration and outputs. Model weights and external reader runtimes are not archived.",
 } as const

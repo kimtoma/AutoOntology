@@ -35,8 +35,17 @@ from autoontology.engine.jobs import (
     require_llm_proxy,
     setup_job_logging,
 )
+from autoontology.engine.processing import (
+    RecordingBackend,
+    backend_descriptor,
+    code_hashes,
+    extraction_config,
+    reader_config,
+)
 from autoontology.store.db import Run, Source, Store, now_iso
 from autoontology.store.documents import DocumentStore
+from autoontology.store.operations import digest
+from autoontology.store.processing import Processing, read_chunks, text_sha256
 from autoontology.store.provenance import SourceArchive
 from autoontology.unstructured import chunker, consolidate, readers, report
 from autoontology.unstructured.extractor import (
@@ -49,7 +58,7 @@ from autoontology.unstructured.extractor import (
     upstream_backend,
 )
 from autoontology.unstructured.report import display_path
-from autoontology.unstructured.schemas import ValidatedExtraction, reverify
+from autoontology.unstructured.schemas import MergeDecision, ValidatedExtraction, reverify
 
 logger = logging.getLogger("autoontology.jobs")
 
@@ -137,8 +146,13 @@ def reader_settings(settings: Settings) -> str:
     fingerprint; OCR readiness and the vision model are added there per input)."""
     return (
         f"reader={READER_VERSION};rows={settings.doc_table_max_rows};"
-        f"cols={readers.DOC_TABLE_MAX_COLS};bytes={settings.doc_max_bytes}"
+        f"cols={readers.DOC_TABLE_MAX_COLS};bytes={settings.doc_max_bytes};"
+        f"chunks={chunker.env_sizes()};code={digest(code_hashes('autoontology.unstructured.readers', 'autoontology.unstructured.chunker'))}"
     )
+
+
+def pipeline_settings(settings: Settings) -> str:
+    return reader_settings(settings) + ";extract=" + digest(extraction_config(settings))
 
 
 def reader_fingerprint(settings: Settings, path: Path, ocr: Callable[[], str]) -> str:
@@ -146,7 +160,11 @@ def reader_fingerprint(settings: Settings, path: Path, ocr: Callable[[], str]) -
     (native readers), the table limits (CSV/TSV), OCR readiness (PDFs and images: *ocr*
     is called only for those) and the vision model (images)."""
     ext = path.suffix.lower()
-    parts = [f"reader={READER_VERSION}"]
+    parts = [
+        f"reader={READER_VERSION}",
+        f"chunks={chunker.env_sizes()}",
+        f"code={digest(code_hashes('autoontology.unstructured.readers', 'autoontology.unstructured.chunker'))}",
+    ]
     if ext in readers.NATIVE_EXTENSIONS:
         parts.append(f"bytes={settings.doc_max_bytes}")
     if ext in (".csv", ".tsv"):
@@ -156,6 +174,26 @@ def reader_fingerprint(settings: Settings, path: Path, ocr: Callable[[], str]) -
     if ext in formats.IMAGE_SUFFIXES and settings.vision_model:
         parts.append(f"vision={settings.vision_model}")
     return ";".join(parts)
+
+
+def record_read(ctx, document_id, document, sha, fingerprint):
+    processing = Processing(ctx.store)
+    identity = processing.record(
+        ctx.source,
+        "read",
+        ctx.run.id,
+        input={"sha256": sha},
+        configuration=reader_config(ctx.settings, fingerprint),
+        output={
+            "title": document.title,
+            "engine": document.engine,
+            "pages": document.pages,
+            "chunks": read_chunks(ctx.docs.chunks_for_document(document_id)),
+        },
+        dependencies=[],
+        status="succeeded",
+    )
+    processing.document_read(document_id, identity)
 
 
 def _same_read(docs: DocumentStore, existing: Any, doc: readers.Document, chunks: list) -> bool:
@@ -375,6 +413,7 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             continue
         if existing is not None and _same_read(ctx.docs, existing, doc, chunks):
             ctx.docs.set_reader_fingerprint(existing.id, fingerprint)
+            record_read(ctx, existing.id, doc, sha, fingerprint)
             keep_cached()
             continue
         row, replaced = ctx.docs.replace_document(
@@ -389,6 +428,7 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
             pages=doc.pages,
             chunks=chunks,
         )
+        record_read(ctx, row.id, doc, sha, fingerprint)
         action = "replaced" if replaced or shown in replaced_paths else "new"
         documents.append(
             {
@@ -474,9 +514,29 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
 
 
 def _step_extract(ctx: _ExtractCtx) -> dict[str, Any]:
+    from autoontology.unstructured import prompts
+
+    processing = Processing(ctx.store)
+    configuration = extraction_config(ctx.settings)
+    configuration_sha = digest(configuration)
     titles = {d.id: d.title for d in ctx.docs.list_documents(ctx.source.id)}
+    documents = {d.id: d for d in ctx.docs.list_documents(ctx.source.id)}
     all_chunks = ctx.docs.chunks_for_source(ctx.source.id)
-    pending = [c for c in all_chunks if c.extraction is None]
+    for chunk in all_chunks:
+        identity = chunk.extract_detail.get("processing_receipt")
+        if chunk.extraction is not None and identity:
+            record = processing.get(identity)["record"]
+            if record["output"] != chunk.extraction or record["input"][
+                "text_sha256"
+            ] != text_sha256(chunk.text):
+                raise RuntimeError("cached extraction differs from its immutable receipt")
+    pending = [
+        c
+        for c in all_chunks
+        if c.extraction is None
+        or not c.extract_detail.get("processing_receipt")
+        or c.extract_detail.get("configuration_sha256") != configuration_sha
+    ]
     limited = pending[: ctx.max_chunks] if ctx.max_chunks is not None else pending
     detail: dict[str, Any] = {
         "chunks": len(all_chunks),
@@ -501,6 +561,31 @@ def _step_extract(ctx: _ExtractCtx) -> dict[str, Any]:
         )
         for c in limited
     ]
+    by_id = {c.id: c for c in limited}
+    for chunk in limited:
+        if chunk.extraction is not None:
+            old = chunk.extract_detail.get("processing_receipt")
+            if old:
+                if processing.get(old)["record"]["output"] != chunk.extraction:
+                    raise RuntimeError("cached extraction differs from its immutable receipt")
+            else:
+                processing.record(
+                    ctx.source,
+                    "extract",
+                    ctx.run.id,
+                    input={
+                        "document_sha256": documents[chunk.doc_id].sha256,
+                        "text": chunk.text,
+                        "text_sha256": text_sha256(chunk.text),
+                    },
+                    configuration={
+                        "status": "unknown",
+                        "reason": "legacy extraction settings were not recorded",
+                    },
+                    output=chunk.extraction,
+                    dependencies=[],
+                    status="legacy",
+                )
     run_id = ctx.run.id
     done = {"n": 0}
     paths: dict[str, int] = {}
@@ -518,6 +603,24 @@ def _step_extract(ctx: _ExtractCtx) -> dict[str, Any]:
             retried["chunks"] += 1
             retried["retries"] += outcome.detail["upstream_retries"]
         if outcome.extraction is None:
+            chunk = by_id[outcome.job.key]
+            read = processing.read_for(chunk.doc_id)
+            processing.record(
+                ctx.source,
+                "extract",
+                ctx.run.id,
+                input={
+                    "document_sha256": documents[chunk.doc_id].sha256,
+                    "text": chunk.text,
+                    "text_sha256": text_sha256(chunk.text),
+                },
+                configuration=configuration,
+                backend=backend_descriptor(ctx.backends.extraction()),
+                output=None,
+                dependencies=[read] if read else [],
+                status="failed",
+                invocations=outcome.detail.pop("invocations", []),
+            )
             errors.append(outcome.error or "unknown error")
             failed_chunks.append(
                 {
@@ -541,6 +644,42 @@ def _step_extract(ctx: _ExtractCtx) -> dict[str, Any]:
                 (outcome.error or "")[:200],
             )
             return
+        chunk = by_id[outcome.job.key]
+        read = processing.read_for(chunk.doc_id)
+        receipt = processing.record(
+            ctx.source,
+            "extract",
+            ctx.run.id,
+            input={
+                "document_sha256": documents[chunk.doc_id].sha256,
+                "chunk_id": chunk.id,
+                "text": chunk.text,
+                "text_sha256": text_sha256(chunk.text),
+            },
+            configuration=configuration,
+            backend=backend_descriptor(ctx.backends.extraction()),
+            messages={
+                "structured_system": prompts.SYSTEM_PROMPT,
+                "json_system": prompts.json_mode_system_prompt(),
+                "human": prompts.human_message(
+                    doc_title=outcome.job.doc_title,
+                    section_path=outcome.job.section_path,
+                    index=outcome.job.index,
+                    total=outcome.job.total,
+                    chunk_text=outcome.job.text,
+                ),
+            },
+            output=outcome.extraction.to_dict(),
+            dependencies=[read] if read else [],
+            status="succeeded",
+            execution={
+                k: v
+                for k, v in outcome.detail.items()
+                if k in ("path", "seconds", "json_attempts", "upstream_retries", "llm_timeout_s")
+            },
+            invocations=outcome.detail.pop("invocations", []),
+        )
+        outcome.detail.update(processing_receipt=receipt, configuration_sha256=configuration_sha)
         ctx.docs.set_chunk_extraction(outcome.job.key, outcome.extraction.to_dict(), outcome.detail)
         ctx.store.finish_step(run_id, name, status="succeeded", detail=outcome.detail)
         path = outcome.detail.get("path", "?")
@@ -559,7 +698,7 @@ def _step_extract(ctx: _ExtractCtx) -> dict[str, Any]:
             f" ({retries} upstream retry/retries after a timeout or error)" if retries else "",
         )
 
-    extractor = Extractor(ctx.backends.extraction())
+    extractor = Extractor(RecordingBackend(ctx.backends.extraction()))
     outcomes = extractor.run(jobs, workers=ctx.workers, on_start=on_start, on_done=on_done)
     succeeded = sum(o.extraction is not None for o in outcomes)
     detail.update(
@@ -607,7 +746,25 @@ def consolidation_config(settings: Settings, threshold: float, max_judge: int) -
         "judge_model": resolve_triplet_field(models, "NON_REASONING", "MODEL") or "",
         "embed_model": resolve_triplet_field(models, "EMBED", "MODEL") or "",
         "merge_prompt": hashlib.sha256(prompts.MERGE_SYSTEM_PROMPT.encode()).hexdigest()[:16],
+        "judge_endpoint_sha256": digest(resolve_triplet_field(models, "NON_REASONING", "ENDPOINT")),
+        "embed_endpoint_sha256": digest(resolve_triplet_field(models, "EMBED", "ENDPOINT")),
+        "schema_sha256": digest(MergeDecision.model_json_schema()),
+        "code": code_hashes(
+            "autoontology.unstructured.consolidate", "autoontology.unstructured.schemas"
+        ),
+        "embedding_artifact": {"status": "unverified", "reason": "injected embedder"},
     }
+
+
+def active_consolidation_config(ctx, threshold, max_judge):
+    from autoontology.engine.model_artifacts import embedding_identity
+
+    config = consolidation_config(ctx.settings, threshold, max_judge)
+    if ctx.backends.embedder is None:
+        config["embedding_artifact"] = embedding_identity(ctx.settings)
+    elif hasattr(ctx.backends.embedder, "identity"):
+        config["embedding_artifact"] = ctx.backends.embedder.identity()
+    return config
 
 
 def _consolidation_incomplete(detail: dict[str, Any]) -> bool:
@@ -675,7 +832,7 @@ def _step_consolidate(ctx: _ExtractCtx) -> dict[str, Any]:
     fingerprint = extraction_fingerprint(pairs)
     threshold = consolidate.threshold_from_env()
     max_judge = consolidate.max_judge_from_env()
-    config = consolidation_config(ctx.settings, threshold, max_judge)
+    config = active_consolidation_config(ctx, threshold, max_judge)
     previous = _last_consolidation(ctx)
     current = ctx.docs.ontology_identity(ctx.source.id)
     # cache identity = extractions + config (a consolidation recorded without a config
@@ -705,6 +862,10 @@ def _step_consolidate(ctx: _ExtractCtx) -> dict[str, Any]:
         threshold=threshold,
         max_judge=max_judge,
     )
+    if active_consolidation_config(ctx, threshold, max_judge) != config:
+        raise RuntimeError(
+            "consolidation provider identity changed; retry before replacing knowledge"
+        )
     counts = ctx.docs.replace_ontology(ctx.source.id, result.concepts, result.relations)
     stats = result.stats.to_dict()
     logger.info(
@@ -727,7 +888,7 @@ def _step_consolidate(ctx: _ExtractCtx) -> dict[str, Any]:
             stats["judge_failures"],
             stats["missing_vectors"],
         )
-    return {
+    detail = {
         "action": "consolidated",
         "fingerprint": None if partial else fingerprint,
         "config": config,
@@ -738,6 +899,34 @@ def _step_consolidate(ctx: _ExtractCtx) -> dict[str, Any]:
         "ontology_sha": ctx.docs.ontology_identity(ctx.source.id),
         **counts,
     }
+    from dataclasses import asdict
+
+    processing = Processing(ctx.store)
+    identity = processing.record(
+        ctx.source,
+        "consolidate",
+        ctx.run.id,
+        input={"extractions_sha256": fingerprint},
+        configuration=config,
+        backend=backend_descriptor(ctx.backends.judge()),
+        output={
+            "ontology_sha": detail["ontology_sha"],
+            "concepts": [asdict(c) for c in result.concepts],
+            "relations": [asdict(r) for r in result.relations],
+        },
+        dependencies=sorted(
+            {
+                c.extract_detail["processing_receipt"]
+                for c in chunks
+                if c.extract_detail.get("processing_receipt")
+            }
+        ),
+        unknown_extractions=sum(not c.extract_detail.get("processing_receipt") for c in chunks),
+        status="partial" if partial else "succeeded",
+    )
+    processing.head(ctx.source.id, identity)
+    detail["processing_receipt"] = identity
+    return detail
 
 
 def _llm_timeout(settings: Settings) -> float | None:
@@ -904,7 +1093,15 @@ def _run_extract_held(
         "max_chunks": max_chunks,
         "pid": os.getpid(),
     }
+    from autoontology.engine.build import input_fingerprint
+
+    params["inputs_sha"] = input_fingerprint(
+        source, settings.home, settings.vision_model, reader=pipeline_settings(settings)
+    )
     previous = store.latest_run(source.id, EXTRACT_KIND) if resume else None
+    changed = previous is not None and (
+        not params["inputs_sha"] or previous.params.get("inputs_sha") != params["inputs_sha"]
+    )
     if previous is not None:
         store.update_run(
             previous.id,
@@ -914,6 +1111,8 @@ def _run_extract_held(
         run = store.get_run(previous.id)
         assert run is not None
         already = store.succeeded_steps(run.id) & set(EXTRACT_STEPS)
+        if changed:
+            already.clear()
         last = {s.name: s.detail for s in store.get_steps(run.id)}
         last_extract = last.get("extract", {})
         if last.get("read", {}).get("failed"):
@@ -970,7 +1169,7 @@ def _run_extract_held(
         workers=workers,
         max_chunks=max_chunks,
         backends=backends or Backends(settings),
-        full_scan=max_chunks is None and previous is None,
+        full_scan=max_chunks is None and (previous is None or changed),
     )
     result = _execute(ctx, list(EXTRACT_STEPS), skip={}, already=already, steps=EXTRACT_STEP_FUNCS)
     result.export_dir = ctx.export_dir

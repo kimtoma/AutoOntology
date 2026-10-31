@@ -188,9 +188,9 @@ candidate and previous operational revisions, the approved model hash, decision
 records, representative-question results, preserved originals and source-input
 revision hashes, a dedicated frozen retrieval scope, and export hashes. The
 embedding endpoint is hashed; credentials and raw endpoints are not copied into
-receipts. Known reader fingerprints are recorded. Historical extractor/chat
-profiles were not saved and are explicitly marked unknown rather than inferred
-from the current settings. Connected database rows remain live at execution;
+receipts. Snapshot-bound processing records capture new reader/extraction
+profiles; missing historical profiles stay explicitly unknown rather than
+being inferred from the current settings. Connected database rows remain live at execution;
 source revisions preserve input files or catalog schemas, not historical rows.
 
 Publication copies the exact validated vectors without embedding passages again.
@@ -404,3 +404,61 @@ atomically, archive the weights/runtime, or guarantee deterministic model output
 Historical chat/extraction settings and complete runtime/weight recovery remain
 separate lineage work. A controlled read-only proxy is used in acceptance tests
 to simulate digest drift without changing the shared Ollama models.
+
+## Document processing receipts
+
+Schema v11 adds content-addressed processing records independent of mutable
+sources, documents and chunks. Successful reads capture the original byte hash,
+observed reader/engine settings, chunk settings, reader code hashes and actual
+chunk outputs. Extraction captures each chunk's exact text, requested model and
+provider options, schema/prompt/code hashes, observed client configuration where
+available, application backend calls, parsed output and dependencies on its read.
+Consolidation captures its thresholds, model/endpoint identities, code/schema
+hashes, input extraction dependencies and materialized output. Ollama embedding
+identity is checked before replacing consolidation results.
+
+Backend calls include structured/JSON fallback requests and results exposed by
+the application helper. Internal helper/provider retries may not expose every
+wire request. Injected backends, unrecorded historical settings, immutable model
+weights and external reader runtime archives remain explicitly unverified. No
+credentials or raw provider endpoints are copied into configuration records.
+Receipt contents can include the source text and model output; they have the
+same sensitivity as the original documents.
+
+An unchanged extraction profile reuses its validated results without another
+generation call. Model, prompt, schema, extraction-mode and relevant provider
+option changes invalidate the chunk cache, including `--resume`. Reader/chunk
+settings invalidate reading and packing; freshness and build/resume use the same
+processing fingerprint. Failed replacements leave the current chunk pending and
+retain earlier immutable results. Legacy extraction output is archived with an
+unknown configuration before replacement; it is never relabeled as today's work.
+Removing a source or replacing document/chunk rows does not delete its records.
+
+Build snapshots pin processing references in their source bindings. Publication
+validation binds those exact inputs; changed bindings invalidate its token. New
+publication manifests expand and verify the processing dependency closure.
+Later publications inherit frozen input bindings from the previous publication
+manifest and bind its publication ID; a publication snapshot containing only
+source display names cannot replace those original bindings.
+Historical reader settings come from these pinned read records, never from a
+matching file in today's live document table. Restoration preserves the target's
+frozen bindings. Missing or corrupt referenced processing records block integrity
+verification and publication preparation.
+
+In **Change history → Verify publication → Processing history**, inspect counts,
+recorded extraction selections and explicit historical gaps. The detailed receipt
+contains the underlying records. Native CLI operations and HTTP inspection use
+the same core:
+
+```sh
+uv run autoontology ops processing SOURCE_NAME
+uv run autoontology ops processing-record proc-RECEIPT_HASH
+uv run autoontology ops publication --revision 12 --verify
+```
+
+`GET /api/ops/processing?source=SOURCE_NAME` lists recent source records, including
+unpublished/failed attempts; `GET /api/ops/processing/{id}` inspects one record.
+Publication inspection names only the frozen records relevant to its input
+bindings. Reading records never calls a model or rebuilds the ontology. These
+records do not establish authenticated human/agent authority or measured human
+active effort; those remain separate roadmap stages.
