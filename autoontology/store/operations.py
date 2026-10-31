@@ -12,6 +12,7 @@ import copy
 import hashlib
 import json
 import sqlite3
+from contextlib import nullcontext
 from typing import Any
 
 from autoontology.ontology.model import MergedOntology
@@ -292,24 +293,12 @@ class Operations:
                 )
         return items
 
-    @requires("review.decide")
-    def decide(
-        self,
-        change_id: str,
-        decision: str,
-        *,
-        candidate: int,
-        note: str = "",
-        actor: str = "local",
-        edits: dict | None = None,
-    ) -> dict:
-        if self.state()["candidate_revision"] != candidate:
-            raise OperationsError("candidate changed; refresh before deciding")
+    @staticmethod
+    def validate_review(item, decision, note, edits=None):
         if decision not in ("accept", "reject", "hold"):
             raise OperationsError("invalid decision")
-        item = next((i for i in self.changes() if i["id"] == change_id), None)
-        if item is None:
-            raise OperationsError("change no longer exists")
+        if edits is not None and not isinstance(edits, dict):
+            raise OperationsError("knowledge edits must be an object")
         edits = edits or {}
         allowed = {
             "classes": {"label", "definitions", "alt_labels", "comment"},
@@ -332,7 +321,29 @@ class Operations:
                 raise OperationsError("invalid edited text")
         if decision == "reject" and not note.strip():
             raise OperationsError("a rejection needs a reason")
-        with self.store._immediate() as conn:
+        return edits
+
+    @requires("review.decide")
+    def decide(
+        self,
+        change_id: str,
+        decision: str,
+        *,
+        candidate: int,
+        note: str = "",
+        actor: str = "local",
+        edits: dict | None = None,
+        conn=None,
+    ) -> dict:
+        if self.state()["candidate_revision"] != candidate:
+            raise OperationsError("candidate changed; refresh before deciding")
+        if decision not in ("accept", "reject", "hold"):
+            raise OperationsError("invalid decision")
+        item = next((i for i in self.changes() if i["id"] == change_id), None)
+        if item is None:
+            raise OperationsError("change no longer exists")
+        edits = self.validate_review(item, decision, note, edits)
+        with nullcontext(conn) if conn is not None else self.store._immediate() as conn:
             authority = authorize(self.store, "review.decide", conn=conn)
             if self.state()["candidate_revision"] != candidate:
                 raise OperationsError("candidate changed; refresh before deciding")
@@ -361,23 +372,58 @@ class Operations:
                 },
                 conn=conn,
             )
+            self._review_event(
+                conn,
+                change_id,
+                "decide",
+                actor,
+                {
+                    "candidate": candidate,
+                    "decision": decision,
+                    "note": note.strip(),
+                    "edits": edits,
+                },
+            )
             return dict(
                 conn.execute("SELECT * FROM ops_reviews WHERE id=?", (change_id,)).fetchone()
             )
 
+    def _review_event(self, conn, change_id, operation, actor, data):
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ops_review_events'"
+        ).fetchone():
+            conn.execute(
+                "INSERT INTO ops_review_events(change_id,operation,actor,payload_json,created_at) VALUES(?,?,?,?,?)",
+                (change_id, operation, actor, json.dumps(data, ensure_ascii=False), now_iso()),
+            )
+
     @requires("review.decide")
-    def undo(self, change_id: str) -> None:
-        with self.store._immediate() as conn:
+    def undo(self, change_id: str, *, conn=None) -> None:
+        with nullcontext(conn) if conn is not None else self.store._immediate() as conn:
             authority = authorize(self.store, "review.decide", conn=conn)
             row = conn.execute(
                 "SELECT applied_revision FROM ops_reviews WHERE id=?", (change_id,)
             ).fetchone()
             if row and row[0] is not None:
                 raise OperationsError("published decisions require a new change")
+            self._review_event(
+                conn,
+                change_id,
+                "undo",
+                authority.actor.principal_id if authority else "local-unverified",
+                {
+                    "previous": dict(
+                        conn.execute(
+                            "SELECT * FROM ops_reviews WHERE id=?", (change_id,)
+                        ).fetchone()
+                        or {}
+                    )
+                },
+            )
             conn.execute("DELETE FROM ops_reviews WHERE id=?", (change_id,))
             audit_effect(self.store, authority, change_id, {"operation": "undo"}, conn=conn)
 
-    def compose(self, revision: int) -> tuple[MergedOntology, list[dict]]:
+    def compose(self, revision: int, *, reviews=None) -> tuple[MergedOntology, list[dict]]:
         state = self.state()
         if state["candidate_revision"] != revision:
             raise OperationsError("candidate changed; refresh")
@@ -389,9 +435,18 @@ class Operations:
             if state["published_revision"] is not None:
                 raise OperationsError("the published snapshot is missing; restore the workspace")
             base = MergedOntology(draft.name, draft.base)
-        selected = [
-            i for i in self.changes() if i["decision"] and i["decision"]["decision"] == "accept"
-        ]
+        changes = self.changes()
+        if reviews is not None:
+            for item in changes:
+                if item["id"] in reviews:
+                    item["decision"] = {
+                        "actor": "proposed",
+                        "created_at": "pending-confirmation",
+                        "edits": {},
+                        "note": "",
+                        **reviews[item["id"]],
+                    }
+        selected = [i for i in changes if i["decision"] and i["decision"]["decision"] == "accept"]
         if not selected:
             raise OperationsError("no approved changes to publish")
         data = base.to_dict()

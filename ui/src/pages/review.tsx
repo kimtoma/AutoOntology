@@ -1,3 +1,4 @@
+import { CaseBoard } from "@/components/case-board"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { Link, useSearchParams } from "react-router"
@@ -368,11 +369,7 @@ export default function ReviewPage() {
   const [chosenTab, setTab] = useState(params.get("tab") || ""),
     [selected, setSelected] = useState(params.get("item") || ""),
     [run, setRun] = useState<string | null>(null)
-  const tab =
-    chosenTab ||
-    (!changes.data?.items.length && !changes.isPending && legacy.data?.items.length
-      ? "connections"
-      : "changes")
+  const tab = params.get("tab") || chosenTab || (params.has("item") ? "changes" : "cases")
   const apply = useMutation({
     mutationFn: () => api.startRun({ kind: "apply" }),
     onSuccess: (r) => {
@@ -419,6 +416,7 @@ export default function ReviewPage() {
       />
       <div className="review-tabs" role="tablist" aria-label={t("ops.review")}>
         {[
+          ["cases", "cases.title"],
           ["changes", "ops.changes"],
           ["connections", "ops.alignments"],
           ["feedback", "ops.feedback"],
@@ -448,7 +446,7 @@ export default function ReviewPage() {
           </Button>
         ))}
       </div>
-      {tab !== "feedback" && (
+      {tab !== "feedback" && tab !== "cases" && (
         <div className="review-filters">
           {[
             ["all", "ops.all"],
@@ -472,7 +470,7 @@ export default function ReviewPage() {
           ))}
         </div>
       )}
-      {(tab === "changes" ? changes.error : tab === "connections" ? legacy.error : changes.error) ? (
+      {tab === "cases" ? <CaseBoard /> : (tab === "changes" ? changes.error : tab === "connections" ? legacy.error : changes.error) ? (
         <ErrorState
           error={changes.error || legacy.error}
           onRetry={() => {

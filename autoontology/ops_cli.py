@@ -296,4 +296,7 @@ def commands(settings_for, store_for, fail):
     from autoontology.query_cli import install
 
     install(app, settings_for)
+    from autoontology.cases_cli import install as install_cases
+
+    install_cases(app, settings_for, store_for)
     return app

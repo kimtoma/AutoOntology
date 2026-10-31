@@ -85,6 +85,17 @@ GROUPS = {
         "conversations": "results.read",
         "conversation": "results.read",
         "forget-conversation": "results.delete",
+        "cases": "candidate.read",
+        "case": "candidate.read",
+        "case-summary": "candidate.read",
+        "case-members": "candidate.read",
+        "case-create": "review.suggest",
+        "case-update": "review.suggest",
+        "case-prepare": "review.suggest",
+        "case-confirm": "review.decide",
+        "case-rebase": "review.suggest",
+        "case-reopen": "review.decide",
+        "case-resolve": "review.decide",
     },
 }
 

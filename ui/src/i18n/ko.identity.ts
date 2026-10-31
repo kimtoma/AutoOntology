@@ -1,9 +1,11 @@
 import type { enIdentity } from "@/i18n/en.identity"
 import { koAccess } from "@/i18n/ko.access"
+import { koCases } from "@/i18n/ko.cases"
 
 export const koIdentity: Record<keyof typeof enIdentity, string> = {
   "identity.authorityChanged": "접근 권한이 변경되어 실행 중 요청을 중단하고 화면을 새로 확인했습니다. 저장된 결과도 현재 권한으로 확인합니다.",
   ...koAccess,
+  ...koCases,
   "identity.scope.title": "내 접근 범위의 지식",
   "identity.scope.hint": "읽을 수 있는 소스로 뒷받침된 완전한 항목만 표시합니다. 여러 소스가 합쳐진 항목은 모든 기여 소스의 접근 권한이 필요합니다.",
   "identity.scope.exports": "현재 접근 범위의 승인된 지식을 Turtle·JSON-LD·GraphML로 다운로드합니다.",

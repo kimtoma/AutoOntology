@@ -1,3 +1,4 @@
+import { CaseSummaryRow } from "@/components/case-board"
 import { useQuery } from "@tanstack/react-query"
 import {
   ArrowRight,
@@ -58,6 +59,7 @@ export default function OperationsHome() {
           </>
         }
       />
+      <CaseSummaryRow />
       <div className="ops-metrics" id="operations-counts">
         {[
           [t("ops.pending"), pending, "/review", t("console.pendingHint")],

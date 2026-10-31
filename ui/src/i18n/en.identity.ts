@@ -1,7 +1,9 @@
 import { enAccess } from "@/i18n/en.access"
+import { enCases } from "@/i18n/en.cases"
 export const enIdentity = {
   "identity.authorityChanged": "Access changed. Active requests stopped and this view refreshed. Saved results are checked against your current access.",
   ...enAccess,
+  ...enCases,
   "identity.scope.title": "Knowledge within your access",
   "identity.scope.hint": "Only complete items supported by sources you can read are shown. A combined item requires access to every contributing source.",
   "identity.scope.exports": "Download the approved knowledge within your current access as Turtle, JSON-LD or GraphML.",

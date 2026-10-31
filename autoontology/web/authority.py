@@ -97,6 +97,29 @@ _policies("candidate.read", "GET", "/api/ops/restores", "/api/ops/restores/{prop
 _policies("knowledge.restore", "POST", "/api/ops/restores/{proposal}/execute")
 _policies("feedback.submit", "POST", "/api/ops/feedback")
 _policies("feedback.manage", "POST", "/api/ops/feedback/{item_id}/resolve")
+_policies(
+    "candidate.read",
+    "GET",
+    "/api/cases",
+    "/api/cases/summary",
+    "/api/cases/members",
+    "/api/cases/{ident}",
+)
+_policies(
+    "review.suggest",
+    "POST",
+    "/api/cases",
+    "/api/cases/{ident}/prepare",
+    "/api/cases/{ident}/rebase",
+)
+_policies("review.suggest", "PATCH", "/api/cases/{ident}")
+_policies(
+    "review.decide",
+    "POST",
+    "/api/cases/packets/{packet}/confirm",
+    "/api/cases/{ident}/resolve",
+    "/api/cases/{ident}/reopen",
+)
 _policies("checks.edit", "POST", "/api/ops/checks")
 _policies("checks.edit", "DELETE", "/api/ops/checks/{item_id}")
 _policies(

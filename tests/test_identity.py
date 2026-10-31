@@ -385,7 +385,7 @@ def test_atomic_v11_upgrade_preserves_existing_rows_and_leaves_identity_unconfig
                 for name in tables
             }
     upgraded = Store(path)
-    assert upgraded.schema_version() == 14 and not Identity(upgraded).status()["configured"]
+    assert upgraded.schema_version() == 15 and not Identity(upgraded).status()["configured"]
     with upgraded._conn() as conn:
         assert {
             name: [tuple(row) for row in conn.execute(f'SELECT * FROM "{name}"')] for name in tables

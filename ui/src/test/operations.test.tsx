@@ -39,6 +39,7 @@ const routes = {
   "GET /ontology": ontology,
   "GET /sources/freshness": { sources: [], stale: 0, age_s: 0 },
   "GET /runs": [],
+  "GET /cases/summary": { active: 0, awaiting_review: 0, overdue: 0, unassigned: 0, held: 0 },
   "GET /ops/connections": { items: [], counts: { total: 0 }, unapplied: 0, pages: 1, total: 0 },
   "GET /ops/changes": { ...overview, items: [item], feedback: [] },
 }
@@ -81,7 +82,7 @@ describe("Ontology Ops", () => {
   it("saves a review decision without calling publication", async () => {
     const user = userEvent.setup()
     const { calls } = mockFetch({ ...routes, "POST /ops/changes/abc/decision": { decision: "accept" } })
-    renderPage(<ReviewPage />)
+    renderPage(<ReviewPage />, "/review?tab=changes")
     await user.click(await screen.findByRole("button", { name: "Approve change" }))
     await waitFor(() => expect(calls.some((c) => c.path === "/ops/changes/abc/decision")).toBe(true))
     expect(calls.some((c) => c.path === "/ops/publish")).toBe(false)
@@ -89,7 +90,7 @@ describe("Ontology Ops", () => {
   it("requires a reason for rejection", async () => {
     const user = userEvent.setup()
     const { calls } = mockFetch(routes)
-    renderPage(<ReviewPage />)
+    renderPage(<ReviewPage />, "/review?tab=changes")
     await user.click(await screen.findByRole("button", { name: "Exclude proposal" }))
     expect(screen.getByRole("alert")).toHaveTextContent("Enter a reason")
     expect(calls.some((c) => c.method === "POST")).toBe(false)
@@ -97,7 +98,7 @@ describe("Ontology Ops", () => {
   it("edits a proposal with named inputs and requires an explanation", async () => {
     const user = userEvent.setup()
     const { calls } = mockFetch({ ...routes, "POST /ops/changes/abc/decision": { decision: "accept" } })
-    renderPage(<ReviewPage />)
+    renderPage(<ReviewPage />, "/review?tab=changes")
     await user.click(await screen.findByRole("button", { name: "Edit proposal" }))
     const definition = screen.getByLabelText("Definition", { exact: true })
     await user.clear(definition)

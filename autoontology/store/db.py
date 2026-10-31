@@ -594,6 +594,44 @@ MIGRATIONS: list[tuple[int, str]] = [
         BEGIN SELECT RAISE(ABORT,'message knowledge scope is immutable'); END
         """,
     ),
+    (
+        15,
+        """
+        CREATE TABLE ops_cases (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, reason TEXT NOT NULL,
+            owner_id TEXT, priority TEXT NOT NULL, due_at TEXT,
+            base_revision INTEGER, candidate_revision INTEGER, base_publication_id TEXT,
+            status TEXT NOT NULL, version INTEGER NOT NULL,
+            changes_json TEXT NOT NULL, links_json TEXT NOT NULL, outcome_json TEXT NOT NULL DEFAULT '{}',
+            request_key TEXT NOT NULL UNIQUE, request_sha TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE ops_case_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT NOT NULL REFERENCES ops_cases(id),
+            sequence INTEGER NOT NULL, operation TEXT NOT NULL, actor_json TEXT NOT NULL,
+            data_json TEXT NOT NULL, previous_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL,
+            created_at TEXT NOT NULL, UNIQUE(case_id,sequence));
+        CREATE TABLE ops_case_packets (
+            id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES ops_cases(id),
+            payload_json TEXT NOT NULL, sha256 TEXT NOT NULL,
+            expires_at REAL NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE ops_case_receipts (
+            packet_id TEXT PRIMARY KEY REFERENCES ops_case_packets(id),
+            case_id TEXT NOT NULL REFERENCES ops_cases(id), record_json TEXT NOT NULL,
+            sha256 TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE ops_review_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, change_id TEXT NOT NULL,
+            operation TEXT NOT NULL, actor TEXT NOT NULL, payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL);
+        CREATE TRIGGER case_events_no_update BEFORE UPDATE ON ops_case_events BEGIN SELECT RAISE(ABORT,'immutable case event'); END;
+        CREATE TRIGGER case_events_no_delete BEFORE DELETE ON ops_case_events BEGIN SELECT RAISE(ABORT,'immutable case event'); END;
+        CREATE TRIGGER case_packets_no_update BEFORE UPDATE ON ops_case_packets BEGIN SELECT RAISE(ABORT,'immutable review packet'); END;
+        CREATE TRIGGER case_packets_no_delete BEFORE DELETE ON ops_case_packets BEGIN SELECT RAISE(ABORT,'immutable review packet'); END;
+        CREATE TRIGGER case_receipts_no_update BEFORE UPDATE ON ops_case_receipts BEGIN SELECT RAISE(ABORT,'immutable review receipt'); END;
+        CREATE TRIGGER case_receipts_no_delete BEFORE DELETE ON ops_case_receipts BEGIN SELECT RAISE(ABORT,'immutable review receipt'); END;
+        CREATE TRIGGER review_events_no_update BEFORE UPDATE ON ops_review_events BEGIN SELECT RAISE(ABORT,'immutable review event'); END;
+        CREATE TRIGGER review_events_no_delete BEFORE DELETE ON ops_review_events BEGIN SELECT RAISE(ABORT,'immutable review event'); END;
+    """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
