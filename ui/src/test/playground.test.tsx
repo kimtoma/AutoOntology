@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { CitedText } from "@/components/playground/shared"
+import { SqlTab } from "@/components/playground/sql-tab"
 import { api, parseSse, type SseEvent } from "@/lib/api"
 import { tabulate, toCsv } from "@/lib/playground"
 import PlaygroundPage from "@/pages/playground"
@@ -35,6 +36,45 @@ function sse(events: [string, unknown][]) {
 }
 
 describe("playground helpers", () => {
+  it("shows a requested stop and allows correcting the SQL question", async () => {
+    const request = vi.spyOn(api.playground, "sql").mockImplementation((_body, _event, signal) =>
+      new Promise((_resolve, reject) => signal?.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")))))
+    renderPage(<SqlTab source="hanbit" />)
+    await userEvent.type(screen.getByRole("textbox"), "고객 목록")
+    await userEvent.click(screen.getByRole("button", {name: /Ask/}))
+    await userEvent.click(await screen.findByRole("button", {name: /Stop/}))
+    expect(await screen.findByRole("status")).toHaveTextContent("Stop requested")
+    expect(screen.getByRole("link", {name: "Usage history"})).toHaveAttribute("href", "/playground?tab=usage")
+    expect(screen.getByRole("button", {name: /Ask/})).toBeEnabled()
+    expect(screen.queryByRole("link", {name: "CSV"})).toBeNull()
+    request.mockRestore()
+  })
+  it("downloads completed SQL from its receipt and labels limited live data", async () => {
+    const trace = "a".repeat(32)
+    mockFetch({"POST /playground/sql": () => sse([
+      ["meta", { trace_id: trace, revision: 8, row_limit: 500 }],
+      ["result", { answer: { sql_code: "SELECT ...", sql_columns: ["customer"], sql_response_from_db: [["한빛"]], truncated: true } }],
+      ["done", { trace_id: trace, status: "succeeded" }],
+    ])})
+    renderPage(<SqlTab source="hanbit" />)
+    await userEvent.type(screen.getByRole("textbox"), "고객 목록")
+    await userEvent.click(screen.getByRole("button", {name: /Ask/}))
+    expect(await screen.findByRole("link", {name: "CSV"})).toHaveAttribute("href", `/api/playground/traces/${trace}/result.csv`)
+    expect(screen.getByText(/Approved knowledge r8/)).toBeInTheDocument()
+    expect(screen.getByText(/Output was limited/)).toBeInTheDocument()
+  })
+
+  it("does not offer a SQL result download when completion fails", async () => {
+    mockFetch({"POST /playground/sql": () => sse([
+      ["meta", {trace_id: "a".repeat(32), revision: 8}],
+      ["error", {error: "sql_timeout", detail: "Refine the question"}],
+    ])})
+    renderPage(<SqlTab source="hanbit" />)
+    await userEvent.type(screen.getByRole("textbox"), "고객 목록")
+    await userEvent.click(screen.getByRole("button", {name: /Ask/}))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Refine the question")
+    expect(screen.queryByRole("link", {name: "CSV"})).toBeNull()
+  })
   it("parses SSE across chunk boundaries", () => {
     const got: SseEvent[] = []
     let tail = parseSse('event: delta\ndata: {"text":"안', (e) => got.push(e))

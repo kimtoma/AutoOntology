@@ -312,6 +312,14 @@ def install_publication(
                 "publication_id": restoration.get("target_publication_id"),
             }
             marker_path.write_text(json.dumps(marker, ensure_ascii=False, indent=2))
+        from autoontology.playground.sql_catalog import write_catalog
+
+        input_bindings = (
+            source_bindings
+            if source_bindings is not None
+            else publications.bindings((previous, revision))
+        )
+        write_catalog(store, settings, model, revision, work, input_bindings)
         publication = publications.prepare(
             new,
             candidate=revision,
@@ -322,7 +330,7 @@ def install_publication(
             scope=frozen_scope,
             folder=work,
             restoration=restoration,
-            source_bindings=source_bindings,
+            source_bindings=input_bindings,
         )
         for path in work.rglob("*"):
             if path.is_file():

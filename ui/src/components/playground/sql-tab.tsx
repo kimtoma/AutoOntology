@@ -1,7 +1,8 @@
-/* SQL: upstream's NL->SQL agent over a structured source, relayed as SSE (steps, SQL, result table). */
+/* SQL uses the operational catalog and downloads the completed execution receipt. */
 
 import { CheckCircle2, Loader2, Send, Square } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { Link } from "react-router"
 
 import { CopyButton, ResultTable } from "@/components/playground/shared"
 import { TraceButton } from "@/components/playground/usage-traces"
@@ -18,6 +19,7 @@ interface SqlAnswer {
   sql_code?: string
   sql_columns?: string[]
   sql_response_from_db?: unknown
+  truncated?: boolean
 }
 
 const newConversation = () =>
@@ -26,6 +28,9 @@ const newConversation = () =>
 /** *source*: the structured source to query; null = the snapshot's first one. */
 export function SqlTab({ source }: { source: string | null }) {
   const [traceId, setTraceId] = useState<string>()
+  const [revision, setRevision] = useState<number>()
+  const [completed, setCompleted] = useState(false)
+  const [stopRequested, setStopRequested] = useState(false)
   const t = useT()
   const [question, setQuestion] = useState("")
   const [asked, setAsked] = useState("")
@@ -42,6 +47,7 @@ export function SqlTab({ source }: { source: string | null }) {
   const run = async (q: string) => {
     if (!q.trim() || busy) return
     setTraceId(undefined)
+    setRevision(undefined); setCompleted(false); setStopRequested(false)
     setAsked(q.trim())
     setSteps([]); setSql(""); setAnswer(null); setError(null); setNotices([])
     setBusy(true)
@@ -50,11 +56,18 @@ export function SqlTab({ source }: { source: string | null }) {
     const onEvent = (ev: SseEvent) => {
       const d = ev.data as Record<string, unknown>
       if (d.trace_id) setTraceId(String(d.trace_id))
-      if (ev.event === "done" && d.status === "failed") setError(t("usage.sqlFailed"))
-      if (ev.event === "meta") setNotices((d.notices as string[]) ?? [])
+      if (ev.event === "done") {
+        setCompleted(d.status === "succeeded")
+        if (d.status !== "succeeded") setError(t("usage.sqlFailed"))
+      }
+      if (ev.event === "meta") {
+        setNotices(d.legacy_binding ? [t("playground.sql.legacy")] : (d.notices as string[]) ?? [])
+        setRevision(typeof d.revision === "number" ? d.revision : undefined)
+      }
       else if (ev.event === "step") {
         const node = String(d.node ?? "")
-        const label = String(d.label ?? node)
+        const label = node === "generate_sql" ? t("playground.sql.planning")
+          : node === "execute_sql" ? t("playground.sql.reading") : String(d.label ?? node)
         setSteps((prev) => {
           const i = prev.findIndex((s) => s.node === node && !s.done)
           if (d.phase === "end" && i >= 0) return prev.map((s, j) => (j === i ? { ...s, done: true } : s))
@@ -66,12 +79,16 @@ export function SqlTab({ source }: { source: string | null }) {
         const a = (d.answer ?? {}) as SqlAnswer
         setAnswer(a)
         if (a.sql_code) setSql(a.sql_code)
-      } else if (ev.event === "error") setError(String(d.detail ?? d.message ?? d.error ?? "error"))
+      } else if (ev.event === "error") {
+        setCompleted(false)
+        setError(String(d.detail ?? d.message ?? d.error ?? "error"))
+      }
     }
     try {
       await api.playground.sql({ source, question: q.trim(), conversation_id: conversationId }, onEvent, ctrl.signal)
     } catch (err) {
-      if ((err as Error).name !== "AbortError") setError(errorMessage(err))
+      if ((err as Error).name === "AbortError") setStopRequested(true)
+      else setError(errorMessage(err))
     } finally {
       setBusy(false)
       abort.current = null
@@ -102,6 +119,11 @@ export function SqlTab({ source }: { source: string | null }) {
         </div>
       </form>
       {!busy && <TraceButton traceId={traceId} />}
+      {stopRequested && <p role="status" className="text-sm text-muted-foreground">{t("playground.sql.stopped")}{" "}
+        {!traceId && <Link className="underline underline-offset-4" to="/playground?tab=usage">{t("usage.history")}</Link>}
+      </p>}
+      {revision != null && <p className="text-xs text-muted-foreground">{t("playground.sql.binding", { revision })}</p>}
+      {answer?.truncated && <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{t("playground.sql.limited")}</p>}
       {notices.map((n) => <p key={n} className="text-xs text-amber-700 dark:text-amber-300">{n}</p>)}
       {(steps.length > 0 || busy) && (
         <Card className="gap-2 py-4">
@@ -111,7 +133,8 @@ export function SqlTab({ source }: { source: string | null }) {
               {steps.map((s, i) => (
                 <li key={i} className="flex items-center gap-2" data-done={s.done}>
                   {s.done ? <CheckCircle2 className="size-4 text-success" aria-hidden />
-                    : <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />}
+                    : busy ? <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />
+                    : <Square className="size-4 text-muted-foreground" aria-hidden />}
                   {s.label}
                 </li>
               ))}
@@ -138,7 +161,9 @@ export function SqlTab({ source }: { source: string | null }) {
           </CardContent>
         </Card>
       )}
-      {table && <ResultTable columns={table.columns} rows={table.rows} csvName="query-result.csv" id="sql-result" />}
+      {table && <ResultTable columns={table.columns} rows={table.rows}
+        csvName={completed ? "query-result.csv" : undefined}
+        downloadUrl={completed && traceId ? `/api/playground/traces/${traceId}/result.csv` : undefined} id="sql-result" />}
       {answer && !table && answer.sql_response_from_db != null && (
         <pre className="overflow-x-auto rounded-md border p-3 text-xs">{String(answer.sql_response_from_db)}</pre>
       )}

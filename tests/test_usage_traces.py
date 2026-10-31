@@ -86,39 +86,22 @@ def test_trace_terminal_state_is_immutable_and_tampering_is_detected(client):
     assert c.get(f"{API}/traces/{trace_id}").status_code == 409
 
 
-def test_sql_trace_records_actual_result_and_error_before_done_is_failure(client, monkeypatch):
-    from autoontology.web import playground_api
+def test_sql_trace_records_actual_result_and_execution_failure_is_not_done(client):
+    from autoontology.playground.sql_guard import SqlError
+    from tests.test_sql_service import attach
 
     c, _, _, _, _ = client
-
-    def handler(request):
-        result = {
-            "type": "result",
-            "answer": {
-                "response": "3명",
-                "sql_code": "SELECT count(*) FROM customers",
-                "sql_response_from_db": [[3]],
-                "sql_columns": ["count"],
-            },
-        }
-        events = (
-            [result]
-            if json.loads(request.content)["question"] != "error"
-            else [{"type": "error", "message": "query rejected"}]
-        )
-        return httpx.Response(
-            200,
-            text="".join("data: " + json.dumps(x) + "\n\n" for x in events) + "data: [DONE]\n\n",
-        )
-
-    monkeypatch.setattr(playground_api, "UPSTREAM_TRANSPORT", httpx.MockTransport(handler))
-    for question, expected in [("고객 수", "succeeded"), ("error", "failed")]:
-        events = dict(_sse(c.post(f"{API}/sql", json={"question": question}).text))
+    _, _, executor = attach(client)
+    for failure in (None, SqlError("Query deadline exceeded", "sql_timeout", 504)):
+        executor.error = failure
+        events = dict(_sse(c.post(f"{API}/sql", json={"question": "고객 수"}).text))
         trace = c.get(f"{API}/traces/{events['meta']['trace_id']}").json()
-        assert trace["status"] == expected
+        assert trace["status"] == ("failed" if failure else "succeeded")
         assert trace["data"]["context"]["data_time"] == "live_at_execution"
-        if expected == "succeeded":
-            assert trace["data"]["outcome"]["events"][0]["answer"]["sql_response_from_db"] == [[3]]
+        if failure:
+            assert "done" not in events and events["error"]["error"] == "sql_timeout"
+        else:
+            assert trace["data"]["outcome"]["events"][0]["answer"]["sql_response_from_db"] == [[40]]
 
 
 def test_sparql_trace_captures_query_result_and_exact_ttl_hash(client):
@@ -160,19 +143,16 @@ def test_provider_preflight_failure_has_a_failed_receipt_and_releases_slot(clien
     assert trace["status"] == "failed" and not app.state.playground._busy
 
 
-def test_sql_rejects_unpublished_sources_without_contacting_backend(client, monkeypatch):
-    from autoontology.web import playground_api
+def test_sql_rejects_unpublished_sources_without_contacting_model_or_database(client):
+    from tests.test_sql_service import attach
 
     c, _, app, _, _ = client
+    _, planner, executor = attach(client)
     source = app.state.api.store.add_source(name="unpublished", kind="files", locator="/private")
     app.state.api.store.set_catalog_database_id(source.id, "private-db")
-
-    def forbidden(request):
-        pytest.fail("an unpublished SQL source must not reach the backend")
-
-    monkeypatch.setattr(playground_api, "UPSTREAM_TRANSPORT", httpx.MockTransport(forbidden))
     result = c.post(f"{API}/sql", json={"source": "unpublished", "question": "rows?"})
     assert result.status_code == 409 and result.json()["error"] == "source_not_published"
+    assert planner.calls == executor.calls == []
 
 
 def test_query_cli_uses_same_service_and_inspection_never_repeats_the_model(client, monkeypatch):

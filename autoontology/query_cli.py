@@ -3,9 +3,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+import tempfile
 import time
+import uuid
+from pathlib import Path
 
 import httpx
 import typer
@@ -54,7 +59,61 @@ def install(app, settings_for):
             raise typer.Exit(1)
         return value
 
-    def stream(kind, body, watch):
+    def output_path(output, watch=False):
+        output = output.expanduser().absolute()
+        if output.exists() or output.is_symlink() or not output.parent.is_dir():
+            value = {
+                "error": "output_exists"
+                if output.exists() or output.is_symlink()
+                else "output_directory_missing",
+                "detail": "Choose a new file in an existing directory.",
+            }
+            if watch:
+                typer.echo(json.dumps({"event": "error", "data": value}))
+            else:
+                emit(value)
+            raise typer.Exit(1)
+        return output
+
+    def save_result(trace_id, output, reject):
+        settings = settings_for()
+        try:
+            response = httpx.request(
+                "GET",
+                f"http://127.0.0.1:{settings.port}/api/playground/traces/{identifier(trace_id)}/result.csv",
+                timeout=30,
+            )
+            response.raise_for_status()
+            payload = response.content
+            if len(payload) > 8 * 1024 * 1024:
+                raise ValueError("file exceeds supported size")
+            fd, temporary = tempfile.mkstemp(prefix=".autoontology-result-", dir=output.parent)
+            try:
+                with os.fdopen(fd, "wb") as file:
+                    file.write(payload)
+                    file.flush()
+                    os.fsync(file.fileno())
+                # Exclusive installation: a concurrent file is never overwritten.
+                os.link(temporary, output)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+            return {
+                "path": str(output),
+                "bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "trace_id": trace_id,
+            }
+        except (OSError, ValueError, httpx.HTTPError) as exc:
+            reject(
+                {
+                    "error": "result_download_failed",
+                    "trace_id": trace_id,
+                    "detail": "The query completed; its result file could not be saved. Inspect the receipt before retrying the query.",
+                }
+            )
+            raise typer.Exit(1) from exc
+
+    def stream(kind, body, watch, output=None):
         def reject(value):
             if watch:
                 typer.echo(json.dumps({"event": "error", "data": value}, ensure_ascii=False))
@@ -109,11 +168,17 @@ def install(app, settings_for):
             )
             raise typer.Exit(1)
         receipt = request("GET", f"/traces/{identifier(trace_id)}", on_error=reject)
+        successful = done and not error and receipt["status"] == "succeeded"
+        download = (
+            save_result(trace_id, output, reject) if output is not None and successful else None
+        )
         if watch:
             typer.echo(json.dumps({"event": "receipt", "data": receipt}, ensure_ascii=False))
+            if download:
+                typer.echo(json.dumps({"event": "download", "data": download}, ensure_ascii=False))
         else:
-            emit(receipt)
-        if not done or error or receipt["status"] != "succeeded":
+            emit({"receipt": receipt, "download": download} if download else receipt)
+        if not successful:
             raise typer.Exit(1)
 
     @app.command("execution")
@@ -178,8 +243,29 @@ def install(app, settings_for):
         question: str,
         source: str | None = typer.Option(None, "--source"),
         watch: bool = typer.Option(False, "--watch"),
+        conversation_id: uuid.UUID | None = typer.Option(None, "--conversation-id"),
+        output: Path | None = typer.Option(
+            None, "--output", help="Save the completed receipt's CSV without overwriting a file."
+        ),
     ):
-        stream("sql", {"question": question, "source": source}, watch)
+        if output is not None:
+            output = output_path(output, watch)
+        stream(
+            "sql",
+            {
+                "question": question,
+                "source": source,
+                "conversation_id": str(conversation_id) if conversation_id else None,
+            },
+            watch,
+            output,
+        )
+
+    @app.command("sql-result")
+    def sql_result(trace_id: str, output: Path = typer.Option(..., "--output")):
+        """Download a completed query without running its model or SQL again."""
+        output = output_path(output)
+        emit(save_result(identifier(trace_id), output, emit))
 
     @app.command("sparql")
     def sparql(query: str, limit: int = typer.Option(100, "--limit", min=1, max=500)):

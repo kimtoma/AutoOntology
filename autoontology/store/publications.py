@@ -182,6 +182,7 @@ class Publications:
                                     "kind",
                                     "included",
                                     "processing",
+                                    "sql_binding",
                                 )
                                 if k in source
                             }

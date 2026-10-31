@@ -3,6 +3,22 @@ import userEvent from "@testing-library/user-event"
 import { TraceButton } from "@/components/playground/usage-traces"
 import { mockFetch, renderPage } from "@/test/utils"
 
+it.each(["succeeded", "failed", "cancelled"])("recovers CSV only from a successful SQL record: %s", async status => {
+  const { calls } = mockFetch({"GET /playground/traces/trace1": {
+    id: "trace1", kind: "sql", status, revision: 8, data: {
+      binding: {legacy: false}, request: {question: "고객 수"}, duration_ms: 100,
+      context: {data_time: "live_at_execution"}, outcome: {events: []},
+    },
+  }})
+  renderPage(<TraceButton traceId="trace1" />)
+  await userEvent.click(screen.getByRole("button", {name: "Usage record"}))
+  await screen.findByText("고객 수")
+  if (status === "succeeded") {
+    expect(screen.getByRole("link", {name: "CSV"})).toHaveAttribute("href", "/api/playground/traces/trace1/result.csv")
+  } else expect(screen.queryByRole("link", {name: "CSV"})).toBeNull()
+  expect(calls.every(c => c.method === "GET")).toBe(true)
+})
+
 it("shows the saved output and context without starting another query", async () => {
   const user = userEvent.setup()
   const { calls } = mockFetch({ "GET /playground/traces/trace1": {

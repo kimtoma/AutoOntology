@@ -2,8 +2,7 @@
 """REST + SSE routes of the Playground page, under ``/api/playground/``.
 
 * ``POST /chat`` (SSE): RAG over the latest ontology snapshot (``playground.service``).
-* ``POST /sql`` (SSE): upstream's NL->SQL agent (``POST /api/chat/completions`` on the
-  backend), events relayed verbatim (masked).
+* ``POST /sql`` (SSE): bounded read queries against the approved publication catalog.
 * ``POST /sparql``, ``GET /sparql/examples``: the SPARQL console over the latest snapshot
   (its export's ``ontology.ttl`` when that export's ``export.json`` names this very
   snapshot, else a Turtle file written on demand to
@@ -26,7 +25,6 @@ from pathlib import Path
 from typing import Any
 
 import anyio
-import httpx
 from fastapi import APIRouter, FastAPI, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
@@ -48,16 +46,12 @@ from autoontology.playground.sparql import (
     SparqlError,
     SparqlRunner,
 )
+from autoontology.playground.sql_guard import SqlError
+from autoontology.playground.sql_service import SqlService, result_csv
 from autoontology.store.traces import TraceError, UsageTraces, error_code
 from autoontology.web.api import PREFIX, Api, ApiError, mask
 
 logger = logging.getLogger("autoontology.web")
-
-UPSTREAM_USER = "autoontology"
-UPSTREAM_READ_TIMEOUT_S = 180.0
-STORAGE_MISSING = "Conversation storage unavailable"
-#: tests replace it with an httpx.MockTransport
-UPSTREAM_TRANSPORT: httpx.AsyncBaseTransport | None = None
 
 
 class _In(BaseModel):
@@ -77,7 +71,7 @@ class ChatIn(_In):
 
 
 class SqlIn(_In):
-    #: the structured source whose database the query targets (default: upstream picks)
+    #: the structured source whose database the query targets (default: first published source)
     source: str | None = Field(None, max_length=80)
     question: str = Field(min_length=1, max_length=2000)
     conversation_id: uuid.UUID | None = None
@@ -127,7 +121,7 @@ def sql_receipt_event(event: Any) -> dict:
 
 
 def _err(exc: Exception) -> tuple[int, str, str]:
-    if isinstance(exc, (PlaygroundError, LLMError, SparqlError)):
+    if isinstance(exc, (PlaygroundError, LLMError, SparqlError, SqlError)):
         return exc.status, exc.code, exc.message
     if isinstance(exc, TraceError):
         return exc.status, exc.code, str(exc)
@@ -318,12 +312,18 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             raise ApiError(404, "unknown_conversation", f"no conversation {conversation_id!r}")
         return {"deleted": conversation_id}
 
-    # --- NL -> SQL (upstream) -----------------------------------------------------------
+    # --- NL -> SQL (approved catalog, managed read execution) ----------------------------
+
+    def sql_service() -> SqlService:
+        found = getattr(app.state, "sql_service", None)
+        if found is None:
+            found = SqlService(api.store, lambda: api.settings, lambda: pg().llm_factory())
+            app.state.sql_service = found
+        return found
 
     @router.post("/sql")
     async def sql(body: SqlIn) -> EventSourceResponse:
         s = scope()
-        target_db = None
         if body.source:
             src = api.source(body.source)
             if src.kind not in ("files", "database"):
@@ -334,198 +334,42 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                     "source_not_published",
                     "the source is not included in operational knowledge",
                 )
-            target_db = src.catalog_database_id
-        else:  # the snapshot's first built structured source (none: upstream picks)
-            structured = s.structured
-            target_db = next((x.catalog_database_id for x in structured), None)
-        if not target_db:
-            raise ApiError(
-                409, "sql_unavailable", "publish a structured source before querying its data"
-            )
-        traces = UsageTraces(api.store)
-        trace_id = traces.begin(
-            kind="sql",
-            workspace=s.key,
-            revision=s.revision,
-            model=s.model,
-            request=body.model_dump(mode="json"),
-        )
-        traces.context(
-            trace_id,
-            {
-                "target_db": target_db,
-                "data_time": "live_at_execution",
-                "provider": api.settings.chat_provider,
-                "model": api.settings.effective_chat_model,
-            },
-        )
-        payload: dict[str, Any] = {"question": body.question}
-        if target_db:
-            payload["target_db"] = target_db
-        http = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, read=UPSTREAM_READ_TIMEOUT_S), transport=UPSTREAM_TRANSPORT
-        )
-        notices: list[str] = []
-        url = f"{api.settings.backend_url}/api/chat/completions"
-        headers = {
-            "x-auto-ontology-user-id": UPSTREAM_USER,
-            "x-auto-ontology-source": "autoontology-playground",
-        }
-
-        async def open_stream(with_conversation: bool) -> httpx.Response:
-            data = dict(payload)
-            if with_conversation and body.conversation_id:
-                data["conversation_id"] = str(body.conversation_id)
-            req = http.build_request("POST", url, json=data, headers=headers)
-            return await http.send(req, stream=True)
-
+        stack = hold(s)
+        service = sql_service()
         try:
-            resp = await open_stream(True)
-            if resp.status_code == 503 and body.conversation_id:
-                raw = (await resp.aread()).decode("utf-8", "replace")
-                await resp.aclose()
-                if STORAGE_MISSING in raw:
-                    # upstream keeps conversations in the Next.js frontend's `frontend.*`
-                    # schema, which AutoOntology does not run: ask statelessly instead
-                    notices.append(
-                        "the upstream conversation store (frontend schema) is "
-                        "missing: asking without the earlier turns"
-                    )
-                    resp = await open_stream(False)
-            if resp.status_code >= 400:
-                raw = (await resp.aread()).decode("utf-8", "replace")
-                await resp.aclose()
-                await http.aclose()
-                try:
-                    detail = str(json.loads(raw).get("detail") or raw)
-                except (ValueError, AttributeError):
-                    detail = raw
-                if resp.status_code == 409:
-                    raise ApiError(
-                        409,
-                        "sql_unavailable",
-                        "cannot start the data query: the structured source has no "
-                        "semantic layer (Terms) or a query of this conversation "
-                        "is still running. "
-                        f"(upstream: {mask(detail)[:300]})",
-                    )
-                raise ApiError(
-                    502 if resp.status_code >= 500 else resp.status_code,
-                    "upstream_error",
-                    f"upstream {resp.status_code}: {mask(detail)[:400]}",
-                )
-        except httpx.HTTPError as exc:
-            await http.aclose()
-            traces.finish(trace_id, "failed", {"error": "backend_unavailable"})
-            raise ApiError(
-                503,
-                "backend_unavailable",
-                f"upstream backend unreachable: {type(exc).__name__}",
-                trace_id=trace_id,
-            ) from exc
+            prepared = await service.prepare(s, body.model_dump(mode="json"))
         except BaseException as exc:
-            await http.aclose()
-            traces.finish(trace_id, "failed", {"error": error_code(exc)})
-            if isinstance(exc, ApiError):
-                exc.extra["trace_id"] = trace_id
+            stack.close()
+            if isinstance(exc, Exception):
+                raise _api_error(exc, getattr(exc, "trace_id", None)) from exc
             raise
 
-        async def relay() -> AsyncIterator[dict[str, str]]:
-            recorded, failed = [], False
-            try:
-                yield _event(
-                    "meta",
-                    {
-                        "target_db": target_db,
-                        "trace_id": trace_id,
-                        "notices": notices,
-                        "stateless": bool(notices) or not body.conversation_id,
-                    },
-                )
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue  # ": ping" keep-alives
-                    raw = line[5:].strip()
-                    if raw == "[DONE]":
-                        success = not failed and any(sql_result_complete(e) for e in recorded)
-                        traces.finish(
-                            trace_id,
-                            "succeeded" if success else "failed",
-                            {
-                                "events": recorded,
-                                "data_time": "live_at_execution",
-                                **({} if success else {"error": "upstream_query_failed"}),
-                            },
-                        )
-                        yield _event(
-                            "done",
-                            {"trace_id": trace_id, "status": "succeeded" if success else "failed"},
-                        )
-                        return
-                    try:
-                        ev = json.loads(raw)
-                    except ValueError:
-                        continue
-                    name = str(ev.get("type") or "message") if isinstance(ev, dict) else "message"
-                    failed = failed or name == "error"
-                    recorded.append(sql_receipt_event(ev))
-                    yield _event(name, ev)
-                traces.finish(
-                    trace_id,
-                    "failed",
-                    {"events": recorded, "error": "stream_truncated", "partial": True},
-                )
-                yield _event(
-                    "error",
-                    {
-                        "status": 502,
-                        "error": "stream_truncated",
-                        "detail": "upstream stream ended without [DONE]",
-                    },
-                )
-            except httpx.HTTPError as exc:
-                traces.finish(
-                    trace_id,
-                    "failed",
-                    {"events": recorded, "error": "upstream_error", "partial": True},
-                )
-                yield _event(
-                    "error",
-                    {
-                        "status": 502,
-                        "error": "upstream_error",
-                        "detail": f"upstream stream broke: {type(exc).__name__}",
-                    },
-                )
-            except Exception as exc:
-                traces.finish(
-                    trace_id,
-                    "failed",
-                    {"events": recorded, "error": error_code(exc), "partial": True},
-                )
-                yield _event(
-                    "error",
-                    {
-                        "status": 502,
-                        "error": "upstream_error",
-                        "detail": "the SQL stream could not be processed",
-                    },
-                )
-            finally:
-                traces.finish(
-                    trace_id,
-                    "cancelled",
-                    {"events": recorded, "error": "request_cancelled", "partial": True},
-                )
-                await cleanup()
+        def cleanup():
+            service.cancel(prepared)
+            stack.close()
 
-        async def cleanup() -> None:
-            # idempotent; also the background task, for a client gone before the body started
-            await resp.aclose()
-            await http.aclose()
-            traces.finish(trace_id, "cancelled", {"error": "client_disconnected", "partial": True})
+        return EventSourceResponse(
+            _guarded(stack, service.events(prepared)), background=BackgroundTask(cleanup)
+        )
 
-        return EventSourceResponse(relay(), background=BackgroundTask(cleanup))
+    @router.get("/traces/{trace_id}/result.csv")
+    def sql_result_file(trace_id: str):
+        try:
+            receipt = UsageTraces(api.store).get(trace_id)
+            if receipt["workspace"] != api.settings.workspace:
+                raise TraceError("no result in this workspace", "trace_missing", 404)
+            return Response(
+                result_csv(receipt),
+                media_type="text/csv; charset=utf-8",
+                headers={
+                    "Content-Disposition": 'attachment; filename="query-result.csv"',
+                    "Cache-Control": "private, no-store",
+                    "X-AutoOntology-Trace": trace_id,
+                    "X-AutoOntology-Receipt-SHA256": receipt["sha256"],
+                },
+            )
+        except (TraceError, SqlError) as exc:
+            raise _api_error(exc) from exc
 
     # --- SPARQL -------------------------------------------------------------------------
 

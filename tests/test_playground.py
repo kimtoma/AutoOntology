@@ -907,59 +907,22 @@ def test_sparql_endpoint(client, model):
     assert bad.status_code == 400 and bad.json()["error"] == "sparql_syntax"
 
 
-def test_sql_passthrough_relays_events_and_handles_storage_and_409(client, monkeypatch):
-    c, _, _, _, _ = client
-    seen = []
+def test_sql_uses_frozen_catalog_events_and_shared_workspace_slot(client):
+    from tests.test_sql_service import attach
 
-    def handler(request):
-        body = json.loads(request.content)
-        seen.append((dict(request.headers), body))
-        if body["question"] == "busy":
-            return httpx.Response(409, json={"detail": "Semantic layer not calculated"})
-        if "conversation_id" in body:
-            return httpx.Response(503, json={"detail": "Conversation storage unavailable"})
-        events = [
-            {
-                "type": "step",
-                "phase": "start",
-                "node": "question_intent",
-                "label": "Classifying the question",
-            },
-            {
-                "type": "result",
-                "answer": {
-                    "response": "고객은 3명입니다",
-                    "sql_code": "SELECT count(*) FROM customers",
-                    "sql_columns": ["count"],
-                    "sql_response_from_db": [[3]],
-                },
-            },
-        ]
-        text = (
-            ": ping\n\n"
-            + "".join(f"data: {json.dumps(e)}\n\n" for e in events)
-            + "data: [DONE]\n\n"
-        )
-        return httpx.Response(200, text=text, headers={"content-type": "text/event-stream"})
-
-    monkeypatch.setattr(playground_api, "UPSTREAM_TRANSPORT", httpx.MockTransport(handler))
-    conv = "7f1c2b8e-0000-4000-8000-000000000001"
-    events = _sse(
-        c.post(
-            f"{API}/sql",
-            json={"question": "고객 수는?", "conversation_id": conv},
-        ).text
-    )
-    assert [n for n, _ in events] == ["meta", "step", "result", "done"]
-    assert events[0][1]["stateless"] is True and events[0][1]["notices"]
-    assert events[0][1]["target_db"] == "db1"
-    assert events[2][1]["answer"]["sql_code"].startswith("SELECT")
-    headers, body = seen[0]
-    assert headers["x-auto-ontology-user-id"] == "autoontology"
-    assert body["conversation_id"] == conv and body["target_db"] == "db1"
-    assert "conversation_id" not in seen[1][1]
-    busy = c.post(f"{API}/sql", json={"question": "busy"})
-    assert busy.status_code == 409 and busy.json()["error"] == "sql_unavailable"
+    c, _, app, _, _ = client
+    _, planner, executor = attach(client)
+    events = dict(_sse(c.post(f"{API}/sql", json={"question": "고객 수는?"}).text))
+    assert events["done"]["status"] == "succeeded"
+    assert events["meta"]["revision"] == 1 and events["meta"]["row_limit"] == 500
+    assert events["result"]["answer"]["sql_response_from_db"] == [[40]]
+    assert executor.calls[0].startswith("SELECT COUNT(*)")
+    assert len(planner.calls) == 1
+    pg = app.state.playground
+    with pg.acquire(pg.scope()):
+        busy = c.post(f"{API}/sql", json={"question": "고객 수는?"})
+    assert busy.status_code == 409 and busy.json()["error"] == "playground_busy"
+    assert len(planner.calls) == 1
 
 
 # --- review fixes ---------------------------------------------------------------------------

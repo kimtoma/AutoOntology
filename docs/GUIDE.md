@@ -430,11 +430,35 @@ Moving dots on a link mean an accepted *same* match.
 - **Chat**: ask in plain language ("연체는 언제 되나요?"). The answer cites the concepts,
   rules and evidence it used; click a citation to open it. It answers about the latest
   revision only.
-- **SQL**: ask a question about the data ("지역별 고객 수") and the engine writes SQL,
-  runs it on a structured source and shows the table and the SQL.
+- **SQL**: ask a question about the data ("지역별 고객 수"). The selected model plans
+  a read using the operational publication's approved tables and fields. The app checks
+  and executes it with a deadline and output limits, then shows the SQL and table.
+  Data rows are current at execution time, with up to 500 rows / 4 MiB returned.
+  A limited result is labeled; its CSV includes only the returned rows.
+  Usage history retains the exact query context and result. Downloading a completed
+  result never runs the model or SQL again. Older publications disclose missing
+  historical connection information; changed or unverifiable targets are blocked.
 - **SPARQL**: run read-only queries on the ontology itself. The examples menu has ready
   queries: Classes, Synonyms per Term, Aligned concepts, Relations and their evidence,
   Business rules, Concepts per document, Property domain/range, Unaligned concepts.
+
+The native CLI uses the same local service, checks and receipts:
+
+```sh
+uv run autoontology ops sql '지역별 고객 수' --source quick --output region-count.csv
+uv run autoontology ops sql '계약금액 합계는?' --source quick --watch
+uv run autoontology ops trace TRACE_ID
+uv run autoontology ops sql-result TRACE_ID --output saved-result.csv
+```
+
+Start the local UI service first. Output paths must be new files in an existing
+directory; files are owner-only and never overwrite an existing result. If saving
+fails after a completed query, use its trace ID with `sql-result` to recover the file.
+`--watch` emits NDJSON; errors have stable codes and a nonzero exit status. Follow-up
+SQL questions may use `--conversation-id UUID`; earlier turns are reused only for the
+same operational version and approved SQL catalog. Identity-based delegation and
+human confirmation are still being implemented; this interface does not grant an
+agent publication or external-action authority.
 
 ### Exports
 

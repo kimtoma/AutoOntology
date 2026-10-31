@@ -30,8 +30,8 @@ The engine is pinned as an **unmodified** git submodule (`vendor/auto-ontology`,
 AutoOntology uses it in two ways:
 
 - **Over HTTP** (`engine/client.py`): it creates and updates connections, reads the
-  catalog and Terms, fetches the model export (`model.yaml`, the Ossie zip), and relays
-  playground NL-to-SQL (`/api/chat/completions`). Every request carries the user header
+  catalog and Terms, and fetches the model export (`model.yaml`, the Ossie zip).
+  Every request carries the user header
   `x-auto-ontology-user-id: autoontology`.
 - **In-process** (`engine/jobs.py`, `engine/upstream_semantic.py`): it runs ingest, the
   PII/rule replay and semantic compilation by importing `auto_ontology` directly, and it
@@ -236,11 +236,29 @@ process can send any Host and login header.
 
 ### Playground (`autoontology/playground`)
 
-The scope is always the latest snapshot. The retrieval index (`elements.py`, `index.py`)
+Default reads select the approved operational publication; candidate reads need an
+explicit preview. The retrieval index (`elements.py`, `index.py`)
 embeds one text per Term, concept, rule, process, relation, axiom and evidence node. It is
 rebuilt when the snapshot changes. Chat (`service.py`) retrieves the top-k elements,
 quotes them inside a delimited context block and streams the answer with citations. SQL
-is relayed to the engine. SPARQL (`sparql.py`) evaluates against the snapshot's Turtle
+uses `sql_service.py`: an approved model plus the verified frozen source export projects
+the SQL catalog. New publications hash `sql-catalog.json` in their manifest. Source and
+catalog UUIDs plus connection target hashes prevent silent retargeting; legacy versions
+require a matching recorded ancestor source-set and disclose missing old host/account
+identity. Unapproved live Terms, sampled values, tables and columns are excluded.
+The selected chat provider generates a structured plan; pinned SQLGlot parsing,
+qualification and function/type guards admit a single supported SELECT. Execution uses
+an isolated worker and its own connection, with a 10-second statement deadline,
+20-second worker deadline, 500-row and 4 MiB result limits. Postgres/MySQL add a read-only
+transaction; Snowflake enforces the SELECT guard and statement/session deadlines and
+should use a read-only source role. A disconnect terminates the query worker.
+SQL reads current rows, not historical data; receipts retain the returned rows and
+exact model/catalog/query context. Completed CSV downloads use those receipts without
+calling a model or database. UI, `ops sql`, and `ops sql-result` use the same HTTP
+operations. Human/agent identity and domain/row authorization remain P0-03; a model login
+or a read-only AST guard is not that authorization layer.
+
+SPARQL (`sparql.py`) evaluates against the snapshot's Turtle
 with rdflib in up to two spawn-context worker processes, with a semaphore of 2 and a row
 cap. Past the 10 s deadline the worker is killed (408), so a query that never reads the
 graph also stops; a worker above 1024 MB resident memory exits and the query answers 413

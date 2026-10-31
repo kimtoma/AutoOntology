@@ -97,8 +97,8 @@ function download(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function ResultTable({ columns, rows, max = 200, csvName, id }: {
-  columns: string[]; rows: unknown[][]; max?: number; csvName?: string; id?: string
+export function ResultTable({ columns, rows, max = 200, csvName, downloadUrl, id }: {
+  columns: string[]; rows: unknown[][]; max?: number; csvName?: string; downloadUrl?: string; id?: string
 }) {
   const shown = rows.slice(0, max)
   return (
@@ -107,7 +107,11 @@ export function ResultTable({ columns, rows, max = 200, csvName, id }: {
         <span data-rows={rows.length}>
           {tn("playground.rows", rows.length)}{rows.length > max && ` ${t("playground.firstShown", { n: max })}`}
         </span>
-        {csvName && rows.length > 0 && (
+        {downloadUrl ? (
+          <Button asChild size="sm" variant="outline">
+            <a href={downloadUrl} download={csvName}><Download aria-hidden /> CSV</a>
+          </Button>
+        ) : csvName && rows.length > 0 && (
           <Button type="button" size="sm" variant="outline"
                   onClick={() => download(csvName, toCsv(columns, rows))}>
             <Download aria-hidden /> CSV

@@ -34,6 +34,9 @@ export function TraceButton({ traceId }: { traceId?: string }) {
               {data.outcome.answer && <p className="mt-2 whitespace-pre-wrap">{data.outcome.answer}</p>}
               {data.outcome.error && <p role="alert" className="mt-2 text-destructive">{data.outcome.error}</p>}
               {!!(data.outcome.result || data.outcome.events) && <pre className="mt-2 max-h-80 overflow-auto bg-muted p-3 text-xs">{JSON.stringify(data.outcome.result ?? data.outcome.events, null, 2)}</pre>}
+              {trace.kind === "sql" && trace.status === "succeeded" && <Button asChild variant="outline" size="sm" className="mt-2">
+                <a href={`/api/playground/traces/${trace.id}/result.csv`} download="query-result.csv">CSV</a>
+              </Button>}
             </section>
             {data.context.data_time === "live_at_execution" && <p className="text-xs text-muted-foreground">{t("usage.liveData")}</p>}
             {!!data.context.hits?.length && <section><h3 className="font-medium">{t("usage.evidence")}</h3><ul className="mt-2 divide-y">{data.context.hits.map((hit, i) => <li key={i} className="py-2"><span className="text-xs text-muted-foreground">[{hit.ref}]</span><p className="mt-1 whitespace-pre-wrap">{hit.text}</p></li>)}</ul></section>}

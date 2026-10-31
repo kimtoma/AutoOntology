@@ -434,7 +434,9 @@ class _Build:
     def snapshot(self) -> dict[str, Any]:
         if self.model is None:  # merge was reused from an earlier pass of this run
             self.merge()
-        sources = snapshot_sources(self.store, [self.fresh(s) for s in self.sources], self.model)
+        sources = snapshot_sources(
+            self.store, [self.fresh(s) for s in self.sources], self.model, self.settings
+        )
         revision = self.store.save_snapshot(self.run.id, self.model, sources=sources)
         applied = self.mark_decisions(revision)
         counts = self.model.counts()
@@ -469,7 +471,9 @@ class _Build:
         return DecisionStore(self.store).mark_applied(done, revision) if done else 0
 
 
-def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[dict[str, Any]]:
+def snapshot_sources(
+    store: Store, sources: list[Source], model: Any, settings: Settings | None = None
+) -> list[dict[str, Any]]:
     """The ``sources`` list of a snapshot: name, kind and what the model holds of each."""
     from autoontology.store.processing import Processing
     from autoontology.store.provenance import SourceArchive
@@ -489,7 +493,11 @@ def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[di
             "counts": by_source.get(s.name, {}),
         }
         if s.kind in STRUCTURED_KINDS:
+            from autoontology.playground.sql_catalog import source_binding
+
             entry["database"] = pipeline.catalog_database_name(s)
+            if settings is not None:
+                entry["sql_binding"] = source_binding(s, settings)
         else:
             entry["documents"] = len(DocumentStore(store).list_documents(s.id))
             entry["processing"] = Processing(store).binding(s.id)

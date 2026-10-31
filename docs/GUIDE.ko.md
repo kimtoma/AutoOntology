@@ -402,12 +402,33 @@ Postgres 소스 이력은 수집된 카탈로그 스키마를 기록하며 과�
 
 - **채팅**: 평소 말로 묻습니다("연체는 언제 되나요?"). 답변은 근거로 쓴 개념, 규칙, 원문을 인용하며,
   인용을 누르면 해당 개념이 열립니다. 가장 최근 리비전에 대해서만 답합니다.
-- **SQL**: 데이터에 대해 물으면("지역별 고객 수") 엔진이 SQL을 작성해 정형 소스에서 실행하고 표와
-  SQL을 보여 줍니다.
+- **SQL**: 데이터에 대해 물으면("지역별 고객 수") 선택한 모델이 운영 버전의 승인된 테이블과
+  필드로 조회를 계획합니다. 앱이 SQL을 검사하고 시간·결과 제한을 적용해 실행한 뒤 표와 SQL을
+  보여 줍니다. 원본 데이터는 조회 시점 기준이며 최대 500행·4 MiB를 반환합니다. 제한된 결과는
+  표시되며 CSV에는 반환된 행만 담깁니다. 사용 기록에 정확한 조회 맥락과 결과를 보존합니다.
+  완료된 결과를 다운로드해도 모델이나 SQL을 다시 실행하지 않습니다. 이전 버전에 연결 정보가
+  없으면 이를 알리고, 대상이 바뀌었거나 검증할 수 없으면 조회를 차단합니다.
 - **SPARQL**: 온톨로지 자체에 읽기 전용 질의를 실행합니다. 예시 메뉴에 바로 쓸 수 있는 질의가
   있습니다: Classes, Synonyms per Term, Aligned concepts, Relations and their evidence, Business
   rules, Concepts per document, Property domain/range, Unaligned concepts(예시 이름은 영어로
   표시됩니다).
+
+CLI에서도 같은 로컬 서비스·검사·실행 기록을 사용합니다.
+
+```sh
+uv run autoontology ops sql '지역별 고객 수' --source quick --output region-count.csv
+uv run autoontology ops sql '계약금액 합계는?' --source quick --watch
+uv run autoontology ops trace TRACE_ID
+uv run autoontology ops sql-result TRACE_ID --output saved-result.csv
+```
+
+로컬 UI 서비스를 먼저 시작하세요. 출력은 존재하는 폴더의 새 파일로만 저장하며 소유자만
+접근할 수 있고 기존 파일을 덮어쓰지 않습니다. 조회 완료 후 저장만 실패했다면 실행 기록의
+ID를 `sql-result`에 전달해 파일을 다시 받으세요. `--watch`는 NDJSON 진행 기록을 출력하며
+오류에는 고정 코드와 0이 아닌 종료 상태를 제공합니다. 후속 SQL 질문에는
+`--conversation-id UUID`를 사용할 수 있습니다. 같은 운영 버전과 승인된 SQL 카탈로그의
+이전 질문만 이어갑니다. 신원 기반 위임과 사람의 확인은 계속 구현 중이며 이 인터페이스가
+에이전트에게 운영 반영이나 외부 작업 권한을 부여하지는 않습니다.
 
 ### 내보내기
 

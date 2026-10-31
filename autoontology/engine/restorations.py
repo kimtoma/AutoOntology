@@ -89,7 +89,15 @@ def target_material(store, settings, revision):
         "sources": [
             {
                 k: s[k]
-                for k in ("name", "kind", "included", "source_id", "source_revision", "processing")
+                for k in (
+                    "name",
+                    "kind",
+                    "included",
+                    "source_id",
+                    "source_revision",
+                    "processing",
+                    "sql_binding",
+                )
                 if k in s
             }
             for s in snapshot.sources
