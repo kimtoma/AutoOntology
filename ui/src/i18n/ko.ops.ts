@@ -1,4 +1,8 @@
 export const koOps = {
+  "usage.ownScope": "내가 실행한 사용 기록",
+  "usage.adminScope": "관리자 권한으로 다른 사용자와 이전 기록을 확인하고 있습니다",
+  "usage.inspectAll": "다른 사용자와 이전 기록 함께 확인",
+  "usage.ownerUnknown": "소유자가 확인되지 않은 이전 기록",
   "ops.loading": "운영 지식을 불러오고 있습니다…",
   "console.skip": "본문으로 이동",
   "console.workspace": "작업 공간",

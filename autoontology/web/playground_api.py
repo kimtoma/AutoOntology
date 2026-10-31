@@ -48,6 +48,8 @@ from autoontology.playground.sparql import (
 )
 from autoontology.playground.sql_guard import SqlError
 from autoontology.playground.sql_service import SqlService, result_csv
+from autoontology.security.context import await_authorized
+from autoontology.security.policy import AccessError
 from autoontology.store.traces import TraceError, UsageTraces, error_code
 from autoontology.web.api import PREFIX, Api, ApiError, mask
 
@@ -121,6 +123,8 @@ def sql_receipt_event(event: Any) -> dict:
 
 
 def _err(exc: Exception) -> tuple[int, str, str]:
+    if isinstance(exc, AccessError):
+        return exc.status, exc.code, str(exc)
     if isinstance(exc, (PlaygroundError, LLMError, SparqlError, SqlError)):
         return exc.status, exc.code, exc.message
     if isinstance(exc, TraceError):
@@ -136,17 +140,48 @@ def _api_error(exc: Exception, trace_id: str | None = None) -> ApiError:
 
 
 async def _guarded(
-    stack: ExitStack, events: AsyncIterator[dict[str, Any]]
+    stack: ExitStack,
+    events: AsyncIterator[dict[str, Any]],
+    *,
+    store=None,
+    traces=None,
+    trace_id=None,
 ) -> AsyncIterator[dict[str, str]]:
     """Relay *events* as SSE, an exception as a final ``error`` event; release the slot."""
+    parts = []
+
+    def revoked(error):
+        if traces is not None and trace_id:
+            traces.finish(
+                trace_id, "failed", {"error": error.code, "partial": True, "answer": "".join(parts)}
+            )
+
     try:
-        async for ev in events:
+        while True:
+            try:
+                ev = (
+                    await await_authorized(store, "query.run", events.__anext__, on_revoked=revoked)
+                    if store is not None
+                    else await events.__anext__()
+                )
+            except StopAsyncIteration:
+                break
+            if ev["event"] == "delta":
+                parts.append(ev["data"]["text"])
             yield _event(ev["event"], ev["data"])
     except Exception as exc:  # noqa: BLE001 - reported to the client
         status, code, message = _err(exc)
         if status >= 500 and code == "internal_error":
             logger.error("playground stream failed", exc_info=exc)
-        yield _event("error", {"status": status, "error": code, "detail": message})
+        yield _event(
+            "error",
+            {
+                "status": status,
+                "error": code,
+                "detail": message,
+                **({"trace_id": trace_id} if trace_id else {}),
+            },
+        )
     finally:
         with anyio.CancelScope(shield=True):
             await events.aclose()
@@ -186,12 +221,12 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     # --- index / chat -------------------------------------------------------------------
 
     @router.get("/traces")
-    def traces(response: Response, limit: int = 50):
+    def traces(response: Response, limit: int = 50, all_users: bool = False):
         response.headers["Cache-Control"] = "private, no-store"
         try:
             return {
                 "items": UsageTraces(api.store).listing(
-                    workspace=api.settings.workspace, limit=limit
+                    workspace=api.settings.workspace, limit=limit, all_users=all_users
                 )
             }
         except TraceError as exc:
@@ -241,7 +276,7 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     async def chat(body: ChatIn) -> EventSourceResponse:
         s = scope()
         if body.conversation_id:
-            conv = pg().pg.get_conversation(body.conversation_id)
+            conv = pg().pg.get_conversation(body.conversation_id, action="query.run")
             if conv is None or conv["scope"] != s.key:
                 raise ApiError(
                     404,
@@ -292,12 +327,13 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         # the generator's finally never runs when the client leaves before the body starts:
         # the background task (after the response, whatever happened) releases the slot too
         return EventSourceResponse(
-            _guarded(stack, events()), background=BackgroundTask(cleanup_chat)
+            _guarded(stack, events(), store=api.store, traces=pg().traces, trace_id=trace_id),
+            background=BackgroundTask(cleanup_chat),
         )
 
     @router.get("/conversations")
-    def conversations() -> dict[str, Any]:
-        return {"conversations": pg().pg.list_conversations(scope().key)}
+    def conversations(all_users: bool = False) -> dict[str, Any]:
+        return {"conversations": pg().pg.list_conversations(scope().key, all_users=all_users)}
 
     @router.get("/conversations/{conversation_id}")
     def conversation(conversation_id: str) -> dict[str, Any]:
@@ -349,7 +385,14 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             stack.close()
 
         return EventSourceResponse(
-            _guarded(stack, service.events(prepared)), background=BackgroundTask(cleanup)
+            _guarded(
+                stack,
+                service.events(prepared),
+                store=api.store,
+                traces=service.traces,
+                trace_id=prepared["trace_id"],
+            ),
+            background=BackgroundTask(cleanup),
         )
 
     @router.get("/traces/{trace_id}/result.csv")

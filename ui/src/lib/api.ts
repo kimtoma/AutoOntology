@@ -461,6 +461,7 @@ export interface UsageSummary {
   status: "running" | "succeeded" | "failed" | "cancelled" | "interrupted"
   revision: number
   started_at: string
+  owner?: { principal_id: string | null; name: string | null; legacy: boolean }
 }
 export interface UsageTrace extends UsageSummary {
   data: {
@@ -526,6 +527,7 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
   let terminal = false
   const emit = (ev: SseEvent) => {
     if (TERMINAL_EVENTS.has(ev.event)) terminal = true
+    if (ev.event === "error" && typeof ev.data === "object" && ev.data !== null && "status" in ev.data && typeof ev.data.status === "number") identityResponse(ev.data.status)
     onEvent(ev)
   }
   for (;;) {
@@ -638,7 +640,7 @@ export const api = {
   exportText: (dir: string, file: string) =>
     requestText(`/exports/${enc(dir)}/${encPath(file)}?inline=true`),
   playground: {
-    traces: () => request<{ items: UsageSummary[] }>("/playground/traces"),
+    traces: (allUsers = false) => request<{ items: UsageSummary[] }>("/playground/traces" + (allUsers ? "?all_users=true" : "")),
     trace: (id: string) => request<UsageTrace>(`/playground/traces/${enc(id)}`),
     forgetTrace: (id: string) => request(`/playground/traces/${enc(id)}`, json("DELETE", {})),
     index: () => request<IndexStatus>("/playground/index"),

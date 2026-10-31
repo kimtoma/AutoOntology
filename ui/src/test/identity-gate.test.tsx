@@ -2,13 +2,22 @@ import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { IdentityControls, IdentityGate } from "@/components/identity-gate"
-import { request } from "@/lib/api"
+import { request, streamSse } from "@/lib/api"
 import { mockFetch, renderPage } from "@/test/utils"
 import HomePage from "@/pages/home"
 
 const denied = () => new Response(JSON.stringify({ error: "authentication_required", detail: "Sign in" }), { status: 401, headers: { "content-type": "application/json" } })
 const session = { principal: { id: "person", username: "owner", name: "Owner", kind: "human", status: "active" }, workspace: { workspace_id: "workspace", workspace_name: "Workspace", organization_id: "org" }, policy_version: 1, credential_id: "credential", expires_at: 2000000000, grants: [], capabilities: { "knowledge.read": ["*"], "candidate.read": ["*"] } }
 const page = <IdentityGate><span>Protected workspace</span><IdentityControls /></IdentityGate>
+
+it("locks the workspace when a running SSE response reports credential revocation", async () => {
+  mockFetch({ "GET /identity/status": { configured: true, workspace_id: "workspace" }, "GET /identity/me": session, "POST /playground/chat": () => new Response('event: error\ndata: {"status":401,"error":"credential_invalid"}\n\n', { headers: { "content-type": "text/event-stream" } }) })
+  renderPage(page)
+  expect(await screen.findByText("Protected workspace")).toBeVisible()
+  await streamSse("/playground/chat", { question: "test" }, vi.fn())
+  expect(await screen.findByLabelText("Password")).toBeVisible()
+  expect(screen.queryByText("Protected workspace")).not.toBeInTheDocument()
+})
 
 it("does not flash first-install guidance while the operational workspace is loading", async () => {
   let finish!: (value: Response) => void

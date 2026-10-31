@@ -8,9 +8,11 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { api, errorMessage } from "@/lib/api"
 import { fmtTime } from "@/lib/labels"
 import { useT } from "@/i18n"
+import { useCanUse, useIdentity } from "@/lib/identity"
 
 export function TraceButton({ traceId }: { traceId?: string }) {
   const t = useT(), qc = useQueryClient()
+  const canDelete = useCanUse("results.delete")
   const [open, setOpen] = useState(false), [confirm, setConfirm] = useState(false)
   const record = useQuery({ queryKey: ["usage-trace", traceId], queryFn: () => api.playground.trace(traceId!), enabled: open && !!traceId, refetchInterval: q => q.state.data?.status === "running" ? 2000 : false })
   const remove = useMutation({ mutationFn: () => api.playground.forgetTrace(traceId!), onSuccess: () => { qc.invalidateQueries({ queryKey: ["usage-traces"] }); setConfirm(false) } })
@@ -41,7 +43,7 @@ export function TraceButton({ traceId }: { traceId?: string }) {
             {data.context.data_time === "live_at_execution" && <p className="text-xs text-muted-foreground">{t("usage.liveData")}</p>}
             {!!data.context.hits?.length && <section><h3 className="font-medium">{t("usage.evidence")}</h3><ul className="mt-2 divide-y">{data.context.hits.map((hit, i) => <li key={i} className="py-2"><span className="text-xs text-muted-foreground">[{hit.ref}]</span><p className="mt-1 whitespace-pre-wrap">{hit.text}</p></li>)}</ul></section>}
             <details><summary className="cursor-pointer">{t("usage.details")}</summary><pre className="mt-2 max-h-96 overflow-auto bg-muted p-3 text-xs">{JSON.stringify(trace, null, 2)}</pre></details>
-            {trace.status !== "running" && <div className="border-t pt-4">
+            {trace.status !== "running" && canDelete && <div className="border-t pt-4">
               <p className="mb-2 text-xs text-muted-foreground">{t("usage.deleteHint")}</p>
               {confirm ? <div className="flex gap-2"><Button variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate()}>{t("usage.confirmDelete")}</Button><Button variant="outline" onClick={() => setConfirm(false)}>{t("common.cancel")}</Button></div> : <Button variant="outline" onClick={() => setConfirm(true)}>{t("usage.delete")}</Button>}
               {remove.error && <p role="alert">{errorMessage(remove.error)}</p>}
@@ -55,10 +57,14 @@ export function TraceButton({ traceId }: { traceId?: string }) {
 
 export function UsageHistory() {
   const t = useT()
-  const traces = useQuery({ queryKey: ["usage-traces"], queryFn: api.playground.traces, refetchInterval: 5000 })
+  const identity = useIdentity(), canInspect = useCanUse("identity.admin")
+  const [allUsers, setAllUsers] = useState(false)
+  const inspect = !!identity && canInspect && allUsers
+  const traces = useQuery({ queryKey: ["usage-traces", inspect], queryFn: () => api.playground.traces(inspect), refetchInterval: 5000 })
   return <section>
+    {identity && <div className="mb-5 space-y-3 border-y py-4 text-sm"><p>{t(inspect ? "usage.adminScope" : "usage.ownScope")}</p>{canInspect && <label className="flex items-center gap-2"><input type="checkbox" checked={inspect} onChange={event => setAllUsers(event.target.checked)} />{t("usage.inspectAll")}</label>}</div>}
     <p className="mb-4 text-sm text-muted-foreground">{t("usage.savedHint")}</p>
-    {traces.error ? <ErrorState error={traces.error} onRetry={() => traces.refetch()} /> : <ul className="divide-y">{traces.data?.items.map(trace => <li key={trace.id} className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm"><div><p>{trace.kind} · r{trace.revision} · {t(`usage.${trace.status}`)}</p><p className="mt-1 text-xs text-muted-foreground">{fmtTime(trace.started_at)}</p></div><TraceButton traceId={trace.id} /></li>)}</ul>}
+    {traces.error ? <ErrorState error={traces.error} onRetry={() => traces.refetch()} /> : <ul className="divide-y">{traces.data?.items.map(trace => <li key={trace.id} className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm"><div><p>{trace.kind} · r{trace.revision} · {t(`usage.${trace.status}`)}</p>{inspect && <p className="mt-1 text-xs">{trace.owner?.name ?? t("usage.ownerUnknown")}</p>}<p className="mt-1 text-xs text-muted-foreground">{fmtTime(trace.started_at)}</p></div><TraceButton traceId={trace.id} /></li>)}</ul>}
     {!traces.isPending && !traces.error && !traces.data?.items.length && <p className="py-6 text-sm text-muted-foreground">{t("usage.empty")}</p>}
   </section>
 }

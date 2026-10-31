@@ -11,6 +11,8 @@ from array import array
 from dataclasses import dataclass
 from typing import Any
 
+from autoontology.security.context import audit_effect, authorize
+from autoontology.security.results import require_result, selection
 from autoontology.store.db import Store, now_iso
 
 VERDICTS: tuple[str, ...] = ("pass", "fail", "unsure")
@@ -105,43 +107,91 @@ class PlaygroundStore:
     def create_conversation(self, scope: str, title: str) -> str:
         cid = uuid.uuid4().hex
         stamp = now_iso()
-        with self._conn() as conn:
+        with self.store._immediate() as conn:
+            decision = authorize(self.store, "query.run", conn=conn)
+            principal = decision.actor.principal_id if decision else None
+            workspace = decision.workspace_id if decision else None
             conn.execute(
                 "INSERT INTO playground_conversations (id, scope, title, created_at, "
-                "updated_at) VALUES (?, ?, ?, ?, ?)",
-                (cid, scope, title[:200], stamp, stamp),
+                "updated_at,principal_id,identity_workspace) VALUES (?, ?, ?, ?, ?,?,?)",
+                (cid, scope, title[:200], stamp, stamp, principal, workspace),
             )
             conn.execute(
-                "DELETE FROM playground_conversations WHERE scope = ? AND id NOT IN ("
-                "SELECT id FROM playground_conversations WHERE scope = ? "
+                "DELETE FROM playground_conversations WHERE scope = ? AND principal_id IS ? AND identity_workspace IS ? AND id NOT IN ("
+                "SELECT conversation_id FROM usage_traces WHERE status='running' AND conversation_id IS NOT NULL) AND id NOT IN ("
+                "SELECT id FROM playground_conversations WHERE scope = ? AND principal_id IS ? AND identity_workspace IS ? "
                 "ORDER BY updated_at DESC, rowid DESC LIMIT ?)",
-                (scope, scope, MAX_CONVERSATIONS),
+                (scope, principal, workspace, scope, principal, workspace, MAX_CONVERSATIONS),
             )
         return cid
 
     def delete_conversation(self, conversation_id: str) -> bool:
-        with self._conn() as conn:
-            return (
+        with self.store._immediate() as conn:
+            row = conn.execute(
+                "SELECT principal_id,identity_workspace FROM playground_conversations WHERE id=?",
+                (conversation_id,),
+            ).fetchone()
+            if row is not None:
+                decision = require_result(
+                    self.store,
+                    row["principal_id"],
+                    row["identity_workspace"],
+                    action="results.delete",
+                    conn=conn,
+                )
+                if conn.execute(
+                    "SELECT 1 FROM usage_traces WHERE conversation_id=? AND status='running'",
+                    (conversation_id,),
+                ).fetchone():
+                    from autoontology.store.traces import TraceError
+
+                    raise TraceError("Stop the request before deleting its conversation.")
+            removed = (
                 conn.execute(
                     "DELETE FROM playground_conversations WHERE id = ?", (conversation_id,)
                 ).rowcount
                 > 0
             )
+            if removed:
+                audit_effect(
+                    self.store,
+                    decision,
+                    conversation_id,
+                    {"kind": "conversation", "owner": row["principal_id"]},
+                    conn=conn,
+                )
+            return removed
 
-    def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
+    def get_conversation(
+        self, conversation_id: str, *, action="results.read"
+    ) -> dict[str, Any] | None:
         with self._conn() as conn:
+            conn.execute("BEGIN")
             row = conn.execute(
                 "SELECT * FROM playground_conversations WHERE id = ?", (conversation_id,)
             ).fetchone()
+            if row is not None:
+                require_result(
+                    self.store,
+                    row["principal_id"],
+                    row["identity_workspace"],
+                    action=action,
+                    conn=conn,
+                )
         return dict(row) if row else None
 
-    def list_conversations(self, scope: str, limit: int = 50) -> list[dict[str, Any]]:
+    def list_conversations(
+        self, scope: str, limit: int = 50, *, all_users=False
+    ) -> list[dict[str, Any]]:
         with self._conn() as conn:
+            conn.execute("BEGIN")
+            owner = selection(self.store, all_users=all_users, conn=conn)
+            clause = " AND c.principal_id=? AND c.identity_workspace=?" if owner else ""
             rows = conn.execute(
                 "SELECT c.*, (SELECT count(*) FROM playground_messages m WHERE "
                 "m.conversation_id = c.id) AS messages FROM playground_conversations c "
-                "WHERE c.scope = ? ORDER BY c.updated_at DESC, c.rowid DESC LIMIT ?",
-                (scope, limit),
+                "WHERE c.scope = ?" + clause + " ORDER BY c.updated_at DESC, c.rowid DESC LIMIT ?",
+                (scope, *(owner or ()), max(1, min(500, limit))),
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -159,7 +209,22 @@ class PlaygroundStore:
         trace_id: str | None = None,
     ) -> int:
         stamp = now_iso()
-        with self._conn() as conn:
+        with self.store._immediate() as conn:
+            row = conn.execute(
+                "SELECT principal_id,identity_workspace FROM playground_conversations WHERE id=?",
+                (conversation_id,),
+            ).fetchone()
+            if row is None:
+                from autoontology.security.policy import AccessError
+
+                raise AccessError("No conversation with this identifier.", "result_missing", 404)
+            require_result(
+                self.store,
+                row["principal_id"],
+                row["identity_workspace"],
+                action="query.run",
+                conn=conn,
+            )
             cur = conn.execute(
                 "INSERT INTO playground_messages (conversation_id, role, content, "
                 "retrieved_json, citations_json, provider, model, incomplete, created_at, trace_id) "
@@ -183,8 +248,21 @@ class PlaygroundStore:
             )
             return int(cur.lastrowid)
 
-    def messages(self, conversation_id: str) -> list[dict[str, Any]]:
+    def messages(self, conversation_id: str, *, action="results.read") -> list[dict[str, Any]]:
         with self._conn() as conn:
+            conn.execute("BEGIN")
+            row = conn.execute(
+                "SELECT principal_id,identity_workspace FROM playground_conversations WHERE id=?",
+                (conversation_id,),
+            ).fetchone()
+            if row is not None:
+                require_result(
+                    self.store,
+                    row["principal_id"],
+                    row["identity_workspace"],
+                    action=action,
+                    conn=conn,
+                )
             rows = conn.execute(
                 "SELECT * FROM playground_messages WHERE conversation_id = ? ORDER BY id",
                 (conversation_id,),

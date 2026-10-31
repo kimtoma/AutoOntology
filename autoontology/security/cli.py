@@ -79,10 +79,10 @@ GROUPS = {
         "sparql": "query.run",
         "traces": "results.read",
         "trace": "results.read",
-        "forget-trace": "feedback.manage",
+        "forget-trace": "results.delete",
         "conversations": "results.read",
         "conversation": "results.read",
-        "forget-conversation": "feedback.manage",
+        "forget-conversation": "results.delete",
     },
 }
 

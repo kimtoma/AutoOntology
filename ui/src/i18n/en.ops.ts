@@ -1,4 +1,8 @@
 export const enOps = {
+  "usage.ownScope": "My saved requests",
+  "usage.adminScope": "Administrator inspection of other users and earlier records",
+  "usage.inspectAll": "Inspect all users and earlier records",
+  "usage.ownerUnknown": "Earlier record with no verified owner",
   "ops.loading": "Loading operational knowledge…",
   "console.skip": "Skip to content",
   "console.workspace": "Workspace",

@@ -868,7 +868,12 @@ def test_chat_error_event_when_the_provider_fails(client):
     events = _sse(c.post(f"{API}/chat", json={"question": "계약?"}).text)
     assert events[-1] == (
         "error",
-        {"status": 504, "error": "provider_timeout", "detail": "ollama did not answer within 270s"},
+        {
+            "status": 504,
+            "error": "provider_timeout",
+            "detail": "ollama did not answer within 270s",
+            "trace_id": dict(events)["status"]["trace_id"],
+        },
     )
 
 

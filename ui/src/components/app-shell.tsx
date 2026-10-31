@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react"
-import { ArrowUpRight, Command, GitBranch, Search } from "lucide-react"
+import { ArrowUpRight, Command, GitBranch, Search, UsersRound } from "lucide-react"
 import { Link, Outlet, useLocation } from "react-router"
 import { LangToggle } from "@/components/lang-toggle"
 import { ThemeToggle } from "@/components/theme"
@@ -100,7 +100,7 @@ function WorkspaceNavigation() {
         <nav id="workspace-navigation" aria-label={t("shell.mainMenu")} className="console-sidebar-nav">
           <SidebarMenu className="console-sidebar-menu">
             {NAV.map((item) => (
-              <CanUse capability={navigationAuthority[item.id]} key={item.path}><SidebarMenuItem>
+              <CanUse capability={navigationAuthority[item.id]} key={item.path}><SidebarMenuItem className={item.id === "settings" ? "console-sidebar-settings" : undefined}>
                 <SidebarMenuButton
                   asChild
                   isActive={isCurrent(item, pathname)}
@@ -127,7 +127,7 @@ function WorkspaceNavigation() {
         </nav>
       </SidebarContent>
       <SidebarFooter className="console-sidebar-footer">
-        {identity && <Link to="/access" data-nav="access" className="console-sidebar-link text-xs" onClick={() => isMobile && setOpenMobile(false)}>{t("access.title")}</Link>}
+        {identity && <SidebarMenu><SidebarMenuItem><SidebarMenuButton asChild tooltip={t("access.title")} isActive={pathname.startsWith("/access")} className="console-sidebar-link"><Link to="/access" data-nav="access" aria-label={t("access.title")} onClick={() => isMobile && setOpenMobile(false)}><UsersRound aria-hidden /><span className="console-sidebar-name">{t("access.title")}</span></Link></SidebarMenuButton></SidebarMenuItem></SidebarMenu>}
         <span className="console-sidebar-name">Ontology Ops</span>
       </SidebarFooter>
     </Sidebar>

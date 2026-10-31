@@ -1245,7 +1245,7 @@
   flex: 1;
   gap: 5px;
 }
-.console-sidebar-menu > :last-child {
+.console-sidebar-menu > .console-sidebar-settings {
   margin-top: auto;
   padding-top: 24px;
 }

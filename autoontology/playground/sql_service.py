@@ -13,6 +13,7 @@ import anyio
 from autoontology.playground.sql_catalog import catalog_for, verify_binding
 from autoontology.playground.sql_executor import SqlExecutor
 from autoontology.playground.sql_guard import MAX_ROWS, MAX_SQL_CHARS, SqlError, validate_sql
+from autoontology.security.context import authorize
 from autoontology.store.operations import digest
 from autoontology.store.traces import UsageTraces, error_code
 from autoontology.structured.pipeline import connection_for
@@ -214,6 +215,8 @@ class SqlService:
         )
 
         def event(name, **data):
+            if name != "error":
+                authorize(self.store, "query.run")
             return {"event": name, "data": {"trace_id": trace_id, **data}}
 
         try:
@@ -245,7 +248,7 @@ class SqlService:
                 )
             messages.append({"role": "user", "content": body["question"]})
             self.traces.context(trace_id, {"messages": messages, "history_turns": len(history)})
-            binding = self.traces.get(trace_id)["data"]["binding"]
+            binding = self.traces.get(trace_id, action="query.run")["data"]["binding"]
             yield event(
                 "meta",
                 revision=scope.revision,

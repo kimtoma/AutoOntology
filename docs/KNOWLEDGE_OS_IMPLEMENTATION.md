@@ -12,6 +12,13 @@ prepare the work and humans confirm consequential decisions. Enterprise AX is
 measured primarily by reduced end-to-end lead time and human active effort.
 See [the CLI, delegation and time-outcome contract](CLI_AGENT_AX_CONTRACT.md).
 
+The user set a target of **2026-10-31 20:00 Asia/Seoul** for the active complete
+roadmap goal. This is a delivery constraint, not permission to omit acceptance,
+collapse scope, fabricate measured time savings or mark pending stages complete.
+Prioritize implementation, meaningful verification and recoverable local commits;
+record any remaining scope explicitly at the deadline. Public deployment remains
+out of scope.
+
 ## Architecture and invariants
 
 Use the existing SQLite store for operational metadata and a persistent local
@@ -68,6 +75,16 @@ verified individual actor and matching E1 evidence. A prior unverified-actor rec
 is preserved as pre-fix evidence. The completed answer can be opened from UI history
 without a new model request. Normal-workspace enrollment stays off; domain-level
 projections, remaining effect/stream/queue and approval/recovery gates are incomplete.
+
+Stage 13 implements shared saved-request ownership, explicit administrator
+inspection, owner-scoped retention/deletion and asynchronous provider/SQL revocation.
+Schema v13 preserves historical receipt bytes/hashes and leaves unknown owners
+unknown. Actual copied-data UI/CLI isolation, Postgres count 40/CSV recovery and
+SSE session locking passed with local Ollama and controlled chat/planning. The UI
+retains correct navigation when roles hide settings and when the sidebar collapses.
+Synchronous-worker cancellation, per-domain knowledge projection and remaining
+P0-P3 gates stay incomplete. Final regression and recovery evidence are recorded
+in the private stage-13 index; no normal enrollment or public deployment is implied.
 
 ## End-to-end completion audit
 
@@ -143,6 +160,28 @@ during earlier dialog/panel entry animations are retained separately and are not
 the final visual evidence. This stage does not activate normal identity or complete
 the organization-wide authority, exact approval lifecycle, full CLI contract or
 P0-P3 roadmap. Its final commit and data checkpoint/drill are in the private index.
+
+### Stage 13: private saved requests and asynchronous revocation
+
+Parent `3141c37`. Common trace/conversation stores enforce current principal and
+workspace for list/read/write/delete/continuation, with explicit administration
+inspection and per-owner retention. The additive v13 migration does not rewrite
+old receipt JSON or hashes or invent historical conversation ownership. Originating
+producer leases permit failure cleanup after revocation without authorizing success.
+HTTP streams monitor current authority while awaiting asynchronous provider/SQL
+results; UI and native CLI preserve actionable revocation/recovery behavior.
+
+Actual copied-data checks use real local Ollama retrieval, real copied Postgres
+rows and controlled local chat/planning, clearly separated from previous actual
+Codex semantic acceptance. Frozen source/model/vector fingerprint verification
+allows reuse of the prior actual index, while legacy unverified vectors remain
+preserved. Light-mode captures, initial attempts, final tests, source commit and
+data checkpoint/drill are linked from `changes/stage-13-result-authority/index.html`.
+All remaining scope in `IDENTITY_AUTHORITY.md` and the full roadmap still applies.
+Final Python regression: **1515 passed / 66 skipped**. UI: **186 passed** with
+build and lint; the existing restoration purity warning remains. The native
+SSE error contract retains the terminal trace ID so a revoked session receives
+an actionable failure without an unauthorized follow-up result read.
 
 ## Recovery procedure
 

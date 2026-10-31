@@ -30,6 +30,7 @@ CAPABILITIES = {
     "exports.read": Capability("read"),
     "query.run": Capability("read"),
     "results.read": Capability("read"),
+    "results.delete": Capability("execute", True),
     "candidate.read": Capability("read"),
     "candidate.prepare": Capability("draft"),
     "source.read": Capability("read"),
@@ -57,6 +58,7 @@ VIEWER = frozenset(
         "exports.read",
         "query.run",
         "results.read",
+        "results.delete",
         "source.read",
         "feedback.submit",
     }

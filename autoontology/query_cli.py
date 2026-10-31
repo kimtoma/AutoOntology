@@ -172,6 +172,10 @@ def install(app, settings_for):
                 }
             )
             raise typer.Exit(1)
+        if error and error.get("status") in (401, 403):
+            if not watch:
+                reject({**error, "trace_id": trace_id})
+            raise typer.Exit(1)
         receipt = request("GET", f"/traces/{identifier(trace_id)}", on_error=reject)
         successful = done and not error and receipt["status"] == "succeeded"
         download = (
@@ -277,8 +281,15 @@ def install(app, settings_for):
         emit(request("POST", "/sparql", {"query": query, "limit": limit}))
 
     @app.command("traces")
-    def traces(limit: int = typer.Option(50, "--limit", min=1, max=500)):
-        emit(request("GET", f"/traces?limit={limit}"))
+    def traces(
+        limit: int = typer.Option(50, "--limit", min=1, max=500),
+        all_users: bool = typer.Option(
+            False,
+            "--all-users",
+            help="Explicit human-admin inspection of other owners and legacy records.",
+        ),
+    ):
+        emit(request("GET", f"/traces?limit={limit}" + ("&all_users=true" if all_users else "")))
 
     @app.command("trace")
     def trace(trace_id: str):
@@ -289,8 +300,14 @@ def install(app, settings_for):
         emit(request("DELETE", f"/traces/{identifier(trace_id)}"))
 
     @app.command("conversations")
-    def conversations():
-        emit(request("GET", "/conversations"))
+    def conversations(
+        all_users: bool = typer.Option(
+            False,
+            "--all-users",
+            help="Explicit human-admin inspection; does not permit replying as another owner.",
+        ),
+    ):
+        emit(request("GET", "/conversations" + ("?all_users=true" if all_users else "")))
 
     @app.command("conversation")
     def conversation(conversation_id: str):

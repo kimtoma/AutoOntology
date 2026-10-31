@@ -557,6 +557,31 @@ MIGRATIONS: list[tuple[int, str]] = [
         BEGIN SELECT RAISE(ABORT,'identity audit is append-only'); END
         """,
     ),
+    (
+        13,
+        """
+        ALTER TABLE playground_conversations ADD COLUMN principal_id TEXT;
+        ALTER TABLE playground_conversations ADD COLUMN identity_workspace TEXT;
+        ALTER TABLE usage_traces ADD COLUMN principal_id TEXT;
+        ALTER TABLE usage_traces ADD COLUMN identity_workspace TEXT;
+        UPDATE usage_traces SET
+            principal_id=json_extract(data_json,'$.actor.id'),
+            identity_workspace=json_extract(data_json,'$.actor.workspace_id')
+        WHERE CASE WHEN json_valid(data_json) THEN
+            json_extract(data_json,'$.actor.verified')=1
+            AND json_extract(data_json,'$.actor.workspace_id') IS NOT NULL ELSE 0 END;
+        CREATE INDEX playground_conversation_owner ON playground_conversations
+            (identity_workspace,principal_id,scope,updated_at);
+        CREATE INDEX usage_trace_owner ON usage_traces
+            (identity_workspace,principal_id,workspace,started_at);
+        CREATE TRIGGER conversation_owner_immutable
+        BEFORE UPDATE OF principal_id,identity_workspace ON playground_conversations
+        BEGIN SELECT RAISE(ABORT,'conversation owner is immutable'); END;
+        CREATE TRIGGER usage_trace_owner_immutable
+        BEFORE UPDATE OF principal_id,identity_workspace ON usage_traces
+        BEGIN SELECT RAISE(ABORT,'trace owner is immutable'); END
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration

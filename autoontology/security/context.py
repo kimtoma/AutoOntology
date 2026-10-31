@@ -138,3 +138,46 @@ def audit_effect(store, decision, target, detail, *, conn):
             str(target),
             {"policy_version": decision.policy_version, **detail},
         )
+
+
+async def await_authorized(store, action, call, *, on_revoked=None, interval=0.1):
+    """Check while waiting, cancel the awaited provider/read, and retain its auth error.
+
+    No cancellation scope spans a generator yield. The caller supplies cleanup for
+    its own producer receipt; monitoring never grants access to another request.
+    Synchronous worker threads remain bounded by their own transport deadlines.
+    """
+    import anyio
+
+    authorize(store, action)
+    denied = None
+    failure = None
+    value = None
+
+    async def monitor(scope):
+        nonlocal denied
+        while True:
+            await anyio.sleep(interval)
+            try:
+                authorize(store, action)
+            except AccessError as error:
+                denied = error
+                if on_revoked:
+                    on_revoked(error)
+                scope.cancel()
+                return
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(monitor, group.cancel_scope)
+        try:
+            value = await call()
+        except BaseException as error:
+            failure = error
+        finally:
+            group.cancel_scope.cancel()
+    if denied is not None:
+        raise denied
+    if failure is not None:
+        raise failure
+    authorize(store, action)
+    return value

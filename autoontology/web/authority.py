@@ -116,7 +116,7 @@ _policies(
     "/api/playground/sparql",
 )
 _policies(
-    "feedback.manage",
+    "results.delete",
     "DELETE",
     "/api/playground/traces/{trace_id}",
     "/api/playground/conversations/{conversation_id}",

@@ -214,8 +214,8 @@ operation for human disablement, not a rollback of session revocations or audit.
 Usage trace creation now rechecks `query.run` inside its write transaction and
 records the verified principal, credential, workspace and policy version when
 configured. Previously completed legacy receipts remain unchanged; they are not
-retroactively attributed. Per-resource history/conversation ownership and stream
-revocation still require their separate implementation.
+retroactively attributed. Stage 13 adds the ownership and asynchronous revocation
+boundaries below; domain-specific data access remains a separate activation gate.
 
 After explicit user approval of a frozen 2,292-character model payload, actual
 individual native CLI -> protected HTTP -> local Ollama retrieval -> Codex
@@ -227,3 +227,60 @@ copied-data administration verified role changes, password reset, disable/re-ena
 source classification, agent-only preparation, revoked delegation/session behavior
 through the native CLI, and the audit chain. Light-mode desktop/mobile captures
 and remaining activation gates are recorded in the private stage-12 evidence.
+
+## Saved-request ownership and asynchronous revocation
+
+Schema v13 adds immutable owner/workspace columns to conversations and traces.
+Existing verified trace actors populate an ownership index without changing their
+receipt JSON or hashes. Unverified historical ownership stays unknown. Historical
+conversations are not assigned to an inferred author: a verified answer does not
+prove ownership of every earlier message. Normal unconfigured local workspaces
+retain their existing behavior; individual enrollment is still disabled by policy.
+
+Configured list/read/continuation/write/delete checks run in the shared stores,
+not just route handlers. A person sees their own records by default. Another
+person's identifier returns 404 and cannot be continued, appended to or deleted.
+Human administrators can explicitly inspect all owners and unknown older records
+using the UI history checkbox, `ops traces --all-users` or `ops conversations
+--all-users`. Inspection does not allow replying as another conversation's author.
+Conversation retention is per owner/workspace; one user's activity cannot prune
+another person's history. Running conversations cannot be deleted during a request.
+
+`results.delete` is a human capability for removing one's own completed receipts or
+conversations. It does not grant deletion of another person's data; that requires
+current human administration. Each explicit configured deletion appends actor,
+target and owner metadata to the audit chain in the same transaction. Agent
+delegations cannot include this human-only capability. An agent using the native
+question commands needs both `query.run` and `results.read` to execute and then
+recover the resulting receipt; these are separate explicit capabilities.
+
+Only the originating in-process producer can mutate a configured running trace.
+It may record failure/cancellation after revocation, but success requires current
+query authority. A trusted reaper may only interrupt a dead producer. The ownership
+columns must agree with the existing hashed actor, preventing accidental index
+corruption from silently changing access. Finished receipt hashes remain stable.
+
+RAG rechecks before calling the chat provider, before each output chunk and before
+successful persistence. The HTTP stream also polls authority while awaiting the
+next asynchronous provider or SQL-executor result. Revocation records failure,
+cancels the await, closes the provider/SQL worker and emits an authentication or
+authority error. A 401 inside an HTTP-200 SSE response locks the UI and clears work
+caches. The CLI preserves the request ID and does not attempt another result read
+with a just-revoked credential. Structured reads recheck at their result boundary.
+
+This does not complete cancellation of synchronous embedding/catalog/SPARQL worker
+threads: they remain bounded by their transport/execution deadlines and cannot
+publish a successful result after failed authority checks. Their prompt cleanup,
+per-domain historical access, queue/source effects and exact approval lifecycle
+remain activation gates. Existing role catalogs also need explicit policy-definition
+binding in prepared approval packets, rather than relying only on grant versions.
+
+Actual copied-data UI/native CLI acceptance used two humans, real local Ollama
+retrieval and actual PostgreSQL count 40/CSV recovery. Chat output and SQL planning
+were controlled local fixtures; no new external model call was made. It checked
+foreign-record denial, explicit admin inspection, menu collapse, and revocation
+while a controlled provider was waiting. A prior actual embedding cache was reused
+only after the current model artifact, model inputs, all 806 element text hashes
+and normalized vector fingerprint matched the earlier actual receipt. The initial
+fresh-copy attempt had legitimately begun re-embedding legacy, unidentified vectors;
+its timeout and subsequent diagnosis are preserved separately. See stage-13 evidence.

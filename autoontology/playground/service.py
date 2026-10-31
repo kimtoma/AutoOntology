@@ -25,6 +25,7 @@ from autoontology.playground.elements import Element, elements_from_model
 from autoontology.playground.index import DEFAULT_TOP_K, ElementIndex, Embedder, Hit, build_index
 from autoontology.playground.llm import LLMError, PlaygroundLLM
 from autoontology.playground.store import PlaygroundStore
+from autoontology.security.context import authorize
 from autoontology.store.db import Source, Store
 from autoontology.store.traces import UsageTraces, error_code
 
@@ -372,7 +373,7 @@ class Playground:
         self, scope: Scope, conversation_id: str | None, history: list[dict[str, str]] | None
     ) -> tuple[str | None, list[dict]]:
         if conversation_id:
-            conv = self.pg.get_conversation(conversation_id)
+            conv = self.pg.get_conversation(conversation_id, action="query.run")
             if conv is None or conv["scope"] != scope.key:
                 raise PlaygroundError(
                     404,
@@ -382,7 +383,7 @@ class Playground:
             # an incomplete (truncated) answer is not context for the next turn
             return conversation_id, [
                 {"role": m["role"], "content": m["content"]}
-                for m in self.pg.messages(conversation_id)
+                for m in self.pg.messages(conversation_id, action="query.run")
                 if not m["incomplete"]
             ]
         return None, list(history or [])
@@ -460,6 +461,7 @@ class Playground:
         parts, cid = [], options.get("conversation_id")
         try:
             async for event in self._ask(scope, question, trace_id=trace_id, **options):
+                authorize(self.store, "query.run")
                 name, data = event["event"], event["data"]
                 if name == "delta":
                     parts.append(data["text"])
@@ -559,9 +561,12 @@ class Playground:
         )
         parts: list[str] = []
         try:
-            async for text in llm.stream(messages):
-                parts.append(text)
-                yield {"event": "delta", "data": {"text": text}}
+            authorize(self.store, "query.run")
+            async with contextlib.aclosing(llm.stream(messages)) as stream:
+                async for text in stream:
+                    authorize(self.store, "query.run")
+                    parts.append(text)
+                    yield {"event": "delta", "data": {"text": text}}
         except LLMError as exc:
             if exc.code != "stream_truncated":
                 raise
@@ -594,6 +599,7 @@ class Playground:
                 )
             yield {"event": "stream_truncated", "data": info}
             raise
+        authorize(self.store, "query.run")
         answer = "".join(parts).strip()
         cited, unknown = prompts.parse_citations(answer, tokens)
         result = Answer(answer, hits, tokens, cited, unknown, llm.provider, llm.model)
