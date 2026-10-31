@@ -622,7 +622,7 @@ def test_upgrade_rejudges_the_second_source_after_the_first_rewrites_the_descrip
     assert "align:hanbit-docs" not in kept.details and "align:b-docs" not in kept.details
 
 
-def test_v4_migration_keeps_a_baseline_confirmed_under_v3(env, tmp_path):
+def test_v4_migration_keeps_a_baseline_confirmed_under_v3(env, tmp_path, monkeypatch):
     """Round 7: under store v3 the confirmed baseline lived in ``applied_json``
     (``description_baseline`` with the text). An upgrade interrupted after the first
     documents source confirmed it, before the second was judged: the v4 migration moves
@@ -638,8 +638,38 @@ def test_v4_migration_keeps_a_baseline_confirmed_under_v3(env, tmp_path):
     ex.ensure_documents_source(env["store"], "b-docs", other)
     first = run(env)
     assert first.status == "succeeded", first.problems
-    path = env["store"].path
+    from autoontology.store import db
+
+    # Build a genuine v3 store with the data/columns that existed at that version.
+    # Keeping future tables while lowering only the version is an inconsistent fixture.
+    path = tmp_path / "legacy-v3.db"
+    with monkeypatch.context() as old_schema:
+        old_schema.setattr(db, "MIGRATIONS", db.MIGRATIONS[:3])
+        legacy = Store(path)
+    with env["store"]._conn() as current, legacy._conn() as old:
+        tables = [
+            r[0]
+            for r in old.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            if r[0] != "schema_version"
+        ]
+        for table in tables:
+            columns = [r[1] for r in old.execute(f'PRAGMA table_info("{table}")')]
+            projection = ",".join(f'"{column}"' for column in columns)
+            rows = current.execute(f'SELECT {projection} FROM "{table}"').fetchall()
+            old.executemany(
+                f'INSERT INTO "{table}" ({projection}) VALUES ({",".join("?" for _ in columns)})',
+                [tuple(row) for row in rows],
+            )
     with sqlite3.connect(path) as conn:  # the v3 state of a confirmed baseline
+        # V3 chunks cannot refer to processing receipts introduced by schema v11.
+        for chunk_id, raw in conn.execute("SELECT id,extract_detail_json FROM chunks").fetchall():
+            detail = _json.loads(raw or "{}")
+            detail.pop("processing_receipt", None)
+            detail.pop("configuration_sha256", None)
+            conn.execute(
+                "UPDATE chunks SET extract_detail_json=? WHERE id=?",
+                (_json.dumps(detail), chunk_id),
+            )
         rows = conn.execute(
             "SELECT id, applied_json FROM alignments WHERE applied_json LIKE '%description_set%'"
         ).fetchall()
@@ -652,13 +682,6 @@ def test_v4_migration_keeps_a_baseline_confirmed_under_v3(env, tmp_path):
                     "UPDATE alignments SET applied_json = ? WHERE id = ?",
                     (_json.dumps(applied), row_id),
                 )
-        conn.execute("DROP TABLE term_legacy_descriptions")
-        conn.execute("DELETE FROM schema_version WHERE version >= 4")
-        conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
-        conn.execute("DROP TABLE review_decisions")
-        conn.execute("DROP INDEX IF EXISTS alignments_review_idx")
-        conn.execute("ALTER TABLE alignments DROP COLUMN judged_json")
-        conn.execute("ALTER TABLE playground_messages DROP COLUMN trace_id")
     env["store"] = Store(path)  # migrates v3 -> v4 (and on)
     with sqlite3.connect(path) as conn:
         legacy = conn.execute(

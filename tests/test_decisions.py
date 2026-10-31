@@ -17,32 +17,19 @@ from tests.test_align import FakeJudge, _v
 from tests.test_build import env  # noqa: F401 - the build fixture
 
 
-def _downgrade(path, version):
-    """Turn a current store back into a v<version> one (the later migrations' DDL undone)."""
-    conn = sqlite3.connect(path)
-    conn.execute("PRAGMA foreign_keys = OFF")
-    conn.execute("DROP TABLE review_decisions")
-    conn.execute("DROP INDEX IF EXISTS alignments_review_idx")
-    conn.execute("ALTER TABLE alignments DROP COLUMN judged_json")
-    conn.execute("ALTER TABLE playground_messages DROP COLUMN trace_id")
-    if version < 5:
-        conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
-    if version < 4:
-        conn.execute("DROP TABLE term_legacy_descriptions")
-    conn.execute("DELETE FROM schema_version WHERE version > ?", (version,))
-    conn.execute(
-        "INSERT INTO alignments (source_id, concept_id, concept_name, term_id, relation, "
-        "run_id, created_at) VALUES ('s', 'c1', '계약', 't1', 'same', 'r', 'x')"
-    )
-    conn.commit()
-    conn.close()
-
-
 @pytest.mark.parametrize("version", [5, 3])
-def test_migration_v6_upgrades_older_stores(tmp_path, version):
+def test_migration_v6_upgrades_older_stores(tmp_path, version, monkeypatch):
+    from autoontology.store import db
+
     path = tmp_path / "autoontology.db"
-    Store(path)
-    _downgrade(path, version)
+    with monkeypatch.context() as old_schema:
+        old_schema.setattr(db, "MIGRATIONS", [m for m in MIGRATIONS if m[0] <= version])
+        Store(path)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "INSERT INTO alignments (source_id, concept_id, concept_name, term_id, relation, "
+            "run_id, created_at) VALUES ('s', 'c1', '계약', 't1', 'same', 'r', 'x')"
+        )
     store = Store(path)
     assert store.schema_version() == MIGRATIONS[-1][0] and store.schema_version() >= 6
     row = AlignmentStore(store).get("c1")

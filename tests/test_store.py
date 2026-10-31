@@ -6,6 +6,21 @@ import pytest
 from autoontology.store.db import MIGRATIONS, Store
 
 
+def test_migration_handles_trigger_bodies_and_literal_semicolons(tmp_path, monkeypatch):
+    from autoontology.store import db
+
+    sql = """CREATE TABLE notes(value TEXT);
+    CREATE TRIGGER frozen_notes BEFORE DELETE ON notes
+    BEGIN SELECT RAISE(ABORT,'append-only; preserve'); END;
+    INSERT INTO notes VALUES ('a;b')"""
+    monkeypatch.setattr(db, "MIGRATIONS", [(1, sql)])
+    store = Store(tmp_path / "triggers.db")
+    with store._conn() as conn:
+        assert conn.execute("SELECT value FROM notes").fetchone()[0] == "a;b"
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("DELETE FROM notes")
+
+
 @pytest.fixture
 def store(tmp_path):
     return Store(tmp_path / "autoontology.db")
@@ -212,22 +227,19 @@ def test_lock_wait_succeeds_after_release(tmp_path, monkeypatch):
     assert store.acquire_leases(["demo"], "build")
 
 
-def test_migration_v4_notes_the_legacy_description_records(tmp_path):
+def test_migration_v4_notes_the_legacy_description_records(tmp_path, monkeypatch):
     """Round 6: the Terms whose description an older apply set without the text are noted
     at upgrade in ``term_legacy_descriptions`` (which apply never writes)."""
     import json
 
     path = tmp_path / "autoontology.db"
-    Store(path)
+    from autoontology.store import db
+
+    with monkeypatch.context() as old_schema:
+        old_schema.setattr(db, "MIGRATIONS", MIGRATIONS[:3])
+        Store(path)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = OFF")
-    conn.execute("DROP TABLE term_legacy_descriptions")
-    conn.execute("DELETE FROM schema_version WHERE version >= 4")  # back to a v3 store
-    conn.execute("ALTER TABLE documents DROP COLUMN reader_fingerprint")
-    conn.execute("DROP TABLE review_decisions")
-    conn.execute("DROP INDEX IF EXISTS alignments_review_idx")
-    conn.execute("ALTER TABLE alignments DROP COLUMN judged_json")
-    conn.execute("ALTER TABLE playground_messages DROP COLUMN trace_id")
     for i, applied in enumerate(
         [
             {"term_id": "t-old", "description_set": True},

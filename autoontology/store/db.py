@@ -501,6 +501,62 @@ MIGRATIONS: list[tuple[int, str]] = [
         )
         """,
     ),
+    (
+        12,
+        """
+        CREATE TABLE identity_state (
+            id INTEGER PRIMARY KEY CHECK(id=1), organization_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL UNIQUE, workspace_name TEXT NOT NULL,
+            policy_version INTEGER NOT NULL, created_at REAL NOT NULL
+        );
+        CREATE TABLE identity_principals (
+            id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('human','agent')),
+            status TEXT NOT NULL CHECK(status IN ('active','disabled')),
+            password_hash TEXT, epoch INTEGER NOT NULL DEFAULT 1, created_at REAL NOT NULL
+        );
+        CREATE TABLE identity_domains (
+            id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL, created_at REAL NOT NULL
+        );
+        CREATE TABLE identity_grants (
+            id TEXT PRIMARY KEY, principal_id TEXT NOT NULL REFERENCES identity_principals(id),
+            workspace_id TEXT NOT NULL, domain_id TEXT NOT NULL, role TEXT NOT NULL,
+            created_by TEXT NOT NULL, created_at REAL NOT NULL, revoked_at REAL
+        );
+        CREATE INDEX identity_grants_principal ON identity_grants(principal_id,revoked_at);
+        CREATE TABLE identity_credentials (
+            id TEXT PRIMARY KEY, principal_id TEXT NOT NULL REFERENCES identity_principals(id),
+            secret_sha256 TEXT NOT NULL UNIQUE, epoch INTEGER NOT NULL,
+            created_at REAL NOT NULL, expires_at REAL NOT NULL, revoked_at REAL
+        );
+        CREATE TABLE identity_delegations (
+            principal_id TEXT PRIMARY KEY REFERENCES identity_principals(id),
+            delegator_id TEXT NOT NULL REFERENCES identity_principals(id),
+            workspace_id TEXT NOT NULL, actions_json TEXT NOT NULL, domains_json TEXT NOT NULL,
+            created_at REAL NOT NULL, expires_at REAL NOT NULL, revoked_at REAL
+        );
+        CREATE TABLE identity_source_domains (
+            source_id TEXT NOT NULL, version INTEGER NOT NULL, domain_id TEXT NOT NULL,
+            created_by TEXT NOT NULL, created_at REAL NOT NULL,
+            PRIMARY KEY(source_id,version)
+        );
+        CREATE TABLE identity_login_limits (
+            key TEXT PRIMARY KEY, failures INTEGER NOT NULL, blocked_until REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        CREATE TABLE identity_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL,
+            actor_id TEXT, credential_id TEXT, action TEXT NOT NULL,
+            target TEXT NOT NULL, detail_json TEXT NOT NULL, previous_sha256 TEXT NOT NULL,
+            sha256 TEXT NOT NULL
+        );
+        CREATE TRIGGER identity_events_no_update BEFORE UPDATE ON identity_events
+        BEGIN SELECT RAISE(ABORT,'identity audit is append-only'); END;
+        CREATE TRIGGER identity_events_no_delete BEFORE DELETE ON identity_events
+        BEGIN SELECT RAISE(ABORT,'identity audit is append-only'); END
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
@@ -518,6 +574,20 @@ def _ensure_indexes(conn: sqlite3.Connection, version: int) -> None:
     for since, statement in ENSURED_INDEXES:
         if version >= since:
             conn.execute(statement)
+
+
+def _migration_statements(sql: str) -> Iterator[str]:
+    """Keep trigger bodies and quoted semicolons inside one atomic statement."""
+    start = 0
+    for pos, char in enumerate(sql):
+        if char == ";" and sqlite3.complete_statement(sql[start : pos + 1]):
+            yield sql[start : pos + 1].strip()
+            start = pos + 1
+    remainder = sql[start:].strip()
+    if remainder:
+        if not sqlite3.complete_statement(remainder + ";"):
+            raise ValueError("incomplete migration statement")
+        yield remainder
 
 
 #: Seconds a lease stays valid without a heartbeat (the holder refreshes it every third).
@@ -811,9 +881,8 @@ class Store:
                         conn.execute("COMMIT")
                         return current
                     version, sql = pending[0]
-                    for statement in (s.strip() for s in sql.split(";")):
-                        if statement:
-                            conn.execute(statement)
+                    for statement in _migration_statements(sql):
+                        conn.execute(statement)
                     conn.execute(
                         "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
                         (version, now_iso()),

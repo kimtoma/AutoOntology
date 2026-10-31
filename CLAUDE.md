@@ -65,3 +65,8 @@ uv run autoontology tools build-ui                   # rebuild the committed bun
   never an API key.
 - Tests first for behaviour changes; integration tests stay behind `AUTOONTOLOGY_INTEGRATION=1`.
 - If `ui/` changes, rebuild and commit the bundle in the same change.
+- Record each implementation stage's changes, validation, remaining work and recovery
+  commit in `docs/KNOWLEDGE_OS_IMPLEMENTATION.md` and the private stage evidence index.
+  When UI behavior changes, capture its actual light-mode flow (entry, work in progress,
+  confirmation when applicable, result, and failure/recovery) and link it from that
+  stage's record. Follow `docs/STAGE_EVIDENCE.md`; label controlled fixtures separately.
