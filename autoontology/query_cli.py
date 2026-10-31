@@ -172,7 +172,16 @@ def install(app, settings_for):
                 }
             )
             raise typer.Exit(1)
-        if error and error.get("status") in (401, 403):
+        if error and (
+            error.get("status") in (401, 403)
+            or error.get("error")
+            in {
+                "authority_changed",
+                "view_authority_changed",
+                "result_scope_changed",
+                "result_scope_unknown",
+            }
+        ):
             if not watch:
                 reject({**error, "trace_id": trace_id})
             raise typer.Exit(1)

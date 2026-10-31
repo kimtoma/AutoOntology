@@ -1,9 +1,9 @@
 # Identity and authority core
 
-P0-03 is in progress. The durable core now has initial HTTP, native CLI and browser
-session adapters and guarded review/publication effects. Unfiltered resources
-currently require **whole-workspace scope**. Mixed-domain projection, complete
-effect/stream/queue revocation, exact approval lifecycle and
+P0-03 is in progress. The durable core has HTTP, native CLI and browser
+session adapters, domain-selected knowledge/query views and guarded review/publication
+effects. Unfiltered operational resources require **whole-workspace scope**.
+Complete effect/stream/queue revocation, exact approval lifecycle and
 local-owner recovery are not complete. There is no anonymous enrollment endpoint
 or normal-workspace enrollment command. Do not enroll the normal workspace until
 the activation gates below pass. The existing shared access password and
@@ -84,11 +84,11 @@ are redacted; explicit `.reveal()` belongs only at a storage/transport boundary.
 
 ## Required integration and activation gates
 
-- Finish per-resource domain checks/projections across business APIs, historical
-  originals/exports, search/SQL results and conversations. The current explicit
-  route inventory denies unknown endpoints and requires whole-workspace scope for
-  unfiltered data. It must not be described as permitting legitimate mixed-domain
-  access. Complete native mutation/read parity and effect-boundary checks, including
+- Finish remaining source/workflow/history domain checks and effect boundaries.
+  Stages 14-15 project knowledge, originals/view downloads, search/SQL/SPARQL and
+  saved results/conversations. The explicit route inventory denies unknown endpoints
+  and requires whole-workspace scope for remaining unfiltered operational data.
+  Complete native mutation/read parity and effect-boundary checks, including
   source/settings/connection-review writes and resource ownership.
 - Administration now has a human UI and native commands for people, roles, password
   reset, disabling/re-enabling people, domains, source classification, preparation
@@ -116,6 +116,35 @@ The full P0-P3 lifecycle, semantic CLI parity and Enterprise AX measurement rema
 in progress. No end-to-end time savings or completed authenticated product is
 claimed by this foundation. See `KNOWLEDGE_OS_IMPLEMENTATION.md` and the private
 stage evidence/recovery index for executed results.
+
+## Domain-selected query and saved-result boundaries
+
+Stage 15 selects the query model before retrieval, provider context, frozen SQL
+catalog projection or SPARQL serialization. Frozen publication vectors are reused
+only for identical selected element type/text hashes; changed scoped text has a
+separate artifact-qualified fragment cache. Full publication models, indexes and
+catalog files remain immutable. SPARQL never reuses the full Turtle file for a
+restricted view. Query/provider and SQL waits check the selected policy epoch;
+scope changes prevent subsequent output or a successful terminal receipt even
+when a general query grant remains.
+
+New configured query receipts capture immutable source and resource dependencies.
+Current reads require ownership/explicit administration as well as current access
+to all recorded knowledge. Broader later permission can read an older narrower
+result; unknown historical bindings never become domain-authorized by inference.
+Every configured message independently binds its exact stored bytes and knowledge
+scope in schema v14, so removing its trace cannot remove the conversation boundary.
+The migration preserves old message and receipt bytes/hashes. Old messages require
+whole-workspace authority; their scope is not fabricated. Replaying a conversation
+requires both query and saved-result read authority. An originating producer lease
+binds new messages inside the same write transaction; ordinary callers cannot
+attach a known scope to arbitrary result content. Humans can delete owned terminal
+results after losing knowledge-read access, subject to current delete permission.
+
+UI navigation permits domain queries and saved-result reads, omits whole-workspace
+source/settings requests from the query page, and clears mounted work on policy
+drift. These are interface affordances; direct APIs and native operations enforce
+the same service boundaries. Remaining activation gates above still apply.
 
 ## Initial adapter integration
 

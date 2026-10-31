@@ -22,7 +22,7 @@ export const IdentityContext = createContext<{ session: IdentitySession; signOut
 export const useIdentity = () => useContext(IdentityContext)
 export const canUse = (session: IdentitySession | null | undefined, capability: string) => {
   const scopes = session?.capabilities[capability] ?? []
-  const projected = ["knowledge.read", "originals.read", "exports.read"].includes(capability)
+  const projected = ["knowledge.read", "originals.read", "exports.read", "query.run", "results.read", "results.delete"].includes(capability)
   return !session || scopes.includes("*") || (projected && scopes.length > 0)
 }
 export const useCanUse = (capability: string) => canUse(useIdentity()?.session, capability)

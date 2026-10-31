@@ -148,6 +148,26 @@ def test_configured_publication_pins_identified_current_domain_and_later_moves_o
     with acting_as(store, reader):
         selected = knowledge_view(store, store.get_snapshot(result.revision))
         assert "concept-rule" in selected.model.classes
+        from autoontology.ontology.model import MergedOntology
+        from autoontology.playground.service import Playground
+
+        def no_reembedding(texts, kind):
+            raise AssertionError("Matching scoped text must reuse pinned publication vectors")
+
+        service = Playground(
+            store,
+            model_for=lambda: (
+                result.revision,
+                MergedOntology.from_dict(store.get_snapshot(result.revision).model),
+            ),
+            llm_factory=Answer,
+            embedder_factory=lambda: (no_reembedding, "test"),
+        )
+        before = Publications(store).get(result.revision)["manifest"]["index"]
+        index = service.index(service.scope())
+        assert index.elements and index.reused == len(index.elements)
+        assert Publications(store).verify(result.revision, settings.exports_dir)["ok"]
+        assert Publications(store).get(result.revision)["manifest"]["index"] == before
     identity.assign_source(owner, source.id, hr["id"])
     with acting_as(store, reader):
         assert not knowledge_view(store, store.get_snapshot(result.revision)).model.classes

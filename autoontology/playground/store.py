@@ -11,7 +11,9 @@ from array import array
 from dataclasses import dataclass
 from typing import Any
 
-from autoontology.security.context import audit_effect, authorize
+from autoontology.security.context import audit_effect, authorize, authorize_any
+from autoontology.security.policy import AccessError
+from autoontology.security.query_scope import message_scope
 from autoontology.security.results import require_result, selection
 from autoontology.store.db import Store, now_iso
 
@@ -104,11 +106,13 @@ class PlaygroundStore:
 
     # --- conversations ------------------------------------------------------------------
 
-    def create_conversation(self, scope: str, title: str) -> str:
+    def create_conversation(
+        self, scope: str, title: str, *, trace_writer=None, trace_id=None
+    ) -> str:
         cid = uuid.uuid4().hex
         stamp = now_iso()
         with self.store._immediate() as conn:
-            decision = authorize(self.store, "query.run", conn=conn)
+            decision = authorize_any(self.store, "query.run", conn=conn)
             principal = decision.actor.principal_id if decision else None
             workspace = decision.workspace_id if decision else None
             conn.execute(
@@ -116,6 +120,10 @@ class PlaygroundStore:
                 "updated_at,principal_id,identity_workspace) VALUES (?, ?, ?, ?, ?,?,?)",
                 (cid, scope, title[:200], stamp, stamp, principal, workspace),
             )
+            if trace_writer is not None and trace_id:
+                if trace_writer.store.path != self.store.path:
+                    raise AccessError("A request cannot bind another workspace.")
+                trace_writer.attach_conversation(trace_id, cid, conn=conn)
             conn.execute(
                 "DELETE FROM playground_conversations WHERE scope = ? AND principal_id IS ? AND identity_workspace IS ? AND id NOT IN ("
                 "SELECT conversation_id FROM usage_traces WHERE status='running' AND conversation_id IS NOT NULL) AND id NOT IN ("
@@ -178,6 +186,11 @@ class PlaygroundStore:
                     action=action,
                     conn=conn,
                 )
+                message_scope(self.store, conversation_id, action, conn=conn)
+                if action == "query.run":
+                    # Replaying stored content is a read effect as well as a new query.
+                    authorize_any(self.store, "results.read", conn=conn)
+                    message_scope(self.store, conversation_id, "results.read", conn=conn)
         return dict(row) if row else None
 
     def list_conversations(
@@ -190,10 +203,21 @@ class PlaygroundStore:
             rows = conn.execute(
                 "SELECT c.*, (SELECT count(*) FROM playground_messages m WHERE "
                 "m.conversation_id = c.id) AS messages FROM playground_conversations c "
-                "WHERE c.scope = ?" + clause + " ORDER BY c.updated_at DESC, c.rowid DESC LIMIT ?",
-                (scope, *(owner or ()), max(1, min(500, limit))),
+                "WHERE c.scope = ?" + clause + " ORDER BY c.updated_at DESC, c.rowid DESC",
+                (scope, *(owner or ())),
             ).fetchall()
-        return [dict(r) for r in rows]
+            result, cache = [], {}
+            for row in rows:
+                try:
+                    message_scope(self.store, row["id"], "results.read", conn=conn, cache=cache)
+                except AccessError as error:
+                    if error.status not in {403, 404}:
+                        raise
+                    continue
+                result.append(dict(row))
+                if len(result) >= max(1, min(500, limit)):
+                    break
+        return result
 
     def add_message(
         self,
@@ -207,6 +231,7 @@ class PlaygroundStore:
         model: str = "",
         incomplete: bool = False,
         trace_id: str | None = None,
+        trace_writer=None,
     ) -> int:
         stamp = now_iso()
         with self.store._immediate() as conn:
@@ -215,8 +240,6 @@ class PlaygroundStore:
                 (conversation_id,),
             ).fetchone()
             if row is None:
-                from autoontology.security.policy import AccessError
-
                 raise AccessError("No conversation with this identifier.", "result_missing", 404)
             require_result(
                 self.store,
@@ -225,6 +248,14 @@ class PlaygroundStore:
                 action="query.run",
                 conn=conn,
             )
+            message_scope(self.store, conversation_id, "query.run", conn=conn)
+            binding = None
+            if trace_writer is not None and trace_id:
+                if trace_writer.store.path != self.store.path:
+                    raise AccessError("A request cannot bind another workspace.")
+                _, binding = trace_writer.writer(trace_id, conn=conn)
+            elif conn.execute("SELECT 1 FROM identity_state").fetchone():
+                authorize(self.store, "query.run", conn=conn)
             cur = conn.execute(
                 "INSERT INTO playground_messages (conversation_id, role, content, "
                 "retrieved_json, citations_json, provider, model, incomplete, created_at, trace_id) "
@@ -246,6 +277,18 @@ class PlaygroundStore:
                 "UPDATE playground_conversations SET updated_at = ? WHERE id = ?",
                 (stamp, conversation_id),
             )
+            if binding is not None:
+                from autoontology.store.operations import digest
+
+                message = dict(
+                    conn.execute(
+                        "SELECT * FROM playground_messages WHERE id=?", (cur.lastrowid,)
+                    ).fetchone()
+                )
+                conn.execute(
+                    "INSERT INTO playground_message_scopes VALUES(?,?,?)",
+                    (cur.lastrowid, _dumps(binding), digest([message, binding])),
+                )
             return int(cur.lastrowid)
 
     def messages(self, conversation_id: str, *, action="results.read") -> list[dict[str, Any]]:
@@ -263,6 +306,10 @@ class PlaygroundStore:
                     action=action,
                     conn=conn,
                 )
+                message_scope(self.store, conversation_id, action, conn=conn)
+                if action == "query.run":
+                    authorize_any(self.store, "results.read", conn=conn)
+                    message_scope(self.store, conversation_id, "results.read", conn=conn)
             rows = conn.execute(
                 "SELECT * FROM playground_messages WHERE conversation_id = ? ORDER BY id",
                 (conversation_id,),

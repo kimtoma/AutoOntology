@@ -25,7 +25,8 @@ from autoontology.playground.elements import Element, elements_from_model
 from autoontology.playground.index import DEFAULT_TOP_K, ElementIndex, Embedder, Hit, build_index
 from autoontology.playground.llm import LLMError, PlaygroundLLM
 from autoontology.playground.store import PlaygroundStore
-from autoontology.security.context import authorize
+from autoontology.security.context import authorize, authorize_any
+from autoontology.security.views import knowledge_view, verify_view_authority
 from autoontology.store.db import Source, Store
 from autoontology.store.traces import UsageTraces, error_code
 
@@ -55,6 +56,7 @@ class Scope:
     names: list[str]
     structured: list[Source] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    action: str = "query.run"
 
 
 @dataclass
@@ -149,9 +151,26 @@ class Playground:
 
     # --- scope / concurrency ------------------------------------------------------------
 
-    def scope(self) -> Scope:
+    def scope(self, action="query.run") -> Scope:
         """The latest snapshot (``model_for`` raises when there is none)."""
         revision, model = self.model_for()
+        authority = authorize_any(self.store, action)
+        if authority is not None:
+            snapshot = self.store.get_snapshot(revision)
+            if snapshot is not None:
+                model = knowledge_view(self.store, snapshot, action=action).model
+            else:
+                authorize(self.store, action)
+        if (
+            action == "query.run"
+            and getattr(model, "_access_view", {}).get("restricted")
+            and not elements_from_model(model)
+        ):
+            raise PlaygroundError(
+                409,
+                "scope_empty",
+                "No knowledge is available within your current access. Ask the administrator to check source lineage and scope.",
+            )
         structured, warnings = [], []
         for name in model.structured_sources:
             s = self.store.get_source(name)
@@ -166,6 +185,7 @@ class Playground:
             names=[*model.structured_sources, *model.documents_sources],
             structured=structured,
             warnings=warnings,
+            action=action,
         )
 
     @contextlib.contextmanager
@@ -207,10 +227,15 @@ class Playground:
 
     def index(self, scope: Scope) -> ElementIndex:
         from autoontology.engine.model_artifacts import ModelArtifactError
+        from autoontology.ontology.model import MergedOntology
+        from autoontology.store.operations import digest
         from autoontology.store.publications import PublicationError, Publications, index_receipt
 
+        verify_view_authority(self.store, scope.model, scope.action)
         embed, model_name = self.embedder()
         revision = scope.revision
+        restricted = getattr(scope.model, "_access_view", {}).get("restricted", False)
+        partial_rows = None
         try:
             publication = Publications(self.store).check_model(revision)
             if publication:
@@ -237,19 +262,31 @@ class Playground:
                     raise PublicationError(
                         "embedding model artifact changed or was not recorded; validate and publish a new revision"
                     )
-                if index_receipt(self.store, receipt["scope"], scope.model) != receipt:
+                full_model = MergedOntology.from_dict(self.store.get_snapshot(revision).model)
+                if not restricted and digest(scope.model.to_dict()) != digest(full_model.to_dict()):
+                    raise PublicationError("query model differs from the approved publication")
+                if index_receipt(self.store, receipt["scope"], full_model) != receipt:
                     raise PublicationError("publication index integrity check failed")
                 rows = self.pg.index_rows(receipt["scope"])
                 elements = self.elements(scope)
-                index = ElementIndex(
-                    elements,
-                    [rows[e.id].embedding for e in elements],
-                    model=model_name,
-                    revision=revision,
-                    reused=len(elements),
-                )
-                index.embedding_artifact = expected
-                return index
+                partial_rows = {
+                    e.id: rows[e.id]
+                    for e in elements
+                    if e.id in rows
+                    and rows[e.id].text_sha == e.text_sha
+                    and rows[e.id].element_type == e.type
+                }
+                if len(partial_rows) == len(elements):
+                    index = ElementIndex(
+                        elements,
+                        [partial_rows[e.id].embedding for e in elements],
+                        model=model_name,
+                        revision=revision,
+                        reused=len(elements),
+                    )
+                    index.embedding_artifact = expected
+                    verify_view_authority(self.store, scope.model, scope.action)
+                    return index
         except PublicationError as exc:
             raise PlaygroundError(409, "publication_invalid", str(exc)) from exc
         except ModelArtifactError as exc:
@@ -260,12 +297,33 @@ class Playground:
         # Preserve legacy rows, but never assume they came from today's mutable tag.
         suffix = f"@{digest(embed.artifact)}" if isinstance(embed, GuardedEmbedder) else ""
         sid = f"{scope.key}@r{revision}{suffix}"
+        full_sid = sid
+        if restricted:
+            sid += "@view-" + digest(scope.model.to_dict())
         with self._index_lock:
             cached = self._indexes.get(sid)
             if cached and cached.revision == revision and cached.model == model_name:
                 return cached
         elements = self.elements(scope)
-        if not suffix and not self.pg.index_rows(sid):
+        if restricted and not self.pg.index_rows(sid):
+            candidates = (
+                partial_rows
+                if partial_rows is not None
+                else self.pg.index_rows(full_sid)
+                if suffix
+                else {}
+            )
+            matched = [
+                candidates[e.id]
+                for e in elements
+                if e.id in candidates
+                and candidates[e.id].text_sha == e.text_sha
+                and candidates[e.id].element_type == e.type
+                and candidates[e.id].model == model_name
+            ]
+            if matched:
+                self.pg.replace_index(sid, matched, revision=revision, model=model_name)
+        elif not suffix and not self.pg.index_rows(sid):
             legacy = self.pg.index_rows(scope.key)
             if legacy:
                 self.pg.replace_index(
@@ -287,6 +345,7 @@ class Playground:
                 f"embedding the ontology failed: {type(exc).__name__}: {str(exc)[:300]}",
             ) from exc
         idx.embedding_artifact = dict(getattr(embed, "artifact", {"status": "unverified"}))
+        verify_view_authority(self.store, scope.model, scope.action)
         with self._index_lock:
             if len(self._indexes) >= 4:
                 self._indexes.pop(next(iter(self._indexes)))
@@ -296,6 +355,8 @@ class Playground:
     def index_status(self, scope: Scope) -> dict[str, Any]:
         from autoontology.store.operations import digest
         from autoontology.store.publications import Publications
+
+        verify_view_authority(self.store, scope.model, scope.action)
 
         publication = Publications(self.store).check_model(scope.revision)
         sid = (
@@ -317,6 +378,23 @@ class Playground:
             if identity and identity.get("status") == "unavailable"
             else self.pg.index_meta(sid)
         )
+        if getattr(scope.model, "_access_view", {}).get("restricted"):
+            from autoontology.ontology.model import MergedOntology
+
+            fragment = f"{scope.key}@r{scope.revision}"
+            if identity and identity.get("status") != "unavailable":
+                fragment += "@" + digest(identity)
+            fragment += "@view-" + digest(scope.model.to_dict())
+            own = self.pg.index_meta(fragment)
+            if own is None and publication and meta:
+                full_model = MergedOntology.from_dict(self.store.get_snapshot(scope.revision).model)
+                full_text = {e.id: (e.type, e.text_sha) for e in elements_from_model(full_model)}
+                visible = self.elements(scope)
+                if meta["elements"] == publication["manifest"]["index"]["elements"] and all(
+                    full_text.get(e.id) == (e.type, e.text_sha) for e in visible
+                ):
+                    own = {**meta, "scope": fragment, "elements": len(visible)}
+            meta = own
         compatible = (
             identity == publication["manifest"]["profile"].get("embedding_artifact")
             if publication and identity
@@ -413,7 +491,13 @@ class Playground:
                 "model": idx.model,
                 "embedding_artifact": getattr(idx, "embedding_artifact", {"status": "unverified"}),
                 "elements": len(idx.elements),
-                "publication_index": publication["manifest"]["index"] if publication else None,
+                "publication_index": (
+                    {"sha256": publication["manifest"]["index"]["sha256"], "restricted": True}
+                    if getattr(scope.model, "_access_view", {}).get("restricted")
+                    else publication["manifest"]["index"]
+                )
+                if publication
+                else None,
             },
             "hits": [
                 {
@@ -441,6 +525,7 @@ class Playground:
             idx, hits, vector = self.retrieve_with_vector(scope, question, top_k)
             context = self.retrieval_context(scope, idx, hits, vector)
             self.traces.context(trace, context)
+            verify_view_authority(self.store, scope.model, "query.run")
             self.traces.finish(trace, "succeeded", {"hit_count": len(hits)})
             return {"trace_id": trace, "revision": scope.revision, **context}
         except BaseException as exc:
@@ -461,7 +546,9 @@ class Playground:
         parts, cid = [], options.get("conversation_id")
         try:
             async for event in self._ask(scope, question, trace_id=trace_id, **options):
-                authorize(self.store, "query.run")
+                verify_view_authority(
+                    self.store, scope.model, "query.run", check_model=event["event"] == "done"
+                )
                 name, data = event["event"], event["data"]
                 if name == "delta":
                     parts.append(data["text"])
@@ -561,10 +648,10 @@ class Playground:
         )
         parts: list[str] = []
         try:
-            authorize(self.store, "query.run")
+            verify_view_authority(self.store, scope.model, "query.run")
             async with contextlib.aclosing(llm.stream(messages)) as stream:
                 async for text in stream:
-                    authorize(self.store, "query.run")
+                    verify_view_authority(self.store, scope.model, "query.run", check_model=False)
                     parts.append(text)
                     yield {"event": "delta", "data": {"text": text}}
         except LLMError as exc:
@@ -580,8 +667,12 @@ class Playground:
             if persist:
 
                 def save_partial() -> tuple[str, int]:
-                    cid = conversation_id or self.pg.create_conversation(scope.key, question[:80])
-                    self.pg.add_message(cid, "user", question)
+                    cid = conversation_id or self.pg.create_conversation(
+                        scope.key, question[:80], trace_writer=self.traces, trace_id=trace_id
+                    )
+                    self.pg.add_message(
+                        cid, "user", question, trace_writer=self.traces, trace_id=trace_id
+                    )
                     mid = self.pg.add_message(
                         cid,
                         "assistant",
@@ -591,6 +682,7 @@ class Playground:
                         model=llm.model,
                         incomplete=True,
                         trace_id=trace_id,
+                        trace_writer=self.traces,
                     )
                     return cid, mid
 
@@ -599,15 +691,19 @@ class Playground:
                 )
             yield {"event": "stream_truncated", "data": info}
             raise
-        authorize(self.store, "query.run")
+        verify_view_authority(self.store, scope.model, "query.run")
         answer = "".join(parts).strip()
         cited, unknown = prompts.parse_citations(answer, tokens)
         result = Answer(answer, hits, tokens, cited, unknown, llm.provider, llm.model)
         if persist:
 
             def save() -> tuple[str, int]:
-                cid = conversation_id or self.pg.create_conversation(scope.key, question[:80])
-                self.pg.add_message(cid, "user", question)
+                cid = conversation_id or self.pg.create_conversation(
+                    scope.key, question[:80], trace_writer=self.traces, trace_id=trace_id
+                )
+                self.pg.add_message(
+                    cid, "user", question, trace_writer=self.traces, trace_id=trace_id
+                )
                 mid = self.pg.add_message(
                     cid,
                     "assistant",
@@ -617,6 +713,7 @@ class Playground:
                     provider=llm.provider,
                     model=llm.model,
                     trace_id=trace_id,
+                    trace_writer=self.traces,
                 )
                 return cid, mid
 

@@ -50,6 +50,7 @@ from autoontology.playground.sql_guard import SqlError
 from autoontology.playground.sql_service import SqlService, result_csv
 from autoontology.security.context import await_authorized
 from autoontology.security.policy import AccessError
+from autoontology.security.views import verify_view_authority
 from autoontology.store.traces import TraceError, UsageTraces, error_code
 from autoontology.web.api import PREFIX, Api, ApiError, mask
 
@@ -146,6 +147,7 @@ async def _guarded(
     store=None,
     traces=None,
     trace_id=None,
+    model=None,
 ) -> AsyncIterator[dict[str, str]]:
     """Relay *events* as SSE, an exception as a final ``error`` event; release the slot."""
     parts = []
@@ -160,7 +162,19 @@ async def _guarded(
         while True:
             try:
                 ev = (
-                    await await_authorized(store, "query.run", events.__anext__, on_revoked=revoked)
+                    await await_authorized(
+                        store,
+                        "query.run",
+                        events.__anext__,
+                        on_revoked=revoked,
+                        check=(
+                            lambda: verify_view_authority(
+                                store, model, "query.run", check_model=False
+                            )
+                        )
+                        if model is not None
+                        else None,
+                    )
                     if store is not None
                     else await events.__anext__()
                 )
@@ -206,9 +220,9 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             app.state.playground = found
         return found
 
-    def scope() -> Scope:
+    def scope(action="query.run") -> Scope:
         try:
-            return pg().scope()
+            return pg().scope(action=action)
         except PlaygroundError as exc:
             raise _api_error(exc) from exc
 
@@ -260,11 +274,11 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
 
     @router.get("/index")
     def index_status() -> dict[str, Any]:
-        return pg().index_status(scope())
+        return pg().index_status(scope("knowledge.read"))
 
     @router.post("/index")
     async def index_build() -> dict[str, Any]:
-        s = scope()
+        s = scope("candidate.prepare")
         with hold(s):
             try:
                 await anyio.to_thread.run_sync(pg().index, s)
@@ -327,13 +341,22 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         # the generator's finally never runs when the client leaves before the body starts:
         # the background task (after the response, whatever happened) releases the slot too
         return EventSourceResponse(
-            _guarded(stack, events(), store=api.store, traces=pg().traces, trace_id=trace_id),
+            _guarded(
+                stack,
+                events(),
+                store=api.store,
+                traces=pg().traces,
+                trace_id=trace_id,
+                model=s.model,
+            ),
             background=BackgroundTask(cleanup_chat),
         )
 
     @router.get("/conversations")
     def conversations(all_users: bool = False) -> dict[str, Any]:
-        return {"conversations": pg().pg.list_conversations(scope().key, all_users=all_users)}
+        return {
+            "conversations": pg().pg.list_conversations(api.settings.workspace, all_users=all_users)
+        }
 
     @router.get("/conversations/{conversation_id}")
     def conversation(conversation_id: str) -> dict[str, Any]:
@@ -391,6 +414,7 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                 store=api.store,
                 traces=service.traces,
                 trace_id=prepared["trace_id"],
+                model=s.model,
             ),
             background=BackgroundTask(cleanup),
         )
@@ -401,8 +425,11 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             receipt = UsageTraces(api.store).get(trace_id)
             if receipt["workspace"] != api.settings.workspace:
                 raise TraceError("no result in this workspace", "trace_missing", 404)
+            data = result_csv(receipt)
+            if UsageTraces(api.store).get(trace_id)["sha256"] != receipt["sha256"]:
+                raise TraceError("Saved result changed before download.")
             return Response(
-                result_csv(receipt),
+                data,
                 media_type="text/csv; charset=utf-8",
                 headers={
                     "Content-Disposition": 'attachment; filename="query-result.csv"',
@@ -422,7 +449,7 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
 
     @router.post("/sparql")
     async def run_sparql(body: SparqlIn) -> dict[str, Any]:
-        head, model = api.snapshot()
+        head, model = api.snapshot(action="query.run")
         traces = UsageTraces(api.store)
         trace_id = traces.begin(
             kind="sparql",
@@ -439,7 +466,7 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                 Publications(api.store).verify(head.revision, api.settings.exports_dir)
             path = snapshot_ttl(api.settings, head, model)
             traces.context(trace_id, {"ttl_sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
-            key = snapshot_key(api.settings, head)
+            key = snapshot_key(api.settings, head, model)
             return {
                 **sparql.run_file(key, path, body.query, limit=body.limit),
                 "revision": head.revision,
@@ -447,7 +474,17 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             }
 
         try:
-            result = mask(await anyio.to_thread.run_sync(work))
+            result = mask(
+                await await_authorized(
+                    api.store,
+                    "query.run",
+                    lambda: anyio.to_thread.run_sync(work, abandon_on_cancel=True),
+                    check=lambda: verify_view_authority(
+                        api.store, model, "query.run", check_model=False
+                    ),
+                )
+            )
+            verify_view_authority(api.store, model, "query.run")
             traces.finish(trace_id, "succeeded", {"result": result})
             return {**result, "trace_id": trace_id}
         except Exception as exc:
@@ -459,14 +496,19 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     return router
 
 
-def snapshot_key(settings: Any, head: Any) -> str:
+def snapshot_key(settings: Any, head: Any, model=None) -> str:
     """Identity of snapshot *head* beyond its revision number -- revisions restart in a
     recreated store and ``exports/`` may be shared by several homes: workspace, revision
     and a hash of the snapshot's run id and creation time."""
     digest = hashlib.sha256(
         f"{settings.workspace}\0{head.run_id}\0{head.created_at}".encode()
     ).hexdigest()[:12]
-    return f"r{head.revision}-{digest}"
+    suffix = ""
+    if model is not None and getattr(model, "_access_view", {}).get("restricted"):
+        from autoontology.store.operations import digest as content_digest
+
+        suffix = "-view-" + content_digest(model.to_dict())[:32]
+    return f"r{head.revision}-{digest}{suffix}"
 
 
 def export_matches(settings: Any, head: Any, folder: Path) -> bool:
@@ -491,13 +533,15 @@ def snapshot_ttl(settings: Any, head: Any, model: Any) -> Path:
 
     folder = Path(settings.exports_dir) / revision_dir_name(head.revision)
     exported = folder / "ontology.ttl"
-    if exported.is_file() and export_matches(settings, head, folder):
+    restricted = getattr(model, "_access_view", {}).get("restricted", False)
+    if not restricted and exported.is_file() and export_matches(settings, head, folder):
         return exported
-    cached = Path(settings.home) / "cache" / f"ontology-{snapshot_key(settings, head)}.ttl"
-    if not cached.is_file():
+    cached = Path(settings.home) / "cache" / f"ontology-{snapshot_key(settings, head, model)}.ttl"
+    if not cached.is_file() or restricted:
         cached.parent.mkdir(parents=True, exist_ok=True)
         tmp = cached.with_name(f".{cached.name}.{uuid.uuid4().hex}.tmp")
         try:
+            tmp.touch(mode=0o600, exist_ok=False)
             rdf.to_graph(model).serialize(destination=str(tmp), format="turtle", encoding="utf-8")
             tmp.replace(cached)
         finally:

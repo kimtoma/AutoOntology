@@ -13,7 +13,7 @@ import anyio
 from autoontology.playground.sql_catalog import catalog_for, verify_binding
 from autoontology.playground.sql_executor import SqlExecutor
 from autoontology.playground.sql_guard import MAX_ROWS, MAX_SQL_CHARS, SqlError, validate_sql
-from autoontology.security.context import authorize
+from autoontology.security.views import verify_view_authority
 from autoontology.store.operations import digest
 from autoontology.store.traces import UsageTraces, error_code
 from autoontology.structured.pipeline import connection_for
@@ -128,6 +128,7 @@ class SqlService:
         self.catalog_loader = catalog_loader
 
     async def prepare(self, scope, body):
+        verify_view_authority(self.store, scope.model, "query.run")
         trace_id = self.traces.begin(
             kind="sql",
             workspace=scope.key,
@@ -216,7 +217,7 @@ class SqlService:
 
         def event(name, **data):
             if name != "error":
-                authorize(self.store, "query.run")
+                verify_view_authority(self.store, scope.model, "query.run", check_model=False)
             return {"event": name, "data": {"trace_id": trace_id, **data}}
 
         try:
@@ -302,6 +303,7 @@ class SqlService:
                 label="Read the source with enforced limits",
             )
             columns, rows = result["columns"], result["rows"]
+            verify_view_authority(self.store, scope.model, "query.run")
             summary = (
                 f"{columns[0]}: {rows[0][0]}"
                 if len(columns) == len(rows) == 1

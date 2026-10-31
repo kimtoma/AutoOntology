@@ -13,11 +13,12 @@ import { useCanUse, useIdentity } from "@/lib/identity"
 export function TraceButton({ traceId }: { traceId?: string }) {
   const t = useT(), qc = useQueryClient()
   const canDelete = useCanUse("results.delete")
+  const canRead = useCanUse("results.read")
   const [open, setOpen] = useState(false), [confirm, setConfirm] = useState(false)
-  const record = useQuery({ queryKey: ["usage-trace", traceId], queryFn: () => api.playground.trace(traceId!), enabled: open && !!traceId, refetchInterval: q => q.state.data?.status === "running" ? 2000 : false })
+  const record = useQuery({ queryKey: ["usage-trace", traceId], queryFn: () => api.playground.trace(traceId!), enabled: canRead && open && !!traceId, refetchInterval: q => q.state.data?.status === "running" ? 2000 : false })
   const remove = useMutation({ mutationFn: () => api.playground.forgetTrace(traceId!), onSuccess: () => { qc.invalidateQueries({ queryKey: ["usage-traces"] }); setConfirm(false) } })
   const trace = record.data, data = trace?.data
-  if (!traceId) return null
+  if (!traceId || !canRead) return null
   return <>
     <Button type="button" variant="ghost" size="sm" data-trace-id={traceId} onClick={() => setOpen(true)}>{t("usage.record")}</Button>
     <Sheet open={open} onOpenChange={setOpen}>

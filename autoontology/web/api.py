@@ -501,9 +501,14 @@ class Api:
         return "local"
 
     def latest_model(self) -> tuple[int, Any]:
-        """``(revision, model)`` of the latest snapshot (the playground's scope)."""
-        head, model = self.snapshot()
-        return head.revision, model
+        """Private full model factory; Playground.scope selects its caller's authority."""
+        from autoontology.ontology.model import MergedOntology
+        from autoontology.store.operations import read_snapshot
+
+        head = read_snapshot(self.store)
+        if head is None:
+            raise ApiError(404, "no_snapshot", "Build and publish knowledge first.")
+        return head.revision, MergedOntology.from_dict(head.model)
 
     # --- status ------------------------------------------------------------------------
 

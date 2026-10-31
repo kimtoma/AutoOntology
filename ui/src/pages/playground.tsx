@@ -9,6 +9,7 @@ import { Link, useSearchParams } from "react-router"
 import { ConceptSheet } from "@/components/concept-sheet"
 import { EmptyState, ErrorState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
+import { ScopeNotice } from "@/components/scope-notice"
 import { ChatTab } from "@/components/playground/chat-tab"
 import { ConceptOpener } from "@/components/playground/concept-opener"
 import { SparqlTab } from "@/components/playground/sparql-tab"
@@ -21,10 +22,11 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useOntology, useSources, useStatus } from "@/hooks/queries"
+import { useOntology, useStatus } from "@/hooks/queries"
 import { t, useT } from "@/i18n"
 import { isNoSnapshot } from "@/lib/api"
 import { SHARED_DEMO } from "@/lib/demo"
+import { useCanUse } from "@/lib/identity"
 
 const TABS = [
   { key: "chat", label: () => t("playground.tab.chat"), icon: MessagesSquare },
@@ -51,12 +53,14 @@ function ProviderBadge() {
 
 export default function PlaygroundPage() {
   const t = useT()
+  const canReadResults = useCanUse("results.read")
+  const canReadSettings = useCanUse("settings.read")
+  const tabs = TABS.filter(tab => tab.key !== "usage" || canReadResults)
   const [params, setParams] = useSearchParams()
   const ontology = useOntology()
-  const sources = useSources()
-  const structured = (sources.data ?? []).filter((s) => s.kind !== "documents" && s.built)
+  const structured = (ontology.data?.sources ?? []).filter((s) => s.kind !== "documents" && s.included !== false)
   const sqlSource = structured.find((s) => s.name === params.get("source"))?.name ?? null
-  const tab = (TABS.some((x) => x.key === params.get("tab")) ? params.get("tab") : "chat") as Tab
+  const tab = (tabs.some((x) => x.key === params.get("tab")) ? params.get("tab") : "chat") as Tab
   const conceptId = params.get("concept")
   const set = useCallback((patch: Record<string, string | null>) => {
     setParams((prev) => {
@@ -74,7 +78,8 @@ export default function PlaygroundPage() {
     <ConceptOpener.Provider value={openConcept}>
       <PageHeader title={t("playground.title")}
                   description={t("playground.description")}
-                  actions={SHARED_DEMO ? undefined : <ProviderBadge />} />
+                  actions={SHARED_DEMO || !canReadSettings ? undefined : <ProviderBadge />} />
+      <ScopeNotice access={ontology.data?.access} />
       {isNoSnapshot(ontology.error) ? (
         <EmptyState icon={FlaskConical} title={t("ontology.empty.title")}
                     hint={t("playground.empty.hint")}
@@ -85,7 +90,7 @@ export default function PlaygroundPage() {
           <Tabs value={tab} onValueChange={(v) => set({ tab: v })} id="playground-tabs">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <TabsList className="h-auto flex-wrap justify-start">
-                {TABS.map((tab) => (
+                {tabs.map((tab) => (
                   <TabsTrigger key={tab.key} value={tab.key} data-tab={tab.key} className="flex-none">
                     <tab.icon aria-hidden /> {tab.label()}
                   </TabsTrigger>
@@ -115,7 +120,7 @@ export default function PlaygroundPage() {
               <SqlTab key={sqlSource ?? AUTO} source={sqlSource} />
             </TabsContent>
             <TabsContent value="sparql" forceMount hidden={tab !== "sparql"}><SparqlTab /></TabsContent>
-            <TabsContent value="usage">{tab === "usage" && <UsageHistory />}</TabsContent>
+            {canReadResults && <TabsContent value="usage">{tab === "usage" && <UsageHistory />}</TabsContent>}
           </Tabs>
         )}
       <ConceptSheet conceptId={conceptId} onClose={() => set({ concept: null })} onOpen={openConcept} />

@@ -168,6 +168,16 @@ DOMAIN_READS = {
         "/api/ontology/export/{format}",
     )
 }
+DOMAIN_READS.update(
+    (method, path)
+    for (method, path), action in POLICIES.items()
+    if path.startswith("/api/playground/")
+    and (
+        (method == "POST" and action == "query.run")
+        or (method == "GET" and action in {"results.read", "knowledge.read"})
+        or (method == "DELETE" and action == "results.delete")
+    )
+)
 RULES = [
     (method, compile_path(path)[0], action, path) for (method, path), action in POLICIES.items()
 ]

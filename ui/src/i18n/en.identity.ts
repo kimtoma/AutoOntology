@@ -1,5 +1,6 @@
 import { enAccess } from "@/i18n/en.access"
 export const enIdentity = {
+  "identity.authorityChanged": "Access changed. Active requests stopped and this view refreshed. Saved results are checked against your current access.",
   ...enAccess,
   "identity.scope.title": "Knowledge within your access",
   "identity.scope.hint": "Only complete items supported by sources you can read are shown. A combined item requires access to every contributing source.",

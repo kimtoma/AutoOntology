@@ -150,7 +150,7 @@ def audit_effect(store, decision, target, detail, *, conn):
         )
 
 
-async def await_authorized(store, action, call, *, on_revoked=None, interval=0.1):
+async def await_authorized(store, action, call, *, on_revoked=None, interval=0.1, check=None):
     """Check while waiting, cancel the awaited provider/read, and retain its auth error.
 
     No cancellation scope spans a generator yield. The caller supplies cleanup for
@@ -159,7 +159,8 @@ async def await_authorized(store, action, call, *, on_revoked=None, interval=0.1
     """
     import anyio
 
-    authorize(store, action)
+    check = check or (lambda: authorize(store, action))
+    check()
     denied = None
     failure = None
     value = None
@@ -169,7 +170,7 @@ async def await_authorized(store, action, call, *, on_revoked=None, interval=0.1
         while True:
             await anyio.sleep(interval)
             try:
-                authorize(store, action)
+                check()
             except AccessError as error:
                 denied = error
                 if on_revoked:
@@ -189,5 +190,5 @@ async def await_authorized(store, action, call, *, on_revoked=None, interval=0.1
         raise denied
     if failure is not None:
         raise failure
-    authorize(store, action)
+    check()
     return value

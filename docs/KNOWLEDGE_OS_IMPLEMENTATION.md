@@ -191,6 +191,30 @@ an actionable failure without an unauthorized follow-up result read.
 
 ## Recovery procedure
 
+### Stage 15: query and durable saved-result knowledge scope
+
+Parent `118ee63`; additive schema v14 stores immutable message-scope companions
+without rewriting historical messages or receipt hashes. Shared query selection
+covers retrieval/context, frozen-vector subset reuse, frozen SQL catalog projection,
+SPARQL serialization/worker keys, receipt/conversation reads and CSV recovery.
+Knowledge dependencies and current ownership are independent requirements. Scope
+changes cancel asynchronous waits and prevent success; trace deletion cannot erase
+message dependencies. UI/native domain query paths share these boundaries.
+
+Actual copied-data acceptance uses local Ollama and copied PostgreSQL, with controlled
+r9 source/SQL bindings and operational pointer plus fixed local chat/planning.
+This separates access/lifecycle verification from semantic publication acceptance;
+the legacy r8 source identities remain unknown. No external model input or normal
+identity enrollment is added. Final test, capture, preservation and recovery evidence
+is recorded in the private stage-15 index. Remaining source/effect/queue checks,
+exact human approval, owner recovery, full CLI parity and P1-P3 remain in scope.
+Python regression: **1541 passed / 66 integration tests skipped**. UI: **192 passed**,
+lint/build passed with the existing restoration purity warning. The actual copied
+workspace passed scoped local retrieval, completed controlled answer, PostgreSQL
+count 40, matching browser/native CSV, SPARQL exclusion and live domain-move
+cancellation/history denial. Six final light-mode captures include the explicit
+authority-change notice; earlier attempts remain separately labeled.
+
 ### Stage 14: source-complete domain views
 
 Parent `abab7cc`; schema remains v13. Shared read selection covers graph, concept,

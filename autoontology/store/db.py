@@ -582,6 +582,18 @@ MIGRATIONS: list[tuple[int, str]] = [
         BEGIN SELECT RAISE(ABORT,'trace owner is immutable'); END
         """,
     ),
+    (
+        14,
+        """
+        CREATE TABLE playground_message_scopes (
+            message_id INTEGER PRIMARY KEY REFERENCES playground_messages(id) ON DELETE CASCADE,
+            scope_json TEXT NOT NULL, sha256 TEXT NOT NULL
+        );
+        CREATE TRIGGER playground_message_scope_immutable
+        BEFORE UPDATE ON playground_message_scopes
+        BEGIN SELECT RAISE(ABORT,'message knowledge scope is immutable'); END
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration

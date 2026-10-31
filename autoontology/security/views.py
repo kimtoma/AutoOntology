@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 
 from autoontology.ontology.model import MergedOntology
@@ -46,7 +47,7 @@ def _whole(service, actor, action, conn):
         return None
 
 
-def knowledge_view(store, snapshot, *, action="knowledge.read", additional_actions=()):
+def knowledge_view(store, snapshot, *, action="knowledge.read", additional_actions=(), conn=None):
     """Recheck live policy and project copies; never cache by revision alone.
 
     Historical identities must come from captured source metadata, not today's
@@ -59,7 +60,7 @@ def knowledge_view(store, snapshot, *, action="knowledge.read", additional_actio
     service = Identity(store)
     publication = Publications(store).check_model(snapshot.revision)
     pinned = (publication or {}).get("manifest", {}).get("source_authority")
-    with service._read() as conn:
+    with nullcontext(conn) if conn is not None else service._read() as conn:
         actor = current_actor(store, conn=conn)
         if actor is None:
             return KnowledgeView(snapshot, model, False, None)
@@ -143,7 +144,7 @@ def knowledge_view(store, snapshot, *, action="knowledge.read", additional_actio
         return KnowledgeView(projected, result, True, state["policy_version"], authority, unknown)
 
 
-def verify_view_authority(store, model, action):
+def verify_view_authority(store, model, action, *, check_model=True):
     """Recheck a selected view before a byte/file effect; reject stale/mutated views."""
     from autoontology.store.operations import digest
 
@@ -167,8 +168,8 @@ def verify_view_authority(store, model, action):
             raise AccessError(
                 "The selected view belongs to a different execution.", "view_authority_changed", 409
             )
-        if bound["policy_version"] != state["policy_version"] or bound["model_sha256"] != digest(
-            model.to_dict()
+        if bound["policy_version"] != state["policy_version"] or (
+            check_model and bound["model_sha256"] != digest(model.to_dict())
         ):
             raise AccessError(
                 "The selected knowledge or policy changed. Refresh before continuing.",

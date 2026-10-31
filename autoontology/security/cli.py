@@ -89,6 +89,11 @@ GROUPS = {
 
 _CREDENTIAL_PATH: ContextVar[Path | None] = ContextVar("autoontology_cli_credential", default=None)
 DOMAIN_READ_COMMANDS = {("ops", "documents"), ("ops", "original"), ("ops", "export-view")}
+DOMAIN_READ_COMMANDS.update(
+    ("ops", name)
+    for name, action in GROUPS["ops"].items()
+    if action in {"query.run", "results.read", "results.delete"}
+)
 
 
 def _emit(value):

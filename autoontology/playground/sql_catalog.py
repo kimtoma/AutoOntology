@@ -297,6 +297,13 @@ def frozen_archive(store, settings, revision, model, name):
         if path.is_symlink() or not path.resolve().is_relative_to(folder.resolve()):
             raise ValueError("unsafe path")
         raw = path.read_bytes()
+        from autoontology.store.publications import Publications
+
+        publication = Publications(store).check_model(revision)
+        if publication and hashlib.sha256(raw).hexdigest() != publication["manifest"][
+            "artifacts"
+        ].get(relative):
+            raise ValueError("changed publication mapping")
         if (
             marker.get("revision") != revision
             or marker.get("snapshot_run") != snapshot.run_id
@@ -362,12 +369,27 @@ def catalog_for(store, settings, revision, model, name=None):
             ):
                 raise ValueError("changed catalog")
             envelope = json.loads(raw)
-            if envelope["model_sha256"] != digest(model.to_dict()):
+            from autoontology.ontology.model import MergedOntology
+
+            full_model = MergedOntology.from_dict(store.get_snapshot(revision).model)
+            if envelope["model_sha256"] != digest(full_model.to_dict()):
                 raise ValueError("different model")
             selected = next(s for s in envelope["sources"] if s["source"] == name)
             if selected["status"] != "available":
                 raise SqlError(selected["detail"], selected["error"])
             verify_binding(store, settings, name, selected["binding"])
+            if digest(model.to_dict()) != digest(full_model.to_dict()):
+                from autoontology.security.views import verify_view_authority
+
+                if not getattr(model, "_access_view", {}).get("restricted"):
+                    raise ValueError("unapproved model")
+                verify_view_authority(store, model, "query.run")
+                return project(
+                    model,
+                    name,
+                    native_catalog(frozen_archive(store, settings, revision, full_model, name)),
+                    selected["binding"],
+                )
             return selected
         except SqlError:
             raise

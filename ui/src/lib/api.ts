@@ -514,7 +514,6 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
     throw new ApiError(NETWORK_HINT, 0, "network")
   }
   if (!resp.ok || !resp.body) {
-    identityResponse(resp.status)
     let detail = `HTTP ${resp.status}`
     let code: string | undefined
     try {
@@ -522,6 +521,7 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
       if (typeof obj.detail === "string") detail = obj.detail
       code = obj.error
     } catch { /* not JSON */ }
+    identityResponse(resp.status, code)
     throw new ApiError(detail, resp.status, code)
   }
   const reader = resp.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -529,7 +529,7 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
   let terminal = false
   const emit = (ev: SseEvent) => {
     if (TERMINAL_EVENTS.has(ev.event)) terminal = true
-    if (ev.event === "error" && typeof ev.data === "object" && ev.data !== null && "status" in ev.data && typeof ev.data.status === "number") identityResponse(ev.data.status)
+    if (ev.event === "error" && typeof ev.data === "object" && ev.data !== null && "status" in ev.data && typeof ev.data.status === "number") identityResponse(ev.data.status, "error" in ev.data && typeof ev.data.error === "string" ? ev.data.error : undefined)
     onEvent(ev)
   }
   for (;;) {
@@ -555,8 +555,8 @@ async function send(path: string, init: RequestInit, asText: boolean): Promise<u
   const type = resp.headers.get("content-type") || ""
   const body: unknown = type.includes("json") && !(asText && resp.ok) ? await resp.json() : await resp.text()
   if (!resp.ok) {
-    identityResponse(resp.status)
     const obj = (body && typeof body === "object" ? body : {}) as { detail?: unknown; error?: string }
+    identityResponse(resp.status, obj.error)
     const detail = typeof obj.detail === "string" ? obj.detail : `HTTP ${resp.status}`
     throw new ApiError(detail, resp.status, obj.error, obj as Record<string, unknown>)
   }

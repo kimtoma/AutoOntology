@@ -288,3 +288,68 @@ def test_legacy_source_binding_uses_a_recorded_run_not_a_name_guess(frozen):
     store.update_run(run, status="succeeded", params={})
     with pytest.raises(SqlError, match="no verified source identity"):
         catalog_for(store, settings, rev, model, "finance")
+
+
+def test_scoped_frozen_catalog_uses_visible_properties_and_verified_native_mapping(
+    frozen, monkeypatch
+):
+    from autoontology.security.context import acting_as
+    from autoontology.security.views import knowledge_view
+    from autoontology.store.identity import Identity
+    from autoontology.store.operations import digest
+
+    store, settings, model, rev, _, folder = frozen
+    # An approved attribute whose evidence lacks domain ownership is not visible
+    # to a domain reader, even when it shares the permitted physical table.
+    model.properties["attr-secret"] = OProperty(
+        "attr-secret",
+        "datatype",
+        "PRIVATE_PASSWORD",
+        "term-customer",
+        "xsd:string",
+        "structured",
+        source_column="public.customers.password",
+        owner="finance",
+        derived_from=["unknown-evidence"],
+    )
+    with store._conn() as conn:
+        conn.execute(
+            "UPDATE ontology_snapshots SET model_json=? WHERE revision=?",
+            (json.dumps(model.to_dict()), rev),
+        )
+    write_catalog(store, settings, model, rev, folder, Publications(store).bindings([rev]))
+    artifact = folder / "sql-catalog.json"
+    full = json.loads(artifact.read_text())
+    assert "password" in full["sources"][0]["tables"][0]["columns"]
+    publication = {
+        "manifest": {
+            "artifacts": {
+                "sql-catalog.json": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+                "upstream/finance.ossie.zip": hashlib.sha256(
+                    (folder / "upstream/finance.ossie.zip").read_bytes()
+                ).hexdigest(),
+            }
+        }
+    }
+    monkeypatch.setattr(Publications, "check_model", lambda self, revision: publication)
+    identity = Identity(store)
+    issued = identity.bootstrap("Org", "owner", "Owner", "long owner fixture password")
+    owner = identity.authenticate(issued.secret.reveal())
+    general = next(
+        d["id"] for d in identity.administration(owner)["domains"] if d["slug"] == "general"
+    )
+    identity.create_human(
+        owner, "reader", "Reader", "long reader fixture password", ["viewer"], domains=[general]
+    )
+    reader = identity.authenticate(
+        identity.login("reader", "long reader fixture password").secret.reveal()
+    )
+    with acting_as(store, reader):
+        view = knowledge_view(store, store.get_snapshot(rev), action="query.run")
+        assert digest(view.model.to_dict()) != digest(model.to_dict())
+        catalog = catalog_for(store, settings, rev, view.model)
+        assert set(catalog["tables"][0]["columns"]) == {"name"}
+        assert "PRIVATE" not in json.dumps(catalog)
+        with pytest.raises(SqlError):
+            validate_sql("SELECT password FROM customers", catalog)
+    assert json.loads(artifact.read_text()) == full

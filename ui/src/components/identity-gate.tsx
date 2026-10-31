@@ -21,6 +21,7 @@ export function IdentityGate({ children }: { children: ReactNode }) {
   const [password, setPassword] = useState("")
   const [acceptedAuthority, setAcceptedAuthority] = useState<string | null>(null)
   const [refreshingAuthority, setRefreshingAuthority] = useState(false)
+  const [authorityNotice, setAuthorityNotice] = useState(false)
   const status = useQuery({ queryKey: statusKey, queryFn: ({ signal }) => identityApi.status(signal), retry: false })
   const configured = status.data?.configured === true
   const me = useQuery({ queryKey: meKey, queryFn: ({ signal }) => identityApi.me(signal), enabled: configured && !locked, retry: false, refetchInterval: 30_000 })
@@ -50,6 +51,7 @@ export function IdentityGate({ children }: { children: ReactNode }) {
     }
     const refresh = () => {
       if (!configured) return
+      setAuthorityNotice(true)
       setRefreshingAuthority(true)
       void qc.cancelQueries({ predicate: query => query.queryKey[0] !== "identity" }).then(() => {
         qc.removeQueries({ predicate: query => query.queryKey[0] !== "identity" })
@@ -115,7 +117,7 @@ export function IdentityGate({ children }: { children: ReactNode }) {
   if (refreshingAuthority || acceptedAuthority !== authorityKey) {
     return <main className="mx-auto max-w-sm px-6 py-24"><p className="text-sm text-muted-foreground" role="status">{t("identity.checking")}</p></main>
   }
-  return <IdentityContext.Provider value={{ session: me.data, signOut: () => logout.mutate(), signingOut: logout.isPending, logoutFailed: logout.isError }}>{children}</IdentityContext.Provider>
+  return <IdentityContext.Provider value={{ session: me.data, signOut: () => logout.mutate(), signingOut: logout.isPending, logoutFailed: logout.isError }}>{children}{authorityNotice && <div role="status" className="fixed right-5 bottom-5 z-50 flex max-w-sm items-start gap-3 border border-border bg-background p-4 text-xs leading-6 shadow-sm"><span>{t("identity.authorityChanged")}</span><button type="button" className="shrink-0 underline underline-offset-4" onClick={() => setAuthorityNotice(false)}>{t("common.close")}</button></div>}</IdentityContext.Provider>
 }
 
 export function IdentityControls() {

@@ -29,17 +29,27 @@ it("discards cached knowledge when the live policy changes", async () => {
   version = 2
   window.dispatchEvent(new Event(AUTHORITY_CHANGED))
   expect(await screen.findByText("Allowed current data")).toBeVisible()
+  expect(screen.getByRole("status")).toHaveTextContent("Access changed")
   expect(screen.queryByText("PRIVATE_OLD")).not.toBeInTheDocument()
   expect(calls.filter(call => call.path === "/domain-knowledge")).toHaveLength(2)
 })
 
-it("permits projected domain reads while unprojected operations still require whole scope", async () => {
+it("permits projected domain reads and queries", async () => {
   mockFetch({ "GET /identity/status": { configured: true, workspace_id: "workspace" }, "GET /identity/me": { ...session, capabilities: { "knowledge.read": ["finance"], "query.run": ["finance"] } } })
   function Authority() {
     return <span>{useCanUse("knowledge.read") ? "Scoped graph allowed" : "Graph denied"} / {useCanUse("query.run") ? "Query allowed" : "Query gate retained"}</span>
   }
   renderPage(<IdentityGate><Authority /></IdentityGate>)
-  expect(await screen.findByText("Scoped graph allowed / Query gate retained")).toBeVisible()
+  expect(await screen.findByText("Scoped graph allowed / Query allowed")).toBeVisible()
+})
+
+it("refreshes current authority after a stream reports policy drift", async () => {
+  const changed = vi.fn()
+  window.addEventListener(AUTHORITY_CHANGED, changed)
+  mockFetch({ "POST /playground/chat": () => new Response('event: error\ndata: {"status":409,"error":"view_authority_changed"}\n\n', { headers: { "content-type": "text/event-stream" } }) })
+  await streamSse("/playground/chat", {}, vi.fn())
+  expect(changed).toHaveBeenCalledOnce()
+  window.removeEventListener(AUTHORITY_CHANGED, changed)
 })
 
 it("locks the workspace when a running SSE response reports credential revocation", async () => {

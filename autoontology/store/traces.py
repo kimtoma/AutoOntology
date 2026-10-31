@@ -13,8 +13,9 @@ import time
 import uuid
 from datetime import datetime
 
-from autoontology.security.context import audit_effect, authorize
+from autoontology.security.context import audit_effect, authorize_any
 from autoontology.security.policy import AccessError
+from autoontology.security.query_scope import capture_scope, require_scope
 from autoontology.security.results import require_result, selection
 from autoontology.store.db import Store, now_iso, pid_alive
 from autoontology.store.operations import digest
@@ -50,6 +51,7 @@ class UsageTraces:
     ) -> str:
         if kind not in ("chat", "retrieval", "sql", "sparql"):
             raise TraceError("unknown trace kind")
+        knowledge = capture_scope(self.store, revision, model)
         publication = Publications(self.store).check_model(revision)
         trace_id = uuid.uuid4().hex
         stamp = now_iso()
@@ -67,8 +69,14 @@ class UsageTraces:
             "outcome": {},
             "duration_ms": None,
         }
+        if knowledge is not None:
+            data["binding"]["knowledge"] = knowledge
         with self.store._immediate() as conn:
-            authority = authorize(self.store, "query.run", conn=conn)
+            authority = authorize_any(self.store, "query.run", conn=conn)
+            if authority is not None and authority.policy_version != knowledge["policy_version"]:
+                raise AccessError(
+                    "Authority changed before the request started.", "authority_changed", 409
+                )
             if conversation_id:
                 conversation = conn.execute(
                     "SELECT principal_id,identity_workspace FROM playground_conversations WHERE id=?",
@@ -144,7 +152,55 @@ class UsageTraces:
             require_result(
                 self.store, row["principal_id"], row["identity_workspace"], action=action, conn=conn
             )
-            return self._record(row)
+            record = self._record(row)
+            require_scope(
+                self.store, record["data"].get("binding", {}).get("knowledge"), action, conn=conn
+            )
+            return record
+
+    def writer(self, trace_id, *, conn):
+        """Verify an originating producer and its exact current preparation authority."""
+        row = conn.execute(
+            "SELECT * FROM usage_traces WHERE id=? AND status='running'", (trace_id,)
+        ).fetchone()
+        if row is None or trace_id not in self._writers:
+            raise AccessError(
+                "Only the originating running request may bind this message.",
+                "trace_producer_required",
+                403,
+            )
+        require_result(
+            self.store,
+            row["principal_id"],
+            row["identity_workspace"],
+            action="query.run",
+            conn=conn,
+        )
+        binding = self._record(row)["data"].get("binding", {}).get("knowledge")
+        require_scope(
+            self.store,
+            binding,
+            "query.run",
+            conn=conn,
+            expected_policy=binding.get("policy_version") if binding else None,
+        )
+        return row, binding
+
+    def attach_conversation(self, trace_id, conversation_id, *, conn):
+        row, _ = self.writer(trace_id, conn=conn)
+        conversation = conn.execute(
+            "SELECT principal_id,identity_workspace FROM playground_conversations WHERE id=?",
+            (conversation_id,),
+        ).fetchone()
+        if conversation is None or tuple(conversation) != (
+            row["principal_id"],
+            row["identity_workspace"],
+        ):
+            raise TraceError("Conversation ownership differs from its originating request.")
+        conn.execute(
+            "UPDATE usage_traces SET conversation_id=? WHERE id=? AND status='running'",
+            (conversation_id, trace_id),
+        )
 
     def context(self, trace_id: str, context: dict) -> None:
         with self.store._immediate() as conn:
@@ -170,6 +226,14 @@ class UsageTraces:
                 conn=conn,
             )
             data = json.loads(row["data_json"])
+            binding = data.get("binding", {}).get("knowledge")
+            require_scope(
+                self.store,
+                binding,
+                "query.run",
+                conn=conn,
+                expected_policy=binding.get("policy_version") if binding else None,
+            )
             data["context"].update(context)
             conn.execute(
                 "UPDATE usage_traces SET data_json=? WHERE id=? AND status='running'",
@@ -209,6 +273,14 @@ class UsageTraces:
                     row["identity_workspace"],
                     action="query.run",
                     conn=conn,
+                )
+                binding = self._record(row)["data"].get("binding", {}).get("knowledge")
+                require_scope(
+                    self.store,
+                    binding,
+                    "query.run",
+                    conn=conn,
+                    expected_policy=binding.get("policy_version") if binding else None,
                 )
             if conversation_id:
                 conversation = conn.execute(
@@ -276,12 +348,30 @@ class UsageTraces:
             rows = conn.execute(
                 "SELECT * FROM usage_traces WHERE workspace=?"
                 + clause
-                + " ORDER BY started_at DESC,rowid DESC LIMIT ?",
-                (workspace, *(owner or ()), max(1, min(500, limit))),
-            ).fetchall()
+                + " ORDER BY started_at DESC,rowid DESC",
+                (workspace, *(owner or ())),
+            )
             names = {
                 r["id"]: r["name"] for r in conn.execute("SELECT id,name FROM identity_principals")
             }
+            allowed, cache = [], {}
+            for row in rows:
+                record = self._record(row)
+                try:
+                    require_scope(
+                        self.store,
+                        record["data"].get("binding", {}).get("knowledge"),
+                        "results.read",
+                        conn=conn,
+                        cache=cache,
+                    )
+                except AccessError as error:
+                    if error.status != 404:
+                        raise
+                    continue
+                allowed.append(row)
+                if len(allowed) >= max(1, min(500, limit)):
+                    break
         # Listing avoids duplicating private prompts and results in the overview.
         return [
             {
@@ -292,7 +382,7 @@ class UsageTraces:
                     "legacy": row["principal_id"] is None,
                 },
             }
-            for row in rows
+            for row in allowed
         ]
 
     def verify(self, trace_id: str) -> dict:

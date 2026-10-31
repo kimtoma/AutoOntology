@@ -6,7 +6,7 @@ it, but cannot continue a conversation as its original author. OS-level database
 access is a trusted maintenance boundary, not an untrusted agent permission.
 """
 
-from autoontology.security.context import authorize, current_actor
+from autoontology.security.context import authorize, authorize_any, current_actor
 from autoontology.security.policy import AccessError
 
 
@@ -15,7 +15,7 @@ def selection(store, *, all_users=False, conn):
     actor = current_actor(store, conn=conn)
     if actor is None:
         return None
-    authorize(store, "results.read", conn=conn)
+    authorize_any(store, "results.read", conn=conn)
     if all_users:
         authorize(store, "identity.admin", conn=conn)
         return None
@@ -41,4 +41,4 @@ def require_result(store, principal_id, workspace_id, *, action="results.read", 
             raise AccessError(
                 "No saved result with this identifier.", "result_missing", 404
             ) from None
-    return authorize(store, action, conn=conn)
+    return authorize_any(store, action, conn=conn)
