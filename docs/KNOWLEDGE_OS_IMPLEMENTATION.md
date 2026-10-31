@@ -57,7 +57,7 @@ model, source and browser checks.
 | P0-03 | Authenticated Principal, roles, workspace/domain scope; evidence/search/history/export/SQL enforcement; audit actors; SQL read-only limits | In progress: durable schema-v12 identity foundation plus initial individual HTTP/native CLI/browser sessions, explicit route/command policies, worker context propagation, verified review actors and atomic publication authority checks. Unfiltered resources require whole-workspace scope; normal-workspace enrollment remains off. Final Python regression 1498 passed / 66 integration skipped; UI 180 passed, build/lint passed with the pre-existing restoration purity warning. Actual copied-data browser login/error/progress/graph/logout/role-denial, native login/whoami/original listing and fixed-public-content Codex pong passed. The subsequent stage adds administration UI/CLI and verified usage actors, with Python 1504 / UI 183 passing. After explicit approval, exact-message document chat completed through actual Codex with a verified actor and matching E1 citation; UI history recovered it without a new model call. Mixed-domain resource projection, full effects/stream/queue checks, remote-session/renewal support, exact approval lifecycle and local-owner enrollment/recovery remain required. See `IDENTITY_AUTHORITY.md` and private stage-10/11/12 evidence. |
 | P1-01 | ChangeSet/ReviewCase, dependencies, base publication, owner/due/priority/reasons, stale-base warning, append-only transitions, connection-review links | In progress: Stage 17 adds shared UI/native business cases, structural dependency-complete exact human review packets, atomic review batches, immutable receipts, stale/expiry/policy guards, case relations and publication-bound resolution/reopen. Connection-review packet integration, effective dates, linked evaluations, consumer impact and full-stage acceptance remain. See BUSINESS_CASES.md and private stage evidence. |
 | P1-02 | Contract/billing rule scope, amount/operator, approval authority, effective dates, exceptions/conflicts; durable identity rename/merge/split; extraction quality and corrections; versioned deterministic evaluation and citation support | In progress: Stage 18 adds explicit human-reviewed monetary rule fields, amount/date/authority conflicts, immutable evaluation suite versions, deterministic model/answer criteria, shared publication/restoration checks, preserved runs and UI/native parity. Automatic typed extraction, semantic support judgments, merge/split and remaining acceptance stay pending. See RULE_EVALUATION.md. |
-| P1-03 | Answer → feedback → owner → change → evaluation → resolution publication; reopening; workload/overdue/evidence/failure/impact metrics | Pending |
+| P1-03 | Answer → feedback → owner → change → evaluation → resolution publication; reopening; workload/overdue/evidence/failure/impact metrics | In progress: Stage 19 links feedback/owner/business context/effective dates/exact required suites to case confirmation and outcomes, adds explicit no-change dispositions and atomic linked-request reopening, plus transparent human intervals, coverage attestation, provenance-separated baselines, owner targets and cohort median/p90. Real business measurements, failure/recovery phase attribution, correction adjudication and consumer impact remain required. See AX_FEEDBACK.md. |
 | P2-01 | Folder/Postgres schedules, durable deduplicated queue, retries/backoff/terminal failure, restart/resume, owner-linked notification outbox | Pending |
 | P2-02 | Connector auth/scope/delete/move/duplicate/failure/cursor contract; separate DB schema and row changes; one document-repository pilot | Pending |
 | P3-01 | Contract/billing, HR, security domain catalog; ownership, sources/publication, shared/conflicting concept mappings and authorization | Pending |
@@ -388,3 +388,17 @@ limits](RULE_EVALUATION.md). Private real browser/native acceptance uses an
 archived fictitious Korean regulation and clearly controlled model adapters;
 no private material is sent to an external model and no public deployment occurs.
 The final stage record holds regression, images, checkpoint and recovery proof.
+
+### Stage 19: feedback handoff, case context and AX records
+
+Schema v17 adds immutable business-context versions, original feedback links,
+human-owned timers and append-only timing events, effort coverage attestations,
+observed/reported and business/simulation baselines, retained corrections and
+owner target versions. Exact case packets bind context/evaluation versions and
+accepted outcomes require those versions in their publication manifest. Explicit
+no-change cases apply no knowledge decisions/publication; linked feedback closes
+only against a usable outcome and reopens with the case. UI/native actions share
+one service. See [measurement provenance, commands and remaining pilot work](AX_FEEDBACK.md).
+Private browser acceptance uses a fictitious request, a clearly controlled snapshot
+clone and simulated/reported data; it makes no real business-savings claim.
+Regression, captures and data recovery proof belong in the private stage record.

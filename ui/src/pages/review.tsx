@@ -1,3 +1,4 @@
+import { FeedbackCaseButton } from "@/components/feedback-case"
 import { RuleFields, RuleSummary } from "@/components/rule-fields"
 import { emptyRule, type MonetaryRule } from "@/lib/rules"
 import { CaseBoard } from "@/components/case-board"
@@ -388,11 +389,6 @@ export default function ReviewPage() {
     },
     onError: (e) => toast.error(errorMessage(e)),
   })
-  const resolve = useMutation({
-    mutationFn: operations.resolve,
-    onSuccess: () => refreshOperations(qc),
-    onError: (e) => toast.error(errorMessage(e)),
-  })
   const items =
     changes.data?.items.filter((i) =>
       filter === "all" || filter === "pending"
@@ -496,13 +492,12 @@ export default function ReviewPage() {
                 <h2 className="font-semibold">{f.question}</h2>
                 <p className="my-3 text-sm text-muted-foreground whitespace-pre-wrap">{f.answer}</p>
                 <p className="mb-4 text-sm">{f.note}</p>
+                <div className="mb-3"><FeedbackCaseButton id={f.id} question={f.question}/></div>
                 <div className="flex flex-wrap gap-2">
                   <Button asChild variant="outline">
                     <Link to="/sources">{t("nav.sources")}</Link>
                   </Button>
-                  <Button variant="outline" disabled={resolve.isPending} onClick={() => resolve.mutate(f.id)}>
-                    {t("ops.resolve")}
-                  </Button>
+
                 </div>
               </article>
             ))

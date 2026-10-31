@@ -1,3 +1,4 @@
+import { AXDashboard } from "@/components/ax-dashboard"
 import { CaseSummaryRow } from "@/components/case-board"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -60,6 +61,7 @@ export default function OperationsHome() {
         }
       />
       <CaseSummaryRow />
+      <AXDashboard />
       <div className="ops-metrics" id="operations-counts">
         {[
           [t("ops.pending"), pending, "/review", t("console.pendingHint")],

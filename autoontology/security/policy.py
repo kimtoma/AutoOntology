@@ -24,6 +24,9 @@ class Capability:
 
 
 CAPABILITIES = {
+    "ax.read": Capability("read"),
+    "ax.record": Capability("execute", True),
+    "ax.configure": Capability("execute", True),
     "knowledge.read": Capability("read"),
     "history.read": Capability("read"),
     "originals.read": Capability("read"),
@@ -64,6 +67,8 @@ VIEWER = frozenset(
     }
 )
 REVIEWER = VIEWER | {
+    "ax.read",
+    "ax.record",
     "candidate.read",
     "review.suggest",
     "review.decide",
@@ -76,6 +81,8 @@ ROLES = {
     "viewer": VIEWER,
     "editor": VIEWER
     | {
+        "ax.read",
+        "ax.record",
         "candidate.read",
         "candidate.prepare",
         "source.edit",

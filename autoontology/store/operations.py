@@ -733,6 +733,21 @@ class Operations:
     def resolve_feedback(self, item_id: int, reopen: bool) -> None:
         with self.store._immediate() as conn:
             authority = authorize(self.store, "feedback.manage", conn=conn)
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='ax_feedback_links'"
+            ).fetchone():
+                link = conn.execute(
+                    "SELECT c.status FROM ax_feedback_links l JOIN ops_cases c ON c.id=l.case_id WHERE l.feedback_id=?",
+                    (item_id,),
+                ).fetchone()
+                if link and (not reopen or link["status"] == "resolved"):
+                    from autoontology.security.policy import AccessError
+
+                    raise AccessError(
+                        "Resolve linked feedback through its usable case outcome, or reopen the case first.",
+                        "feedback_case_required",
+                        409,
+                    )
             conn.execute(
                 "UPDATE ops_feedback SET resolved=? WHERE id=?", (0 if reopen else 1, item_id)
             )

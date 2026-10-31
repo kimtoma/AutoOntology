@@ -173,3 +173,8 @@ evidence, but do not yet prove authenticated human/agent authority separation.
 - Every stage includes semantic CLI parity, machine-readable workflows and the
   corresponding error/recovery/authorization tests. Partial CLI coverage cannot
   be reported as completing the entire goal.
+
+Stage 19 adds thirteen named AX/feedback commands, explicit human timing and
+coverage confirmation, immutable context/evaluation links, provenance-separated
+baselines and baseline-bound owner targets. See AX_FEEDBACK.md. These are
+instrumentation, not evidence of actual organizational time savings.

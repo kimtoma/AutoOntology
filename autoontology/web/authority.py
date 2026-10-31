@@ -196,6 +196,23 @@ _policies(
 )
 
 
+_policies("ax.read", "GET", "/api/ax", "/api/ax/baselines")
+_policies("candidate.read", "GET", "/api/ax/cases/{ident}")
+_policies("review.suggest", "PUT", "/api/ax/cases/{ident}")
+_policies("ax.record", "GET", "/api/ax/efforts")
+_policies(
+    "ax.record",
+    "POST",
+    "/api/ax/efforts",
+    "/api/ax/efforts/{ident}/stop",
+    "/api/ax/cases/{ident}/attest-effort",
+)
+_policies(
+    "ax.configure", "POST", "/api/ax/baselines", "/api/ax/baselines/{ident}/void", "/api/ax/targets"
+)
+_policies("review.suggest", "POST", "/api/ax/feedback/{ident}/case")
+_policies("feedback.manage", "POST", "/api/ax/feedback/{ident}/resolve")
+
 DOMAIN_READS = {
     ("GET", path)
     for path in (

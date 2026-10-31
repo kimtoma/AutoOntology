@@ -10,7 +10,7 @@ const packet = { id: "packet1", sha256: "a".repeat(64), payload: { case_id: "cas
 
 it("requires explicit confirmation of the prepared business packet", async () => {
   let applied = false
-  const { calls } = mockFetch({ "GET /cases": { items: [entry] }, "GET /cases/members": { items: [{ id: "human", name: "Reviewer", can_review: true }] }, "GET /cases/case1": () => ({ ...entry, packet, status: applied ? "reviewed" : "awaiting_review", receipts: applied ? [{ id: "receipt" }] : [] }), "GET /ops/changes": { items: [], feedback: [] }, "POST /cases/packets/packet1/confirm": () => { applied = true; return { id: "receipt", status: "reviewed" } } })
+  const { calls } = mockFetch({ "GET /ax/cases/case1": {current:null,versions:[],feedback:[],effort_summary:null}, "GET /cases": { items: [entry] }, "GET /cases/members": { items: [{ id: "human", name: "Reviewer", can_review: true }] }, "GET /cases/case1": () => ({ ...entry, packet, status: applied ? "reviewed" : "awaiting_review", receipts: applied ? [{ id: "receipt" }] : [] }), "GET /ops/changes": { items: [], feedback: [] }, "POST /cases/packets/packet1/confirm": () => { applied = true; return { id: "receipt", status: "reviewed" } } })
   renderPage(<IdentityContext.Provider value={{ session, signOut: vi.fn(), signingOut: false, logoutFailed: false }}><CaseBoard /></IdentityContext.Provider>, "/review?tab=cases&case=case1")
   expect(await screen.findByText("CEO approval above threshold")).toBeVisible()
   expect(screen.getByText("Changed approval threshold")).toBeVisible()

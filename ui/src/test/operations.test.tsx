@@ -39,6 +39,8 @@ const routes = {
   "GET /ontology": ontology,
   "GET /sources/freshness": { sources: [], stale: 0, age_s: 0 },
   "GET /runs": [],
+  "GET /ax": {cohorts:[],voided_baselines:0},
+  "GET /ax/baselines": {items:[]},
   "GET /cases/summary": { active: 0, awaiting_review: 0, overdue: 0, unassigned: 0, held: 0 },
   "GET /ops/connections": { items: [], counts: { total: 0 }, unapplied: 0, pages: 1, total: 0 },
   "GET /ops/changes": { ...overview, items: [item], feedback: [] },

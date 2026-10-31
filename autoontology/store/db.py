@@ -654,6 +654,38 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE TRIGGER quality_runs_no_delete BEFORE DELETE ON quality_runs BEGIN SELECT RAISE(ABORT,'immutable quality run'); END;
         """,
     ),
+    (
+        17,
+        """
+        CREATE TABLE ax_context_versions (id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES ops_cases(id), version INTEGER NOT NULL, previous_id TEXT,
+            payload_json TEXT NOT NULL, sha256 TEXT NOT NULL, actor TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(case_id,version));
+        CREATE TABLE ax_context_heads (case_id TEXT PRIMARY KEY REFERENCES ops_cases(id), version_id TEXT NOT NULL REFERENCES ax_context_versions(id));
+        CREATE TABLE ax_feedback_links (feedback_id INTEGER PRIMARY KEY, case_id TEXT NOT NULL REFERENCES ops_cases(id), source_sha256 TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE ax_efforts (id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES ops_cases(id), actor TEXT NOT NULL, status TEXT NOT NULL,
+            started_at REAL NOT NULL, finished_at REAL, elapsed_seconds REAL, start_note TEXT NOT NULL, stop_note TEXT, created_at TEXT NOT NULL);
+        CREATE UNIQUE INDEX ax_one_running_effort ON ax_efforts(actor) WHERE status='running';
+        CREATE TABLE ax_effort_events (id INTEGER PRIMARY KEY AUTOINCREMENT, effort_id TEXT NOT NULL, operation TEXT NOT NULL, actor TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE ax_effort_attestations (id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES ops_cases(id), basis_sha256 TEXT NOT NULL, actor TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TRIGGER ax_attestation_no_update BEFORE UPDATE ON ax_effort_attestations BEGIN SELECT RAISE(ABORT,'immutable effort attestation'); END;
+        CREATE TRIGGER ax_attestation_no_delete BEFORE DELETE ON ax_effort_attestations BEGIN SELECT RAISE(ABORT,'immutable effort attestation'); END;
+        CREATE TABLE ax_baselines (id TEXT PRIMARY KEY, workflow TEXT NOT NULL, complexity TEXT NOT NULL, lead_seconds REAL NOT NULL,
+            active_seconds REAL NOT NULL, source TEXT NOT NULL, reference TEXT NOT NULL, measurement_scope TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE ax_baseline_voids (sample_id TEXT PRIMARY KEY REFERENCES ax_baselines(id), reason TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE ax_targets (id TEXT PRIMARY KEY, workflow TEXT NOT NULL, complexity TEXT NOT NULL, payload_json TEXT NOT NULL, sha256 TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TRIGGER ax_context_no_update BEFORE UPDATE ON ax_context_versions BEGIN SELECT RAISE(ABORT,'immutable case context'); END;
+        CREATE TRIGGER ax_context_no_delete BEFORE DELETE ON ax_context_versions BEGIN SELECT RAISE(ABORT,'immutable case context'); END;
+        CREATE TRIGGER ax_feedback_no_update BEFORE UPDATE ON ax_feedback_links BEGIN SELECT RAISE(ABORT,'immutable feedback link'); END;
+        CREATE TRIGGER ax_feedback_no_delete BEFORE DELETE ON ax_feedback_links BEGIN SELECT RAISE(ABORT,'immutable feedback link'); END;
+        CREATE TRIGGER ax_effort_event_no_update BEFORE UPDATE ON ax_effort_events BEGIN SELECT RAISE(ABORT,'immutable effort event'); END;
+        CREATE TRIGGER ax_effort_event_no_delete BEFORE DELETE ON ax_effort_events BEGIN SELECT RAISE(ABORT,'immutable effort event'); END;
+        CREATE TRIGGER ax_baseline_no_update BEFORE UPDATE ON ax_baselines BEGIN SELECT RAISE(ABORT,'immutable baseline'); END;
+        CREATE TRIGGER ax_baseline_no_delete BEFORE DELETE ON ax_baselines BEGIN SELECT RAISE(ABORT,'immutable baseline'); END;
+        CREATE TRIGGER ax_baseline_void_no_update BEFORE UPDATE ON ax_baseline_voids BEGIN SELECT RAISE(ABORT,'immutable baseline correction'); END;
+        CREATE TRIGGER ax_baseline_void_no_delete BEFORE DELETE ON ax_baseline_voids BEGIN SELECT RAISE(ABORT,'immutable baseline correction'); END;
+        CREATE TRIGGER ax_target_no_update BEFORE UPDATE ON ax_targets BEGIN SELECT RAISE(ABORT,'immutable AX target'); END;
+        CREATE TRIGGER ax_target_no_delete BEFORE DELETE ON ax_targets BEGIN SELECT RAISE(ABORT,'immutable AX target'); END;
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration

@@ -106,8 +106,23 @@ class Cases:
             "sources_sha256": digest(
                 [snapshot.sources if snapshot else None for snapshot in snapshots]
             ),
+            "quality_versions": self.ops.quality_versions(),
             "reviews_sha256": digest({item["id"]: item["decision"] for item in self.ops.changes()}),
         }
+
+    def case_context(self, ident, *, required=False):
+        from autoontology.store.ax import context_binding
+        from autoontology.store.quality import Quality
+
+        bound = context_binding(self.store, ident)
+        if required and bound:
+            active = {v["id"]: v["sha256"] for v in Quality(self.store).active()}
+            if any(active.get(v["id"]) != v["sha256"] for v in bound["payload"]["required_suites"]):
+                deny(
+                    "Required evaluation changed. Update case context explicitly.",
+                    "case_evaluation_changed",
+                )
+        return bound
 
     def _owner(self, conn, owner):
         if (
@@ -329,6 +344,15 @@ class Cases:
     def _plan(self, case):
         items = {item["id"]: item for item in self.ops.changes()}
         plan = {item["id"]: dict(item) for item in case["changes"]}
+        bound = self.case_context(case["id"], required=True)
+        no_change = bound and bound["payload"].get("resolution_intent") == "no_change"
+        if no_change:
+            if plan:
+                deny(
+                    "A no-change disposition cannot apply knowledge decisions.",
+                    "case_no_change_conflict",
+                )
+            return [], [], []
         if not plan or set(plan) - set(items):
             deny("Choose changes from the current candidate.", "case_selection_changed")
         base = self.ops.model(case["base_revision"])
@@ -450,7 +474,8 @@ class Cases:
                     key: case[key]
                     for key in ("title", "reason", "owner_id", "priority", "due_at", "links")
                 },
-                "allowed_effect": "review.decisions",
+                "case_context": self.case_context(ident, required=True),
+                "allowed_effect": "review.decisions" if plan else "case.no_change",
                 "executor_id": executor_id,
                 "context": context,
                 "policy_version": authority.policy_version if authority else None,
@@ -502,6 +527,7 @@ class Cases:
                 or case["version"] != payload["case_version"]
                 or authority.policy_version != payload["policy_version"]
                 or self._context() != payload["context"]
+                or payload.get("case_context") != self.case_context(case["id"], required=True)
             ):
                 deny(
                     "The case, candidate, decisions or policy changed after preparation.",
@@ -657,6 +683,9 @@ class Cases:
                 },
                 reason,
             )
+            from autoontology.store.ax import AX
+
+            AX(self.store).reopen_linked_feedback(conn, ident)
             audit_effect(
                 self.store,
                 authority,
@@ -717,6 +746,19 @@ class Cases:
                     deny(
                         "Choose a committed publication created after this confirmation.",
                         "case_resolution_publication_required",
+                    )
+                required_suites = (
+                    (packet.get("case_context") or {}).get("payload", {}).get("required_suites", [])
+                )
+                checked_suites = (
+                    published["manifest"]["validation"]
+                    .get("model_checks", {})
+                    .get("suite_versions", [])
+                )
+                if any(required not in checked_suites for required in required_suites):
+                    deny(
+                        "Publication does not contain this case's exact required evaluations.",
+                        "case_resolution_evaluation_required",
                     )
                 model = self.ops.model(publication)
                 draft = self.ops.model(receipt["candidate_revision"])
@@ -853,12 +895,14 @@ class Cases:
         authority = authorize(self.store, "candidate.read")
         return {
             **result,
+            "case_context": self.case_context(ident),
             "current_publication": context["base_revision"],
             "packet_expired": bool(latest and latest["payload"]["expires_at"] <= self.clock()),
             "packet_stale": bool(
                 latest
                 and (
                     latest["payload"]["context"] != context
+                    or latest["payload"].get("case_context") != self.case_context(ident)
                     or latest["payload"]["case_version"] != result["version"]
                     or authority is None
                     or latest["payload"]["policy_version"] != authority.policy_version
