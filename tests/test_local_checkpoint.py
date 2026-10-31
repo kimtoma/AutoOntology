@@ -131,3 +131,37 @@ def test_copy_mode_must_be_explicitly_supported(tmp_path):
     source.write_bytes(b"source")
     with pytest.raises(ValueError, match="mode"):
         checkpoint.copy_file(source, tmp_path / "new", mode="invalid")
+
+
+def test_workspace_snapshot_excludes_only_named_ephemeral_tool_homes(tmp_path):
+    home = tmp_path / "workspace"
+    assert checkpoint.workspace_ignored(home, home, ["kordoc", "originals", "autoontology.db"]) == {
+        "kordoc",
+        "autoontology.db",
+    }
+    assert checkpoint.workspace_ignored(home, home / "run", ["codex-home", "profile.json"]) == {
+        "codex-home"
+    }
+    assert not checkpoint.workspace_ignored(home, home / "originals", ["kordoc", "codex-home"])
+
+
+def test_private_auth_and_tool_cache_symlinks_are_not_followed_into_snapshot(tmp_path):
+    from functools import partial
+
+    home = tmp_path / "workspace"
+    (home / "run/codex-home").mkdir(parents=True)
+    private = tmp_path / "private-login"
+    private.write_text("synthetic-not-for-backup")
+    (home / "run/codex-home/auth.json").symlink_to(private)
+    (home / "kordoc").symlink_to(tmp_path, target_is_directory=True)
+    (home / "run/profile.json").write_text("preserved profile")
+    target = tmp_path / "snapshot"
+    checkpoint.shutil.copytree(
+        home,
+        target,
+        ignore=partial(checkpoint.workspace_ignored, home),
+        copy_function=partial(checkpoint.copy_file, mode="copy"),
+    )
+    assert not (target / "run/codex-home").exists() and not (target / "kordoc").exists()
+    assert (target / "run/profile.json").read_text() == "preserved profile"
+    assert private.read_text() == "synthetic-not-for-backup"

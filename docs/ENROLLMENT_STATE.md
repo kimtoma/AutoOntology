@@ -64,6 +64,15 @@ uses its online backup API; source archives are normal git archives.
 
 This avoids allocating another complete PostgreSQL cluster for each unchanged
 development checkpoint when disk space is tight. It does not free existing files
-or replace independent off-machine backups. Six new copy-mode tests supplement
+or replace independent off-machine backups. Eight new copy/cache tests supplement
 the three existing checkpoint tests; the stage also requires a real PostgreSQL
 restore and re-verification that the original checkpoint hashes did not change.
+
+New checkpoints exclude exactly `workspace/kordoc` and
+`workspace/run/codex-home`: installed tool caches and the ephemeral Codex home
+must not dereference the host login or executable symlinks into a data backup.
+Originals, exports, processing receipts, ordinary run profiles and the identity
+database remain included. Codex recreates its isolated home from the host login;
+use the existing document-tool setup procedure before processing new documents
+on a restored workspace without its tool cache. Other unexpected file symlinks
+are refused. Earlier private checkpoints are retained unchanged.

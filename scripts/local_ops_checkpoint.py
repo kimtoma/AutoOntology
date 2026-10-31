@@ -51,6 +51,20 @@ def copy_file(source, destination, *, mode="auto"):
     return shutil.copy2(source, destination)
 
 
+def workspace_ignored(home, directory, names):
+    """Keep evidence and profiles, excluding regenerable tools and CLI login homes."""
+    ignored = set(
+        shutil.ignore_patterns("autoontology.db", "autoontology.db-wal", "autoontology.db-shm")(
+            directory, names
+        )
+    )
+    if Path(directory) == Path(home):
+        ignored.update({"kordoc"}.intersection(names))
+    if Path(directory) == Path(home) / "run":
+        ignored.update({"codex-home"}.intersection(names))
+    return ignored
+
+
 def command(args, **kwargs):
     result = subprocess.run(args, capture_output=True, text=True, **kwargs)
     if result.returncode:
@@ -148,9 +162,7 @@ def create(runtime: Path, label: str, *, copy_mode="auto") -> Path:
             payload / "workspace",
             symlinks=False,
             copy_function=partial(copy_file, mode=copy_mode),
-            ignore=shutil.ignore_patterns(
-                "autoontology.db", "autoontology.db-wal", "autoontology.db-shm"
-            ),
+            ignore=partial(workspace_ignored, runtime / "workspace"),
         )
         with closing(sqlite3.connect(runtime / "workspace/autoontology.db")) as source:
             with closing(sqlite3.connect(payload / "workspace/autoontology.db")) as target:
@@ -177,6 +189,7 @@ def create(runtime: Path, label: str, *, copy_mode="auto") -> Path:
             "databases": databases,
             "runtime": str(runtime),
             "copy_mode": copy_mode,
+            "excluded_runtime_caches": ["workspace/kordoc", "workspace/run/codex-home"],
             "sha256": hashes(payload),
         }
         (staging / "manifest.json").write_text(json.dumps(manifest, indent=2))
