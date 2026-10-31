@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
 
+from autoontology.security.enrollment import enrollment_state
 from autoontology.security.policy import CAPABILITIES, AccessError, Actor
 
 
@@ -55,44 +56,20 @@ def current_actor(store, *, conn=None):
         with service._read() as read:
             return current_actor(store, conn=read)
     execution = _IDENTITY.get()
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_state'"
-    ).fetchone():
-        legacy = conn.execute("SELECT max(version) FROM schema_version").fetchone()[0] < 12
-        principals = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_principals'"
-        ).fetchone()
-        if execution is None and legacy and not principals:
-            return None
+    if execution is not None and execution.database != store.path.resolve():
         raise AccessError(
-            "Identity configuration is missing; local-owner recovery is required.",
-            "identity_configuration_missing",
-            503,
+            "An authenticated execution cannot change or lose its workspace.",
+            "execution_workspace_mismatch",
+            403,
         )
-    row = conn.execute("SELECT workspace_id FROM identity_state WHERE id=1").fetchone()
+    state = enrollment_state(conn, bound_workspace=execution.workspace_id if execution else None)
     if execution is not None:
-        if (
-            execution.database != store.path.resolve()
-            or row is None
-            or execution.workspace_id != row[0]
-        ):
-            raise AccessError(
-                "An authenticated execution cannot change or lose its workspace.",
-                "execution_workspace_mismatch",
-                403,
-            )
         return service._actor(conn, execution.actor)
-    if row is not None:
+    if state is not None:
         raise AccessError(
             "Sign in with an individual credential before this operation.",
             "authentication_required",
             401,
-        )
-    if conn.execute("SELECT 1 FROM identity_principals LIMIT 1").fetchone():
-        raise AccessError(
-            "Identity configuration is missing; local-owner recovery is required.",
-            "identity_configuration_missing",
-            503,
         )
     return None
 

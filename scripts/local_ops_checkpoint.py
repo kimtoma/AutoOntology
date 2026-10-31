@@ -17,9 +17,38 @@ import sqlite3
 import subprocess
 import sys
 from contextlib import closing
+from functools import partial
 from pathlib import Path
 
 PG_CTL = Path("/opt/homebrew/opt/postgresql@17/bin/pg_ctl")
+
+
+def copy_file(source, destination, *, mode="auto"):
+    """Use independent APFS copy-on-write extents without mutating the source.
+
+    Explicit clone mode never falls back to allocating another full file. This
+    matters when space is sufficient for changed pages but not a second cluster.
+    """
+    if mode not in {"auto", "clone", "copy"}:
+        raise ValueError("unsupported checkpoint copy mode")
+    source, destination = Path(source), Path(destination)
+    if source.is_symlink():
+        raise ValueError("checkpoint files must not contain symlinks")
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError("checkpoint copy destination already exists")
+    if mode != "copy" and sys.platform == "darwin":
+        result = subprocess.run(
+            ["/bin/cp", "-c", str(source.absolute()), str(destination.absolute())],
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            shutil.copystat(source, destination)
+            return str(destination)
+        if destination.exists():
+            destination.unlink()  # Only this failed copy's newly created target.
+    if mode == "clone":
+        raise RuntimeError("native clone is required but unavailable; no full-copy fallback")
+    return shutil.copy2(source, destination)
 
 
 def command(args, **kwargs):
@@ -57,19 +86,21 @@ def verify(checkpoint: Path) -> dict:
     return manifest
 
 
-def stage(checkpoint: Path, destination: Path) -> dict:
+def stage(checkpoint: Path, destination: Path, *, copy_mode="auto") -> dict:
     """Restore into a new directory only; never overwrite a running workspace."""
     manifest = verify(checkpoint)
     if destination.exists():
         raise ValueError("restore destination already exists; use a new directory")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(checkpoint / "payload", destination)
+    shutil.copytree(
+        checkpoint / "payload", destination, copy_function=partial(copy_file, mode=copy_mode)
+    )
     os.chmod(destination, 0o700)
     assert hashes(destination) == manifest["sha256"]
     return manifest
 
 
-def create(runtime: Path, label: str) -> Path:
+def create(runtime: Path, label: str, *, copy_mode="auto") -> Path:
     if runtime.name != "ontology-ops-local" or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", label):
         raise ValueError("use the isolated ontology-ops-local runtime and a safe checkpoint label")
     root = runtime.parents[1]
@@ -116,6 +147,7 @@ def create(runtime: Path, label: str) -> Path:
             runtime / "workspace",
             payload / "workspace",
             symlinks=False,
+            copy_function=partial(copy_file, mode=copy_mode),
             ignore=shutil.ignore_patterns(
                 "autoontology.db", "autoontology.db-wal", "autoontology.db-shm"
             ),
@@ -124,9 +156,14 @@ def create(runtime: Path, label: str) -> Path:
             with closing(sqlite3.connect(payload / "workspace/autoontology.db")) as target:
                 source.backup(target)
         for name in ("exports", "postgres"):
-            shutil.copytree(runtime / name, payload / name, symlinks=False)
+            shutil.copytree(
+                runtime / name,
+                payload / name,
+                symlinks=False,
+                copy_function=partial(copy_file, mode=copy_mode),
+            )
         for name in ("local.env", "control.py"):
-            shutil.copy2(runtime / name, payload / name)
+            copy_file(runtime / name, payload / name, mode=copy_mode)
         command(
             ["git", "archive", "--format=tar", "-o", str(payload / "source.tar"), revision], cwd=app
         )
@@ -139,6 +176,7 @@ def create(runtime: Path, label: str) -> Path:
             "label": label,
             "databases": databases,
             "runtime": str(runtime),
+            "copy_mode": copy_mode,
             "sha256": hashes(payload),
         }
         (staging / "manifest.json").write_text(json.dumps(manifest, indent=2))
@@ -170,19 +208,21 @@ def main():
     create_parser = sub.add_parser("create")
     create_parser.add_argument("--runtime", required=True, type=Path)
     create_parser.add_argument("--label", required=True)
+    create_parser.add_argument("--copy-mode", choices=("auto", "clone", "copy"), default="auto")
     for name in ("verify", "stage"):
         item = sub.add_parser(name)
         item.add_argument("checkpoint", type=Path)
         if name == "stage":
             item.add_argument("destination", type=Path)
+            item.add_argument("--copy-mode", choices=("auto", "clone", "copy"), default="auto")
     args = parser.parse_args()
     if args.operation == "create":
-        print(create(args.runtime.resolve(), args.label))
+        print(create(args.runtime.resolve(), args.label, copy_mode=args.copy_mode))
     else:
         result = (
             verify(args.checkpoint)
             if args.operation == "verify"
-            else stage(args.checkpoint, args.destination)
+            else stage(args.checkpoint, args.destination, copy_mode=args.copy_mode)
         )
         print(f"Verified checkpoint: {result['label']} / commit {result['commit']}")
 

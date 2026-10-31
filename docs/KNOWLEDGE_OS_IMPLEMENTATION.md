@@ -478,3 +478,24 @@ regression cases cover those boundaries. See [the evidence and remaining scope](
 The frozen review application and public deployment remain unchanged; no UI change
 or new model call is included in this stage. Full regression and local recovery
 evidence are recorded separately before the stage is considered verified.
+
+## Stage 25 — owner-recovery loss audit
+
+Documentation commit `6996f51` preserves actual partial-restore reproductions and
+[the complete enrollment/recovery acceptance contract](OWNER_RECOVERY_GATE.md).
+Only a new explanation file changed; its source archive was extracted and matched
+exactly. Recovery reuses the already verified stage-24 data checkpoint. No new
+database backup/restore or runtime code change was claimed for this documentation
+step. The frozen review application remains unchanged.
+
+## Stage 26 — shared enrollment-state classification
+
+CLI probes, HTTP status, service bootstrap and effect contexts share one
+transactional read-only decision. Surviving identity history and incomplete or
+invalid metadata require recovery instead of granting legacy local authority.
+UI JSON/SSE errors immediately hide protected work and clear its cache; retry
+cannot downgrade a formerly managed session into unconfigured local authority.
+See [the contract and remaining independent-marker/owner-ceremony work](ENROLLMENT_STATE.md).
+Actual private-copy UI flow captures, full regression and checkpoint evidence
+are recorded separately. This stage does not complete owner recovery or bounded
+autonomy and does not update the frozen review or public applications.

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from autoontology.security.credential_file import _parent
 from autoontology.security.credentials import Secret
+from autoontology.security.enrollment import enrollment_state
 from autoontology.security.policy import AccessError
 
 
@@ -20,36 +21,8 @@ def identity_enabled(home):
     if not path.exists():
         return False
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:
-        if not conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_state'"
-        ).fetchone():
-            principal_table = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_principals'"
-            ).fetchone()
-            version_table = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
-            ).fetchone()
-            version = (
-                conn.execute("SELECT max(version) FROM schema_version").fetchone()[0]
-                if version_table
-                else None
-            )
-            if principal_table or version is None or version >= 12:
-                raise AccessError(
-                    "Identity configuration is missing; local-owner recovery is required.",
-                    "identity_configuration_missing",
-                    503,
-                )
-            return False
-        if conn.execute("SELECT 1 FROM identity_state WHERE id=1").fetchone():
-            return True
-        if conn.execute("SELECT 1 FROM identity_principals LIMIT 1").fetchone():
-            raise AccessError(
-                "Identity configuration is missing; local-owner recovery is required.",
-                "identity_configuration_missing",
-                503,
-            )
-    return False
+        conn.execute("BEGIN")
+        return enrollment_state(conn) is not None
 
 
 def router_secret(home):

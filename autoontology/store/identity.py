@@ -27,6 +27,7 @@ from autoontology.security.credentials import (
     hash_password,
     token_digest,
 )
+from autoontology.security.enrollment import enrollment_state
 from autoontology.security.policy import CAPABILITIES, ROLES, AccessError, Actor, Decision
 from autoontology.store.operations import digest
 
@@ -91,23 +92,17 @@ class Identity:
             yield conn
 
     def _state(self, conn):
-        row = conn.execute("SELECT * FROM identity_state WHERE id=1").fetchone()
-        if row is None:
+        state = enrollment_state(conn)
+        if state is None:
             raise AccessError(
                 "Individual identity has not been configured.", "identity_unconfigured", 409
             )
-        return dict(row)
+        return state
 
     def status(self):
         with self._read() as conn:
-            row = conn.execute("SELECT * FROM identity_state WHERE id=1").fetchone()
-            if row is None and conn.execute("SELECT 1 FROM identity_principals LIMIT 1").fetchone():
-                raise AccessError(
-                    "Identity configuration is missing; use local-owner recovery before exposing the service.",
-                    "identity_configuration_missing",
-                    503,
-                )
-            return {"configured": row is not None, **(dict(row) if row else {})}
+            state = enrollment_state(conn)
+            return {"configured": state is not None, **(state or {})}
 
     def describe(self, actor):
         """Return only this principal's public metadata and current effective scopes."""
@@ -368,16 +363,7 @@ class Identity:
             raise AccessError("Provide the local workspace name.", "invalid_workspace", 400)
         password_record = hash_password(password)
         with self.store._immediate() as conn:
-            if (
-                not conn.execute("SELECT 1 FROM identity_state").fetchone()
-                and conn.execute("SELECT 1 FROM identity_principals LIMIT 1").fetchone()
-            ):
-                raise AccessError(
-                    "Identity configuration is missing; recover the existing workspace rather than enrolling a new owner.",
-                    "identity_configuration_missing",
-                    503,
-                )
-            if conn.execute("SELECT 1 FROM identity_state").fetchone():
+            if enrollment_state(conn) is not None:
                 raise AccessError(
                     "Identity is already configured; use the existing owner login.",
                     "identity_already_configured",

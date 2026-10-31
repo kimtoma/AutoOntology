@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Button } from "@/components/ui/button"
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 import { LangToggle } from "@/components/lang-toggle"
 import { useT } from "@/i18n"
 import { ApiError } from "@/lib/api"
-import { AUTHORITY_CHANGED, IDENTITY_REQUIRED } from "@/lib/auth-events"
+import { AUTHORITY_CHANGED, IDENTITY_REQUIRED, IDENTITY_UNAVAILABLE } from "@/lib/auth-events"
 import { identityApi, IdentityContext, useCanUse, useIdentity } from "@/lib/identity"
 
 const statusKey = ["identity", "status"] as const
@@ -22,9 +22,11 @@ export function IdentityGate({ children }: { children: ReactNode }) {
   const [acceptedAuthority, setAcceptedAuthority] = useState<string | null>(null)
   const [refreshingAuthority, setRefreshingAuthority] = useState(false)
   const [authorityNotice, setAuthorityNotice] = useState(false)
+  const [recoveryRequired, setRecoveryRequired] = useState(false)
+  const accessFailures = useRef(0)
   const status = useQuery({ queryKey: statusKey, queryFn: ({ signal }) => identityApi.status(signal), retry: false })
   const configured = status.data?.configured === true
-  const me = useQuery({ queryKey: meKey, queryFn: ({ signal }) => identityApi.me(signal), enabled: configured && !locked, retry: false, refetchInterval: 30_000 })
+  const me = useQuery({ queryKey: meKey, queryFn: ({ signal }) => identityApi.me(signal), enabled: configured && !locked && !recoveryRequired, retry: false, refetchInterval: 30_000 })
   const authorityKey = me.data ? `${me.data.workspace.workspace_id}:${me.data.principal.id}:${me.data.credential_id}:${me.data.policy_version}` : null
 
   useEffect(() => {
@@ -42,6 +44,13 @@ export function IdentityGate({ children }: { children: ReactNode }) {
     qc.removeQueries({ predicate: query => query.queryKey[0] !== "identity" })
   }
   useEffect(() => {
+    const unavailable = () => {
+      accessFailures.current += 1
+      setRecoveryRequired(true)
+      void qc.cancelQueries({ predicate: query => query.queryKey[0] !== "identity" })
+      qc.removeQueries({ predicate: query => query.queryKey[0] !== "identity" })
+      qc.removeQueries({ queryKey: meKey, exact: true })
+    }
     const lock = () => {
       if (!configured) return
       setLocked(true)
@@ -60,11 +69,24 @@ export function IdentityGate({ children }: { children: ReactNode }) {
     }
     window.addEventListener(IDENTITY_REQUIRED, lock)
     window.addEventListener(AUTHORITY_CHANGED, refresh)
+    window.addEventListener(IDENTITY_UNAVAILABLE, unavailable)
+    if (!configured && acceptedAuthority !== null) unavailable()
     return () => {
       window.removeEventListener(IDENTITY_REQUIRED, lock)
       window.removeEventListener(AUTHORITY_CHANGED, refresh)
+      window.removeEventListener(IDENTITY_UNAVAILABLE, unavailable)
     }
-  }, [configured, qc])
+  }, [configured, acceptedAuthority, qc])
+
+  const retryAccess = async () => {
+    const failure = accessFailures.current
+    const result = await status.refetch()
+    if (accessFailures.current !== failure || !result.isSuccess) return
+    if (acceptedAuthority !== null && !result.data.configured) return
+    setAcceptedAuthority(null)
+    qc.removeQueries({ queryKey: meKey, exact: true })
+    setRecoveryRequired(false)
+  }
 
   const login = useMutation({
     mutationFn: () => identityApi.login(username, password),
@@ -87,11 +109,11 @@ export function IdentityGate({ children }: { children: ReactNode }) {
     },
   })
 
+  if (recoveryRequired || (acceptedAuthority !== null && !configured) || status.isError || (configured && !locked && me.isError && !(me.error instanceof ApiError && me.error.status === 401))) {
+    return <main className="mx-auto max-w-md px-6 py-24"><p className="mb-6 text-sm">AutoOntology / Ontology Ops</p><h1 className="text-xl font-medium" role="alert">{t("identity.unavailable")}</h1><p className="my-4 text-sm text-muted-foreground">{t("identity.remedy")}</p><Button variant="outline" disabled={status.isFetching} onClick={() => { void retryAccess() }}>{t("identity.retry")}</Button></main>
+  }
   if (status.isPending || (configured && !locked && me.isPending)) {
     return <main className="mx-auto max-w-sm px-6 py-24"><p className="text-sm text-muted-foreground" role="status">{t("identity.checking")}</p></main>
-  }
-  if (status.isError || (configured && !locked && me.isError && !(me.error instanceof ApiError && me.error.status === 401))) {
-    return <main className="mx-auto max-w-md px-6 py-24"><p className="mb-6 text-sm">AutoOntology / Ontology Ops</p><h1 className="text-xl font-medium" role="alert">{t("identity.unavailable")}</h1><p className="my-4 text-sm text-muted-foreground">{t("identity.remedy")}</p><Button variant="outline" onClick={() => { void status.refetch(); void me.refetch() }}>{t("identity.retry")}</Button></main>
   }
   if (!configured) return children
   if (locked || !me.data || me.isError) {

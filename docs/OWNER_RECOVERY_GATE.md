@@ -68,3 +68,8 @@ providing the complete product recovery workflow.
 This gate precedes policy-authorized autonomous decisions/publication. Closing
 only the two-table reproduction is useful hardening but does not satisfy the
 independent-marker, owner-recovery and full product enrollment requirements.
+
+The subsequent [shared enrollment-state boundary](ENROLLMENT_STATE.md) implements
+the database classification and corresponding UI cache/exception behavior.
+The observations above remain the preserved audit at 56af1c0; the independent
+host marker and supported owner ceremony are still implementation work.
