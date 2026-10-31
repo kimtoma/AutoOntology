@@ -1,0 +1,60 @@
+---
+title: "Publication - current implementation"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: 구현된 흐름
+    lg1: Breaks VerifiedHumanApproval
+    lg2: Path to the VerifiedHumanApproval bug
+  }
+  class lg0 blue
+  class lg1 breaks
+  class lg2 bugPath
+  s0: 첫 설치 #183; 운영본 없음
+  s1: 모델#183;데이터 연결 확인
+  s2: 연결#183;준비 실패
+  s3: 입력에서 후보 구축
+  s4: 미승인 후보
+  s5: 근거 확인을 위해 보류
+  s6: 선택한 변경 검토 완료
+  s7: 대표 질문 검증 통과
+  s8: 대표 질문 검증 실패
+  s9: 운영 반영 준비 완료
+  s10: 새 운영본으로 전환
+  [*] --> s0
+  s0 --> s1: 환경과 로그인 확인
+  s1 --> s2: 모델 로그인#183;연결 실패
+  s1 --> s3: 정형#183;문서 소스 구축 시작
+  s2 --> s1: 원인 해결 후 재확인
+  s3 --> s4: 후보 생성 완료 #183; 아직 운영 반영 안 됨
+  s4 --> s5: 판단이 어려운 변경 보류
+  s4 --> s6: 포함할 변경을 확인
+  s5 --> s4: 근거를 보완하고 검토 재개
+  s6 --> s7: 대표 질문과 인용 검사 통과
+  s6 --> s8: 대표 질문 불일치 #183; 반영 중지
+  s7 --> s4: 후보#183;설정이 바뀌어 재검증 필요
+  s7 --> s9: 원문#183;검색#183;산출물 준비
+  s8 --> s4: 원인 수정 후 다시 검토
+  s9 --> s4: 후보#183;설정이 바뀌어 재검증 필요
+  s9 --> s10: 확인한 운영본으로 함께 전환
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 blue
+  class s0 bugPath
+  class s1 blue
+  class s1 bugPath
+  class s2 blue
+  class s3 blue
+  class s3 bugPath
+  class s4 blue
+  class s4 bugPath
+  class s5 blue
+  class s6 blue
+  class s6 bugPath
+  class s7 blue
+  class s7 bugPath
+  class s8 blue
+  class s9 blue
+  class s9 bugPath
+  class s10 blue
+  class s10 breaks
+  class s10 bugPath

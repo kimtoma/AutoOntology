@@ -1,0 +1,41 @@
+---
+title: "Knowledge change - current implementation"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: 구현된 흐름
+  }
+  class lg0 blue
+  s0: 기존 운영본 사용 중
+  s1: 입력 변경 확인
+  s2: 원문#183;개정 읽기
+  s3: 새 후보 #183; 기존 운영 유지
+  s4: 보류 #183; 운영본 그대로
+  s5: 제외 #183; 기존 운영 유지
+  s6: 반영할 변경 선택
+  s7: 질문 검증 실패
+  s8: 운영 반영 확인 대기
+  s9: 검증한 새 운영본
+  [*] --> s0
+  s0 --> s1: 신선도 확인으로 변경 발견 [수동]
+  s1 --> s2: 새 입력 읽기 #183; 원문은 보존
+  s2 --> s3: 문서#183;정형 지식으로 후보 생성
+  s3 --> s4: 충돌#183;불충분한 근거 보류
+  s3 --> s5: 불필요한 변경 제외
+  s3 --> s6: 반영할 변경만 확인
+  s4 --> s3: 근거 보완 후 검토
+  s6 --> s7: 답변#183;인용이 검증 기준에 미달
+  s6 --> s8: 대표 질문 검증 통과
+  s7 --> s3: 수정 후 재검토
+  s8 --> s3: 검토 중 입력이 다시 바뀜
+  s8 --> s9: 검증한 변경만 운영 반영
+  class s0 blue
+  class s1 blue
+  class s2 blue
+  class s3 blue
+  class s4 blue
+  class s5 blue
+  class s6 blue
+  class s7 blue
+  class s8 blue
+  class s9 blue

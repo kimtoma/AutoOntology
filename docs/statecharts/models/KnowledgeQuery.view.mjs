@@ -1,0 +1,5 @@
+export const title = "Operational questions, citations and graph queries - current implementation";
+export const state = v => ({"idle": "운영 지식에 질문", "scope": "운영 버전·검색 식별 확인", "retrieving": "선택한 운영 근거 검색", "streaming": "근거로 답변 작성 중", "answer": "완료 답변·인용·사용 기록", "evaluating": "운영 그래프에 SPARQL 질의", "rows": "그래프 질의 결과·기록", "partial": "응답 잘림 · 완료 아님", "failed": "실패 · 원인 확인", "cancelled": "취소 · 상태 확인", "evidence": "보존한 원문·근거 확인", "missing": "원문 없음·불일치 명시"})[v.phase];
+export const step = (name) => ({"AskRag": "업무 질문 전송", "AskGraph": "온톨로지 SPARQL 질의 전송", "RagScope": "운영본·검색 아티팩트 일치", "GraphScope": "운영본의 그래프 선택", "ScopeFails": "운영본·검색 식별 불일치 차단", "Hits": "관련 개념·규칙·근거 확보", "FullAnswer": "전체 응답·인용·기록 저장", "Truncated": "제공자 응답 중단·잘림", "GraphRows": "읽기 전용 그래프 질의 완료", "Error": "검색·그래프 실행 실패", "Cancel": "요청 중지·취소 상태 확인", "OpenOriginal": "인용에서 보존 원문 해시 확인", "MissingOriginal": "원문 없음·변조 시 다운로드 거부", "IdleStep": "현재 상태 유지"})[name] ?? name;
+export const group = () => "구현된 흐름";
+export const colors = {"구현된 흐름":"blue","목표 설계":"tan"};

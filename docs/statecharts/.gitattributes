@@ -1,0 +1,2 @@
+# Preserve byte-exact TLC output, including its final blank line.
+**/tlc.out -whitespace

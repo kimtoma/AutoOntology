@@ -1,0 +1,25 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 0 and seed -6402332557683842105 with 1 worker on 10 cores with 512MB heap and 64MB offheap memory [pid: 5484] (Mac OS X 27.2 aarch64, Homebrew 25.0.2 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/tmp/autoontology-statechart-20261031/models/KnowledgeQuery.tla
+Parsing file /private/var/folders/27/x9254hjj2g3c3h657wv_ms3r0000gn/T/statechart-6wjIWB/statechart-ictRw8/tmp-verdict-1/Naturals.tla
+Parsing file /private/var/folders/27/x9254hjj2g3c3h657wv_ms3r0000gn/T/statechart-6wjIWB/statechart-ictRw8/tmp-verdict-1/FiniteSets.tla
+Parsing file /private/var/folders/27/x9254hjj2g3c3h657wv_ms3r0000gn/T/statechart-6wjIWB/statechart-ictRw8/tmp-verdict-1/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module KnowledgeQuery
+Starting... (2026-10-31 10:49:43)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-31 10:49:44.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.4E-17
+33 states generated, 19 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-10-31 10:49:44)
+Picked up JAVA_TOOL_OPTIONS: -Xmx512m
+

@@ -1,0 +1,119 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 0 and seed -8628345417218638893 with 1 worker on 10 cores with 512MB heap and 64MB offheap memory [pid: 94902] (Mac OS X 27.2 aarch64, Homebrew 25.0.2 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/tmp/autoontology-statechart-20261031/models/Publication.tla
+Parsing file /private/var/folders/27/x9254hjj2g3c3h657wv_ms3r0000gn/T/statechart-fgNPdT/statechart-3Pnx6S/tmp-verdict-1/Naturals.tla
+Parsing file /private/var/folders/27/x9254hjj2g3c3h657wv_ms3r0000gn/T/statechart-fgNPdT/statechart-3Pnx6S/tmp-verdict-1/FiniteSets.tla
+Parsing file /private/var/folders/27/x9254hjj2g3c3h657wv_ms3r0000gn/T/statechart-fgNPdT/statechart-3Pnx6S/tmp-verdict-1/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module Publication
+Starting... (2026-10-31 10:38:27)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-31 10:38:27.
+Error: Invariant VerifiedHumanApproval is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ index = 0
+/\ reviewed = FALSE
+/\ checked = FALSE
+/\ graph = 0
+/\ verifiedHuman = FALSE
+/\ prepared = FALSE
+/\ fresh = TRUE
+/\ phase = "empty"
+/\ head = 0
+/\ files = 0
+
+State 2: <Start line 20, col 10 to line 22, col 97 of module Publication>
+/\ index = 0
+/\ reviewed = FALSE
+/\ checked = FALSE
+/\ graph = 0
+/\ verifiedHuman = FALSE
+/\ prepared = FALSE
+/\ fresh = TRUE
+/\ phase = "checking"
+/\ head = 0
+/\ files = 0
+
+State 3: <Build line 24, col 10 to line 26, col 97 of module Publication>
+/\ index = 0
+/\ reviewed = FALSE
+/\ checked = FALSE
+/\ graph = 0
+/\ verifiedHuman = FALSE
+/\ prepared = FALSE
+/\ fresh = TRUE
+/\ phase = "building"
+/\ head = 0
+/\ files = 0
+
+State 4: <CandidateReady line 36, col 19 to line 38, col 97 of module Publication>
+/\ index = 0
+/\ reviewed = FALSE
+/\ checked = FALSE
+/\ graph = 0
+/\ verifiedHuman = FALSE
+/\ prepared = FALSE
+/\ fresh = TRUE
+/\ phase = "candidate"
+/\ head = 0
+/\ files = 0
+
+State 5: <Accept line 48, col 11 to line 53, col 70 of module Publication>
+/\ index = 0
+/\ reviewed = TRUE
+/\ checked = FALSE
+/\ graph = 0
+/\ verifiedHuman = FALSE
+/\ prepared = FALSE
+/\ fresh = TRUE
+/\ phase = "reviewed"
+/\ head = 0
+/\ files = 0
+
+State 6: <CheckPass line 55, col 14 to line 58, col 88 of module Publication>
+/\ index = 0
+/\ reviewed = TRUE
+/\ checked = TRUE
+/\ graph = 0
+/\ verifiedHuman = FALSE
+/\ prepared = FALSE
+/\ fresh = TRUE
+/\ phase = "validated"
+/\ head = 0
+/\ files = 0
+
+State 7: <Prepare line 70, col 12 to line 73, col 87 of module Publication>
+/\ index = 0
+/\ reviewed = TRUE
+/\ checked = TRUE
+/\ graph = 0
+/\ verifiedHuman = FALSE
+/\ prepared = TRUE
+/\ fresh = TRUE
+/\ phase = "prepared"
+/\ head = 0
+/\ files = 0
+
+State 8: <Confirm line 83, col 12 to line 89, col 70 of module Publication>
+/\ index = 1
+/\ reviewed = TRUE
+/\ checked = TRUE
+/\ graph = 1
+/\ verifiedHuman = FALSE
+/\ prepared = TRUE
+/\ fresh = TRUE
+/\ phase = "published"
+/\ head = 1
+/\ files = 1
+
+16 states generated, 12 distinct states found, 1 states left on queue.
+The depth of the complete state graph search is 8.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-31 10:38:27)
+Picked up JAVA_TOOL_OPTIONS: -Xmx512m
+

@@ -1,0 +1,20 @@
+{
+  "source_commit": "6896be41504f97f484b42b906ed8425daee0bc18",
+  "scope": "isolated controlled replay using fake embedding and chat functions; no real model call",
+  "steps": [
+    "empty managed workspace",
+    "preserved document input",
+    "build candidate",
+    "review accepted with default actor local",
+    "representative question passed with controlled model",
+    "publication artifacts prepared",
+    "new operational publication committed"
+  ],
+  "candidate_revision": 1,
+  "published_revision": 2,
+  "content_review_and_validation_enforced": true,
+  "authenticated_principal_required": false,
+  "recorded_actor": "local",
+  "counterexample_confirmed": true,
+  "public_or_primary_state_changed": false
+}

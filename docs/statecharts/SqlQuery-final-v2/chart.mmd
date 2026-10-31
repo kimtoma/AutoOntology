@@ -1,0 +1,44 @@
+---
+title: "SQL and result recovery - current implementation"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: 구현된 흐름
+  }
+  class lg0 blue
+  s0: 질문 입력
+  s1: 전송 전 중지 (기록 없을 수 있음)
+  s2: 운영 범위 확인
+  s3: 취소 기록 확인
+  s4: 실패 #183; 질문 수정
+  s5: 승인된 지식으로 SQL 준비
+  s6: 실행 가능한 SELECT
+  s7: 제한된 원본 조회
+  s8: 완료 기록과 결과
+  s9: CSV 저장 완료
+  [*] --> s0
+  s0 --> s1: 전송 전 중지 #183; 기록이 없을 수 있음
+  s0 --> s2: 질문 전송 #183; 사용 기록 시작
+  s2 --> s3: 중지 요청 #183; 실제 종료 기록 확인
+  s2 --> s4: 운영 카탈로그#183;소스 식별 실패
+  s2 --> s5: 운영본과 대상 소스 확인
+  s5 --> s3: 중지 요청 #183; 실제 종료 기록 확인
+  s5 --> s6: 승인된 테이블#183;컬럼의 SELECT
+  s5 --> s4: 미승인 필드#183;쓰기#183;불명확한 질문 차단
+  s6 --> s3: 중지 요청 #183; 실제 종료 기록 확인
+  s6 --> s7: 시간#183;500행#183;용량 제한으로 읽기
+  s7 --> s3: 중지 요청 #183; 실제 종료 기록 확인
+  s7 --> s8: 반환 결과와 종료 기록 저장
+  s7 --> s4: 원본 연결#183;실행#183;시간 초과 실패
+  s8 --> s9: UI#183;CLI에서 같은 기록의 CSV 저장
+  s9 --> s8: 이력을 다시 열어 파일 복구
+  class s0 blue
+  class s1 blue
+  class s2 blue
+  class s3 blue
+  class s4 blue
+  class s5 blue
+  class s6 blue
+  class s7 blue
+  class s8 blue
+  class s9 blue

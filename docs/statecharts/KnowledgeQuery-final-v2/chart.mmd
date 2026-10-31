@@ -1,0 +1,49 @@
+---
+title: "Operational questions, citations and graph queries - current implementation"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: 구현된 흐름
+  }
+  class lg0 blue
+  s0: 운영 지식에 질문
+  s1: 운영 버전#183;검색 식별 확인
+  s2: 취소 #183; 상태 확인
+  s3: 운영 그래프에 SPARQL 질의
+  s4: 실패 #183; 원인 확인
+  s5: 선택한 운영 근거 검색
+  s6: 그래프 질의 결과#183;기록
+  s7: 근거로 답변 작성 중
+  s8: 완료 답변#183;인용#183;사용 기록
+  s9: 응답 잘림 #183; 완료 아님
+  s10: 보존한 원문#183;근거 확인
+  s11: 원문 없음#183;불일치 명시
+  [*] --> s0
+  s0 --> s1: 온톨로지 SPARQL 질의 전송 or 업무 질문 전송
+  s1 --> s2: 요청 중지#183;취소 상태 확인
+  s1 --> s3: 운영본의 그래프 선택
+  s1 --> s4: 운영본#183;검색 식별 불일치 차단
+  s1 --> s5: 운영본#183;검색 아티팩트 일치
+  s3 --> s2: 요청 중지#183;취소 상태 확인
+  s3 --> s4: 검색#183;그래프 실행 실패
+  s3 --> s6: 읽기 전용 그래프 질의 완료
+  s5 --> s2: 요청 중지#183;취소 상태 확인
+  s5 --> s4: 검색#183;그래프 실행 실패
+  s5 --> s7: 관련 개념#183;규칙#183;근거 확보
+  s7 --> s2: 요청 중지#183;취소 상태 확인
+  s7 --> s8: 전체 응답#183;인용#183;기록 저장
+  s7 --> s9: 제공자 응답 중단#183;잘림
+  s8 --> s10: 인용에서 보존 원문 해시 확인
+  s8 --> s11: 원문 없음#183;변조 시 다운로드 거부
+  class s0 blue
+  class s1 blue
+  class s2 blue
+  class s3 blue
+  class s4 blue
+  class s5 blue
+  class s6 blue
+  class s7 blue
+  class s8 blue
+  class s9 blue
+  class s10 blue
+  class s11 blue
