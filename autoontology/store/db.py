@@ -632,6 +632,28 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE TRIGGER review_events_no_delete BEFORE DELETE ON ops_review_events BEGIN SELECT RAISE(ABORT,'immutable review event'); END;
     """,
     ),
+    (
+        16,
+        """
+        CREATE TABLE quality_versions (
+            id TEXT PRIMARY KEY, suite_key TEXT NOT NULL, version INTEGER NOT NULL,
+            previous_id TEXT, payload_json TEXT NOT NULL, sha256 TEXT NOT NULL,
+            actor TEXT NOT NULL, created_at TEXT NOT NULL, policy_version INTEGER,
+            UNIQUE(suite_key,version));
+        CREATE TABLE quality_heads (suite_key TEXT PRIMARY KEY, version_id TEXT NOT NULL REFERENCES quality_versions(id));
+        CREATE TABLE quality_events (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            suite_key TEXT NOT NULL, version_id TEXT NOT NULL, operation TEXT NOT NULL,
+            actor TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE quality_runs (id TEXT PRIMARY KEY, revision INTEGER NOT NULL,
+            result_json TEXT NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TRIGGER quality_versions_no_update BEFORE UPDATE ON quality_versions BEGIN SELECT RAISE(ABORT,'immutable suite version'); END;
+        CREATE TRIGGER quality_versions_no_delete BEFORE DELETE ON quality_versions BEGIN SELECT RAISE(ABORT,'immutable suite version'); END;
+        CREATE TRIGGER quality_events_no_update BEFORE UPDATE ON quality_events BEGIN SELECT RAISE(ABORT,'immutable quality event'); END;
+        CREATE TRIGGER quality_events_no_delete BEFORE DELETE ON quality_events BEGIN SELECT RAISE(ABORT,'immutable quality event'); END;
+        CREATE TRIGGER quality_runs_no_update BEFORE UPDATE ON quality_runs BEGIN SELECT RAISE(ABORT,'immutable quality run'); END;
+        CREATE TRIGGER quality_runs_no_delete BEFORE DELETE ON quality_runs BEGIN SELECT RAISE(ABORT,'immutable quality run'); END;
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration

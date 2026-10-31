@@ -178,6 +178,24 @@ _policies(
 _policies("identity.admin", "DELETE", "/api/identity/delegations/{principal_id}")
 _policies("audit.read", "GET", "/api/identity/audit")
 
+_policies(
+    "candidate.read",
+    "GET",
+    "/api/quality",
+    "/api/quality/versions/{ident}",
+    "/api/quality/rules",
+    "/api/quality/runs",
+    "/api/quality/runs/{ident}",
+)
+_policies("review.suggest", "POST", "/api/quality/versions")
+_policies(
+    "checks.edit",
+    "POST",
+    "/api/quality/versions/{ident}/activate",
+    "/api/quality/versions/{ident}/deactivate",
+)
+
+
 DOMAIN_READS = {
     ("GET", path)
     for path in (

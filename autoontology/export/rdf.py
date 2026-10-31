@@ -114,6 +114,18 @@ def to_graph(model: MergedOntology) -> Graph:
         g.add((u, SKOS.prefLabel, _text(i.label)))
         for alt in i.alt_labels:
             g.add((u, SKOS.altLabel, _text(alt)))
+        if i.rule:
+            import json
+
+            g.add(
+                (
+                    u,
+                    ao.ruleFields,
+                    Literal(
+                        json.dumps(i.rule, ensure_ascii=False, sort_keys=True), datatype=RDF.JSON
+                    ),
+                )
+            )
         if i.comment:
             g.add((u, RDFS.comment, _text(i.comment)))
         g.add((u, ao.source, Literal("document")))

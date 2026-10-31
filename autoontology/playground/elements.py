@@ -177,6 +177,10 @@ def elements_from_model(model: MergedOntology) -> list[Element]:
             f"{'업무 규칙' if kind == 'rule' else '업무 절차' if kind == 'process' else '개체'}"
             f" {i.label}: {i.comment}. 동의어: {_join(i.alt_labels)}"
         )
+        if i.rule:
+            import json
+
+            text += " Rule fields: " + json.dumps(i.rule, ensure_ascii=False, sort_keys=True)
         out.append(
             Element(
                 i.local,

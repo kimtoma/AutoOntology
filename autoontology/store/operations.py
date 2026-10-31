@@ -138,9 +138,10 @@ class Operations:
             head = conn.execute(
                 "SELECT max(s.revision) FROM ontology_snapshots s LEFT JOIN runs r ON r.id=s.run_id WHERE r.id IS NULL OR r.status='succeeded'"
             ).fetchone()[0]
-            conn.execute(
-                "INSERT OR IGNORE INTO ops_state VALUES(1,?,?,?)", (head, head or 0, now_iso())
-            )
+            if not managed:
+                conn.execute(
+                    "INSERT OR IGNORE INTO ops_state VALUES(1,?,?,?)", (head, head or 0, now_iso())
+                )
 
     def state(self) -> dict[str, Any]:
         _, row = _publication_state(self.store)
@@ -302,7 +303,7 @@ class Operations:
         edits = edits or {}
         allowed = {
             "classes": {"label", "definitions", "alt_labels", "comment"},
-            "individuals": {"label", "comment", "alt_labels"},
+            "individuals": {"label", "comment", "alt_labels", "rule"},
             "properties": {"label", "comment"},
         }.get(item["collection"], set())
         if set(edits) - allowed or (edits and (decision != "accept" or item["after"] is None)):
@@ -310,7 +311,20 @@ class Operations:
         if edits and not note.strip():
             raise OperationsError("a manual edit needs a reason")
         for key, value in edits.items():
-            if key in ("definitions", "alt_labels"):
+            if key == "rule":
+                from autoontology.ontology.rules import RuleError, clean_rule
+
+                if not item["after"] or item["after"].get("type") != "BusinessRule":
+                    raise OperationsError(
+                        "Only BusinessRule individuals have monetary rule fields."
+                    )
+                try:
+                    if not isinstance(value, dict):
+                        raise RuleError("Use a rule object, or an empty object to clear it.")
+                    edits[key] = clean_rule(value) if value else {}
+                except RuleError as error:
+                    raise OperationsError(str(error)) from error
+            elif key in ("definitions", "alt_labels"):
                 if (
                     not isinstance(value, list)
                     or len(value) > 100
@@ -567,6 +581,7 @@ class Operations:
 
     def signature(self, revision: int, profile: dict) -> str:
         from autoontology.store.decisions import DecisionStore
+        from autoontology.store.quality import Quality
 
         inputs = {}
         for selected in {revision, self.state()["published_revision"]} - {None}:
@@ -584,6 +599,8 @@ class Operations:
                 "input_bindings": inputs,
                 "changes": self.changes(),
                 "checks": self.checks(),
+                "quality_suites": self.quality_versions(),
+                "quality_policy": Quality.policy(),
                 "connection_decisions": [d.to_dict() for d in DecisionStore(self.store).list()],
                 "profile": profile,
             }
@@ -599,8 +616,11 @@ class Operations:
         run_id: str | None = None,
         restore_proposal_id: str | None = None,
         expected_policy: int | None = None,
+        final_guard=None,
     ) -> None:
         with self.store._immediate() as conn:
+            if final_guard is not None:
+                final_guard()
             authority = authorize(
                 self.store,
                 "knowledge.restore" if restore_proposal_id else "knowledge.publish",
@@ -746,9 +766,34 @@ class Operations:
                 conn.execute("SELECT * FROM ops_checks WHERE id=?", (cursor.lastrowid,)).fetchone()
             )
 
+    def remove_check(self, ident):
+        with self.store._immediate() as conn:
+            authority = authorize(self.store, "checks.edit", conn=conn)
+            row = conn.execute("SELECT * FROM ops_checks WHERE id=?", (ident,)).fetchone()
+            conn.execute("DELETE FROM ops_checks WHERE id=?", (ident,))
+            audit_effect(
+                self.store,
+                authority,
+                ident,
+                {
+                    "operation": "remove_check",
+                    "previous_sha256": digest(dict(row)) if row else None,
+                },
+                conn=conn,
+            )
+        return {"removed": ident}
+
+    def quality_versions(self):
+        from autoontology.store.quality import Quality
+
+        return [{"id": s["id"], "sha256": s["sha256"]} for s in Quality(self.store).active()]
+
     def checks(self) -> list[dict]:
+        from autoontology.store.quality import Quality
+
         with self.store._conn() as conn:
-            return [dict(r) for r in conn.execute("SELECT * FROM ops_checks ORDER BY id")]
+            legacy = [dict(r) for r in conn.execute("SELECT * FROM ops_checks ORDER BY id")]
+        return [*legacy, *Quality(self.store).questions()]
 
 
 def visible_revision(store: Store, revision: int) -> bool:

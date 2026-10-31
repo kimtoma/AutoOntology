@@ -1,8 +1,10 @@
+import { koQuality } from "@/i18n/ko.quality"
 import type { enIdentity } from "@/i18n/en.identity"
 import { koAccess } from "@/i18n/ko.access"
 import { koCases } from "@/i18n/ko.cases"
 
 export const koIdentity: Record<keyof typeof enIdentity, string> = {
+  ...koQuality,
   "identity.authorityChanged": "접근 권한이 변경되어 실행 중 요청을 중단하고 화면을 새로 확인했습니다. 저장된 결과도 현재 권한으로 확인합니다.",
   ...koAccess,
   ...koCases,

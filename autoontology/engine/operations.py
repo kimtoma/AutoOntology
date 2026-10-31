@@ -76,14 +76,18 @@ def validate(store: Store, settings: Settings, *, revision: int, embedder=None, 
     model, items = ops.compose(revision)
     signature = ops.signature(revision, profile(settings, embedder))
     scope = f"{model.name}@proposal-{signature}"
+    from autoontology.store.quality import Quality
+
+    quality = Quality(store)
+    model_checks = quality.model_checks(model)
     cases = ops.checks()
     index = None
-    if cases:
+    if cases and model_checks["ok"]:
         index, embed = prepare_index(store, settings, model, scope, revision, embedder)
         if len(index._rows) != len(index.elements):
             raise OperationsError("some knowledge has no retrieval vector")
     questions = []
-    for case in cases:
+    for case in cases if model_checks["ok"] else []:
         vector = embed([case["question"]], "query")[0]
         hits = index.retrieve(vector or [], top_k=12)
 
@@ -99,20 +103,25 @@ def validate(store: Store, settings: Settings, *, revision: int, embedder=None, 
 
         text = asyncio.run(answer())
         cited, unknown = prompts.parse_citations(text, prompts.context_tokens(hits))
-        ok = case["expected"].casefold() in text.casefold() and bool(cited) and not unknown
+        ok = quality.answer_check(case, text, cited, unknown)
         questions.append({**case, "answer": text, "citations": cited, "ok": ok})
     if ops.signature(revision, profile(settings, embedder)) != signature:
         raise OperationsError("workspace or model identity changed; revalidate")
     result = {
-        "ok": bool(questions) and all(q["ok"] for q in questions),
+        "ok": bool(questions) and all(q["ok"] for q in questions) and model_checks["ok"],
+        "model_checks": model_checks,
         "revision": revision,
         "published_revision": ops.state()["published_revision"],
         "approved": len(items),
         "excluded": len(ops.changes()) - len(items),
         "indexed_elements": len(index.elements) if index else 0,
         "questions": questions,
-        "checks_configured": bool(questions),
-        "blocking_reasons": []
+        "checks_configured": bool(cases),
+        "blocking_reasons": [
+            "Deterministic model/rule checks failed; resolve the recorded conflicts and assertions."
+        ]
+        if not model_checks["ok"]
+        else []
         if questions
         else [
             "Configure at least one representative question and expected answer before publication."
@@ -127,6 +136,20 @@ def validate(store: Store, settings: Settings, *, revision: int, embedder=None, 
         conn.execute(
             "INSERT OR REPLACE INTO ops_validations VALUES(?,?,?,?)",
             (signature, signature, json.dumps(result, ensure_ascii=False), now_iso()),
+        )
+        import uuid
+
+        conn.execute(
+            "INSERT INTO quality_runs VALUES(?,?,?,?,?)",
+            (
+                uuid.uuid4().hex,
+                revision,
+                json.dumps(result, ensure_ascii=False, sort_keys=True),
+                hashlib.sha256(
+                    json.dumps(result, ensure_ascii=False, sort_keys=True).encode()
+                ).hexdigest(),
+                now_iso(),
+            ),
         )
         audit_effect(
             store,
@@ -377,6 +400,7 @@ def install_publication(
             run_id=run.id,
             restore_proposal_id=restoration["proposal_id"] if restoration else None,
             expected_policy=authority.policy_version if authority else None,
+            final_guard=recheck,
         )
         return SimpleNamespace(run_id=run.id, status="succeeded", revision=new)
     except BaseException as exc:

@@ -1,3 +1,5 @@
+import { RuleFields, RuleSummary } from "@/components/rule-fields"
+import { emptyRule, type MonetaryRule } from "@/lib/rules"
 import { CaseBoard } from "@/components/case-board"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
@@ -51,6 +53,10 @@ function ChangeDetail({ item }: { item: KnowledgeChange }) {
   const [editing, setEditing] = useState(false),
     [editedLabel, setEditedLabel] = useState(String(item.after?.label || item.label)),
     [editedText, setEditedText] = useState(knowledgeText(item.after))
+  const displayedRule = item.decision?.edits?.rule ?? item.after?.rule
+  const ruleCandidate = item.collection === "individuals" && item.after?.type === "BusinessRule"
+  const [structuredRule, setStructuredRule] = useState<MonetaryRule>({...emptyRule, ...(item.after?.rule as Partial<MonetaryRule> ?? {})})
+  const [ruleEnabled, setRuleEnabled] = useState(!!item.after?.rule && Object.keys(item.after.rule as object).length > 0)
   const editable = !!item.after && ["classes", "individuals", "properties"].includes(item.collection)
   const save = useMutation({
     mutationFn: (decision: "accept" | "reject" | "hold") =>
@@ -61,6 +67,7 @@ function ChangeDetail({ item }: { item: KnowledgeChange }) {
         editing && decision === "accept"
           ? {
               label: editedLabel.trim(),
+              ...(ruleCandidate ? { rule: ruleEnabled ? structuredRule : {} } : {}),
               ...(item.collection === "classes"
                 ? {
                     definitions: editedText
@@ -107,6 +114,7 @@ function ChangeDetail({ item }: { item: KnowledgeChange }) {
         <span className="review-kind">{t(`ops.${item.kind}`)}</span>
         <h2>{item.label}</h2>
       </div>
+      {!!displayedRule && Object.keys(displayedRule as object).length>0 && <section className="mb-4 border-y py-3"><h3 className="text-sm font-medium">{t("quality.ruleFields")}</h3><RuleSummary value={displayedRule as Record<string,unknown>}/></section>}
       <div className="review-compare">
         {[
           ["ops.before", item.before],
@@ -152,6 +160,7 @@ function ChangeDetail({ item }: { item: KnowledgeChange }) {
               maxLength={5000}
             />
           </div>
+{editing && ruleCandidate && <section className="my-4 space-y-3"><label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={ruleEnabled} onChange={event=>setRuleEnabled(event.target.checked)}/>{t("quality.structureRule")}</label>{ruleEnabled && <RuleFields value={structuredRule} onChange={setStructuredRule}/>}</section>}
           <p className="text-xs text-muted-foreground">{t("ops.editHint")}</p>
         </div>
       )}
@@ -203,6 +212,7 @@ function ChangeDetail({ item }: { item: KnowledgeChange }) {
             {save.isPending && <Loader2 className="animate-spin" aria-hidden />}
             {t(editing ? "ops.acceptEdited" : "ops.accept")}
           </Button>
+
           {editable && (
             <Button variant="outline" disabled={save.isPending} onClick={() => setEditing(!editing)}>
               {t(editing ? "common.cancel" : "ops.edit")}
@@ -391,13 +401,13 @@ export default function ReviewPage() {
           ? i.decision?.decision === "hold"
           : !!i.decision,
     ) || []
-  const selectedIndex = items.findIndex((i) => i.id === selected)
+  const selectedIndex = items.findIndex((i) => i.id === selected || i.key === params.get("subject"))
   const changePage =
     selectedIndex >= 0
       ? Math.floor(selectedIndex / 10) + 1
       : Math.min(page, Math.max(1, Math.ceil(items.length / 10)))
   const visibleItems = items.slice((changePage - 1) * 10, changePage * 10)
-  const item = items.find((i) => i.id === selected) || visibleItems[0],
+  const item = items.find((i) => i.id === selected || i.key === params.get("subject")) || visibleItems[0],
     connection = legacy.data?.items.find((i) => i.id === selected) || legacy.data?.items[0]
   const choose = (id: string) => {
     setSelected(id)

@@ -299,4 +299,7 @@ def commands(settings_for, store_for, fail):
     from autoontology.cases_cli import install as install_cases
 
     install_cases(app, settings_for, store_for)
+    from autoontology.quality_cli import install as install_quality
+
+    install_quality(app, settings_for, store_for)
     return app

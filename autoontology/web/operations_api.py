@@ -366,9 +366,7 @@ def install(app, api):
     @router.delete("/checks/{item_id}")
     def delete_check(item_id: int):
         with edit(api, "checks"):
-            with api.store._conn() as conn:
-                conn.execute("DELETE FROM ops_checks WHERE id=?", (item_id,))
-        return {"removed": item_id}
+            return Operations(api.store).remove_check(item_id)
 
     from autoontology.store.restorations import Restorations
 

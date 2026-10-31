@@ -260,8 +260,8 @@ def test_snapshot_round_trip_is_json_safe(env):
     assert env["store"].get_snapshot(1).revision == 1
     assert env["store"].get_snapshot(2) is None
     assert env["store"].latest_snapshot(with_model=False).model is None
-    with pytest.raises(ValueError, match="format 2 is newer"):
-        MergedOntology.from_dict({**snap.model, "format": 2})
+    with pytest.raises(ValueError, match="format 3 is newer"):
+        MergedOntology.from_dict({**snap.model, "format": 3})
     legacy = {k: v for k, v in snap.model.items() if k != "format"}
     assert MergedOntology.from_dict(legacy) == model  # no format key: format 1
 

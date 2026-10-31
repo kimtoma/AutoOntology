@@ -37,7 +37,7 @@ from autoontology.store.documents import ConceptRow, DocumentRow, RelationRow
 from autoontology.structured.semantic import StructuredSnapshot, qualified
 
 #: Version of the snapshot JSON (:meth:`MergedOntology.to_dict`).
-MODEL_FORMAT = 1
+MODEL_FORMAT = 2
 CLASS_KINDS = frozenset({"entity", "metric", "attribute"})
 INDIVIDUAL_TYPES = {"rule": "BusinessRule", "process": "Process"}
 #: catalog datatype -> XSD local name (anything else stays rdfs:Literal)
@@ -138,6 +138,7 @@ class OIndividual:
     alt_labels: list[str] = field(default_factory=list)
     derived_from: list[str] = field(default_factory=list)
     documents_source: str = ""
+    rule: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -241,7 +242,14 @@ class MergedOntology:
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-safe dict; :meth:`from_dict` rebuilds an equal model."""
-        return {"format": MODEL_FORMAT, **asdict(self)}
+        data = asdict(self)
+        typed = False
+        for node in data["individuals"].values():
+            if node.get("rule"):
+                typed = True
+            else:
+                node.pop("rule", None)
+        return {"format": MODEL_FORMAT if typed else 1, **data}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MergedOntology:

@@ -1,0 +1,2 @@
+export interface MonetaryRule { scope: string; measure: string; operator: string; amount: string; currency: string; authority: string; effective_from: string; effective_to: string | null; exceptions: string[]; priority: number }
+export const emptyRule: MonetaryRule = { scope: "", measure: "", operator: "gte", amount: "", currency: "KRW", authority: "", effective_from: "", effective_to: null, exceptions: [], priority: 0 }

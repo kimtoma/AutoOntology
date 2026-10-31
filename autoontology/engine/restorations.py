@@ -195,9 +195,13 @@ def prepare_restore(store, settings, *, revision: int, reason: str, embedder=Non
             snapshot, model, descriptor, _, _ = target_material(store, settings, revision)
             initial_signature = signature(store, settings, revision, reason, descriptor, embedder)
             scope = f"{model.name}@restore-{proposal}"
+            from autoontology.store.quality import Quality
+
+            quality = Quality(store)
+            model_checks = quality.model_checks(model)
             cases = ops.checks()
             questions, index = [], None
-            if cases:
+            if cases and model_checks["ok"]:
                 from autoontology.engine.model_artifacts import (
                     embedding_identity,
                     reusable_artifact,
@@ -258,9 +262,7 @@ def prepare_restore(store, settings, *, revision: int, reason: str, embedder=Non
                             **case,
                             "answer": text,
                             "citations": cited,
-                            "ok": case["expected"].casefold() in text.casefold()
-                            and bool(cited)
-                            and not unknown,
+                            "ok": quality.answer_check(case, text, cited, unknown),
                         }
                     )
             # Preparation never switches the head; also reject a raced target/change.
@@ -271,16 +273,21 @@ def prepare_restore(store, settings, *, revision: int, reason: str, embedder=Non
             ):
                 raise RestoreError("workspace or restoration target changed; prepare again")
             validation = {
-                "ok": bool(questions) and all(q["ok"] for q in questions),
+                "ok": bool(questions) and all(q["ok"] for q in questions) and model_checks["ok"],
+                "model_checks": model_checks,
                 "revision": revision,
                 "published_revision": base,
                 "scope": scope,
                 "questions": questions,
-                "checks_configured": bool(questions),
+                "checks_configured": bool(cases),
                 "indexed_elements": len(index.elements) if index else 0,
                 "index": index_receipt(store, scope, model) if index else None,
                 "token": initial_signature,
-                "blocking_reasons": []
+                "blocking_reasons": [
+                    "Deterministic model/rule checks failed for the restoration target."
+                ]
+                if not model_checks["ok"]
+                else []
                 if questions
                 else ["Configure at least one representative question before restoration."],
                 "validated_at": now_iso(),

@@ -1,3 +1,5 @@
+import { ModelCheckResults } from "@/components/model-check-results"
+import { QualityPanel } from "@/components/quality-panel"
 import { VersionDiff } from "@/components/version-diff"
 import { RestoreButton, RestorationHistory } from "@/components/restoration"
 import { PublicationRecord } from "@/components/publication-record"
@@ -171,6 +173,8 @@ export default function HistoryPage() {
                 {!validation.checks_configured && (
                   <p className="mt-2 text-sm text-muted-foreground">{t("ops.noChecks")}</p>
                 )}
+                {validation.model_checks && !validation.model_checks.ok && <p role="alert" className="mt-3 text-sm text-destructive">{t("quality.modelFailed")}</p>}
+                <ModelCheckResults result={validation.model_checks}/>
                 <ul className="mt-3 grid gap-3">
                   {validation.questions.map((q) => (
                     <li key={q.id}>
@@ -193,6 +197,7 @@ export default function HistoryPage() {
               </div>
             )}
           </section>
+          <QualityPanel />
           <section className="mt-7" id="quality-checks">
             <h2 className="mb-3 font-semibold">{t("ops.checks")}</h2>
             <form
@@ -223,14 +228,14 @@ export default function HistoryPage() {
                     <p className="text-sm">{c.question}</p>
                     <p className="mt-1 text-xs text-muted-foreground">{c.expected}</p>
                   </div>
-                  <Button
+                  {!c.suite_id && typeof c.id === "number" && <Button
                     size="sm"
                     variant="ghost"
                     disabled={remove.isPending}
-                    onClick={() => remove.mutate(c.id)}
+                    onClick={() => { if(typeof c.id === "number") remove.mutate(c.id) }}
                   >
                     {t("ops.removeCheck")}
-                  </Button>
+                  </Button>}
                 </li>
               ))}
             </ul>

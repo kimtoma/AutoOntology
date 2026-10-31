@@ -97,7 +97,14 @@ def to_graph(model: MergedOntology) -> Graph:
             metric="true" if "Metric" in c.extra_types else "",
         )
     for i in model.individuals.values():
-        add(i.local, "individual", i.label, "document", kind=i.kind, individual_type=i.type)
+        extra = {}
+        if i.rule:
+            import json
+
+            extra["rule_fields"] = json.dumps(i.rule, ensure_ascii=False, sort_keys=True)
+        add(
+            i.local, "individual", i.label, "document", kind=i.kind, individual_type=i.type, **extra
+        )
     for d in model.documents.values():
         add(d.local, "document", d.title, "document", path=d.path, sha256=d.sha256)
     for m in model.merges:

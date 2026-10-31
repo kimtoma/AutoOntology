@@ -1,3 +1,4 @@
+import type { ModelChecks } from "@/components/model-check-results"
 /** Operational APIs keep the published ontology separate from build candidates. */
 import { ApiError, type OriginalReference } from "@/lib/api"
 
@@ -41,7 +42,8 @@ export interface Feedback {
   created_at: string
 }
 export interface QualityCheck {
-  id: number
+  suite_id?: string
+  id: number | string
   question: string
   expected: string
 }
@@ -108,6 +110,7 @@ export interface Revision {
   sources: { name: string }[]
 }
 export interface Validation {
+  model_checks?: ModelChecks;
   ok: boolean
   token: string
   revision: number
