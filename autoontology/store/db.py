@@ -686,6 +686,12 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE TRIGGER ax_target_no_delete BEFORE DELETE ON ax_targets BEGIN SELECT RAISE(ABORT,'immutable AX target'); END;
         """,
     ),
+    (
+        18,
+        """
+        CREATE TABLE host_file_roots (path TEXT PRIMARY KEY, active INTEGER NOT NULL, reason TEXT NOT NULL, actor TEXT NOT NULL, updated_at TEXT NOT NULL);
+    """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
@@ -1053,6 +1059,9 @@ class Store:
                 {"operation": "register", "name": name, "kind": kind},
                 expected_policy=expected_policy,
             ) as conn:
+                from autoontology.security.host_files import HostFiles
+
+                HostFiles(self).locator(kind, locator, conn=conn)
                 conn.execute(
                     "INSERT INTO sources (id, name, kind, locator, pg_database, "
                     "catalog_database_id, created_at, updated_at) "
@@ -1087,6 +1096,11 @@ class Store:
             {"operation": "change_locator"},
             expected_policy=expected_policy,
         ) as conn:
+            from autoontology.security.host_files import HostFiles
+
+            row = conn.execute("SELECT kind FROM sources WHERE id=?", (source_id,)).fetchone()
+            if row:
+                HostFiles(self).locator(row[0], locator, conn=conn)
             conn.execute(
                 "UPDATE sources SET locator = ?, updated_at = ? WHERE id = ?",
                 (locator, now_iso(), source_id),

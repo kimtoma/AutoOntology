@@ -53,6 +53,7 @@ from autoontology.config import (
     env_origin,
     validate_model_profile,
 )
+from autoontology.security.endpoints import url_origin
 from autoontology.web.api import PREFIX, Api, ApiError, mask
 from autoontology.web.runs import WORKSPACE, RunStartError
 
@@ -176,20 +177,6 @@ def _clean_model(value: str, what: str) -> str:
     if value and not CHAT_MODEL_RE.fullmatch(value):
         raise ApiError(400, "invalid_settings", f"{what} is not a valid model name")
     return value
-
-
-def url_origin(url: str) -> str:
-    """``scheme://host:port`` of *url* (lower case, default port filled in; "" if none)."""
-    from urllib.parse import urlsplit
-
-    try:
-        parts = urlsplit(url.strip())
-        port = parts.port or {"http": 80, "https": 443}.get(parts.scheme.lower())
-    except ValueError:
-        return ""
-    if not parts.scheme or not parts.hostname:
-        return ""
-    return f"{parts.scheme.lower()}://{parts.hostname.lower()}:{port}"
 
 
 def candidate_settings(pending: Settings, body: SettingsIn, *, test: bool) -> Settings:
@@ -530,6 +517,7 @@ class SettingsApi:
                 env_file,
                 path,
                 expected_policy=authority.policy_version if authority else None,
+                key_replaced=bool(_key_value(body)) or body.clear_api_key,
             )
             if written:
                 logger.info("settings: wrote %s to %s", ", ".join(written), path.name)

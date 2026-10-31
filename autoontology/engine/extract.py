@@ -243,6 +243,10 @@ def _with_caption(ctx: _ExtractCtx, path: Path, doc: readers.Document) -> reader
 
 
 def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
+    from autoontology.security.host_files import HostFiles
+
+    guard = HostFiles(ctx.store)
+    guard.check(ctx.target)
     files = readers.discover_documents(ctx.target, recursive=ctx.recursive)
     if not files:
         raise RuntimeError(
@@ -268,7 +272,9 @@ def _step_read(ctx: _ExtractCtx) -> dict[str, Any]:
     # that does: a move or a swap); identical content at other paths is a duplicate. Stored
     # rows are never trusted for a path whose file changed (e.g. A=X,B=Y -> A=Y,B=Z keeps
     # Y under A and reads Z for B).
-    current = {str(p.resolve()): sha256_file(p) for p in files}  # stored absolute
+    current = {
+        str(p.resolve()): guard.sha256(p, source_id=ctx.source.id) for p in files
+    }  # stored absolute
     archive = SourceArchive(ctx.store)
     captured = archive.capture_files(
         ctx.source,
@@ -1096,7 +1102,11 @@ def _run_extract_held(
     from autoontology.engine.build import input_fingerprint
 
     params["inputs_sha"] = input_fingerprint(
-        source, settings.home, settings.vision_model, reader=pipeline_settings(settings)
+        source,
+        settings.home,
+        settings.vision_model,
+        reader=pipeline_settings(settings),
+        store=store,
     )
     previous = store.latest_run(source.id, EXTRACT_KIND) if resume else None
     changed = previous is not None and (

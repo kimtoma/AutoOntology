@@ -59,11 +59,14 @@ def _shown(path: Path | str) -> str:
 
 def _document_reasons(store: Store, source: Source) -> list[dict[str, Any]]:
     from autoontology.engine import extract as extract_job
+    from autoontology.security.host_files import HostFiles
     from autoontology.store.documents import DocumentStore
 
+    guard = HostFiles(store)
     target, recursive = extract_job.documents_target(source)
+    guard.check(target)
     files = extract_job.readers.discover_documents(target, recursive=recursive)
-    current = {str(p.resolve()): extract_job.sha256_file(p) for p in files}
+    current = {str(p.resolve()): guard.sha256(p, source_id=source.id) for p in files}
     stored = {d.path: d.sha256 for d in DocumentStore(store).list_documents(source.id)}
     shas = set(stored.values())
     added = [p for p, sha in current.items() if p not in stored and sha not in shas]
@@ -84,7 +87,10 @@ def _document_reasons(store: Store, source: Source) -> list[dict[str, Any]]:
 def _files_reasons(store: Store, source: Source, built_at: str) -> list[dict[str, Any]]:
     from autoontology.structured import pipeline
 
-    files = {str(p.resolve()): p for p in pipeline.files_locator(source).files()}
+    files = {
+        str(p.resolve()): p
+        for p in pipeline.files_locator(source).files(store=store, source_id=source.id)
+    }
     manifest = store.get_file_manifest(source.id) or {}
     loaded = {
         str(Path(t["source_file"]).resolve())
@@ -145,9 +151,10 @@ def source_freshness(store: Store, settings: Settings, source: Source) -> dict[s
             settings.vision_model,
             reader=extract_job.pipeline_settings(settings),
             schema=schema,
+            store=store,
         )
         if not current:  # it swallows errors: read the inputs again to name the error
-            _diagnose(source)
+            _diagnose(source, store)
             raise InputsUnreadable("the inputs could not be read")
         if current == last[0]:
             return out
@@ -181,20 +188,23 @@ def _schema(source: Source) -> str:
     return pipeline.schema_rows_fingerprint(introspect(conn))
 
 
-def _diagnose(source: Source) -> None:
+def _diagnose(source: Source, store: Store) -> None:
     """Read *source*'s inputs the way the fingerprint does, raising what it swallowed."""
     from autoontology.engine import extract as extract_job
+    from autoontology.security.host_files import HostFiles
     from autoontology.structured import pipeline
 
+    guard = HostFiles(store)
     if source.kind == "database":
         return  # read (and raised) before the fingerprint
     if source.kind == "documents":
         target, recursive = extract_job.documents_target(source)
+        guard.check(target)
         files = extract_job.readers.discover_documents(target, recursive=recursive)
     else:
-        files = pipeline.files_locator(source).files()
+        files = pipeline.files_locator(source).files(store=store, source_id=source.id)
     for path in files:
-        extract_job.sha256_file(path)
+        guard.sha256(path, source_id=source.id)
 
 
 def freshness(store: Store, settings: Settings) -> list[dict[str, Any]]:

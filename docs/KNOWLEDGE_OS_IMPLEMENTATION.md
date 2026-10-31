@@ -19,6 +19,17 @@ Prioritize implementation, meaningful verification and recoverable local commits
 record any remaining scope explicitly at the deadline. Public deployment remains
 out of scope.
 
+## Clarified operating goal
+
+Organizational knowledge-system efficiency is the primary outcome; time includes
+UI/CLI waiting and the knowledge/decision/reuse cycle. Initial human validation
+should develop into automatically recorded decisions, a continuous agent loop and
+explicit bounded autonomy with human exceptions. The user has no measured
+baseline yet. See [the current operating model](KNOWLEDGE_OS_OPERATING_MODEL.md).
+Supporting timer instrumentation must not dominate the operations UI or imply
+actual savings before measurement. These directions refine the remaining full
+roadmap rather than a completed feature claim.
+
 ## Architecture and invariants
 
 Use the existing SQLite store for operational metadata and a persistent local
@@ -402,3 +413,7 @@ one service. See [measurement provenance, commands and remaining pilot work](AX_
 Private browser acceptance uses a fictitious request, a clearly controlled snapshot
 clone and simulated/reported data; it makes no real business-savings claim.
 Regression, captures and data recovery proof belong in the private stage record.
+
+## Stage 20 — approved host inputs and provider origin binding
+
+Authenticated ingestion now checks explicit business roots and live source/domain authority before registration, hashing, extraction and original capture. UI and native administrator actions approve/revoke specific paths; protected secret paths and unsafe live links are refused. Revocation preserves archived evidence. The shared provider settings boundary binds saved keys to URL origins, with owner-only key-file replacement or explicit clearing in native CLI. See [host input boundaries](HOST_INPUT_BOUNDARIES.md). Whole-workspace recovery and configured acceptance evidence are recorded privately. Cross-resource recovery, durable agent collection and bounded automation policies remain pending.

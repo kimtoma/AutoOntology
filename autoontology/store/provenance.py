@@ -68,8 +68,11 @@ class SourceArchive:
                 )
         return folder / filename
 
-    def _capture(self, path: Path, expected: str | None) -> tuple[Path, str, int]:
-        sha = expected or file_sha256(path)
+    def _capture(self, path: Path, expected: str | None, source_id=None) -> tuple[Path, str, int]:
+        from autoontology.security.host_files import HostFiles
+
+        guard = HostFiles(self.store)
+        sha = expected or guard.sha256(path, source_id=source_id)
         destination = self.file_path(sha, path.name)
         for directory in (
             self.root,
@@ -87,7 +90,7 @@ class SourceArchive:
                 raise ProvenanceError(
                     "original archive integrity check failed", code="original_corrupt"
                 )
-            if file_sha256(path) != sha:
+            if guard.sha256(path, source_id=source_id) != sha:
                 raise ProvenanceError("source changed during capture; retry the read")
         else:
             descriptor, temporary = tempfile.mkstemp(
@@ -95,7 +98,10 @@ class SourceArchive:
             )
             temporary = Path(temporary)
             try:
-                with os.fdopen(descriptor, "wb") as target, path.open("rb") as source:
+                with (
+                    os.fdopen(descriptor, "wb") as target,
+                    guard.open(path, source_id=source_id) as source,
+                ):
                     for block in iter(lambda: source.read(1 << 20), b""):
                         target.write(block)
                     target.flush()
@@ -133,12 +139,16 @@ class SourceArchive:
     ) -> CapturedSource:
         entries, paths = [], {}
         root = root.resolve()
-        for path in sorted(files, key=lambda p: str(p.resolve())):
+        from autoontology.security.host_files import HostFiles
+
+        guard = HostFiles(self.store)
+        for path in sorted(files, key=str):
+            guard.check(path)
             resolved = path.resolve()
             if not resolved.is_relative_to(root):
                 raise ProvenanceError("source file is outside its input root")
             saved, sha, size = self._capture(
-                resolved, expected.get(str(resolved)) if expected else None
+                resolved, expected.get(str(resolved)) if expected else None, source.id
             )
             entries.append(
                 {

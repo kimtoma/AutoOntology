@@ -268,8 +268,15 @@ class FilesLocator:
     path: str
     recursive: bool = False
 
-    def files(self) -> list[Path]:
-        return discover_files(Path(self.path), recursive=self.recursive)
+    def files(self, *, store=None, source_id=None) -> list[Path]:
+        from autoontology.security.host_files import HostFiles
+
+        guard = HostFiles(store)
+        guard.check(Path(self.path))
+        files = discover_files(Path(self.path), recursive=self.recursive)
+        for path in files:
+            guard.check(path)
+        return files
 
 
 def files_locator(source: Source) -> FilesLocator:
@@ -322,7 +329,12 @@ def add_source(
         raise SourceError(f"source {name!r} already exists (remove it with `source rm {name}`)")
     if kind == "files":
         path = Path(target).expanduser().resolve()
+        from autoontology.security.host_files import HostFiles
+
+        HostFiles(store).check(path)
         files = discover_files(path, recursive=recursive)  # raises LoadError
+        for file in files:
+            HostFiles(store).check(file)
         if not files:
             raise SourceError(f"no supported files in {path}")
         locator = json.dumps({"path": str(path), "recursive": recursive}, ensure_ascii=False)

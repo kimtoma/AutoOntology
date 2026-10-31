@@ -305,4 +305,7 @@ def commands(settings_for, store_for, fail):
     from autoontology.ax_cli import install as install_ax
 
     install_ax(app, settings_for, store_for)
+    from autoontology.host_files_cli import install as install_host
+
+    install_host(app, settings_for, store_for)
     return app

@@ -120,11 +120,13 @@ def preserve_original(store: Store, model: MergedOntology, document_id: str, rev
                 code="original_unavailable",
                 status=404,
             )
-        from autoontology.store.provenance import file_sha256
-        from autoontology.unstructured.readers import discover_documents
-
         # Search only the registered source. A move/rename is recoverable when
         # its bytes match exactly; a historic absolute locator is not authority.
+        from autoontology.security.host_files import HostFiles
+        from autoontology.unstructured.readers import discover_documents
+
+        guard = HostFiles(store)
+        guard.check(target)
         candidates = discover_documents(target, recursive=bool(locator.get("recursive")))
         candidates.sort(key=lambda p: (p.name != Path(document.path).name, str(p)))
         path = next(
@@ -132,7 +134,7 @@ def preserve_original(store: Store, model: MergedOntology, document_id: str, rev
                 p
                 for p in candidates
                 if p.resolve().is_relative_to(target if target.is_dir() else target.parent)
-                and file_sha256(p) == document.sha256
+                and guard.sha256(p, source_id=source.id) == document.sha256
             ),
             None,
         )

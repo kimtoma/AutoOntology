@@ -18,6 +18,10 @@ def effects(tmp_path):
     identity = Identity(store)
     issued = identity.bootstrap("Org", "owner", "Owner", "long effect owner password")
     owner = identity.authenticate(issued.secret.reveal())
+    from autoontology.security.host_files import HostFiles
+
+    with acting_as(store, owner):
+        HostFiles(store).allow(tmp_path, reason="Explicit effect-test input root")
     return store, identity, owner, source
 
 

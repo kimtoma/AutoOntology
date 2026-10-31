@@ -161,7 +161,15 @@ def test_explicit_published_history_is_readable_but_candidates_stay_private(mana
         conn.execute("UPDATE ops_state SET published_revision=? WHERE id=1", (revision,))
     response = client.get(f"/api/ontology?revision={revision}", headers=bearer(token))
     assert response.status_code == 200
-    candidate = snapshot(identity.store, example())
+    from autoontology.security.context import acting_as
+    from autoontology.security.host_files import HostFiles
+
+    with acting_as(identity.store, owner):
+        HostFiles(identity.store).allow(
+            identity.store.path.parent / "fixture-originals",
+            reason="Explicit history fixture input",
+        )
+        candidate = snapshot(identity.store, example())
     response = client.get(f"/api/ontology?revision={candidate}", headers=bearer(token))
     assert response.status_code == 403
 

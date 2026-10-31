@@ -510,7 +510,7 @@ def _step_load(ctx: _Ctx) -> dict[str, Any]:
     from autoontology.store.provenance import SourceArchive
     from autoontology.structured.loaders import load_files_to_postgres
 
-    files = pipeline.files_locator(ctx.source).files()
+    files = pipeline.files_locator(ctx.source).files(store=ctx.store, source_id=ctx.source.id)
     target = Path(pipeline.files_locator(ctx.source).path)
     archive = SourceArchive(ctx.store)
     captured = archive.capture_files(

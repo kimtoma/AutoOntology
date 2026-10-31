@@ -37,7 +37,11 @@ def snapshot(store, model, kind="build"):
         path.write_bytes(raw)
         doc.path, doc.sha256 = str(path), hashlib.sha256(raw).hexdigest()
         source = store.get_source(doc.source) or store.add_source(
-            name=doc.source, kind="documents", locator=json.dumps({"path": str(path)})
+            name=doc.source,
+            kind="documents",
+            locator=json.dumps(
+                {"path": str(store.path.parent / "fixture-originals"), "recursive": True}
+            ),
         )
         SourceArchive(store).capture_files(
             source, [path], run_id="fixture-" + doc.sha256, root=path.parent

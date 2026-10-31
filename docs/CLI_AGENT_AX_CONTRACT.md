@@ -3,7 +3,18 @@
 Product direction recorded 2026-10-31. This is an implementation contract for
 the remaining roadmap, not a claim that all capabilities below already exist.
 
-## Outcome: time returned to the organization
+## Current outcome and operating direction
+
+The user clarified that organization-wide knowledge-system efficiency is the
+primary outcome, with time as its scarce physical resource. Initial human
+verification should lead to automatic capture of decisions and a continuously
+improving agent loop, then bounded policy-authorized autonomy with human
+exceptions. UI/CLI waiting is part of the time cost. See
+[the current operating model](KNOWLEDGE_OS_OPERATING_MODEL.md). Historical
+measurement definitions below remain supporting instruments; they are not the
+whole objective. The user has no measured baseline yet.
+
+## Supporting outcome: time returned to the organization
 
 The primary Enterprise AX objective is to shorten the time from a business
 request or detected knowledge change to an **approved, usable result**, while

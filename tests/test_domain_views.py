@@ -222,14 +222,18 @@ def scoped(tmp_path):
     )
     run = store.create_run(kind="build", source_id=None)
     content = model()
-    for document in content.documents.values():
-        path = tmp_path / (document.local + ".md")
-        path.write_text("계약 승인 기준" if document.source == "policy" else "PRIVATE_SALARY")
-        document.path = str(path)
-        document.sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
-        SourceArchive(store).capture_files(
-            store.get_source(document.source), [path], run_id=run.id, root=tmp_path
-        )
+    from autoontology.security.host_files import HostFiles
+
+    with acting_as(store, owner):
+        HostFiles(store).allow(tmp_path, reason="Explicit scoped-view fixture input")
+        for document in content.documents.values():
+            path = tmp_path / (document.local + ".md")
+            path.write_text("계약 승인 기준" if document.source == "policy" else "PRIVATE_SALARY")
+            document.path = str(path)
+            document.sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+            SourceArchive(store).capture_files(
+                store.get_source(document.source), [path], run_id=run.id, root=tmp_path
+            )
     revision = store.save_snapshot(
         run.id,
         content,

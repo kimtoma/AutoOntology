@@ -355,6 +355,20 @@ def describe_change(key: str, old: str | None, new: str | None) -> str:
             return "(unset)"
         if SECRET_KEY_RE.search(key):
             return "(hidden)" if value else "(empty)"
+        if value and key.upper().endswith(("_URL", "_ENDPOINT")):
+            from urllib.parse import urlsplit
+
+            try:
+                parts = urlsplit(value)
+                if parts.scheme and parts.hostname:
+                    host = parts.hostname
+                    host = f"[{host}]" if ":" in host else host
+                    return (
+                        f"{parts.scheme}://{host}" + (f":{parts.port}" if parts.port else "") + "/…"
+                    )
+            except ValueError:
+                pass
+            return "(configured endpoint)"
         return value or "(empty)"
 
     return f"{key}: {show(old)} -> {show(new)}"

@@ -162,6 +162,7 @@ def input_fingerprint(
     *,
     reader: str = "",
     schema: str | None = None,
+    store: Store | None = None,
 ) -> str:
     """A hash of what the per-source steps of *source* read: the locator plus, for files
     and documents sources, every input file's path and content hash -- and, for documents
@@ -172,12 +173,16 @@ def input_fingerprint(
     of documents sources (table limits, byte cap), so changing one re-reads on ``--resume``.
     "" when the inputs cannot be listed or the database cannot be reached -- never equal
     to a recorded fingerprint, so the steps run again."""
+    from autoontology.security.host_files import HostFiles
+
+    guard = HostFiles(store)
     digest = hashlib.sha256(f"{source.kind}\0{source.locator}\0".encode())
     try:
         if source.kind == "files":
-            files = pipeline.files_locator(source).files()
+            files = pipeline.files_locator(source).files(store=store, source_id=source.id)
         elif source.kind == "documents":
             target, recursive = extract_job.documents_target(source)
+            guard.check(target)
             files = extract_job.readers.discover_documents(target, recursive=recursive)
             if reader:
                 digest.update(f"reader\0{reader}\0".encode())
@@ -196,8 +201,8 @@ def input_fingerprint(
             if not schema:
                 return ""
             digest.update(f"schema\0{schema}\0".encode())
-        for path in sorted(p.resolve() for p in files):
-            digest.update(f"{path}\0{extract_job.sha256_file(path)}\0".encode())
+        for path in sorted(files, key=str):
+            digest.update(f"{path.resolve()}\0{guard.sha256(path, source_id=source.id)}\0".encode())
     except Exception:  # noqa: BLE001 - a missing/unreadable input: the step reports it
         return ""
     return digest.hexdigest()
@@ -265,6 +270,7 @@ class _Build:
                     self.settings.home,
                     self.settings.vision_model,
                     reader=extract_job.pipeline_settings(self.settings),
+                    store=self.store,
                 )
             detail = fn()
             detail[INPUTS_KEY] = self._fingerprints[source.name]
@@ -548,6 +554,7 @@ def _resume_reuse(
             settings.home,
             settings.vision_model,
             reader=extract_job.pipeline_settings(settings),
+            store=store,
         )
         if not current or any(rows[n].detail.get(INPUTS_KEY) != current for n in kept):
             logger.info("--resume: inputs of %s changed since run %s: rebuilt", source.name, run.id)

@@ -1,8 +1,10 @@
+import { enHost } from "@/i18n/en.host"
 import { enAX } from "@/i18n/en.ax"
 import { enQuality } from "@/i18n/en.quality"
 import { enAccess } from "@/i18n/en.access"
 import { enCases } from "@/i18n/en.cases"
 export const enIdentity = {
+  ...enHost,
   ...enAX,
   ...enQuality,
   "identity.authorityChanged": "Access changed. Active requests stopped and this view refreshed. Saved results are checked against your current access.",

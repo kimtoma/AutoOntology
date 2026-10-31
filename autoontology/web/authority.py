@@ -213,6 +213,9 @@ _policies(
 _policies("review.suggest", "POST", "/api/ax/feedback/{ident}/case")
 _policies("feedback.manage", "POST", "/api/ax/feedback/{ident}/resolve")
 
+_policies("identity.admin", "GET", "/api/host-files")
+_policies("identity.admin", "POST", "/api/host-files/allow", "/api/host-files/revoke")
+
 DOMAIN_READS = {
     ("GET", path)
     for path in (

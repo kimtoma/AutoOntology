@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from autoontology import __version__
@@ -438,7 +440,7 @@ def source_add(
         )
         typer.echo(msg("source.locator", locator=pipeline.display_locator(src)))
         if src.kind == "files":
-            files = pipeline.files_locator(src).files()
+            files = pipeline.files_locator(src).files(store=store, source_id=src.id)
             typer.echo(
                 msg("source.files", count=len(files), names=", ".join(f.name for f in files))
             )
@@ -1003,7 +1005,10 @@ def _shell_override_warnings(keys) -> list[str]:
     for key, value in keys:
         shell = shell_value(key)
         if shell is not None and shell != value:
-            out.append(msg("init.shell_override", key=key, value=shell))
+            from autoontology.onboarding import describe_change
+
+            shown = describe_change(key, None, shell).split(" -> ", 1)[-1]
+            out.append(msg("init.shell_override", key=key, value=shown))
     return out
 
 
@@ -1609,6 +1614,14 @@ def provider_use(
         None, "--embed-model", help=msg("help.provider.use.embed_model")
     ),
     base_url: str = typer.Option(None, "--base-url", help=msg("help.provider.use.base_url")),
+    api_key_file: Path = typer.Option(
+        None,
+        "--api-key-file",
+        help="Private owner-only file containing the API key; never pass raw keys as arguments.",
+    ),
+    clear_api_key: bool = typer.Option(
+        False, "--clear-api-key", help="Explicitly remove the saved API key."
+    ),
     openai_chat_model: str = typer.Option(
         None, "--openai-chat-model", help=msg("help.provider.use.openai_chat_model")
     ),
@@ -1627,6 +1640,39 @@ def provider_use(
     from autoontology.security.context import authorize
     from autoontology.security.settings import save_env
 
+    if api_key_file is not None and clear_api_key:
+        _fail("Choose --api-key-file or --clear-api-key.", code=2)
+    private_key = None
+    if api_key_file is not None:
+        import os
+        import stat
+
+        try:
+            descriptor = os.open(api_key_file, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
+                info = os.fstat(stream.fileno())
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or info.st_mode & 0o077
+                    or info.st_size > 1000
+                ):
+                    raise ValueError
+                private_key = stream.read(1001).rstrip("\r\n")
+            from autoontology.config import PLACEHOLDER_KEY_MARKERS
+
+            if (
+                not private_key
+                or len(private_key) > 1000
+                or any(c.isspace() or ord(c) < 32 for c in private_key)
+                or any(marker in private_key for marker in PLACEHOLDER_KEY_MARKERS)
+            ):
+                raise ValueError
+        except (OSError, ValueError, UnicodeError):
+            _fail(
+                "Use a regular owner-only (0600) key file containing one non-placeholder API key line.",
+                code=2,
+            )
     if name not in CHAT_PROVIDERS:
         _fail(msg("provider.unknown", name=name, choices=", ".join(CHAT_PROVIDERS)), code=2)
     if embed is not None and embed not in EMBED_PROVIDERS:
@@ -1658,12 +1704,18 @@ def provider_use(
         keys[var or "AUTOONTOLOGY_OLLAMA_EMBED_MODEL"] = embed_model
     if base_url:
         keys["AUTOONTOLOGY_OPENAI_BASE_URL"] = base_url.rstrip("/")
+    if private_key is not None or clear_api_key:
+        keys["AUTOONTOLOGY_OPENAI_API_KEY"] = private_key or ""
     for key, value in keys.items():
         env_file.set(key, value)
     changed = env_file.changes()
     overrides = _shell_override_warnings(keys.items())  # before the write, as in init
     backup = save_env(
-        store, env_file, path, expected_policy=authority.policy_version if authority else None
+        store,
+        env_file,
+        path,
+        expected_policy=authority.policy_version if authority else None,
+        key_replaced=private_key is not None or clear_api_key,
     )
     for key, old, new in changed:
         typer.echo(msg("provider.set", change=onboarding.describe_change(key, old, new), path=path))

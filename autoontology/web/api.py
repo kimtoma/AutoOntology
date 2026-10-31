@@ -1605,6 +1605,9 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
     from autoontology.web import ax_api
 
     ax_api.install(app, api)
+    from autoontology.web import host_files_api
+
+    host_files_api.install(app, api)
 
     @app.middleware("http")
     async def _local_only(request: Request, call_next):

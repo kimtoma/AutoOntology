@@ -62,10 +62,10 @@ def test_capture_race_does_not_delete_the_previous_active_document(env, monkeypa
     (docs_dir / "계약.md").write_text("# Updated\n계약과 고객")
     real = SourceArchive._capture
 
-    def race(self, path, expected):
+    def race(self, path, expected, source_id=None):
         if path.name == "계약.md":
             path.write_text("Changed after hashing")
-        return real(self, path, expected)
+        return real(self, path, expected, source_id)
 
     monkeypatch.setattr(SourceArchive, "_capture", race)
     with pytest.raises(jobs.JobError, match="changed during capture"):
