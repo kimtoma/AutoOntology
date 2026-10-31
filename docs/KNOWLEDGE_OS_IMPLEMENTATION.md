@@ -191,6 +191,44 @@ an actionable failure without an unauthorized follow-up result read.
 
 ## Recovery procedure
 
+### Stage 16: source and settings effect boundaries
+
+Parent `e94648d`; schema remains v14. Source registration, locator changes, catalog
+binding and local removal recheck current authority inside their write transaction
+and append safe actor-attributed metadata atomically. Human source editing remains
+separate from delegated catalog preparation. Structured registration pins its
+preparation policy; source removal checks policy before teardown steps, polling,
+database DROP and local deletion. A started backend teardown is not claimed to be
+reversed after later revocation. Partial cross-service recovery remains required.
+
+HTTP settings saves and native provider selection share one current-authority,
+prepared-policy and stale-file guard. Participating same-workspace writers serialize
+through SQLite; values and secret-bearing locators never enter audit metadata.
+Private atomic file replacement and backups remain in use. This is not a crash-atomic
+SQLite/filesystem transaction; durable cross-resource effect/consent recovery remains
+an explicit activation gate. Other native configuration/setup paths still need the
+final inventory. Effect-time CLI denials now use the stable entry-denial JSON contract.
+HTTP source errors preserve authorization status instead of rewriting it as bad input.
+Upload staging rechecks authority between chunks and cleans its own failed staging.
+
+Loss of a modern identity table fails closed in both common effects and the internal
+router probe. Genuine pre-identity stores remain explicitly legacy without being
+migrated by the probe. Test isolation resets environment-origin metadata together
+with its environment variables, preventing cross-test shell-origin contamination.
+
+Copied-data native and HTTP acceptance registers/removes new private document sources,
+saves settings without changing embeddings, verifies six secret-free attributable
+effects and restores every table/audit plus six read-only originals. Actual browser
+capture uses a controlled source-validation wait and real fixture-session revocation;
+no external model is called. The normal workspace remains unenrolled and unchanged.
+Private stage-16 evidence records final regression, captures and checkpoint/drill.
+Host-path allowlisting, exact human consent, owner recovery, remaining source/job/effect
+inventory, structured lineage and the rest of P0-P3 remain in scope.
+Final Python regression: **1558 passed / 66 integration tests skipped**; final
+authority-focused checks: **24 passed**. The copied native/HTTP and four-frame
+actual browser acceptance passed. Ruff and format checks passed. The UI source and
+committed bundle remain the tested Stage 15 version; no new UI build is required.
+
 ### Stage 15: query and durable saved-result knowledge scope
 
 Parent `118ee63`; additive schema v14 stores immutable message-scope companions

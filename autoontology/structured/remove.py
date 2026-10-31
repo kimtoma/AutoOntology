@@ -38,7 +38,7 @@ class RemoveError(RuntimeError):
 
 
 def wait_catalog_gone(
-    client, database: str, *, timeout: float | None = None, poll: float | None = None
+    client, database: str, *, timeout: float | None = None, poll: float | None = None, check=None
 ) -> bool:
     """Poll the upstream catalog until *database* is gone (the service's /ingest/delete
     thread runs ``delete_all_data``). True when gone within *timeout*."""
@@ -46,6 +46,8 @@ def wait_catalog_gone(
     poll = RM_POLL_S if poll is None else poll
     deadline = time.monotonic() + timeout
     while True:
+        if check is not None:
+            check()
         if client.database_id_by_name(database) is None:
             return True
         if time.monotonic() >= deadline:
@@ -68,7 +70,10 @@ def remove_source(
     fails or does not finish and *force* is not set, or another operation holds the
     source's lease."""
     from autoontology.config import assert_source_database
+    from autoontology.security.context import authorize
     from autoontology.store.db import SourceBusy
+
+    authority = authorize(store, "source.edit")
 
     def say(message: str, warning: bool = False) -> None:
         if notify:
@@ -104,6 +109,7 @@ def remove_source(
             timeout=timeout,
             poll=poll,
             held=held,
+            expected_policy=authority.policy_version if authority else None,
         )
     finally:
         lease.__exit__(None, None, None)
@@ -120,18 +126,25 @@ def _remove_held(
     timeout: float,
     poll: float | None,
     held: Any = None,
+    expected_policy=None,
 ) -> None:
     from autoontology.config import PG_MAINTENANCE_DB, assert_source_database
     from autoontology.engine import pg
     from autoontology.engine.client import BackendClient, BackendError, BackendUnavailable
+    from autoontology.security.context import authorize
     from autoontology.structured import pipeline
     from autoontology.structured.loaders import quote_ident
+
+    def check():
+        authorize(store, "source.edit", expected_policy=expected_policy)
+
+    check()
 
     if store.active_runs(src.id):
         raise RemoveError(f"source {src.name!r} has an active run; wait for it to finish")
     if src.kind == "documents":  # documents/concepts live in the store
-        remove_added_aliases(settings, store, src, force=force, say=say)
-        store.delete_source(src.id)
+        remove_added_aliases(settings, store, src, force=force, say=say, check=check)
+        store.delete_source(src.id, expected_policy=expected_policy)
         say(
             f"removed documents source {src.name} (documents, chunks, concepts, "
             "relations, evidence)"
@@ -147,6 +160,7 @@ def _remove_held(
     with BackendClient(settings.backend_url) as client:
         try:
             try:
+                check()
                 client.delete_connection(database)
                 say(
                     f"deleted upstream connection {database}; waiting for the "
@@ -157,7 +171,7 @@ def _remove_held(
                     raise
                 say(f"no upstream connection {database} (already gone)")
             connection_gone = True
-            if wait_catalog_gone(client, database, timeout=timeout, poll=poll):
+            if wait_catalog_gone(client, database, timeout=timeout, poll=poll, check=check):
                 say(f"ingested graph of {database} deleted")
             elif force:
                 say(
@@ -183,6 +197,7 @@ def _remove_held(
                 raise RemoveError(f"source rm failed: {exc}") from exc
             say(f"warning: {exc} (--force): {leftover}", True)
     if drop_db:
+        check()
         if src.kind != "files" or not src.pg_database:
             say("--drop-db ignored: only files sources own a local database")
         elif not connection_gone:
@@ -200,9 +215,10 @@ def _remove_held(
             if held is not None and not held.owned():
                 raise RemoveError("lease lost before DROP DATABASE; nothing was dropped")
             with pg.connect(settings, PG_MAINTENANCE_DB) as conn:
+                check()
                 conn.execute(f"DROP DATABASE IF EXISTS {quote_ident(src.pg_database)} WITH (FORCE)")
             say(f"dropped database {src.pg_database}")
-    store.delete_source(src.id)
+    store.delete_source(src.id, expected_policy=expected_policy)
     say(f"removed source {name}")
 
 
@@ -404,24 +420,34 @@ def remove_added_aliases(
     force: bool,
     say: Callable[..., None],
     remover: Callable[[Settings, str, list[str]], dict[str, Any]] | None = None,
+    check=None,
 ) -> None:
     """Take the synonyms *src*'s alignments added (:func:`alias_removal_plan`) off the
     upstream Terms before the source goes. A failure keeps the source (RemoveError)
     unless *force*, which only warns."""
+    from autoontology.security.context import authorize
+    from autoontology.security.policy import AccessError
     from autoontology.store.alignments import AlignmentStore
+
+    check = check or (lambda: authorize(store, "source.edit"))
+    check()
 
     plan, handover = _split_plan(store, src)
     aligns = AlignmentStore(store)
     for term_id, alias, new_owner in handover:  # still supported: the supporter owns it now
+        check()
         aligns.reassign_alias_source(term_id, alias, new_owner)
     if not plan:
         return
     if remover is None:
         from autoontology.engine.upstream_terms import remove_term_synonyms as remover
     for term_id, aliases in sorted(plan.items()):
+        check()
         try:
             result = remover(settings, term_id, aliases)
             removed = result.get("removed", [])
+        except AccessError:
+            raise
         except LookupError:
             removed = []  # the Term is gone already
         except Exception as exc:  # noqa: BLE001 - one message; --force continues
@@ -433,6 +459,7 @@ def remove_added_aliases(
                 ) from exc
             say(f"warning: synonyms of Term {term_id} kept (--force): {exc}", True)
             continue
+        check()
         aligns.mark_aliases_removed(term_id, aliases)
         if removed and result.get("embeddings_refreshed") is False:
             # the next align run retries it (the queue outlives this source)

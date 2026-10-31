@@ -313,6 +313,9 @@ def add_source(
     store: Store, target: str, *, name: str, kind: str | None = None, recursive: bool = False
 ) -> Source:
     """Validate and record a source. No data is moved until ``autoontology build``."""
+    from autoontology.security.context import authorize
+
+    authority = authorize(store, "source.edit")
     validate_source_name(name)
     kind = kind or ("database" if looks_like_url(target) else "files")
     if store.get_source(name):
@@ -343,4 +346,5 @@ def add_source(
         kind=kind,
         locator=locator,  # type: ignore[arg-type]
         pg_database=pg_database,
+        expected_policy=authority.policy_version if authority else None,
     )

@@ -934,13 +934,33 @@ class Store:
 
     # --- sources --------------------------------------------------------------
 
+    @contextmanager
+    def _source_effect(self, action, source_id, detail, *, expected_policy=None):
+        from autoontology.security.context import audit_effect, authorize
+
+        with self._immediate() as conn:
+            decision = authorize(self, action, expected_policy=expected_policy, conn=conn)
+            yield conn
+            audit_effect(self, decision, source_id, detail, conn=conn)
+
     def add_source(
-        self, *, name: str, kind: SourceKind, locator: str, pg_database: str | None = None
+        self,
+        *,
+        name: str,
+        kind: SourceKind,
+        locator: str,
+        pg_database: str | None = None,
+        expected_policy: int | None = None,
     ) -> Source:
         ts = now_iso()
         source_id = uuid.uuid4().hex
         try:
-            with self._conn() as conn:
+            with self._source_effect(
+                "source.edit",
+                source_id,
+                {"operation": "register", "name": name, "kind": kind},
+                expected_policy=expected_policy,
+            ) as conn:
                 conn.execute(
                     "INSERT INTO sources (id, name, kind, locator, pg_database, "
                     "catalog_database_id, created_at, updated_at) "
@@ -968,24 +988,35 @@ class Store:
             rows = conn.execute("SELECT * FROM sources ORDER BY name").fetchall()
         return [_source(r) for r in rows]
 
-    def set_locator(self, source_id: str, locator: str) -> None:
-        with self._conn() as conn:
+    def set_locator(self, source_id: str, locator: str, *, expected_policy=None) -> None:
+        with self._source_effect(
+            "source.edit",
+            source_id,
+            {"operation": "change_locator"},
+            expected_policy=expected_policy,
+        ) as conn:
             conn.execute(
                 "UPDATE sources SET locator = ?, updated_at = ? WHERE id = ?",
                 (locator, now_iso(), source_id),
             )
 
     def set_catalog_database_id(self, source_id: str, catalog_database_id: str | None) -> None:
-        with self._conn() as conn:
+        with self._source_effect(
+            "candidate.prepare",
+            source_id,
+            {"operation": "bind_catalog", "catalog_bound": catalog_database_id is not None},
+        ) as conn:
             conn.execute(
                 "UPDATE sources SET catalog_database_id = ?, updated_at = ? WHERE id = ?",
                 (catalog_database_id, now_iso(), source_id),
             )
 
-    def delete_source(self, source_id: str) -> None:
+    def delete_source(self, source_id: str, *, expected_policy=None) -> None:
         """Delete a source together with its runs and their steps (documents, chunks,
         concepts, relations and evidence go with it through ON DELETE CASCADE)."""
-        with self._conn() as conn:
+        with self._source_effect(
+            "source.edit", source_id, {"operation": "remove"}, expected_policy=expected_policy
+        ) as conn:
             conn.execute(
                 "DELETE FROM steps WHERE run_id IN (SELECT id FROM runs WHERE source_id = ?)",
                 (source_id,),

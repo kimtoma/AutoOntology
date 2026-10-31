@@ -489,6 +489,10 @@ class SettingsApi:
     def put(self, body: SettingsIn) -> dict[str, Any]:
         from autoontology import onboarding
         from autoontology.engine.restart import running_restart
+        from autoontology.security.context import authorize
+        from autoontology.security.settings import save_env
+
+        authority = authorize(self.api.store, "settings.manage")
 
         if running_restart(self.running.run_dir) is not None:
             raise ApiError(409, "restart_in_progress", "a restart is running")
@@ -521,7 +525,12 @@ class SettingsApi:
                 else:
                     env_file.set(var, value)
             written = [key for key, _old, _new in env_file.changes()]
-            backup = env_file.write(path) if written else None
+            backup = save_env(
+                self.api.store,
+                env_file,
+                path,
+                expected_policy=authority.policy_version if authority else None,
+            )
             if written:
                 logger.info("settings: wrote %s to %s", ", ".join(written), path.name)
             new_pending, _ = pending_settings(self.running)

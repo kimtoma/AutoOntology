@@ -119,6 +119,14 @@ stage evidence/recovery index for executed results.
 
 ## Domain-selected query and saved-result boundaries
 
+Stage 16 adds current-authority write guards and safe effect audits for common
+source mutations, preparation-policy checks across structured registration/removal,
+and one native/UI settings-file boundary. Authorization errors remain authorization
+errors through source HTTP and CLI adapters. Modern identity-table loss cannot make
+the model router or effect layer fall back to anonymous legacy operation. Source
+roots, exact consent, durable cross-resource effect recovery and the full activation
+inventory remain required; these guards do not activate the normal workspace.
+
 Stage 15 selects the query model before retrieval, provider context, frozen SQL
 catalog projection or SPARQL serialization. Frozen publication vectors are reused
 only for identical selected element type/text hashes; changed scoped text has a

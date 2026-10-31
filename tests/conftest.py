@@ -47,6 +47,10 @@ os.environ.setdefault("AUTOONTOLOGY_LANG", "en")
 
 
 def _scrub_env(monkeypatch) -> None:
+    from autoontology import config
+
+    # Origin metadata belongs to the same environment epoch as the variables.
+    monkeypatch.setattr(config, "_DOTENV_LOADED", {})
     for name in list(os.environ):
         if name in _KEPT:
             continue

@@ -23,6 +23,23 @@ def identity_enabled(home):
         if not conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_state'"
         ).fetchone():
+            principal_table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_principals'"
+            ).fetchone()
+            version_table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
+            ).fetchone()
+            version = (
+                conn.execute("SELECT max(version) FROM schema_version").fetchone()[0]
+                if version_table
+                else None
+            )
+            if principal_table or version is None or version >= 12:
+                raise AccessError(
+                    "Identity configuration is missing; local-owner recovery is required.",
+                    "identity_configuration_missing",
+                    503,
+                )
             return False
         if conn.execute("SELECT 1 FROM identity_state WHERE id=1").fetchone():
             return True

@@ -55,6 +55,20 @@ def current_actor(store, *, conn=None):
         with service._read() as read:
             return current_actor(store, conn=read)
     execution = _IDENTITY.get()
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_state'"
+    ).fetchone():
+        legacy = conn.execute("SELECT max(version) FROM schema_version").fetchone()[0] < 12
+        principals = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_principals'"
+        ).fetchone()
+        if execution is None and legacy and not principals:
+            return None
+        raise AccessError(
+            "Identity configuration is missing; local-owner recovery is required.",
+            "identity_configuration_missing",
+            503,
+        )
     row = conn.execute("SELECT workspace_id FROM identity_state WHERE id=1").fetchone()
     if execution is not None:
         if (

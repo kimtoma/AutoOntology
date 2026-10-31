@@ -398,6 +398,7 @@ def source_add(
     """Register a source (nothing is loaded until `autoontology build`)."""
     from pathlib import Path
 
+    from autoontology.security.policy import AccessError
     from autoontology.structured import pipeline
     from autoontology.structured.loaders import LoadError
 
@@ -414,6 +415,8 @@ def source_add(
             _fail(msg("source.exists", name=name))
         try:
             src = ensure_documents_source(store, name, path, recursive)
+        except AccessError:
+            raise
         except (JobError, ValueError) as exc:
             _fail(msg("source.add_failed", error=exc))
         typer.echo(msg("source.added_documents", name=src.name))
@@ -421,6 +424,8 @@ def source_add(
     elif kind == "structured":
         try:
             src = pipeline.add_source(store, target, name=name, recursive=recursive)
+        except AccessError:
+            raise
         except (LoadError, ValueError) as exc:
             _fail(msg("source.add_failed", error=exc))
         typer.echo(
@@ -1619,6 +1624,8 @@ def provider_use(
         EMBED_PROVIDERS,
         env_file_path,
     )
+    from autoontology.security.context import authorize
+    from autoontology.security.settings import save_env
 
     if name not in CHAT_PROVIDERS:
         _fail(msg("provider.unknown", name=name, choices=", ".join(CHAT_PROVIDERS)), code=2)
@@ -1634,6 +1641,8 @@ def provider_use(
     if base_url is not None and not re.fullmatch(r"https?://[^\s\"'<>]{1,290}", base_url):
         _fail(msg("provider.bad_url", flag="--base-url", value=base_url), code=2)
     settings = _settings()
+    store = _store(settings)
+    authority = authorize(store, "settings.manage")
     path = env_file_path()
     env_file = onboarding.EnvFile.load(path)
     keys = {"AUTOONTOLOGY_CHAT_PROVIDER": name}
@@ -1653,7 +1662,9 @@ def provider_use(
         env_file.set(key, value)
     changed = env_file.changes()
     overrides = _shell_override_warnings(keys.items())  # before the write, as in init
-    backup = env_file.write(path)
+    backup = save_env(
+        store, env_file, path, expected_policy=authority.policy_version if authority else None
+    )
     for key, old, new in changed:
         typer.echo(msg("provider.set", change=onboarding.describe_change(key, old, new), path=path))
     if not changed:

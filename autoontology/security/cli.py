@@ -12,6 +12,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 import typer
+from typer.core import TyperGroup
 
 from autoontology.security.context import acting_as, authorize, authorize_any
 from autoontology.security.credential_file import _parent, load_credential, save_credential
@@ -189,7 +190,18 @@ def _password(path, *, new=False):
         ) from None
 
 
+class AuthorityGroup(TyperGroup):
+    """Report effect-time denials with the same stable contract as entry-time denials."""
+
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except AccessError as error:
+            _fail(error)
+
+
 def install(app, settings_for):
+    app.info.cls = AuthorityGroup
     auth = typer.Typer(
         help="Individual login, principals, domains, delegation and audit.", no_args_is_help=True
     )

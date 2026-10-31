@@ -99,7 +99,8 @@ def test_removed_configuration_does_not_turn_a_managed_execution_into_legacy(ser
 def test_domain_scope_is_derived_from_the_resource_and_rechecked(service):
     identity, owner = service
     finance = identity.create_domain(owner, "finance", "Finance")
-    source = identity.store.add_source(name="finance", kind="documents", locator="{}")
+    with acting_as(identity.store, owner):
+        source = identity.store.add_source(name="finance", kind="documents", locator="{}")
     identity.assign_source(owner, source.id, finance["id"])
     issued = identity.delegate(
         owner, "reader_agent", "Reader agent", ["knowledge.read"], domains=[finance["id"]]

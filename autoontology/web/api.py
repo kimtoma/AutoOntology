@@ -33,6 +33,7 @@ from starlette.datastructures import UploadFile
 
 from autoontology import __version__
 from autoontology.config import LOCAL_HOSTS, Settings, host_name
+from autoontology.security.policy import AccessError
 from autoontology.store.db import ACTIVE_RUN_STATUSES, Run, Source, Store
 from autoontology.web.runs import (
     RUN_ID_RE,
@@ -1274,6 +1275,8 @@ def _load_samples(api: Api, body: dict[str, Any]) -> dict[str, Any]:
             ) from exc
         except onboarding.SampleSetError as exc:
             raise ApiError(400, "unknown_sample_set", mask(str(exc))) from exc
+        except AccessError:
+            raise
         except (RemoveError, LoadError, JobError, ValueError) as exc:
             raise ApiError(409, "samples_not_loaded", mask(str(exc))) from exc
     finally:
@@ -1327,6 +1330,8 @@ def _add_locator_claimed(api: Api, body: SourceIn) -> Any:
             source = pipeline.add_source(
                 api.store, body.locator, name=body.name, kind=body.kind, recursive=body.recursive
             )
+    except AccessError:
+        raise
     except (LoadError, ValueError) as exc:
         raise ApiError(400, "invalid_source", mask(str(exc))) from exc
     return source
@@ -1360,9 +1365,19 @@ async def _add_upload(api: Api, form: Any) -> dict[str, Any]:
 
 
 async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict[str, Any]:
+    from autoontology.security.context import authorize
     from autoontology.structured import pipeline
     from autoontology.structured.loaders import SUPPORTED_SUFFIXES, LoadError
     from autoontology.unstructured.readers import SUPPORTED_EXTENSIONS
+
+    authority = authorize(api.store, "source.edit")
+
+    def check():
+        authorize(
+            api.store,
+            "source.edit",
+            expected_policy=authority.policy_version if authority else None,
+        )
 
     if api.store.get_source(name):
         raise ApiError(409, "source_exists", f"source {name!r} already exists")
@@ -1387,6 +1402,7 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
             raise ApiError(400, "duplicate_file", f"duplicate file name {fname!r}")
         names.append(fname)
     target = api.uploads_dir / name
+    check()
     if target.exists():  # left behind by an earlier failed upload (no source row)
         shutil.rmtree(target)
     target.mkdir(parents=True)
@@ -1395,6 +1411,7 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
         for f, fname in zip(uploads, names, strict=True):
             with (target / fname).open("wb") as out:
                 while chunk := await f.read(1024 * 1024):
+                    check()
                     total += len(chunk)
                     if total > limit:
                         raise ApiError(
@@ -1408,12 +1425,16 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
         def register() -> Source:
             from autoontology.engine.extract import ensure_documents_source
 
+            check()
+
             if kind == "documents":
                 return ensure_documents_source(api.store, name, target, False)
             return pipeline.add_source(api.store, str(target), name=name, kind="files")
 
         try:
             source = await anyio.to_thread.run_sync(register)
+        except AccessError:
+            raise
         except (LoadError, ValueError) as exc:
             raise ApiError(400, "invalid_source", mask(str(exc))) from exc
     except BaseException:

@@ -200,12 +200,13 @@ def scoped(tmp_path):
     owner = identity.authenticate(issued.secret.reveal())
     finance = identity.create_domain(owner, "finance", "Finance")
     hr = identity.create_domain(owner, "hr", "HR")
-    sources = [
-        store.add_source(
-            name=name, kind="documents" if name != "contracts" else "files", locator="{}"
-        )
-        for name in ("contracts", "policy", "hr")
-    ]
+    with acting_as(store, owner):
+        sources = [
+            store.add_source(
+                name=name, kind="documents" if name != "contracts" else "files", locator="{}"
+            )
+            for name in ("contracts", "policy", "hr")
+        ]
     for source in sources:
         identity.assign_source(owner, source.id, hr["id"] if source.name == "hr" else finance["id"])
     identity.create_human(

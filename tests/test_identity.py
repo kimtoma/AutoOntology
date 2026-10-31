@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import pytest
 
+from autoontology.security.context import acting_as
 from autoontology.security.policy import AccessError, Actor
 from autoontology.store.db import Store
 from autoontology.store.identity import Identity
@@ -245,7 +246,8 @@ def test_reclassification_never_exposes_private_historical_source(identity):
     service, owner, _, _ = identity
     private = service.create_domain(owner, "private", "Private")
     public = service.create_domain(owner, "public", "Public")
-    source = service.store.add_source(name="policies", kind="documents", locator="{}")
+    with acting_as(service.store, owner):
+        source = service.store.add_source(name="policies", kind="documents", locator="{}")
     service.assign_source(owner, source.id, private["id"])
     service.assign_source(owner, source.id, public["id"])
     service.create_human(

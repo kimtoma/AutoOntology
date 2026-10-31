@@ -495,6 +495,65 @@ def test_put_makes_an_open_env_file_private(envfile, stubs):
     assert stat.S_IMODE(envfile.stat().st_mode) == 0o600
 
 
+@pytest.mark.parametrize("change", ["revoke", "policy"])
+def test_configured_put_rechecks_authority_after_preparation_before_writing(
+    envfile, stubs, monkeypatch, change
+):
+    from autoontology.store.identity import Identity
+
+    client = _client()
+    identity = Identity(client.app.state.api.store)
+    issued = identity.bootstrap("Org", "owner", "Owner", "long settings fixture password")
+    owner = identity.authenticate(issued.secret.reveal())
+    before = envfile.read_bytes()
+
+    def drift(*args):
+        if change == "revoke":
+            identity.revoke_credential(owner, owner.credential_id)
+        else:
+            identity.create_domain(owner, "new", "New")
+
+    monkeypatch.setattr(client.app.state.settings_api, "_check_dimension", drift)
+    response = client.put(
+        API,
+        headers={"Authorization": "Bearer " + issued.secret.reveal()},
+        json={"embed_model": "new-prepared-embed"},
+    )
+    assert response.status_code in {401, 409}, response.text
+    assert envfile.read_bytes() == before
+
+
+def test_configured_settings_write_has_a_secret_free_effect_audit(envfile, stubs):
+    from autoontology.store.identity import Identity
+
+    client = _client()
+    identity = Identity(client.app.state.api.store)
+    issued = identity.bootstrap("Org", "owner", "Owner", "long settings fixture password")
+    owner = identity.authenticate(issued.secret.reveal())
+    result = client.put(
+        API, headers={"Authorization": "Bearer " + issued.secret.reveal()}, json={"api_key": KEY}
+    )
+    assert result.status_code == 200, result.text
+    audit = identity.audit(owner)
+    assert KEY not in json.dumps(audit)
+    assert any(e["action"] == "settings.manage" for e in audit)
+
+
+def test_settings_audit_failure_happens_before_file_write(envfile, stubs, monkeypatch):
+    from autoontology.security import context
+
+    client = _client()
+    before = envfile.read_bytes()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("controlled audit failure")
+
+    monkeypatch.setattr(context, "audit_effect", fail)
+    with pytest.raises(RuntimeError, match="controlled audit failure"):
+        client.put(API, json={"chat_provider": "codex"})
+    assert envfile.read_bytes() == before
+
+
 # --- the key on the wire -----------------------------------------------------------------
 
 
