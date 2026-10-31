@@ -18,6 +18,9 @@ import StatusPage from "@/pages/status"
 import { legacyTarget } from "@/lib/routes"
 import { useT } from "@/i18n"
 import { SHARED_DEMO } from "@/lib/demo"
+import { AccessBoundary, CanUse } from "@/components/identity-gate"
+
+const access = (capability: string, children: React.ReactNode) => <AccessBoundary capability={capability}>{children}</AccessBoundary>
 
 // three.js and the force-graph libraries only load with this page
 const GraphPage = lazy(() => import("@/pages/graph"))
@@ -58,30 +61,30 @@ export default function App() {
           <Route
             index
             element={
-              SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HomePage afterBuild={<OperationsHome />} />
+              SHARED_DEMO ? <Navigate to="/ontology" replace /> : <CanUse capability="candidate.read" fallback={<Navigate to="/ontology" replace />}><HomePage afterBuild={<OperationsHome />} /></CanUse>
             }
           />
-          <Route path="review" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <ReviewPage />} />
+          <Route path="review" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : access("candidate.read", <ReviewPage />)} />
           <Route
             path="history"
-            element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HistoryPage />}
+            element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : access("candidate.read", <HistoryPage />)}
           />
-          <Route path="setup" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <HomePage />} />
+          <Route path="setup" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : access("settings.manage", <HomePage />)} />
           <Route
             path="sources"
-            element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <SourcesPage />}
+            element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : access("source.read", <SourcesPage />)}
           />
-          <Route path="build" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <BuildPage />} />
-          <Route path="ontology" element={<OntologyPage />} />
-          <Route path="graph" element={lazyPage(GraphPage)} />
-          <Route path="playground" element={lazyPage(PlaygroundPage)} />
-          <Route path="exports" element={<ExportsPage />} />
-          <Route path="status" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <StatusPage />} />
+          <Route path="build" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : access("candidate.prepare", <BuildPage />)} />
+          <Route path="ontology" element={access("knowledge.read", <OntologyPage />)} />
+          <Route path="graph" element={access("knowledge.read", lazyPage(GraphPage))} />
+          <Route path="playground" element={access("query.run", lazyPage(PlaygroundPage))} />
+          <Route path="exports" element={access("exports.read", <ExportsPage />)} />
+          <Route path="status" element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : access("settings.read", <StatusPage />)} />
           <Route path="runs" element={<LegacyRedirect />} />
           <Route path="concepts" element={<LegacyRedirect />} />
           <Route
             path="settings"
-            element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : <SettingsPage />}
+            element={SHARED_DEMO ? <Navigate to="/ontology" replace /> : access("settings.read", <SettingsPage />)}
           />
           <Route
             path="*"

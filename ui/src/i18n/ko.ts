@@ -1,4 +1,5 @@
 import { koOps } from "@/i18n/ko.ops"
+import { koIdentity } from "@/i18n/ko.identity"
 /* Korean UI strings: the same keys as en.ts (a missing key fails tsc). Technical names
    (SPARQL, SQL, Turtle, JSON-LD, OKF, Ossie, kordoc, OCR, Postgres) stay as they are. */
 
@@ -524,4 +525,4 @@ const koCore = {
   "nav.settings.hint": "모델과 API 키",
 } as const
 
-export const ko: Record<keyof typeof en, string> = { ...koCore, ...koExplore, ...koOps }
+export const ko: Record<keyof typeof en, string> = { ...koCore, ...koExplore, ...koOps, ...koIdentity }

@@ -1,4 +1,5 @@
 export const enOps = {
+  "ops.loading": "Loading operational knowledge…",
   "console.skip": "Skip to content",
   "console.workspace": "Workspace",
   "console.local": "Local",

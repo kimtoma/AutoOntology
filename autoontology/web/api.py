@@ -474,6 +474,11 @@ class Api:
     def decided_by(self, request: Request) -> str:
         """The tailnet login of a request that came through a configured tailnet hostname
         (``tailscale serve`` sets it), else ``local``."""
+        from autoontology.security.context import current_actor
+
+        actor = current_actor(self.store)
+        if actor is not None:
+            return actor.principal_id
         host = host_name(request.headers.get("host") or "")
         login = (request.headers.get(TAILSCALE_LOGIN_HEADER) or "").strip().lower()
         if host in self.settings.tailscale_hosts and login:
@@ -1508,10 +1513,17 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
     from autoontology.web import operations_api
 
     operations_api.install(app, api)
+    from autoontology.security.context import acting_as
+    from autoontology.security.policy import AccessError
+    from autoontology.web import identity_api
+    from autoontology.web.authority import authenticate_request
+
+    identity_api.install(app, api)
 
     @app.middleware("http")
     async def _local_only(request: Request, call_next):
-        # The service has no auth and listens on 127.0.0.1 only. Refuse what a web page on
+        # The network/origin boundary applies before individual authentication.
+        # The service listens on 127.0.0.1. Refuse what a web page on
         # another origin could still send: requests with a foreign Host (DNS rebinding) and
         # cross-origin state changes (a form POST needs no CORS preflight). That covers
         # every route -- the API, the /ingest shims (POST /ingest/delete tears a graph
@@ -1552,7 +1564,32 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
                         {"error": "cross_origin", "detail": "cross-origin requests are refused"},
                         status_code=403,
                     )
-        return await call_next(request)
+        try:
+            actor = await authenticate_request(api, request)
+            if actor is None:
+                return await call_next(request)
+            with acting_as(api.store, actor):
+                return await call_next(request)
+        except AccessError as exc:
+            return _authority_response(exc)
+
+    def _authority_response(exc):
+        headers = {"Cache-Control": "no-store"}
+        if exc.retry_after:
+            headers["Retry-After"] = str(exc.retry_after)
+        return JSONResponse(
+            {
+                "error": exc.code,
+                "detail": str(exc),
+                **({"retry_after": exc.retry_after} if exc.retry_after else {}),
+            },
+            status_code=exc.status,
+            headers=headers,
+        )
+
+    @app.exception_handler(AccessError)
+    async def _authority_error(_request: Request, exc: AccessError) -> JSONResponse:
+        return _authority_response(exc)
 
     @app.exception_handler(ApiError)
     async def _api_error(_request: Request, exc: ApiError) -> JSONResponse:

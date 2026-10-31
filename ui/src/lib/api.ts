@@ -3,6 +3,7 @@
    mirror autoontology/web/api.py, web/concepts.py, web/graph.py and web/playground_api.py. */
 
 import type { Formats } from "@/lib/formats"
+import { identityResponse } from "@/lib/auth-events"
 
 export const API = "/api"
 
@@ -510,6 +511,7 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
     throw new ApiError(NETWORK_HINT, 0, "network")
   }
   if (!resp.ok || !resp.body) {
+    identityResponse(resp.status)
     let detail = `HTTP ${resp.status}`
     let code: string | undefined
     try {
@@ -549,6 +551,7 @@ async function send(path: string, init: RequestInit, asText: boolean): Promise<u
   const type = resp.headers.get("content-type") || ""
   const body: unknown = type.includes("json") && !(asText && resp.ok) ? await resp.json() : await resp.text()
   if (!resp.ok) {
+    identityResponse(resp.status)
     const obj = (body && typeof body === "object" ? body : {}) as { detail?: unknown; error?: string }
     const detail = typeof obj.detail === "string" ? obj.detail : `HTTP ${resp.status}`
     throw new ApiError(detail, resp.status, obj.error, obj as Record<string, unknown>)

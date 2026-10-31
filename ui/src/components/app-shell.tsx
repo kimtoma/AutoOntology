@@ -23,6 +23,10 @@ import { useStatus } from "@/hooks/queries"
 import { cn } from "@/lib/utils"
 import { GATEWAY_ACCESS, SHARED_DEMO } from "@/lib/demo"
 import { useT } from "@/i18n"
+import { CanUse, IdentityControls } from "@/components/identity-gate"
+import { useCanUse } from "@/lib/identity"
+
+const navigationAuthority: Record<string, string> = { home: "candidate.read", review: "candidate.read", sources: "source.read", ontology: "knowledge.read", playground: "query.run", history: "candidate.read", settings: "settings.read" }
 
 function StatusBadge() {
   const t = useT()
@@ -66,8 +70,9 @@ function WorkspaceNavigation() {
   const { pathname } = useLocation()
   const { isMobile, setOpenMobile } = useSidebar()
   const t = useT()
-  const operations = useOperations(!SHARED_DEMO)
-  const legacy = useLegacy(1, "pending", !SHARED_DEMO)
+  const canReview = useCanUse("candidate.read")
+  const operations = useOperations(!SHARED_DEMO && canReview)
+  const legacy = useLegacy(1, "pending", !SHARED_DEMO && canReview)
   const pending =
     (operations.data?.counts.pending ?? 0) +
     (operations.data?.counts.held ?? 0) +
@@ -94,7 +99,7 @@ function WorkspaceNavigation() {
         <nav id="workspace-navigation" aria-label={t("shell.mainMenu")} className="console-sidebar-nav">
           <SidebarMenu className="console-sidebar-menu">
             {NAV.map((item) => (
-              <SidebarMenuItem key={item.path}>
+              <CanUse capability={navigationAuthority[item.id]} key={item.path}><SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
                   isActive={isCurrent(item, pathname)}
@@ -115,7 +120,7 @@ function WorkspaceNavigation() {
                     )}
                   </Link>
                 </SidebarMenuButton>
-              </SidebarMenuItem>
+              </SidebarMenuItem></CanUse>
             ))}
           </SidebarMenu>
         </nav>
@@ -144,7 +149,8 @@ export function AppShell() {
   const { pathname } = useLocation()
   const fullBleed = pathname.startsWith("/graph")
   const t = useT()
-  const operations = useOperations(!SHARED_DEMO)
+  const canReview = useCanUse("candidate.read")
+  const operations = useOperations(!SHARED_DEMO && canReview)
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try {
       return localStorage.getItem("autoontology.sidebar") !== "collapsed"
@@ -197,7 +203,8 @@ export function AppShell() {
                   <Command className="size-3" aria-hidden /> K
                 </kbd>
               </button>
-              {!SHARED_DEMO && <StatusBadge />}
+              {!SHARED_DEMO && <CanUse capability="settings.read"><StatusBadge /></CanUse>}
+              <IdentityControls />
               <div className="console-preferences">
                 <LangToggle />
                 <ThemeToggle />
@@ -226,10 +233,10 @@ export function AppShell() {
             <span>
               AutoOntology <span className="mx-2 text-border">/</span> Ontology Ops
             </span>
-            <Link to="/history">
+            <CanUse capability="candidate.read"><Link to="/history">
               {t("nav.history")}
               <ArrowUpRight className="size-3" aria-hidden />
-            </Link>
+            </Link></CanUse>
           </footer>
         )}
       </div>

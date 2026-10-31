@@ -15,6 +15,8 @@ from pathlib import Path
 import httpx
 import typer
 
+from autoontology.security.cli import request_headers
+
 
 def install(app, settings_for):
     def emit(value):
@@ -29,6 +31,7 @@ def install(app, settings_for):
                 f"http://127.0.0.1:{settings.port}{service_root}{path}",
                 json=body,
                 timeout=360,
+                headers=request_headers(settings),
             )
         except httpx.HTTPError as exc:
             report(
@@ -82,6 +85,7 @@ def install(app, settings_for):
                 "GET",
                 f"http://127.0.0.1:{settings.port}/api/playground/traces/{identifier(trace_id)}/result.csv",
                 timeout=30,
+                headers=request_headers(settings),
             )
             response.raise_for_status()
             payload = response.content
@@ -128,6 +132,7 @@ def install(app, settings_for):
                 f"http://127.0.0.1:{settings.port}/api/playground/{kind}",
                 json=body,
                 timeout=360,
+                headers=request_headers(settings),
             ) as response:
                 if not response.is_success:
                     reject(json.loads(response.read()))

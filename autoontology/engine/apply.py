@@ -104,6 +104,9 @@ def run_apply(
     """Apply the review decisions and save a new snapshot (module docstring). With nothing
     pending (:func:`pending_work`) merge and snapshot are skipped and no revision is written,
     unless *force*."""
+    from autoontology.security.context import authorize
+
+    authorize(store, "candidate.prepare")
     log_path = jobs.setup_job_logging(settings)
     registered = registration_order(store)
     if not registered:

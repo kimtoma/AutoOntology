@@ -168,6 +168,9 @@ def impact_details(store, before, after, base_revision, target_revision):
 
 
 def prepare_restore(store, settings, *, revision: int, reason: str, embedder=None, llm=None):
+    from autoontology.security.context import authorize
+
+    authorize(store, "candidate.prepare")
     reason = reason.strip()
     if not reason or len(reason) > 2000:
         raise RestoreError(
@@ -337,6 +340,9 @@ def prepare_restore(store, settings, *, revision: int, reason: str, embedder=Non
 def run_restore(
     store, settings, *, proposal: str, confirmation: str, embedder=None, exporter=None, log=None
 ):
+    from autoontology.security.context import authorize
+
+    authorize(store, "knowledge.restore")
     with hold_sources(store, [WORKSPACE_LEASE], "restore"):
         restorations = Restorations(store)
         result = restorations.get(proposal)

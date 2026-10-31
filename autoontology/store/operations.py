@@ -15,6 +15,7 @@ import sqlite3
 from typing import Any
 
 from autoontology.ontology.model import MergedOntology
+from autoontology.security.context import audit_effect, authorize, requires
 from autoontology.store.db import Snapshot, Store, now_iso
 
 
@@ -65,6 +66,8 @@ def read_snapshot(
     Explicit unpublished reads require preview=True and a concrete revision.
     An incomplete/missing managed state never falls back to the latest snapshot.
     """
+    if preview and revision is not None and not visible_revision(store, revision):
+        authorize(store, "candidate.read")
     if preview and revision is None:
         raise OperationsError("a preview requires an explicit revision")
     if revision is not None:
@@ -289,6 +292,7 @@ class Operations:
                 )
         return items
 
+    @requires("review.decide")
     def decide(
         self,
         change_id: str,
@@ -328,7 +332,12 @@ class Operations:
                 raise OperationsError("invalid edited text")
         if decision == "reject" and not note.strip():
             raise OperationsError("a rejection needs a reason")
-        with self.store._conn() as conn:
+        with self.store._immediate() as conn:
+            authority = authorize(self.store, "review.decide", conn=conn)
+            if self.state()["candidate_revision"] != candidate:
+                raise OperationsError("candidate changed; refresh before deciding")
+            if authority:
+                actor = authority.actor.principal_id
             conn.execute(
                 "INSERT INTO ops_reviews(id,decision,note,actor,created_at,applied_revision,edits_json) VALUES(?,?,?,?,?,NULL,?) ON CONFLICT(id) DO UPDATE SET decision=excluded.decision,note=excluded.note,actor=excluded.actor,created_at=excluded.created_at,applied_revision=NULL,edits_json=excluded.edits_json",
                 (
@@ -340,18 +349,33 @@ class Operations:
                     json.dumps(edits, ensure_ascii=False),
                 ),
             )
+            audit_effect(
+                self.store,
+                authority,
+                change_id,
+                {
+                    "candidate": candidate,
+                    "decision": decision,
+                    "edits_sha256": digest(edits),
+                    "note_sha256": digest(note.strip()),
+                },
+                conn=conn,
+            )
             return dict(
                 conn.execute("SELECT * FROM ops_reviews WHERE id=?", (change_id,)).fetchone()
             )
 
+    @requires("review.decide")
     def undo(self, change_id: str) -> None:
-        with self.store._conn() as conn:
+        with self.store._immediate() as conn:
+            authority = authorize(self.store, "review.decide", conn=conn)
             row = conn.execute(
                 "SELECT applied_revision FROM ops_reviews WHERE id=?", (change_id,)
             ).fetchone()
             if row and row[0] is not None:
                 raise OperationsError("published decisions require a new change")
             conn.execute("DELETE FROM ops_reviews WHERE id=?", (change_id,))
+            audit_effect(self.store, authority, change_id, {"operation": "undo"}, conn=conn)
 
     def compose(self, revision: int) -> tuple[MergedOntology, list[dict]]:
         state = self.state()
@@ -519,8 +543,19 @@ class Operations:
         publication_id: str | None = None,
         run_id: str | None = None,
         restore_proposal_id: str | None = None,
+        expected_policy: int | None = None,
     ) -> None:
-        with self.store._conn() as conn:
+        with self.store._immediate() as conn:
+            authority = authorize(
+                self.store,
+                "knowledge.restore" if restore_proposal_id else "knowledge.publish",
+                expected_policy=expected_policy,
+                conn=conn,
+            )
+            if authority and publication_id is None:
+                raise OperationsError(
+                    "authenticated publication requires a prepared publication receipt"
+                )
             if publication_id is not None:
                 receipt = conn.execute(
                     "SELECT * FROM publications WHERE id=? AND revision=? AND status='prepared'",
@@ -550,6 +585,18 @@ class Operations:
             ).rowcount
             if changed != 1:
                 raise OperationsError("published version changed; revalidate")
+            audit_effect(
+                self.store,
+                authority,
+                revision,
+                {
+                    "previous_revision": expected,
+                    "publication_id": publication_id,
+                    "run_id": run_id,
+                    "restore_proposal_id": restore_proposal_id,
+                },
+                conn=conn,
+            )
             conn.executemany(
                 "UPDATE ops_reviews SET applied_revision=? WHERE id=?",
                 [(revision, i["id"]) for i in items],
@@ -579,11 +626,18 @@ class Operations:
                     ),
                 )
 
+    @requires("feedback.submit")
     def add_feedback(self, question: str, answer: str, note: str, *, actor="local") -> dict:
-        with self.store._conn() as conn:
+        with self.store._immediate() as conn:
+            authority = authorize(self.store, "feedback.submit", conn=conn)
+            if authority:
+                actor = authority.actor.principal_id
             cursor = conn.execute(
                 "INSERT INTO ops_feedback(question,answer,note,actor,created_at) VALUES(?,?,?,?,?)",
                 (question, answer, note, actor, now_iso()),
+            )
+            audit_effect(
+                self.store, authority, cursor.lastrowid, {"operation": "submit"}, conn=conn
             )
             return dict(
                 conn.execute(
@@ -600,22 +654,38 @@ class Operations:
                 )
             ]
 
+    @requires("feedback.manage")
     def resolve_feedback(self, item_id: int, reopen: bool) -> None:
-        with self.store._conn() as conn:
+        with self.store._immediate() as conn:
+            authority = authorize(self.store, "feedback.manage", conn=conn)
             conn.execute(
                 "UPDATE ops_feedback SET resolved=? WHERE id=?", (0 if reopen else 1, item_id)
             )
+            audit_effect(self.store, authority, item_id, {"reopen": bool(reopen)}, conn=conn)
 
+    @requires("checks.edit")
     def add_check(self, question: str, expected: str) -> dict:
         question, expected = question.strip(), expected.strip()
         if not question or not expected or len(question) > 2000 or len(expected) > 2000:
             raise OperationsError(
                 "representative questions and expected answers must be non-empty and at most 2000 characters"
             )
-        with self.store._conn() as conn:
+        with self.store._immediate() as conn:
+            authority = authorize(self.store, "checks.edit", conn=conn)
             cursor = conn.execute(
                 "INSERT INTO ops_checks(question,expected,created_at) VALUES(?,?,?)",
                 (question, expected, now_iso()),
+            )
+            audit_effect(
+                self.store,
+                authority,
+                cursor.lastrowid,
+                {
+                    "operation": "create",
+                    "question_sha256": digest(question),
+                    "expected_sha256": digest(expected),
+                },
+                conn=conn,
             )
             return dict(
                 conn.execute("SELECT * FROM ops_checks WHERE id=?", (cursor.lastrowid,)).fetchone()

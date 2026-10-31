@@ -19,6 +19,7 @@ from autoontology.playground.elements import elements_from_model
 from autoontology.playground.index import build_index
 from autoontology.playground.service import EmbedderCache, embed_triplet
 from autoontology.playground.store import PlaygroundStore
+from autoontology.security.context import audit_effect, authorize, requires
 from autoontology.store.db import Store, now_iso
 from autoontology.store.operations import Operations, OperationsError
 from autoontology.store.provenance import sync_directory
@@ -63,6 +64,7 @@ def prepare_index(store, settings, model, scope, revision, embedder=None):
     ), embed
 
 
+@requires("validation.run")
 def validate(store: Store, settings: Settings, *, revision: int, embedder=None, llm=None) -> dict:
     from autoontology.engine.apply import pending_work
 
@@ -120,10 +122,18 @@ def validate(store: Store, settings: Settings, *, revision: int, embedder=None, 
         "validated_at": now_iso(),
         "index": index_receipt(store, scope, model) if index else None,
     }
-    with store._conn() as conn:
+    with store._immediate() as conn:
+        authority = authorize(store, "validation.run", conn=conn)
         conn.execute(
             "INSERT OR REPLACE INTO ops_validations VALUES(?,?,?,?)",
             (signature, signature, json.dumps(result, ensure_ascii=False), now_iso()),
+        )
+        audit_effect(
+            store,
+            authority,
+            revision,
+            {"ok": result["ok"], "validation_sha256": signature},
+            conn=conn,
         )
     return result
 
@@ -167,6 +177,7 @@ def write_exports(model, folder: Path, revision: int, run, upstream=()) -> None:
     (folder / "export.json").write_text(json.dumps(marker, ensure_ascii=False, indent=2))
 
 
+@requires("knowledge.publish")
 def run_publish(
     store: Store,
     settings: Settings,
@@ -257,6 +268,7 @@ def install_publication(
     Restorations use frozen mappings; they never ask a mutable backend for old truth.
     """
     ops, publications = Operations(store), Publications(store)
+    authority = authorize(store, "knowledge.restore" if restoration else "knowledge.publish")
     folder = None
     work = None
     try:
@@ -364,6 +376,7 @@ def install_publication(
             publication_id=publication["id"],
             run_id=run.id,
             restore_proposal_id=restoration["proposal_id"] if restoration else None,
+            expected_policy=authority.policy_version if authority else None,
         )
         return SimpleNamespace(run_id=run.id, status="succeeded", revision=new)
     except BaseException as exc:

@@ -327,7 +327,12 @@ class RunManager:
                     if active.run_id:
                         self._by_run.pop(active.run_id, None)
 
-        thread = threading.Thread(target=body, name=active.thread_name, daemon=True)
+        from contextvars import copy_context
+
+        execution = copy_context()
+        thread = threading.Thread(
+            target=lambda: execution.run(body), name=active.thread_name, daemon=True
+        )
         thread.start()
         if not active.started.wait(timeout):
             raise RunStartError(

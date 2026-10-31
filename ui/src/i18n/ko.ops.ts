@@ -1,4 +1,5 @@
 export const koOps = {
+  "ops.loading": "운영 지식을 불러오고 있습니다…",
   "console.skip": "본문으로 이동",
   "console.workspace": "작업 공간",
   "console.local": "로컬",

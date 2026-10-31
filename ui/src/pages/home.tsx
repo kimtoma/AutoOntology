@@ -153,6 +153,9 @@ export default function HomePage({ afterBuild }: { afterBuild?: ReactNode } = {}
   })
   const initial = useOperations(!!afterBuild && isNoSnapshot(ontology.error))
   const t = useT()
+  if (afterBuild && (ontology.isPending || (isNoSnapshot(ontology.error) && initial.isPending))) {
+    return <div className="space-y-6 py-6" role="status"><p className="text-sm text-muted-foreground">{t("ops.loading")}</p><Skeleton className="h-10 w-64" /><Skeleton className="h-40 w-full" /></div>
+  }
   if (afterBuild && ontology.data) return afterBuild
   if (afterBuild && ontology.error && !isNoSnapshot(ontology.error)) {
     return <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />

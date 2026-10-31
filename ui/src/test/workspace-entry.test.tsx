@@ -94,6 +94,10 @@ it("moves from guidance to operations after the first build becomes available", 
       renderPage(<App />)
       await vi.advanceTimersByTimeAsync(1)
     })
+    // Guidance appears after both reads establish that no operational version exists.
+    for (let attempt = 0; attempt < 10 && !document.querySelector("#checklist"); attempt++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+    }
     expect(document.querySelector("#checklist")).toBeInTheDocument()
     finishBuild()
     await act(async () => {

@@ -1,11 +1,13 @@
 # Identity and authority core
 
-This is the P0-03 foundation, not complete application authorization. The core and
-credential-file codec are implemented and tested. They are **not yet wired** to
-HTTP, native business commands, the UI, background jobs or publication confirmation.
-There is deliberately no new enrollment command or anonymous enrollment endpoint.
-Do not enroll the normal workspace until the integration gates below pass. The
-existing shared access password and model-provider login are separate mechanisms.
+P0-03 is in progress. The durable core now has initial HTTP, native CLI and browser
+session adapters and guarded review/publication effects. Unfiltered resources
+currently require **whole-workspace scope**. Mixed-domain projection, complete
+effect/stream/queue revocation, administration UI, exact approval lifecycle and
+local-owner recovery are not complete. There is no anonymous enrollment endpoint
+or normal-workspace enrollment command. Do not enroll the normal workspace until
+the activation gates below pass. The existing shared access password and
+model-provider login are separate mechanisms.
 
 ## Durable policy
 
@@ -82,14 +84,21 @@ are redacted; explicit `.reveal()` belongs only at a storage/transport boundary.
 
 ## Required integration and activation gates
 
-- Enforce on every business API, historical original/export, search/SQL result,
-  conversation, native command, job and publication switch; unknown routes/actions
-  deny access when configured. A remote command cannot fall back to host privileges.
-- Add native principal/domain/role/delegation/session administration and login/logout
-  with safe password input, machine-readable errors and no token stdout. Provide the
-  equivalent human UI and capture its actual light-mode login/control/recovery flow.
-- Separate upstream internal calls from user credentials. Model/provider and ingest
-  shims must not create a route around principal permissions.
+- Finish per-resource domain checks/projections across business APIs, historical
+  originals/exports, search/SQL results and conversations. The current explicit
+  route inventory denies unknown endpoints and requires whole-workspace scope for
+  unfiltered data. It must not be described as permitting legitimate mixed-domain
+  access. Complete native mutation/read parity and effect-boundary checks, including
+  source/settings/connection-review writes and resource ownership.
+- Finish principal/domain/role/delegation/session administration UI and the missing
+  native administration operations. Initial CLI login/logout, whoami, people,
+  provisioning/roles/disable/domain/classification/delegation/revocation/audit exist;
+  this is not full lifecycle or remote-session parity. Finish bounded credential
+  renewal/recovery and explicit scope selection before enrollment.
+- Complete managed ingestion callback compatibility and internal job authorization.
+  The model router has a separate purpose-limited key; configured unauthenticated
+  ingestion shims are denied. Raw backend access/host-path registration, approved
+  source roots and secret-file exclusions still need their final activation audit.
 - Bind consequential human confirmation to exact content, base publication,
   validation, policy, executor, allowed effect and expiry, with one idempotent receipt.
   Revalidate before execution; an agent's credential cannot approve its own packet.
@@ -106,3 +115,55 @@ The full P0-P3 lifecycle, semantic CLI parity and Enterprise AX measurement rema
 in progress. No end-to-end time savings or completed authenticated product is
 claimed by this foundation. See `KNOWLEDGE_OS_IMPLEMENTATION.md` and the private
 stage evidence/recovery index for executed results.
+
+## Initial adapter integration
+
+`security/context.py` binds verified execution identity to one database/workspace
+without granting an operation. HTTP and native CLI checks use it; `RunManager`
+explicitly copies it to workers. Candidate preparation checks at job/step boundaries.
+Common review, check/feedback and publication mutations recheck inside an immediate
+SQLite transaction and append an actor-attributed effect event atomically. Caller
+actor names are ignored when identity is configured. Publication refuses implicit
+local authority, unreceipted switches and policy/role/credential drift during
+preparation. These guards do not complete the separate consent/approval lifecycle.
+
+The HTTP inventory is checked against actual OpenAPI operations, not a potentially
+empty flat router enumeration. Registered path converters are compiled for request
+matching; an unknown endpoint fails closed. Explicit approved history remains
+readable with history permission; candidate preview needs candidate permission.
+
+Browser sessions use a workspace/port-namespaced, host-only, HttpOnly, SameSite=Strict
+cookie. Login fields never enter browser storage. Protected UI mounts after session
+verification; a 401 locks it and removes work caches. Logout revokes the credential
+before reporting success. Page/navigation capability checks improve the interface;
+the service remains the enforcement boundary. While operational state is unknown,
+the root shows neutral loading rather than first-install guidance.
+
+`autoontology --credential-file FILE ...` selects a private native session. `auth
+login USER [--password-file FILE]` shares the core password/login limits and writes
+only safe metadata to stdout. Without a terminal, the password file must be regular,
+owner-only and inside a private directory. Passwords are not accepted as arguments
+or environment values. Sign out before replacing a saved file; expired/revoked
+local sessions can also be removed. Existing commands fail closed without a valid
+credential when configured. Explicit credentials never fall back to an unconfigured
+workspace; query, stream and result-download requests attach the same validated
+bearer credential. Version/help and the identity command family's own explicit
+checks are separate from business command authorization.
+
+Configured engine/model clients use an atomically installed owner-only
+`security/router-secret`. It only authorizes loopback `GET /v1/models` and `POST
+/v1/chat/completions`, never a user/business API or ingestion effect. It cannot be
+used as a human/agent credential. Upstream chat profile keys and the managed
+playground/provider probe attach it; legacy unconfigured profiles retain their
+existing behavior. The key is never placed in URLs, tracked files or logs.
+
+Actual browser acceptance used a private copy of the existing local r8 workspace.
+Interactive login/error/progress, role-limited navigation, graph, confirmed logout
+and the corrected operational-loading transition were captured in light mode.
+Native login/whoami/original listing and a **fixed public pong** through the actual
+Codex router passed. Document retrieval stayed on local Ollama; document-based
+external chat was not executed after automatic approval review rejected that
+transmission. The exact proposed input was frozen for user approval, separately
+from these successful checks. Controlled model tests cover authenticated review,
+publication and revocation during preparation; they are not real document-model
+acceptance. See the private stage-11 report for source, hashes and recovery evidence.

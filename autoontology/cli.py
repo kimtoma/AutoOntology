@@ -1683,3 +1683,8 @@ def restart(
     if code:
         log = settings.logs_dir  # the service and backend logs
         _fail(msg("restart.failed", code=code, log=log), code=code)
+
+
+from autoontology.security.cli import install as install_authority  # noqa: E402
+
+install_authority(app, _settings)

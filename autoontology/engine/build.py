@@ -640,6 +640,9 @@ def run_build(
 
     *log* receives one line per step outcome (the CLI prints them); everything also goes
     to ``<home>/logs/jobs.log``."""
+    from autoontology.security.context import authorize
+
+    authorize(store, "candidate.prepare")
     log_path = jobs.setup_job_logging(settings)
     registered = registration_order(store)
     if not registered:
@@ -832,6 +835,9 @@ def _execute(
         store.start_step(run.id, step.name)
         started = time.monotonic()
         try:
+            from autoontology.security.context import authorize
+
+            authorize(store, "candidate.prepare")
             detail = step.fn()
         except BaseException as exc:
             seconds = round(time.monotonic() - started, 1)

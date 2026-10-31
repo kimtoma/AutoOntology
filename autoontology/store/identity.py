@@ -101,7 +101,64 @@ class Identity:
     def status(self):
         with self._read() as conn:
             row = conn.execute("SELECT * FROM identity_state WHERE id=1").fetchone()
+            if row is None and conn.execute("SELECT 1 FROM identity_principals LIMIT 1").fetchone():
+                raise AccessError(
+                    "Identity configuration is missing; use local-owner recovery before exposing the service.",
+                    "identity_configuration_missing",
+                    503,
+                )
             return {"configured": row is not None, **(dict(row) if row else {})}
+
+    def describe(self, actor):
+        """Return only this principal's public metadata and current effective scopes."""
+        with self._read() as conn:
+            actor = self._actor(conn, actor)
+            state = self._state(conn)
+            principal = conn.execute(
+                "SELECT * FROM identity_principals WHERE id=?", (actor.principal_id,)
+            ).fetchone()
+            credential = conn.execute(
+                "SELECT expires_at FROM identity_credentials WHERE id=?", (actor.credential_id,)
+            ).fetchone()
+            grants = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT role,domain_id FROM identity_grants WHERE principal_id=? AND revoked_at IS NULL ORDER BY domain_id,role",
+                    (actor.principal_id,),
+                )
+            ]
+            delegation = conn.execute(
+                "SELECT delegator_id,actions_json,domains_json,expires_at FROM identity_delegations WHERE principal_id=?",
+                (actor.principal_id,),
+            ).fetchone()
+            scopes = sorted(
+                {g["domain_id"] for g in grants}
+                | (set(json.loads(delegation["domains_json"])) if delegation else set())
+            )
+            capabilities = {}
+            for action in CAPABILITIES:
+                allowed = []
+                for domain in scopes:
+                    try:
+                        self.require(actor, action, domains=[domain], conn=conn)
+                    except AccessError as error:
+                        if error.status != 403:
+                            raise
+                    else:
+                        allowed.append(domain)
+                if allowed:
+                    capabilities[action] = allowed
+            return {
+                "principal": self._public(principal),
+                "workspace": {
+                    k: state[k] for k in ("workspace_id", "workspace_name", "organization_id")
+                },
+                "policy_version": state["policy_version"],
+                "credential_id": actor.credential_id,
+                "expires_at": credential["expires_at"],
+                "grants": grants,
+                "capabilities": capabilities,
+            }
 
     @staticmethod
     def _public(row):
@@ -290,6 +347,15 @@ class Identity:
             raise AccessError("Provide the local workspace name.", "invalid_workspace", 400)
         password_record = hash_password(password)
         with self.store._immediate() as conn:
+            if (
+                not conn.execute("SELECT 1 FROM identity_state").fetchone()
+                and conn.execute("SELECT 1 FROM identity_principals LIMIT 1").fetchone()
+            ):
+                raise AccessError(
+                    "Identity configuration is missing; recover the existing workspace rather than enrolling a new owner.",
+                    "identity_configuration_missing",
+                    503,
+                )
             if conn.execute("SELECT 1 FROM identity_state").fetchone():
                 raise AccessError(
                     "Identity is already configured; use the existing owner login.",

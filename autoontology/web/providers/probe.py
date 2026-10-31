@@ -59,11 +59,15 @@ def ping_body(model: str) -> dict[str, Any]:
     }
 
 
-async def router_call(client: httpx.AsyncClient, model: str, timeout: float) -> dict[str, Any]:
+async def router_call(
+    client: httpx.AsyncClient, model: str, timeout: float, *, headers=None
+) -> dict[str, Any]:
     """POST the pong request; never raises for a failed call (the result says why)."""
     start = time.monotonic()
     try:
-        resp = await client.post("/v1/chat/completions", json=ping_body(model), timeout=timeout)
+        resp = await client.post(
+            "/v1/chat/completions", json=ping_body(model), timeout=timeout, headers=headers
+        )
     except httpx.HTTPError as exc:
         return {
             "ok": False,
@@ -108,7 +112,9 @@ async def run_test_async(
 ) -> dict[str, Any]:
     """Pong through *client* (a router serving ``settings.chat_provider``), saved."""
     model = settings.upstream_chat_model
-    result = await router_call(client, model, timeout)
+    from autoontology.security.internal import router_headers
+
+    result = await router_call(client, model, timeout, headers=router_headers(settings))
     out = {
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "provider": settings.chat_provider,

@@ -65,6 +65,7 @@ class RouterLLM:
         model: str,
         timeout: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
@@ -73,10 +74,13 @@ class RouterLLM:
         # the router enforces the provider deadline; leave slack
         self.timeout = timeout or proxy_timeout_s() + 30
         self.transport = transport
+        self.headers = headers or {}
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
-            timeout=httpx.Timeout(self.timeout, connect=5.0), transport=self.transport
+            timeout=httpx.Timeout(self.timeout, connect=5.0),
+            transport=self.transport,
+            headers=self.headers,
         )
 
     async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
@@ -180,10 +184,13 @@ def llm_for(settings: Settings, *, transport: httpx.AsyncBaseTransport | None = 
             f"the playground uses the service's chat router ({', '.join(ROUTED)});"
             f" chat provider {settings.chat_provider!r} is not routed there",
         )
+    from autoontology.security.internal import router_headers
+
     return RouterLLM(
         settings.service_url,
         settings.upstream_chat_model,
         provider=settings.chat_provider,
         model=settings.effective_chat_model,
         transport=transport,
+        headers=router_headers(settings),
     )

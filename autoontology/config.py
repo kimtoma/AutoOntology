@@ -629,6 +629,10 @@ def expand_model_profile(settings: Settings) -> dict[str, str]:
     providers) for any limit the user has not set.
     """
     key = OLLAMA_API_KEY if settings.chat_provider == "ollama" else ROUTER_API_KEY
+    from autoontology.security.internal import identity_enabled, router_secret
+
+    if identity_enabled(settings.home):
+        key = router_secret(settings.home).reveal()
     env: dict[str, str] = {}
     for prefix in (*CHAT_TRIPLET_PREFIXES, "RERANK"):
         env[f"{prefix}_ENDPOINT"] = settings.llm_proxy_endpoint

@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client"
 import { BrowserRouter } from "react-router"
 
 import App from "@/App"
+import { IdentityGate } from "@/components/identity-gate"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LangProvider } from "@/i18n"
@@ -25,7 +26,7 @@ createRoot(document.getElementById("root")!).render(
         <LangProvider>
           <BrowserRouter basename="/ui">
             <TooltipProvider delayDuration={300}>
-              <App />
+              <IdentityGate><App /></IdentityGate>
               <Toaster richColors closeButton position="top-right" />
             </TooltipProvider>
           </BrowserRouter>
