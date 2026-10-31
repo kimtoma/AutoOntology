@@ -39,6 +39,34 @@ archives, screenshots and host-specific launch controls are not published by git
 The final documentation/version commit may follow `7038ef4`; that does not change
 the runtime/database evidence reference above.
 
+## GitHub/version synchronization
+
+The user subsequently authorized synchronization to `kimtoma/AutoOntology`.
+Version **0.3.0a1** is recorded in the package, CLI/API and lock file; the paired
+READMEs/guides and changelog identify it as an unfinished development preview.
+Commit `6242c92` and tag `v0.3.0a1` preserve that version snapshot. The remote
+`main` and `codex/ontology-ops-local` branches were advanced without rewriting
+existing history. A later documentation-only commit may record this result.
+
+- Offline lock check on a temporary metadata copy passed without modifying vendor
+  or replacing the shared environment's editable install.
+- Version-sensitive CLI/API/export/checkpoint regression: **156 passed**.
+- Publication pattern checks reviewed 1051 unpublished-history blobs and 614
+  working files. Five matches were explicitly labeled Worker test constants;
+  no unresolved matches remained. This is not a proof of absence of all secrets.
+  Runtime data, `.env`, credentials, exports and database archives were excluded.
+- Repository Actions permission and workflow status were enabled/active, but
+  workflow dispatch returned HTTP 422: `Actions has been disabled for this user`.
+  Therefore no successful remote CI run is claimed. Recheck account-level Actions
+  availability on resume; no account/billing/security setting was changed.
+- Only the normal local preview was restarted for version consistency. The frozen
+  review application and public service were not upgraded or deployed.
+
+Local development/review servers were left running for the user. Private test
+servers and restore-drill clusters were stopped. Saved sessions/delegations can
+expire; sign in or reissue a scoped delegation through the existing authorized
+owner workflow on resume rather than bypassing expiry checks.
+
 ## Completed work and limits
 
 1. Operational reads share a published version. First publication requires
