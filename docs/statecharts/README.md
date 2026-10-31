@@ -7,6 +7,22 @@ agent delegation are explicitly separate. The guide contains six charts and the
 21 scenarios from the earlier lifecycle document, including concrete UI/CLI paths,
 confirmation, failure/recovery and Enterprise AX time-measurement boundaries.
 
+The guide opens with a whole Knowledge OS reading map: one-time setup, the repeated
+input -> candidate -> review/evaluation -> publication -> use -> feedback loop,
+and separate recovery and future domain/agent expansion. It explains incoming data,
+preserved knowledge/evidence, human responsibilities and usable outcomes before
+introducing individual scenarios. Each phase opens related scenarios; a scenario
+returns to the phase it was opened from, including when it belongs to several phases.
+All 21 scenarios have a primary location and 27 phase-to-scenario connections.
+Search filters reset on navigation; scenario fragments, browser back and keyboard
+navigation are supported.
+
+`knowledge_os_overview.py` is the editorial navigation source. This map connects the
+six existing checked models; it adds no TLC states, transitions or proof claims.
+The versioned model evidence below remains unchanged. Identity foundation commit
+`3100ed9` was added later, but its business HTTP/CLI/UI adapters are still pending;
+the guide does not interpret that core as fixing the individual-approval gap.
+
 ## Generate the standalone HTML
 
 From this isolated worktree, using the installed project virtual environment:
@@ -65,7 +81,7 @@ The charts omit terminal stuttering and some transitions that retain the same
 visible state. Reports give the omitted counts. Invariants were retained even when
 they fail; no rule was weakened merely to make it pass.
 
-The separate identity implementation in the worktree is in progress and is not
-part of this snapshot. Model sources/evidence and this renderer can be reverted
+The separate identity integration in the worktree is in progress and is not
+part of this model snapshot. Model sources/evidence and this renderer can be reverted
 independently from that work. Runtime HTML, verification screenshots, model inputs,
 raw TLC output and stage change records are available in the ignored local runtime.
