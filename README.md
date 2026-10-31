@@ -2,6 +2,11 @@
 
 **English** | [한국어](README.ko.md)
 
+**Development preview: 0.3.0a1.** This alpha adds Ontology Ops, versioned review and
+publication, scoped human/agent access, business cases and continuous collection.
+Owner enrollment/recovery and the full autonomous Knowledge OS roadmap remain
+incomplete. See the [current handoff and remaining plan](docs/SESSION_HANDOFF.md).
+
 AutoOntology builds **one ontology** from your tables and your documents together. Point it
 at spreadsheets, database exports or a Postgres database, and at the policies, manuals,
 minutes, slide decks and scans that explain them (HWP/HWPX, PDF, Word, PowerPoint, Excel,

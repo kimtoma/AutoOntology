@@ -1,6 +1,6 @@
 [project]
 name = "autoontology"
-version = "0.2.0"
+version = "0.3.0a1"
 description = "Turn structured and unstructured enterprise data into one ontology with NVIDIA Auto Ontology, Apache Ossie and the Open Knowledge Format."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

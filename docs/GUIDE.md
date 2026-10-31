@@ -8,6 +8,10 @@ Owners can follow the [Cloudflare deployment instructions](../deploy/cloudflare/
 
 **English** | [한국어](GUIDE.ko.md)
 
+Version 0.3.0a1 is an Ontology Ops development preview. The
+[handoff and remaining plan](SESSION_HANDOFF.md) identifies implemented flows and
+unfinished owner recovery, agent autonomy and Knowledge OS acceptance gates.
+
 This guide is for people who know their business data (contracts, invoices, customers,
 policies, manuals) but are not data engineers. It walks you from an empty computer to your
 own ontology, alone, using the commands and screens exactly as they are. Every time in this

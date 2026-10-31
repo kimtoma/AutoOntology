@@ -7,8 +7,27 @@ behaviour).
 
 ## Unreleased
 
+## 0.3.0a1 - 2026-10-31
+
+Ontology Ops alpha checkpoint. This release does not complete the Knowledge OS
+roadmap or the owner enrollment/recovery workflow. See
+[the handoff and remaining acceptance gates](docs/SESSION_HANDOFF.md).
+
 ### Added
 
+- Operations dashboard and collapsible left navigation; versioned operational
+  reads, immutable originals, processing/publication/usage receipts and managed
+  knowledge restoration with UI/native inspection and saved SQL/file recovery.
+- Scoped human/agent sessions, roles/domains, exact human review packets, typed
+  rules, versioned evaluation, business cases, feedback and transparent AX records.
+- Durable folder/Postgres collection jobs, actor-bound leases, retry/backoff,
+  failure ownership and a private local outbox. Managed worker lifecycle remains open.
+- Whole-system lifecycle, illustrated/statechart documentation and stage recovery
+  records; private runtime data and credentials are excluded from git.
+- Shared enrollment-loss detection and immediate protected UI/cache removal on
+  identity metadata failure, including safe retry and SSE propagation.
+- APFS clone checkpoint/restore mode, private integrity checks and explicit
+  exclusion of regenerable tool/CLI login homes from new data checkpoints.
 - **Settings page** (`/ui/settings`, gear after Status): choose the chat provider (Ollama,
   Claude subscription, Codex/ChatGPT subscription, OpenAI-compatible API with base URL and
   API key), the embedding provider and models, **Test** a candidate without applying it,
@@ -23,10 +42,17 @@ behaviour).
 
 ### Changed
 
+- Render independent operations data progressively and defer optional detailed
+  metrics; avoid ingestion imports for unrelated native metadata commands.
 - The `/settings` UI route is the Settings page (it used to redirect to `/status`).
 
 ### Fixed
 
+- Native `init` now uses the shared settings effect boundary and refuses stored
+  key origin rebinding, revoked/stale preparation and authenticated workspace
+  switching before PostgreSQL preparation.
+- Partial identity loss no longer grants legacy local authority or replacement
+  enrollment when managed-workspace history survives.
 - Values the supervisor copied from `.env` into its children are now listed in
   `AUTOONTOLOGY_DERIVED_ENV`, so a restarted service re-reads a rewritten `.env` instead of
   keeping the old values as if they came from the shell.

@@ -7,6 +7,10 @@
 
 [English](README.md) | **한국어**
 
+**개발 프리뷰: 0.3.0a1.** Ontology Ops, 버전별 검토·게시, 사람·에이전트 권한,
+업무 사건과 지속 수집을 포함한 알파 버전입니다. 소유자 등록·복구와 자율적으로 운영되는
+지식 OS의 전체 계획은 아직 미완료입니다. [진행 현황과 재개 계획](docs/SESSION_HANDOFF.md)을 참고하세요.
+
 AutoOntology는 표와 문서를 함께 읽어 **하나의 온톨로지**를 만듭니다. 스프레드시트, 데이터베이스
 내보내기 파일이나 Postgres 데이터베이스, 그리고 그것을 설명하는 규정, 매뉴얼, 회의록, 발표 자료,
 스캔본(HWP/HWPX, PDF, Word, PowerPoint, Excel, Markdown, HTML, OCR을 거친 이미지)을 지정하면
