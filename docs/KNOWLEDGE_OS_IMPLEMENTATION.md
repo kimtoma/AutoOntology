@@ -71,8 +71,8 @@ model, source and browser checks.
 | P1-01 | ChangeSet/ReviewCase, dependencies, base publication, owner/due/priority/reasons, stale-base warning, append-only transitions, connection-review links | In progress: Stage 17 adds shared UI/native business cases, structural dependency-complete exact human review packets, atomic review batches, immutable receipts, stale/expiry/policy guards, case relations and publication-bound resolution/reopen. Connection-review packet integration, effective dates, linked evaluations, consumer impact and full-stage acceptance remain. See BUSINESS_CASES.md and private stage evidence. |
 | P1-02 | Contract/billing rule scope, amount/operator, approval authority, effective dates, exceptions/conflicts; durable identity rename/merge/split; extraction quality and corrections; versioned deterministic evaluation and citation support | In progress: Stage 18 adds explicit human-reviewed monetary rule fields, amount/date/authority conflicts, immutable evaluation suite versions, deterministic model/answer criteria, shared publication/restoration checks, preserved runs and UI/native parity. Automatic typed extraction, semantic support judgments, merge/split and remaining acceptance stay pending. See RULE_EVALUATION.md. |
 | P1-03 | Answer → feedback → owner → change → evaluation → resolution publication; reopening; workload/overdue/evidence/failure/impact metrics | In progress: Stage 19 links feedback/owner/business context/effective dates/exact required suites to case confirmation and outcomes, adds explicit no-change dispositions and atomic linked-request reopening, plus transparent human intervals, coverage attestation, provenance-separated baselines, owner targets and cohort median/p90. Real business measurements, failure/recovery phase attribution, correction adjudication and consumer impact remain required. See AX_FEEDBACK.md. |
-| P2-01 | Folder/Postgres schedules, durable deduplicated queue, retries/backoff/terminal failure, restart/resume, owner-linked notification outbox | Pending |
-| P2-02 | Connector auth/scope/delete/move/duplicate/failure/cursor contract; separate DB schema and row changes; one document-repository pilot | Pending |
+| P2-01 | Folder/Postgres schedules, durable deduplicated queue, retries/backoff/terminal failure, restart/resume, owner-linked notification outbox | Stage 22 implements the bounded collection/preparation queue, actual UI/native folder/PG observations and owner-only local outbox. Managed worker lifecycle, true provider-backed queue recovery and full-stage acceptance remain; see CONTINUOUS_COLLECTION.md. |
+| P2-02 | Connector auth/scope/delete/move/duplicate/failure/cursor contract; separate DB schema and row changes; one document-repository pilot | Stage 22 verifies file move/duplicate/removal and separate PG row/schema digests with current authority and explicit limits. Repository pilot, CDC/large-source and remote credential management remain. |
 | P3-01 | Contract/billing, HR, security domain catalog; ownership, sources/publication, shared/conflicting concept mappings and authorization | Pending |
 | P3-02 | Versioned KnowledgeContract, consuming report/training/app/agent registry, compatibility/evaluation rules, question/metric/workflow impact, authorized reads/events | Pending |
 | P3-03 | Knowledge-based proposals/drafts/simulation; separate action approval/permission/idempotency/compensation/audit; contract-approval draft pilot | Pending |
@@ -448,3 +448,22 @@ prepare an honest requirement/status audit and usable local review entry points,
 and prioritize integration over new large features after 19:40. The full roadmap
 remains active; decision learning/bounded autonomy, concept identity, consumer
 contracts, business actions and remaining recovery gates are not marked complete.
+
+## Review edition — current status and historical state models
+
+The [review readiness audit](REVIEW_READINESS.md) preserves the entire remaining
+P0–P3 scope. The statechart guide now distinguishes six historical models at
+6896be4 from current editorial status at b6d31ac, adds a separately checked bounded
+collection model (38 states, 86 steps, six held rules), and updates scenario/CLI
+coverage and the organization-wide knowledge-efficiency goal. Historical proof
+results are preserved and are not current whole-application claims. A frozen,
+separately authenticated review copy is prepared privately with fictitious draft
+additions, real graph/original/export checks and observation-only worker runs.
+
+The local review copy was then exercised beyond login: actual r8 graph rendering,
+exact pending case packet, versioned quality, human/agent folder/Postgres observation,
+agent refusal to confirm a human packet, all six original hashes and three real
+export downloads. A separate initial review backup restored all 74 SQLite tables,
+seven originals and three allowed PostgreSQL databases with matching rows. The
+review guide passed offline navigation, keyboard/lightbox, relative-link and mobile
+checks. No new model or publication call was made by that review preparation.

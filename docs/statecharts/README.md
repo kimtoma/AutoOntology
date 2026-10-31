@@ -1,6 +1,7 @@
 # Statechart guide and user scenarios
 
-This is a documentation snapshot of application commit `6896be4`, produced with the
+The six original checked models are a historical snapshot of application commit
+`6896be4`, produced with the
 installed pstack `statechart` skill 0.15.36, TLC 1.7.4 and Pele 1.9.0. The models
 were authored and checked outside the repository. Current implementation and planned
 agent delegation are explicitly separate. The guide contains six charts and the
@@ -19,9 +20,11 @@ navigation are supported.
 
 `knowledge_os_overview.py` is the editorial navigation source. This map connects the
 six existing checked models; it adds no TLC states, transitions or proof claims.
-The versioned model evidence below remains unchanged. Identity foundation commit
-`3100ed9` was added later, but its business HTTP/CLI/UI adapters are still pending;
-the guide does not interpret that core as fixing the individual-approval gap.
+The versioned model evidence below remains unchanged. The current editorial map separately describes application commit `b6d31ac`,
+including individual HTTP/CLI/UI authority, exact review packets, typed rules,
+versioned evaluation, feedback and bounded persistent collection. These application
+changes are supported by their stage evidence; the old model results are preserved
+and are not treated as proofs of the current implementation.
 
 ## Generate the standalone HTML
 
@@ -64,8 +67,9 @@ maxEdges: 10000})`; retain the SVG next to its exact Mermaid source.
 The six finite models explored 82 abstract states and 136 transitions. Thirty
 checks held. `Publication.VerifiedHumanApproval` fails on the shortest seven-step
 path: empty workspace -> connection check -> build -> candidate -> review ->
-question validation -> prepared artifacts -> publication. The application requires
-content review/validation but does not yet require a verified individual Principal.
+question validation -> prepared artifacts -> publication. That historical application required
+content review/validation without a verified individual Principal. This is not a
+claim that the latest application retains the same defect.
 The controlled replay in `publication-replay.json` reproduced this against the
 reference commit using fake model functions and a separate temporary store. It did
 not call a real model or mutate the normal local/public workspace.
@@ -85,3 +89,23 @@ The separate identity integration in the worktree is in progress and is not
 part of this model snapshot. Model sources/evidence and this renderer can be reverted
 independently from that work. Runtime HTML, verification screenshots, model inputs,
 raw TLC output and stage change records are available in the ignored local runtime.
+
+## Current collection model and review edition
+
+`Collection-verified` is a separate finite model of one collection job and one lease
+replacement, using the same installed skill and checker. TLC explored 38 states
+and 86 steps; six rules held, including duplicate preparation/receipt prevention,
+authority before effect, completion evidence, no publication and no deadlock.
+The chart renders eight visible states and eighteen arrows. Sources are in
+`models/Collection.*`; exact Mermaid/SVG/report/TLC output are kept together.
+
+It does not model file/DB/upstream crash atomicity, provider exactly-once behavior,
+semantic correctness, unbounded queues or automatic publication. Current execution
+evidence is Stage 22 (Python 1630 / UI 202 and real folder/PostgreSQL UI/native
+observation). Preparation crash recovery uses controlled builders.
+
+`current_status.py` adds the current/partial/pending scope and distinguishes that
+collection model from the six historical models. The broad Knowledge OS outcome
+is freshness, consistency, evidence, reuse and decision efficiency, including UI/CLI
+latency. Real organizational savings remain unmeasured. The current review is
+local-only; the full P0–P3 roadmap is not complete.

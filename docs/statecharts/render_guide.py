@@ -9,6 +9,7 @@ import re
 import shutil
 from pathlib import Path
 
+from current_status import APPLICATION_REFERENCE, render_current_status
 from knowledge_os_overview import render_overview
 
 os.umask(0o077)
@@ -404,6 +405,43 @@ scenarios = [
         "승인된 결과까지의 총시간·사람 실작업 시간·재작업 부담",
     ),
 ]
+# Scenario labels describe the current application, while their linked original
+# state models remain explicitly historical evidence below.
+updates = {
+    14: {
+        1: "partial",
+        6: "autoontology ops cases\nautoontology ops case-prepare CASE_ID --version N\nautoontology ops rules",
+        8: "담당 업무·시행일·금액/권한 필드·근거·버전 평가를 연결합니다. 자동 의미 판단과 개념 merge/split은 남아 있습니다.",
+    },
+    15: {
+        6: "autoontology ops quality\nautoontology ops quality-prepare KEY --input suite.json\nautoontology ops quality-activate VERSION_ID --sha256 SHA --confirm\nautoontology ops validate --revision N",
+        8: "버전 질문·알려진 인용·금지 문구와 명시적 모델 필드 검사는 구현됐습니다. 의미적 정답 전체를 보장하지 않습니다.",
+    },
+    17: {
+        6: "autoontology ops feedback-case FEEDBACK_ID --title TITLE --reason REASON\nautoontology ops ax-context CASE_ID\nautoontology ops feedback-resolve FEEDBACK_ID --case CASE_ID --confirm",
+        8: "피드백·담당 업무·필수 평가·정확한 확인·해결 운영본과 재개가 연결됩니다. 소비 영향·단계별 복구 부담과 실제 조직 성과 측정은 남아 있습니다.",
+    },
+    18: {
+        1: "partial",
+        5: "지식 소스 → 지속 수집 → 작업·담당자 알림",
+        6: "autoontology ops collection\nautoontology ops collection-worker --watch\nautoontology ops collection-history SCHEDULE_ID",
+        8: "승인된 폴더/Postgres 큐·재시도·만료·철회·로컬 알림이 구현됐습니다. 결정 학습과 정책 기반 자동 게시·업무 실행은 미완료입니다.",
+        9: "만료된 이전 실행은 쓰기를 차단하고 담당자가 원인 확인 후 재개·최신 작업 재시도를 선택합니다.",
+    },
+    20: {
+        8: "개인·도메인 범위와 근거/검색/SQL 경계는 구현·범위 검증됐습니다. 도메인 지식 카탈로그·소비 계약과 조직 전체 보증은 미완료입니다."
+    },
+    21: {
+        1: "partial",
+        6: "autoontology auth delegate --help\nautoontology ops case-prepare CASE_ID --version N\nautoontology ops case-confirm PACKET --sha256 SHA --confirm",
+        8: "위임된 준비와 정확한 사람 확인은 구현됐습니다. 자동 결정 학습·정책 기반 자율 실행·외부 업무 액션/보상은 추가 개발이 필요합니다.",
+    },
+}
+for number, fields in updates.items():
+    current = list(scenarios[number - 1])
+    for index, value in fields.items():
+        current[index] = value
+    scenarios[number - 1] = tuple(current)
 status = {"current": "현재 제공", "partial": "일부 구현", "planned": "목표 설계"}
 scenario_data = []
 for i, (title, coverage, model, goal, actor, ui, cli, path, confirm, recovery, metric) in enumerate(
@@ -518,7 +556,9 @@ provenance = {
     "passed_rules": sum(len(s["holds"]) for s in summary),
     "known_failed_rules": 1,
     "whole_system_map": "overview.json; editorial navigation only, no additional checked states/rules",
-    "scope": "Bounded abstract models at the recorded application reference. Current implementation and planned delegation are separate. The whole-system navigation map adds no checked states or rules. Identity foundation 3100ed9 is not yet wired to business adapters and is excluded from these proofs. Document generation makes no application or public service mutation.",
+    "current_editorial_reference": APPLICATION_REFERENCE,
+    "collection_model": "38 states / 86 steps / 6 held rules, separate bounded model; see Collection-verified",
+    "scope": "Historical bounded abstract models at the recorded application reference. Current editorial status and the separate Collection model are labeled; historical proof results are not current whole-application assurance. The whole-system navigation map adds no checked states or rules. Document generation makes no application or public service mutation.",
 }
 (out / "provenance.json").write_text(json.dumps(provenance, ensure_ascii=False, indent=2))
 (out / "scenarios.json").write_text(json.dumps(scenario_data, ensure_ascii=False, indent=2))
@@ -526,7 +566,7 @@ E = html.escape
 workflow = []
 for n, w in raw.items():
     verdict = (
-        '<span class="badge gap">인증된 사람 확인 경계 미구현</span>'
+        '<span class="badge gap">과거 코드의 개인 확인 경계 위반</span>'
         if n == "Publication"
         else '<span class="badge design">목표 모델 검사 통과 · 구현 완료 아님</span>'
         if n == "AgentTarget"
@@ -537,7 +577,7 @@ for n, w in raw.items():
         for r in w["rules"]
     )
     workflow.append(
-        f'''<section class="workflow" id="{n}" data-model="{n}"><div class="section-top"><p class="eyebrow">{"TARGET DESIGN" if w["mode"] == "planned" else "CURRENT FLOW"}</p>{verdict}</div><h2>{E(w["name"])}</h2><p class="lead">{E(w["about"])}</p><div class="note {"target" if w["mode"] == "planned" else ""}">{E(w["limit"])}</div><div class="diagram-toolbar"><span>상태를 선택해 설명 보기</span><div><button data-zoom="out" aria-label="{n} 축소">−</button><button data-zoom="fit">맞춤</button><button data-zoom="in" aria-label="{n} 확대">＋</button><button data-save="svg">SVG 저장</button></div></div><div class="diagram" tabindex="0" aria-label="{E(w["name"])} 상태차트">{w["svg"]}</div><div class="inspector" aria-live="polite"><div><p class="eyebrow">선택한 상태</p><h3 class="state-title">상자를 선택하세요</h3><p class="state-help">실제 앱 상태를 바꾸지 않는 설명용 탐색입니다. 표와 시나리오에서 다음 작업·확인·복구 경로를 함께 읽으세요.</p></div><div><span class="small-label">UI 동선</span><p>{E(w["ui"])}</p></div></div><div class="details-grid"><details><summary>CLI로 같은 흐름 보기</summary><pre>{E(w["cli"])}</pre></details><details><summary>상태 모델의 규칙과 검사 결과</summary><ul class="rules">{rules}</ul><pre>{E(w["report"])}</pre></details><details><summary>Mermaid 원문 보기</summary><pre class="mmd-source">{E(w["mmd"])}</pre><button data-save="mmd">Mermaid 저장</button></details></div></section>'''
+        f'''<section class="workflow" id="{n}" data-model="{n}"><div class="section-top"><p class="eyebrow">{"HISTORICAL TARGET MODEL" if w["mode"] == "planned" else "HISTORICAL CODE MODEL"}</p>{verdict}</div><h2>{E(w["name"])}</h2><p class="lead">{E(w["about"])}</p><div class="note {"target" if w["mode"] == "planned" else ""}">{E(w["limit"])}</div><div class="diagram-toolbar"><span>상태를 선택해 설명 보기</span><div><button data-zoom="out" aria-label="{n} 축소">−</button><button data-zoom="fit">맞춤</button><button data-zoom="in" aria-label="{n} 확대">＋</button><button data-save="svg">SVG 저장</button></div></div><div class="diagram" tabindex="0" aria-label="{E(w["name"])} 상태차트">{w["svg"]}</div><div class="inspector" aria-live="polite"><div><p class="eyebrow">선택한 상태</p><h3 class="state-title">상자를 선택하세요</h3><p class="state-help">실제 앱 상태를 바꾸지 않는 설명용 탐색입니다. 표와 시나리오에서 다음 작업·확인·복구 경로를 함께 읽으세요.</p></div><div><span class="small-label">UI 동선</span><p>{E(w["ui"])}</p></div></div><div class="details-grid"><details><summary>CLI로 같은 흐름 보기</summary><pre>{E(w["cli"])}</pre></details><details><summary>상태 모델의 규칙과 검사 결과</summary><ul class="rules">{rules}</ul><pre>{E(w["report"])}</pre></details><details><summary>Mermaid 원문 보기</summary><pre class="mmd-source">{E(w["mmd"])}</pre><button data-save="mmd">Mermaid 저장</button></details></div></section>'''
     )
 scards = []
 for s in scenario_data:
@@ -561,7 +601,7 @@ trace = [
     "새 운영본 전환 — 개인 인증은 요구되지 않음",
 ]
 trace_html = '<ol start="0">' + "".join("<li>" + E(x) + "</li>" for x in trace) + "</ol>"
-source_tests = """현재 코드 기준은 커밋 6896be4입니다. 로컬 기본 작업 공간은 운영 r8·후보 r7이며, 이전 실제 수용 시험에서는 분리한 복사본의 r12 반영·r13 복원과 SQL 고객 수 40명, 한국어 계약금액 집계·CSV 재복구를 확인했습니다. 이번 문서 생성은 앱·DB·Cloudflare를 변경하지 않았습니다. 진행 중인 인증 계층 초안은 현재 구현으로 포함하지 않았습니다."""
+source_tests = """아래 과거 모델의 코드 기준은 커밋 6896be4입니다. 로컬 기본 작업 공간은 운영 r8·후보 r7이며, 이전 실제 수용 시험에서는 분리한 복사본의 r12 반영·r13 복원과 SQL 고객 수 40명, 한국어 계약금액 집계·CSV 재복구를 확인했습니다. 이번 문서 생성은 앱·DB·Cloudflare를 변경하지 않았습니다. 진행 중인 인증 계층 초안은 현재 구현으로 포함하지 않았습니다."""
 body = f"""<header class="topbar"><button id="nav-toggle" aria-label="목차 접기·펼치기" aria-expanded="true">☰</button><strong>AutoOntology <span style="color:#888;font-weight:400">/ 상태로 읽는 사용 설명서</span></strong><span class="meta">LOCAL · 6896be4 · 2026.10.31</span><button id="print-guide">인쇄 / PDF</button></header><div class="shell"><nav class="sidebar" aria-label="설명서 목차"><p class="nav-title">GET STARTED</p><a href="#overview">읽는 방법과 빠른 시작</a><a href="#scenarios">21개 사용자 시나리오</a><p class="nav-title">STATECHARTS</p>{nav}<p class="nav-title">OPERATIONS</p><a href="#outcomes">Enterprise AX 시간 목표</a><a href="#limits">검사 결과와 남은 경계</a><a href="#terms">용어·재현 방법</a></nav><main><section id="overview"><p class="eyebrow">HUMAN FIRST / CLI PARITY / AGENT PREPARATION</p><h1>한 번 구축한 지식을,<br>매일 운영하는 조직의 기준으로</h1><p class="lead">어떤 상태에서 무엇을 하고, 언제 확인하며, 실패하면 어디로 돌아가는지 읽는 설명서입니다. 현재 구현과 목표 설계를 구분해 같은 흐름을 UI와 CLI에서 살펴봅니다.</p><div class="stats"><span><strong>{len(models)}개</strong> 상태차트</span><span><strong>21개</strong> 사용자 시나리오</span><span><strong>{provenance["states"]}개</strong> 추상 상태 탐색</span><span><strong>{provenance["passed_rules"]}개</strong> 모델 규칙 통과 · <strong>1개</strong> 미구현 경계 확인</span></div><div class="quick"><div><b>1. 먼저 시나리오를 고르세요</b><p>설치·데이터 연결·질문·개정·복원 중 본인의 일을 찾습니다.</p><a href="#scenarios">시나리오 선택 →</a></div><div><b>2. 상태와 확인 조건을 읽으세요</b><p>차트 상자를 선택하면 현재 단계가 강조됩니다. 아래 CLI·검사 규칙도 펼쳐볼 수 있습니다.</p></div><div><b>3. 결과와 복구 경로를 확인하세요</b><p>완료·보류·실패·취소·응답 유실을 구분합니다. 에이전트 위임은 목표 설계로 표시했습니다.</p></div></div><p class="meta">이 파일의 버튼은 설명·탐색용입니다. 앱 작업을 실행하거나 실제 데이터를 변경하지 않습니다. 외부 연결 없이 열 수 있습니다.</p></section><section id="scenarios"><div class="section-top"><p class="eyebrow">USER SCENARIOS</p><span class="meta" id="scenario-count">21개 시나리오</span></div><h2>사용자가 하려는 일에서 시작하기</h2><div class="filters"><input id="scenario-search" type="search" aria-label="시나리오 검색" placeholder="예: 계약, 복원, SQL"><select id="scenario-filter" aria-label="구현 상태 필터"><option value="all">전체</option><option value="current">현재 제공</option><option value="partial">일부 구현</option><option value="planned">목표 설계</option></select></div><div class="scenario-grid"><div class="scenario-list">{"".join(scards)}</div><article class="scenario-detail" id="scenario-detail" aria-live="polite"></article></div></section>{"".join(workflow)}<section id="outcomes"><p class="eyebrow">ENTERPRISE AX</p><h2>목표는 승인된 결과까지의 시간 단축</h2><p>에이전트 수나 자동화율보다, 요청부터 검토를 거쳐 쓸 수 있는 결과까지의 총시간과 사람의 실제 작업시간을 줄입니다. 빠르지만 틀린 결과는 성공이 아닙니다.</p><div class="table-wrap"><table><thead><tr><th>측정할 것</th><th>시작 → 끝</th><th>반드시 함께 볼 것</th></tr></thead><tbody><tr><td>총 리드타임 중앙값·p90</td><td>요청·변경 발견 → 승인된 결과 사용 가능</td><td>대기·실패·재작업도 포함</td></tr><tr><td>사람의 실작업 시간</td><td>명시적인 검토·수정·복구 작업 구간 합계</td><td>배정부터 승인까지의 경과 시간으로 추정하지 않음</td></tr><tr><td>확인 준비시간과 대기</td><td>에이전트 준비 완료 / 사람 검토 시작 / 확인 완료</td><td>담당자 부재·불충분한 패킷·승인 병목</td></tr><tr><td>품질과 재작업</td><td>최초 통과율·수정 횟수·복구 부담</td><td>잘못된 근거·권한 위반·운영 장애</td></tr></tbody></table></div><div class="note">계약·청구 규정 개정 파일럿의 수동 기준선을 먼저 측정하고, 비슷한 복잡도의 보조 작업과 비교해 조직 책임자가 수치 목표를 정합니다. 아직 사람 시간 기준선이나 절감률을 측정한 것으로 표시하지 않습니다. 현재 SQL 파일 재다운로드가 모델·DB 작업을 반복하지 않는 점은 검증했습니다.</div></section><section id="limits"><p class="eyebrow">MODEL CHECK / EVIDENCE / LIMITS</p><h2>차트가 증명한 범위와 아직 없는 경계</h2><p>{E(source_tests)}</p><div class="trace"><strong>알려진 미구현 경계: 인증된 사람의 운영 반영</strong><p>현재 모델의 <code>VerifiedHumanApproval</code> 규칙은 아래 최단 7단계 경로에서 깨집니다. 내용 확인을 하는 절차와 확인자의 개인 인증을 같은 것으로 표시하지 않았습니다.</p>{trace_html}<p>같은 경로를 기준 커밋의 격리된 저장소에서 재현했습니다. 제어된 임베딩·질문 모델로 검토와 검증을 통과한 후 actor=local만으로 운영 반영이 가능했습니다. 실제 Codex 호출 시험으로 꾸미지 않았으며, 인증된 Principal·에이전트 분리는 진행 중인 후속 구현입니다.</p></div><div class="table-wrap"><table><thead><tr><th>모델</th><th>추상 상태 / 전이</th><th>검사 결과</th></tr></thead><tbody>{"".join("<tr><td>" + E(raw[s["id"]]["name"]) + "</td><td>" + str(s["states"]) + " / " + str(s["steps"]) + "</td><td>" + ("인증된 사람 확인 규칙 1개 위반" if s["breaks"] else "선택한 규칙 통과" + (" — 목표 설계 모델만" if s["id"] == "AgentTarget" else "")) + "</td></tr>" for s in summary)}</tbody></table></div><p class="meta">TLC는 코드 전체가 아닌 유한한 추상 모델을 검사했습니다. 한 후보·한 SQL 요청·한 복원·한 위임의 선택된 상태를 모델링했습니다. 실제 사용자별 권한, DB 실행 계정의 전체 권한, 동시 부하, 원천 DB의 과거 행, 모델 답변의 의미적 정답, 다중 서비스의 부분 실패·보상은 이 모델 검사로 검증되지 않습니다. 상태가 변하지 않는 완료 유지 단계는 그림에서 생략되며, 같은 표시 상태로 합쳐지는 내부 전이는 각 원문 보고서에 개수를 기록했습니다. 모델 규칙을 녹색으로 만들려고 약화하지 않았습니다.</p></section><section id="terms"><p class="eyebrow">REFERENCE</p><h2>용어와 다시 확인하는 방법</h2><div class="table-wrap"><table><tbody><tr><th>후보</th><td>입력에서 새로 만든 미승인 지식. 운영본을 자동으로 대체하지 않습니다.</td></tr><tr><th>운영본</th><td>검토·검증을 거쳐 일반 조회가 읽는 버전. 그래프·검색·다운로드의 기준입니다.</td></tr><tr><th>검증 토큰 / 복원 확인값</th><td>준비한 내용과 맥락의 일치값. 사람의 로그인·역할 증명은 별도입니다.</td></tr><tr><th>사용 기록</th><td>그 요청의 버전·맥락·질의·결과와 완료/실패/취소를 보존한 기록입니다.</td></tr><tr><th>Principal / 위임</th><td>검증된 사람·에이전트 신원과 허용 범위·유효기간. 현재 완성된 제품 보증이 아닌 구현 중인 영역입니다.</td></tr></tbody></table></div><details class="note"><summary>이 로컬 앱에서 CLI 실행하기</summary><pre>cd /Users/macmini/Projects/AutoOntology/data/ontology-ops-local/app\nexport AUTOONTOLOGY_ENV_FILE=/Users/macmini/Projects/AutoOntology/data/ontology-ops-local/local.env\n.venv/bin/python -m autoontology ops list</pre><p>시나리오에 표시한 명령은 이 환경에서 <code>autoontology</code> 대신 <code>.venv/bin/python -m autoontology</code>로 실행할 수 있습니다. 설치·소스·변경 명령은 실제 효과가 있으므로 이 문서에서는 실행하지 않았습니다.</p></details><details class="note"><summary>상태차트를 다시 생성하는 명령</summary><pre>JAVA=/opt/homebrew/opt/openjdk@25/bin/java \\\nTLA2TOOLS=/private/tmp/autoontology-statechart-20261031/runtime/tla2tools.jar \\\nJAVA_TOOL_OPTIONS=-Xmx512m \\\n/Users/macmini/.codex/plugins/cache/cursor-plugins/pstack/0.15.36/skills/statechart/scripts/statechart \\\n  /private/tmp/autoontology-statechart-20261031/models/Publication.tla \\\n  --view /private/tmp/autoontology-statechart-20261031/models/Publication.view.mjs \\\n  --out /private/tmp/autoontology-statechart-NEW-OUTPUT</pre><p>출력 폴더는 새 경로여야 합니다. Publication의 종료 코드 1은 설명한 인증 경계 위반이며, 나머지 다섯 모델은 0입니다. TLA+·설정·뷰·SVG·Mermaid·TLC 원문·코드 재현 기록은 별도 근거 폴더에도 보존합니다.</p></details><div class="evidence-links"><a href="https://github.com/cursor/plugins/tree/main/pstack/skills/statechart" target="_blank" rel="noopener">pstack statechart 스킬</a><a href="https://pele.run/api" target="_blank" rel="noopener">Pele 렌더러</a></div></section><footer>pstack:statechart 0.15.36 · TLC 1.7.4 · Pele 1.9.0 · 기준 코드 6896be4 · 로컬 전용<br>실행 중인 앱 화면 캡처와 검증 기록은 별도의 단계별 변경 기록에 보존합니다. 이 문서는 상태 모델과 설명용 탐색 화면입니다.<details><summary>라이선스</summary><pre>{E(licenses + chr(10) + font_license)}</pre></details></footer></main></div>"""
 body = body.replace("<main>", "<main>" + overview_html, 1)
 body = body.replace(
@@ -575,9 +615,26 @@ body = body.replace(
 )
 body = body.replace(
     "진행 중인 인증 계층 초안은 현재 구현으로 포함하지 않았습니다.",
-    "후속 커밋 3100ed9의 신원·권한 공통 기반은 API·CLI·UI에 연결 전이며, 이 모델의 개인 권한 보증에 포함하지 않았습니다.",
+    "이 역사적 모델 뒤에 개인 HTTP/CLI/UI·정확한 검토 묶음·도메인 경계가 연결됐습니다. 최신 실행 근거는 상단 현재 구현 표에서 확인하며, 과거 증거를 최신 전면 보증으로 사용하지 않습니다.",
 )
-css += overview_css
+current_html = render_current_status(scratch, out)
+body = body.replace('<section id="overview">', current_html + '<section id="overview">', 1)
+body = body.replace("LOCAL · 6896be4 · 2026.10.31", "LOCAL · b6d31ac current / 6896be4 historical")
+body = body.replace(
+    '<a href="#scenarios">21개 사용자 시나리오</a>',
+    '<a href="#current-status">최신 구현과 경계</a><a href="#collection-current">지속 수집 상태차트</a><a href="#scenarios">21개 사용자 시나리오</a>',
+    1,
+)
+body = body.replace("목표는 승인된 결과까지의 시간 단축", "목표는 조직 지식체계 전체의 효율")
+body = body.replace(
+    "에이전트 수나 자동화율보다, 요청부터 검토를 거쳐 쓸 수 있는 결과까지의 총시간과 사람의 실제 작업시간을 줄입니다. 빠르지만 틀린 결과는 성공이 아닙니다.",
+    "지식의 최신성·일관성·근거·재사용과 결정 품질을 높입니다. UI/CLI 대기부터 지식이 실제 업무에 쓰이기까지의 시간을 줄이며, 업무 타이머는 보조 수단입니다. 실제 조직 기준선은 미측정입니다.",
+)
+css += (
+    overview_css
+    + ".current-status{border-top:1px solid #ddd;margin-top:40px;padding-top:30px}.current-status table{width:100%}.current-status td{vertical-align:top}.current-status section{padding-top:20px}.current-status .diagram{max-height:720px}"
+)
+
 data = {
     "workflows": {n: {k: v for k, v in w.items() if k != "svg"} for n, w in raw.items()},
     "scenarios": scenario_data,
