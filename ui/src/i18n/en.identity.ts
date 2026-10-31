@@ -1,9 +1,11 @@
+import { enCollection } from "@/i18n/en.collection"
 import { enHost } from "@/i18n/en.host"
 import { enAX } from "@/i18n/en.ax"
 import { enQuality } from "@/i18n/en.quality"
 import { enAccess } from "@/i18n/en.access"
 import { enCases } from "@/i18n/en.cases"
 export const enIdentity = {
+  ...enCollection,
   ...enHost,
   ...enAX,
   ...enQuality,

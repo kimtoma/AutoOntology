@@ -1,3 +1,4 @@
+import { CollectionSummary } from "@/components/collection-panel"
 import { AXDashboard } from "@/components/ax-dashboard"
 import { CaseSummaryRow } from "@/components/case-board"
 import { useQuery } from "@tanstack/react-query"
@@ -60,6 +61,7 @@ export default function OperationsHome() {
         }
       />
       <CaseSummaryRow />
+      <CollectionSummary />
       {!!overview.error && <ErrorState error={overview.error} onRetry={() => overview.refetch()} />}
       {!!ontology.error && <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />}
       <div className="ops-metrics" id="operations-counts">

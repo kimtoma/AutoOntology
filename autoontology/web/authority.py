@@ -239,6 +239,27 @@ DOMAIN_READS.update(
         or (method == "DELETE" and action == "results.delete")
     )
 )
+_policies(
+    "collection.read",
+    "GET",
+    "/api/collection",
+    "/api/collection/jobs/{ident}",
+    "/api/collection/summary",
+    "/api/collection/{ident}/history",
+)
+_policies("collection.configure", "GET", "/api/collection/workers")
+_policies(
+    "collection.configure",
+    "POST",
+    "/api/collection",
+    "/api/collection/{ident}/pause",
+    "/api/collection/{ident}/resume",
+    "/api/collection/jobs/{ident}/cancel",
+    "/api/collection/jobs/{ident}/retry",
+)
+_policies("collection.read", "POST", "/api/collection/notices/{ident}/ack")
+_policies("collection.work", "POST", "/api/collection/work", "/api/collection/{ident}/poll")
+
 RULES = [
     (method, compile_path(path)[0], action, path) for (method, path), action in POLICIES.items()
 ]

@@ -308,4 +308,8 @@ def commands(settings_for, store_for, fail):
     from autoontology.host_files_cli import install as install_host
 
     install_host(app, settings_for, store_for)
+    from autoontology.collection_cli import install as install_collection
+
+    install_collection(app, settings_for, store_for)
+
     return app

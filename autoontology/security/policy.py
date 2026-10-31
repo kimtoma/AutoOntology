@@ -24,6 +24,9 @@ class Capability:
 
 
 CAPABILITIES = {
+    "collection.read": Capability("read"),
+    "collection.work": Capability("draft"),
+    "collection.configure": Capability("execute", True),
     "ax.read": Capability("read"),
     "ax.record": Capability("execute", True),
     "ax.configure": Capability("execute", True),
@@ -67,6 +70,7 @@ VIEWER = frozenset(
     }
 )
 REVIEWER = VIEWER | {
+    "collection.read",
     "ax.read",
     "ax.record",
     "candidate.read",
@@ -81,6 +85,8 @@ ROLES = {
     "viewer": VIEWER,
     "editor": VIEWER
     | {
+        "collection.read",
+        "collection.work",
         "ax.read",
         "ax.record",
         "candidate.read",

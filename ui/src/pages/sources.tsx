@@ -1,3 +1,4 @@
+import { CollectionPanel } from "@/components/collection-panel"
 import { HostRoots } from "@/components/host-roots"
 import { SourceFreshness } from "@/components/source-freshness"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -89,6 +90,7 @@ export default function SourcesPage() {
       />
       <SourceFreshness />
       <HostRoots />
+      <CollectionPanel />
       {error ? <ErrorState error={error} onRetry={() => refetch()} />
         : isPending ? <Skeleton className="h-48 w-full" />
         : !sources.length ? (

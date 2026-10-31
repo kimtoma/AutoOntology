@@ -430,3 +430,21 @@ results](INTERACTION_PERFORMANCE.md); private flow captures and raw samples are
 kept alongside the local checkpoint. Existing identity/policy cache disposal
 remains mandatory. These are local interaction measurements, not measured
 organizational time savings.
+
+## Stage 22 — persistent collection and preparation loop
+
+Schema 19 adds schedules, monotonically sequenced jobs, actor/generation-bound
+leases, immutable events, verified worker activity and an owner-only local outbox.
+UI and native CLI share configure/poll/work/inspect/pause/resume/cancel/retry/ack
+operations. Actual folder renames/duplicates and separate PostgreSQL row/schema
+changes, denied agent configuration, host access failure and human recovery were
+executed with eight light-mode captures. The configured 74-table/six-original
+backup matched. Full Python 1630 passed / 66 integration excluded; UI 202 passed,
+with lint/build (the existing restoration purity warning remains).
+See [the collection contract and limitations](CONTINUOUS_COLLECTION.md).
+
+The 20:00 review target refines delivery order: finish this recoverable stage,
+prepare an honest requirement/status audit and usable local review entry points,
+and prioritize integration over new large features after 19:40. The full roadmap
+remains active; decision learning/bounded autonomy, concept identity, consumer
+contracts, business actions and remaining recovery gates are not marked complete.

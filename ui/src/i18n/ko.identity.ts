@@ -1,3 +1,4 @@
+import { koCollection } from "@/i18n/ko.collection"
 import { koHost } from "@/i18n/ko.host"
 import { koAX } from "@/i18n/ko.ax"
 import { koQuality } from "@/i18n/ko.quality"
@@ -6,6 +7,7 @@ import { koAccess } from "@/i18n/ko.access"
 import { koCases } from "@/i18n/ko.cases"
 
 export const koIdentity: Record<keyof typeof enIdentity, string> = {
+  ...koCollection,
   ...koHost,
   ...koAX,
   ...koQuality,

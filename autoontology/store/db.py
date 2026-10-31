@@ -692,6 +692,38 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE TABLE host_file_roots (path TEXT PRIMARY KEY, active INTEGER NOT NULL, reason TEXT NOT NULL, actor TEXT NOT NULL, updated_at TEXT NOT NULL);
     """,
     ),
+    (
+        19,
+        """
+        CREATE TABLE collection_schedules (
+            id TEXT PRIMARY KEY, source_id TEXT NOT NULL, source_name TEXT NOT NULL,
+            source_sha256 TEXT NOT NULL, worker_id TEXT NOT NULL, owner_id TEXT NOT NULL,
+            interval_s INTEGER NOT NULL, mode TEXT NOT NULL, enabled INTEGER NOT NULL,
+            policy_version INTEGER NOT NULL, version INTEGER NOT NULL, max_attempts INTEGER NOT NULL,
+            expires_at REAL NOT NULL, next_at REAL NOT NULL, sequence INTEGER NOT NULL DEFAULT 0,
+            cursor_json TEXT NOT NULL DEFAULT '{}', reason TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL);
+        CREATE UNIQUE INDEX collection_active_source ON collection_schedules(source_id) WHERE enabled=1;
+        CREATE TABLE collection_jobs (
+            id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL REFERENCES collection_schedules(id),
+            sequence INTEGER NOT NULL, schedule_version INTEGER NOT NULL, input_json TEXT NOT NULL,
+            status TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0, generation INTEGER NOT NULL DEFAULT 1,
+            next_at REAL NOT NULL, lease_id TEXT, credential_id TEXT, lease_until REAL,
+            result_json TEXT NOT NULL DEFAULT '{}', error_code TEXT, run_id TEXT,
+            created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(schedule_id,sequence));
+        CREATE INDEX collection_claim ON collection_jobs(status,next_at);
+        CREATE TABLE collection_workers(principal_id TEXT PRIMARY KEY, credential_id TEXT NOT NULL, last_at REAL NOT NULL);
+        CREATE TABLE collection_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, schedule_id TEXT NOT NULL, job_id TEXT,
+            operation TEXT NOT NULL, actor_json TEXT NOT NULL, detail_json TEXT NOT NULL,
+            previous_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL, created_at REAL NOT NULL);
+        CREATE TABLE collection_notices (
+            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, schedule_id TEXT NOT NULL, job_id TEXT NOT NULL,
+            kind TEXT NOT NULL, generation INTEGER NOT NULL, created_at REAL NOT NULL, acknowledged_at REAL,
+            UNIQUE(job_id,kind,generation));
+        CREATE TRIGGER collection_events_no_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT,'immutable collection event'); END;
+        CREATE TRIGGER collection_events_no_delete BEFORE DELETE ON collection_events BEGIN SELECT RAISE(ABORT,'immutable collection event'); END;
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
