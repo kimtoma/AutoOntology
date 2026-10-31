@@ -16,7 +16,7 @@ whole objective. The user has no measured baseline yet.
 
 ## Supporting outcome: time returned to the organization
 
-The primary Enterprise AX objective is to shorten the time from a business
+A supporting Enterprise AX objective is to shorten the time from a business
 request or detected knowledge change to an **approved, usable result**, while
 reducing the human effort spent producing it. Human judgment, correct evidence,
 access policy and recoverability remain acceptance gates.

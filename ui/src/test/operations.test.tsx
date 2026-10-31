@@ -52,8 +52,8 @@ describe("Ontology Ops", () => {
     renderPage(<OperationsHome />)
     expect(await screen.findByRole("heading", { name: "Ontology operations" })).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "Get started" })).toBeNull()
-    expect(screen.getByText("승인 기준")).toBeInTheDocument()
-    expect(screen.getByText("In use · r6")).toBeInTheDocument()
+    expect(await screen.findByText("승인 기준")).toBeInTheDocument()
+    expect(await screen.findByText("In use · r6")).toBeInTheDocument()
   })
   it("shows source-check failures as unknown rather than fresh", async () => {
     mockFetch({

@@ -12,7 +12,6 @@ import time
 import uuid
 from pathlib import Path
 
-import httpx
 import typer
 
 from autoontology.security.cli import request_headers
@@ -23,6 +22,8 @@ def install(app, settings_for):
         typer.echo(json.dumps(value, ensure_ascii=False, indent=2))
 
     def request(method, path, body=None, on_error=None, service_root="/api/playground"):
+        import httpx
+
         report = on_error or emit
         settings = settings_for()
         try:
@@ -79,6 +80,8 @@ def install(app, settings_for):
         return output
 
     def save_result(trace_id, output, reject):
+        import httpx
+
         settings = settings_for()
         try:
             response = httpx.request(
@@ -118,6 +121,8 @@ def install(app, settings_for):
             raise typer.Exit(1) from exc
 
     def stream(kind, body, watch, output=None):
+        import httpx
+
         def reject(value):
             if watch:
                 typer.echo(json.dumps({"event": "error", "data": value}, ensure_ascii=False))

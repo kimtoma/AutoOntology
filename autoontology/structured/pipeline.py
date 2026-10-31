@@ -20,7 +20,6 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from autoontology.config import SOURCE_NAME_MAX_LEN, Settings, validate_pg_database_name
 from autoontology.store.db import Source, Store
-from autoontology.structured.loaders import discover_files
 
 SOURCE_NAME_RE = re.compile(r"^[a-z0-9_]+$")
 #: Upstream's connection-string factory requires a non-empty password
@@ -32,6 +31,13 @@ _URL_SCHEMES = {"postgres", "postgresql", "mysql", "snowflake"}
 
 class SourceError(ValueError):
     pass
+
+
+def discover_files(path: Path, *, recursive: bool = False) -> list[Path]:
+    """Load ingestion dependencies only when discovering actual input files."""
+    from autoontology.structured.loaders import discover_files as discover
+
+    return discover(path, recursive=recursive)
 
 
 def pg_database_for(name: str) -> str:

@@ -13,6 +13,7 @@ import {
   Network,
 } from "lucide-react"
 import { Link } from "react-router"
+import { useState } from "react"
 import { PageHeader } from "@/components/page-header"
 import { ErrorState } from "@/components/empty-state"
 import { Button } from "@/components/ui/button"
@@ -32,15 +33,13 @@ export default function OperationsHome() {
     fresh = useFreshness(),
     legacy = useLegacy()
   const runs = useQuery({ queryKey: keys.runs, queryFn: () => api.runs(6), refetchInterval: 5000 })
-  if (ontology.error) return <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />
-  if (overview.error) return <ErrorState error={overview.error} onRetry={() => overview.refetch()} />
-  if (!ontology.data || !overview.data) return <Skeleton className="h-80" />
+  const [showAX, setShowAX] = useState(false)
   const o = overview.data,
     model = ontology.data
   const unknown = !!fresh.error || fresh.data?.sources.some((s) => s.state === "unknown")
-  const pending = o.counts.pending + o.counts.held + o.counts.feedback + (legacy.data?.counts.total ?? 0)
-  const queue = (changes.data?.items || o.highlights).filter((i) => !i.decision).slice(0, 6)
-  const counts = model.counts as Record<string, number>
+  const pending = o ? o.counts.pending + o.counts.held + o.counts.feedback + (legacy.data?.counts.total ?? 0) : "…"
+  const queue = (changes.data?.items ?? o?.highlights ?? []).filter((i) => !i.decision).slice(0, 6)
+  const counts = (model?.counts ?? {}) as Record<string, number>
   return (
     <div className="ops-overview">
       <PageHeader
@@ -61,13 +60,14 @@ export default function OperationsHome() {
         }
       />
       <CaseSummaryRow />
-      <AXDashboard />
+      {!!overview.error && <ErrorState error={overview.error} onRetry={() => overview.refetch()} />}
+      {!!ontology.error && <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />}
       <div className="ops-metrics" id="operations-counts">
         {[
           [t("ops.pending"), pending, "/review", t("console.pendingHint")],
           [
             t("ops.ready"),
-            o.counts.approved + (legacy.data?.unapplied ?? 0),
+            o ? o.counts.approved + (legacy.data?.unapplied ?? 0) : "…",
             "/history",
             t("console.readyHint"),
           ],
@@ -102,14 +102,17 @@ export default function OperationsHome() {
           <section className="ops-panel" aria-labelledby="queue-title">
             <div className="ops-panel-heading">
               <h2 id="queue-title">{t("console.queue")}</h2>
-              <span className="console-counter">{o.counts.pending}</span>
+              <span className="console-counter">{o?.counts.pending ?? "…"}</span>
               <Link to="/review?tab=changes" className="ops-text-link ml-auto">
                 {t("console.viewAll")}
                 <ArrowUpRight aria-hidden />
               </Link>
             </div>
-            {changes.error ? (
+            {!!changes.error && !!changes.data && <ErrorState error={changes.error} onRetry={() => changes.refetch()} />}
+            {changes.error && !changes.data ? (
               <ErrorState error={changes.error} onRetry={() => changes.refetch()} />
+            ) : !changes.data && !o ? (
+              <Skeleton className="my-4 h-28" aria-label={t("ops.loading")} />
             ) : queue.length ? (
               <div className="ops-queue">
                 <div className="ops-queue-labels" aria-hidden>
@@ -157,7 +160,7 @@ export default function OperationsHome() {
               <Link to="/review?tab=feedback">
                 <FileText className="size-3.5" aria-hidden />
                 {t("ops.feedback")}
-                <span className="font-mono">{o.counts.feedback}</span>
+                <span className="font-mono">{o?.counts.feedback ?? "…"}</span>
               </Link>
             </div>
           </section>
@@ -169,8 +172,11 @@ export default function OperationsHome() {
                 <ArrowUpRight aria-hidden />
               </Link>
             </div>
-            {runs.error ? (
+            {!!runs.error && !!runs.data && <ErrorState error={runs.error} onRetry={() => runs.refetch()} />}
+            {runs.error && !runs.data ? (
               <ErrorState error={runs.error} onRetry={() => runs.refetch()} />
+            ) : !runs.data ? (
+              <Skeleton className="my-4 h-20" aria-label={t("ops.loading")} />
             ) : (
               <div className="ops-activity-list">
                 {runs.data?.map((r) => (
@@ -203,17 +209,17 @@ export default function OperationsHome() {
           </section>
         </div>
         <aside className="ops-aside">
-          <section className="ops-published" aria-labelledby="published-title">
+          {model ? <section className="ops-published" aria-labelledby="published-title">
             <div className="flex items-center gap-2">
               <span className="status-dot bg-success" aria-hidden />
               <h2 id="published-title">{t("console.publishedModel")}</h2>
-              <span className="ml-auto font-mono text-xs">r{o.published_revision ?? model.revision}</span>
+              <span className="ml-auto font-mono text-xs">r{o?.published_revision ?? model.revision}</span>
             </div>
-            <p className="mt-3 truncate text-sm font-medium" title={o.workspace}>
-              {o.workspace}
+            <p className="mt-3 truncate text-sm font-medium" title={o?.workspace ?? model.workspace}>
+              {o?.workspace ?? model.workspace}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {t("ops.published", { n: o.published_revision ?? model.revision })}
+              {t("ops.published", { n: o?.published_revision ?? model.revision })}
             </p>
             <dl className="ops-model-counts">
               <div>
@@ -241,14 +247,14 @@ export default function OperationsHome() {
                 <Link to="/exports">{t("ops.exports")}</Link>
               </Button>
             </div>
-            {o.candidate_revision && (
+            {(o?.candidate_revision ?? changes.data?.candidate_revision) && (
               <Link to="/history" className="ops-candidate-link">
                 <GitCommitHorizontal className="size-3.5" aria-hidden />
-                {t("ops.candidate", { n: o.candidate_revision })}
+                {t("ops.candidate", { n: o?.candidate_revision ?? changes.data?.candidate_revision ?? "—" })}
                 <ChevronRight className="ml-auto size-3" aria-hidden />
               </Link>
             )}
-          </section>
+          </section> : <Skeleton className="h-60" aria-label={t("ops.loading")} />}
           <section className="ops-panel mt-7" aria-labelledby="sources-title">
             <div className="ops-panel-heading">
               <h2 id="sources-title">{t("nav.sources")}</h2>
@@ -291,6 +297,10 @@ export default function OperationsHome() {
           </section>
         </aside>
       </div>
+      <details className="mt-8 border-t py-4" id="ax-measurements" onToggle={event => setShowAX(event.currentTarget.open)}>
+        <summary className="cursor-pointer text-sm font-medium">{t("ax.title")}</summary>
+        {showAX && <AXDashboard />}
+      </details>
     </div>
   )
 }

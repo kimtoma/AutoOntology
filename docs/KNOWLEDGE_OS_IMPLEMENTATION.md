@@ -8,8 +8,10 @@ checkout alone cannot undo a database migration or recover an overwritten file.
 
 The 2026-10-31 direction adds cross-cutting requirements: all UI work must also
 be available through the CLI; human operation is the default; scoped agents
-prepare the work and humans confirm consequential decisions. Enterprise AX is
-measured primarily by reduced end-to-end lead time and human active effort.
+prepare the work and humans confirm consequential decisions, with progressive
+policy-authorized autonomy after evidence accumulates. Enterprise AX improves the
+whole knowledge system; end-to-end lead time and human active effort support
+that outcome alongside freshness, consistency, reuse and decision quality.
 See [the CLI, delegation and time-outcome contract](CLI_AGENT_AX_CONTRACT.md).
 
 The user set a target of **2026-10-31 20:00 Asia/Seoul** for the active complete
@@ -417,3 +419,14 @@ Regression, captures and data recovery proof belong in the private stage record.
 ## Stage 20 — approved host inputs and provider origin binding
 
 Authenticated ingestion now checks explicit business roots and live source/domain authority before registration, hashing, extraction and original capture. UI and native administrator actions approve/revoke specific paths; protected secret paths and unsafe live links are refused. Revocation preserves archived evidence. The shared provider settings boundary binds saved keys to URL origins, with owner-only key-file replacement or explicit clearing in native CLI. See [host input boundaries](HOST_INPUT_BOUNDARIES.md). Whole-workspace recovery and configured acceptance evidence are recorded privately. Cross-resource recovery, durable agent collection and bounded automation policies remain pending.
+
+## Stage 21 — time to useful UI data and native startup
+
+The operations screen renders independent regions progressively, retains authorized
+cache on refresh errors and defers detailed timing queries until expanded.
+Unrelated slow responses no longer hide available case data. CLI metadata avoids
+initializing ingestion dependencies. See [measurement protocol and observed
+results](INTERACTION_PERFORMANCE.md); private flow captures and raw samples are
+kept alongside the local checkpoint. Existing identity/policy cache disposal
+remains mandatory. These are local interaction measurements, not measured
+organizational time savings.

@@ -11,12 +11,12 @@ filter), then each is read with ``GET /api/terms/{id}`` and its column attribute
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from autoontology.engine.client import BackendClient
-from autoontology.store.db import Source
-from autoontology.structured import pipeline
-from autoontology.unstructured.align import TermInfo
+if TYPE_CHECKING:
+    from autoontology.engine.client import BackendClient
+    from autoontology.store.db import Source
+    from autoontology.unstructured.align import TermInfo
 
 
 @dataclass
@@ -73,6 +73,8 @@ def combine(snapshots: list[StructuredSnapshot]) -> StructuredSnapshot:
 
 
 def database_id_for(client: BackendClient, source: Source) -> tuple[str, str]:
+    from autoontology.structured import pipeline
+
     name = pipeline.catalog_database_name(source)
     db_id = client.database_id_by_name(name) or source.catalog_database_id
     if not db_id:
@@ -98,6 +100,8 @@ def qualified(col: dict[str, Any]) -> str:
 
 
 def fetch_snapshot(client: BackendClient, source: Source) -> StructuredSnapshot:
+    from autoontology.unstructured.align import TermInfo
+
     db_id, db_name = database_id_for(client, source)
     graph = client.semantic_graph(db_id)
     schemas = {str(s.get("id")): str(s.get("schema_name") or "") for s in client.schemas(db_id)}
