@@ -109,6 +109,12 @@ in the private stage-13 index; no normal enrollment or public deployment is impl
 
 ## Stage change records
 
+The [illustrated field-guide source](illustrated-guide/README.md) provides a
+separate offline HTML explanation of the whole operating loop and technical
+boundaries, using 27 MIT-licensed Hairline SVG figures. It connects the existing
+lifecycle, statechart, roadmap and actual change records. Current, partial and
+planned behavior is labeled; this documentation is not a new application release.
+
 Every subsequent stage records its concrete changes, test evidence, remaining work
 and local recovery commit. When UI behavior changes, preserve the actual light-mode
 entry, progress, result and relevant confirmation/error/recovery flow. Follow

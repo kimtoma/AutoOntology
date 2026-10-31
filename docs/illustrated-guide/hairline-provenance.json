@@ -1,0 +1,11 @@
+{
+  "package": "@lucasmarkes/hairline",
+  "version": "0.5.1",
+  "integrity": "sha512-zjY3bdMC3As/+enKitZ1X+D1HjpesQiAKzG1sbCFsOrb5xIuJEoepkJTBIO4jmFh6JXOQlGGylhV71nr9ipNpQ==",
+  "license": "MIT",
+  "repository": {
+    "url": "git+https://github.com/lucasmarkes/hairline.git",
+    "type": "git",
+    "directory": "packages/hairline"
+  }
+}
