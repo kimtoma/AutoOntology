@@ -690,3 +690,116 @@ def test_provider_use_leaves_a_private_env(isolated_env, monkeypatch):
     assert stat.S_IMODE(env.stat().st_mode) == 0o600
     (backup,) = Path(isolated_env).glob(".env.bak-*")
     assert stat.S_IMODE(backup.stat().st_mode) == 0o600 and "sk-x1234567" not in backup.read_text()
+
+
+def test_init_refuses_rebinding_a_saved_key_to_a_different_origin(fakes):
+    calls, _state, env = fakes
+    env.parent.mkdir(parents=True)
+    original = (
+        "AUTOONTOLOGY_OPENAI_BASE_URL=https://old.example/v1\n"
+        "AUTOONTOLOGY_OPENAI_API_KEY=synthetic-private-value\n"
+    )
+    env.write_text(original)
+    result = runner.invoke(
+        app,
+        ["init", "--provider", "openai", "--env", str(env)],
+        input="https://other.example/v1\nmodel-x\n\nn\n",
+    )
+    assert result.exit_code == 1 and "key_required" in result.output
+    assert env.read_text() == original and calls["setup"] == []
+    assert "synthetic-private-value" not in result.output
+
+
+@pytest.mark.parametrize("mutation", ["policy", "revocation"])
+def test_init_rechecks_prepared_authority_before_writing_settings(fakes, monkeypatch, mutation):
+    from autoontology.config import Settings
+    from autoontology.security.credential_file import save_credential
+    from autoontology.store.identity import Identity
+
+    calls, _state, env = fakes
+    env.parent.mkdir(parents=True)
+    original = "AUTOONTOLOGY_CHAT_PROVIDER=ollama\n"
+    env.write_text(original)
+    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env))
+    store = Store.for_home(Settings.from_env().home)
+    identity = Identity(store)
+    issued = identity.bootstrap("Audit", "owner", "Owner", "synthetic onboarding owner password")
+    owner = identity.authenticate(issued.secret.reveal())
+    private = env.parent / "private"
+    private.mkdir(mode=0o700)
+    credential = private / "cli.json"
+    save_credential(
+        credential,
+        issued,
+        workspace_id=identity.status()["workspace_id"],
+        origin=Settings.from_env().service_url,
+    )
+
+    def detect(settings, env_path=None):
+        if mutation == "policy":
+            identity.create_domain(owner, "late", "Late policy")
+        else:
+            identity.revoke_credential(owner, owner.credential_id)
+        return _det(env_path, codex=True)
+
+    monkeypatch.setattr(onboarding, "detect_environment", detect)
+    result = runner.invoke(
+        app,
+        [
+            "--credential-file",
+            str(credential),
+            "init",
+            "--provider",
+            "codex",
+            "--yes",
+            "--no-docs",
+            "--env",
+            str(env),
+        ],
+    )
+    expected = "authority_changed" if mutation == "policy" else "credential_invalid"
+    assert result.exit_code == 1 and expected in result.output
+    assert env.read_text() == original and calls["setup"] == []
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_init_env_cannot_retarget_authenticated_execution_before_postgres(
+    fakes, monkeypatch, configured
+):
+    from autoontology.config import Settings, unload_env
+    from autoontology.security.credential_file import save_credential
+    from autoontology.store.identity import Identity
+
+    calls, _state, env = fakes
+    env.parent.mkdir(parents=True)
+    original_home = env.parent / "original-home"
+    selected_home = env.parent / "selected-home"
+    env.write_text(f"AUTOONTOLOGY_HOME={original_home}\n")
+    selected = env.parent / "selected.env"
+    selected_text = f"AUTOONTOLOGY_HOME={selected_home}\n"
+    selected.write_text(selected_text)
+    monkeypatch.delenv("AUTOONTOLOGY_HOME")
+    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env))
+    unload_env()
+    identity = Identity(Store.for_home(original_home))
+    issued = identity.bootstrap("Original", "owner", "Owner", "synthetic original owner password")
+    if configured:
+        Identity(Store.for_home(selected_home)).bootstrap(
+            "Other", "other", "Other", "synthetic selected owner password"
+        )
+    private = env.parent / "private"
+    private.mkdir(mode=0o700)
+    credential = private / "cli.json"
+    save_credential(
+        credential,
+        issued,
+        workspace_id=identity.status()["workspace_id"],
+        origin=Settings.from_env().service_url,
+    )
+    result = runner.invoke(
+        app,
+        ["--credential-file", str(credential), "init", "--yes", "--env", str(selected)],
+    )
+    assert result.exit_code == 1 and "execution_workspace_mismatch" in result.output
+    assert calls == {"pg": 0, "setup": []}
+    assert selected.read_text() == selected_text

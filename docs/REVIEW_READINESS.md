@@ -31,7 +31,7 @@ inside that local copy; no restricted public demo is deployed.
 | Domain knowledge catalog | Identity domains and resource policies exist | Semantic domain ownership/catalog, shared/conflicting concept mappings and cross-domain operating model |
 | Real knowledge consumer contract | No complete implementation evidence | Versioned contract, consumer registry, compatibility tests, impact analysis and authorized events/reads |
 | Business draft/action pilot | Existing publication approval is not a business-action executor | Separate action schemas, permission, exact approval, idempotency, compensation and contract-approval draft pilot; no external send is authorized |
-| Recoverable local stages | Stage 00–22 private source/data/PG checkpoints with documented superseded attempts, drills and capture records | Review-edition documentation checkpoint and configured review-copy initial backup are being prepared separately |
+| Recoverable local stages | Stage 00–23 private source/data/PG checkpoints with documented superseded attempts, drills and capture records; review-copy initial restore matched 74 SQLite tables, seven originals and all three PostgreSQL databases | Later development stages retain their own checkpoints; the review copy remains frozen |
 | Organization-wide efficiency | UI/CLI latency measured locally; timing/baseline/coverage instruments implemented; actual baseline explicitly unknown | Real freshness/consistency/reuse/decision-quality outcomes and comparable pilot observations; no organizational savings percentage is claimed |
 
 Latest application regression: Python 1630 passed, 66 integration tests excluded;
@@ -69,3 +69,14 @@ to versioned consumer contracts and durable concept identity before broad busine
 actions. Keep freshness, consistency, reuse and decision quality visible alongside
 UI/CLI waiting and request-to-usable-result time. Timer reduction alone does not
 satisfy the organizational knowledge-system goal.
+
+## Maintenance audit after freezing the review edition
+
+Stage 24 reproduced and fixed three native `init` settings bypasses: saved-key
+origin rebinding, policy drift and credential revocation during preparation.
+Five regressions also cover authenticated `--env` destination changes. Whole
+Python regression passed 1635 tests with 66 integration exclusions; Ruff lint
+and formatting passed. See [the narrow boundary and remaining limits](NATIVE_INIT_BOUNDARY.md).
+This development source is separate from the frozen review application at
+b6d31ac. It does not complete the final authority audit or any pending autonomy,
+consumer-contract, concept-identity or business-action requirement above.

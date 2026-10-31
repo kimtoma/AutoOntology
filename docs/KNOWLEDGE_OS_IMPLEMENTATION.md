@@ -467,3 +467,14 @@ export downloads. A separate initial review backup restored all 74 SQLite tables
 seven originals and three allowed PostgreSQL databases with matching rows. The
 review guide passed offline navigation, keyboard/lightbox, relative-link and mobile
 checks. No new model or publication call was made by that review preparation.
+
+## Stage 24 — native initialization boundary audit
+
+Controlled audit reproduced settings writes after policy drift/revocation and
+saved-key origin rebinding through `init`. Initialization now shares the settings
+effect gate, binds its prepared policy, rechecks before setup, and refuses an
+authenticated `--env` workspace change before PostgreSQL preparation. Five new
+regression cases cover those boundaries. See [the evidence and remaining scope](NATIVE_INIT_BOUNDARY.md).
+The frozen review application and public deployment remain unchanged; no UI change
+or new model call is included in this stage. Full regression and local recovery
+evidence are recorded separately before the stage is considered verified.

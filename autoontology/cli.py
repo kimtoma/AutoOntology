@@ -1089,6 +1089,8 @@ def init(
         unload_env,
     )
     from autoontology.i18n import other_lang_hint
+    from autoontology.security.context import authorize
+    from autoontology.security.settings import save_env
 
     typer.echo(other_lang_hint())
     if provider is not None and provider not in CHAT_PROVIDERS:
@@ -1102,6 +1104,11 @@ def init(
     env_path = env_file_path()
     import shutil
 
+    # --env can select another workspace after the root command authenticated.
+    # Recheck that destination before starting PostgreSQL or preparing settings.
+    settings = _settings()
+    store = _store(settings)
+    authority = authorize(store, "settings.manage")
     _step(1, INIT_STEPS, msg("init.step.postgres"))
     typer.echo(f"  ok    {_init_postgres(yes, shutil.which('docker') is not None, env_path)}")
     settings = _settings()
@@ -1272,7 +1279,12 @@ def init(
     changed = [c for c in env_file.changes() if c[0] in keys]
     # before the write: afterwards a value loaded from the old .env looks like a shell one
     overrides = _shell_override_warnings(keys.items())
-    backup = env_file.write(env_path)
+    backup = save_env(
+        store,
+        env_file,
+        env_path,
+        expected_policy=authority.policy_version if authority else None,
+    )
     if created:
         typer.echo(msg("init.env_created", path=env_path))
     for key, old, new in changed:
@@ -1287,6 +1299,11 @@ def init(
 
     # 6. setup
     _step(6, INIT_STEPS, msg("init.step.setup_docs" if want_docs else "init.step.setup"))
+    authorize(
+        store,
+        "settings.manage",
+        expected_policy=authority.policy_version if authority else None,
+    )
     try:
         _init_setup(want_docs)
     except typer.Exit as exc:
