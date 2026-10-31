@@ -362,7 +362,7 @@ class Api:
 
     # --- ontology snapshot ---------------------------------------------------------------
 
-    def snapshot(self, revision: int | None = None) -> tuple[Any, Any]:
+    def snapshot(self, revision: int | None = None, *, action="knowledge.read") -> tuple[Any, Any]:
         """``(Snapshot without model, MergedOntology)`` of *revision* (default: published),
         parsed once per revision; 404 ``no_snapshot`` before the first build."""
         from autoontology.ontology.model import MergedOntology
@@ -393,7 +393,20 @@ class Api:
                 if len(self._models) >= MODEL_CACHE_SIZE:
                     self._models.pop(next(iter(self._models)))
                 self._models[key] = model
-        return head, model
+        from dataclasses import replace
+
+        from autoontology.security.views import knowledge_view
+        from autoontology.store.operations import visible_revision
+
+        view = knowledge_view(
+            self.store,
+            replace(head, model=model.to_dict()),
+            action=action,
+            additional_actions=("history.read",)
+            if revision is not None and visible_revision(self.store, revision)
+            else (),
+        )
+        return view.snapshot, view.model
 
     def concepts(self, revision: int | None = None) -> tuple[Any, Any, Any]:
         """``(head, model, ConceptIndex)`` of *revision* (default: the latest); the index
@@ -401,7 +414,9 @@ class Api:
         from autoontology.web.concepts import concept_index
 
         head, model = self.snapshot(revision)
-        key = (head.revision, head.run_id)
+        from autoontology.store.operations import digest
+
+        key = (head.revision, head.run_id, digest(model.to_dict()))
         with self._model_lock:
             index = self._concepts.get(key)
         if index is None:
@@ -914,6 +929,7 @@ def build_router(api: Api) -> APIRouter:
             "sources": head.sources,
             "counts": head.counts,
             "alignment": model.alignment_counts,
+            "access": model._access_view,
         }
 
     @router.get("/ontology/graph")
@@ -931,13 +947,48 @@ def build_router(api: Api) -> APIRouter:
             "revision": head.revision,
             "max_nodes": cap,
             "warnings": [],
+            "access": model._access_view,
         }
+
+    @router.get("/ontology/export")
+    def view_exports(revision: int | None = Query(None, ge=1)):
+        from autoontology.export.view import FORMATS
+
+        head, model = api.snapshot(revision, action="exports.read")
+        return {
+            "revision": head.revision,
+            "access": model._access_view,
+            "counts": model.counts(),
+            "formats": list(FORMATS),
+        }
+
+    @router.get("/ontology/export/{format}")
+    def view_export(format: str, revision: int | None = Query(None, ge=1)):
+        from autoontology.export.view import FORMATS, render
+        from autoontology.security.views import verify_view_authority
+
+        if format not in FORMATS:
+            raise ApiError(400, "invalid_format", "Choose ttl, jsonld or graphml.")
+        head, model = api.snapshot(revision, action="exports.read")
+        data = render(model, format)
+        verify_view_authority(api.store, model, "exports.read")
+        return Response(
+            data,
+            media_type=FORMATS[format],
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Disposition": f'attachment; filename="ontology-r{head.revision}-view.{format}"',
+                "X-Ontology-Revision": str(head.revision),
+                "X-Ontology-Scoped": str(model._access_view["restricted"]).lower(),
+            },
+        )
 
     @router.get("/ontology/documents")
     def ontology_documents(revision: int | None = Query(None, ge=1)):
         from autoontology.provenance import document_rows
 
-        head, model = api.snapshot(revision)
+        head, model = api.snapshot(revision, action="originals.read")
         return {"revision": head.revision, "items": document_rows(api.store, model, head.revision)}
 
     @router.get("/ontology/documents/{document_id}/original")
@@ -945,7 +996,7 @@ def build_router(api: Api) -> APIRouter:
         from autoontology.provenance import document_original
         from autoontology.store.provenance import ProvenanceError
 
-        _, model = api.snapshot(revision)
+        _, model = api.snapshot(revision, action="originals.read")
         try:
             document, path = document_original(api.store, model, document_id)
         except ProvenanceError as exc:

@@ -191,6 +191,31 @@ an actionable failure without an unauthorized follow-up result read.
 
 ## Recovery procedure
 
+### Stage 14: source-complete domain views
+
+Parent `abab7cc`; schema remains v13. Shared read selection covers graph, concept,
+original and generated view-download paths through HTTP and native CLI. Complete
+mixed-source components require all contributing sources; old identity and domain
+unknowns remain unknown. Configured publication receipts pin source authority,
+while current classifications can further restrict historical reads. Projected
+cache keys and browser policy epochs prevent reuse of a broader prior view.
+
+The copied actual model/originals are exercised in a real browser and native CLI.
+Its test-only r9 source binding and operational pointer are controlled fixtures,
+not historical adoption, a new semantic build or publication-approval acceptance.
+Normal r8 remains unchanged. The final report, source commit, light-mode flows,
+preservation evidence and checkpoint/drill are in the private stage-14 index.
+Query/index/search/SQL/SPARQL scope, broader history/source/queue/effect checks,
+exact approval/recovery and P1-P3 remain implementation work. No AX saving or
+complete organization isolation is claimed by this stage.
+Final checks: **1531 Python tests passed / 66 integration tests skipped**; the
+final related projection/publication checks passed 31 tests. **190 UI tests**,
+lint and build passed; the existing restoration purity warning remains. Nine
+final actual light-mode captures cover legacy unknowns, known scoped ontology,
+evidence/original download, graph, generated files, mobile, collapsed navigation
+and live policy cache removal. Configured-fixture backup preserves all 49 SQLite
+tables, domains/roles/audit, owner/reader projections and six read-only originals.
+
 ### Stage 11: initial individual-session adapters
 
 Parent `819fa40`; data schema remains v12. Browser login uses HttpOnly cookies and

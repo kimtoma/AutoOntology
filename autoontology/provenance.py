@@ -48,6 +48,9 @@ def document_rows(store: Store, model: MergedOntology, revision: int) -> list[di
 def document_original(
     store: Store, model: MergedOntology, document_id: str
 ) -> tuple[ODocument, Path]:
+    from autoontology.security.views import verify_view_authority
+
+    verify_view_authority(store, model, "originals.read")
     document = model.documents.get(document_id)
     if document is None:
         raise ProvenanceError(
@@ -61,9 +64,9 @@ def document_original(
             code="original_unavailable",
             status=404,
         )
-    return document, SourceArchive(store).original(
-        document.source, document.sha256, Path(document.path).name
-    )
+    path = SourceArchive(store).original(document.source, document.sha256, Path(document.path).name)
+    verify_view_authority(store, model, "originals.read")
+    return document, path
 
 
 def selected_model(
@@ -72,7 +75,18 @@ def selected_model(
     snapshot = read_snapshot(store, revision, preview=preview)
     if snapshot is None:
         raise OperationsError("no ontology snapshot selected; build, review and publish first")
-    return snapshot.revision, MergedOntology.from_dict(snapshot.model)
+    from autoontology.security.views import knowledge_view
+    from autoontology.store.operations import visible_revision
+
+    view = knowledge_view(
+        store,
+        snapshot,
+        action="originals.read",
+        additional_actions=("history.read",)
+        if revision is not None and visible_revision(store, revision)
+        else (),
+    )
+    return snapshot.revision, view.model
 
 
 def preserve_original(store: Store, model: MergedOntology, document_id: str, revision: int) -> dict:
@@ -186,6 +200,9 @@ def save_original(store: Store, model: MergedOntology, document_id: str, destina
             raise ProvenanceError(
                 "original archive integrity check failed", code="original_corrupt"
             )
+        from autoontology.security.views import verify_view_authority
+
+        verify_view_authority(store, model, "originals.read")
         try:
             os.link(temporary, destination)
         except FileExistsError:

@@ -6,6 +6,7 @@ import { Link, useSearchParams } from "react-router"
 import { ConceptSheet, OriginBadge, RelationChip } from "@/components/concept-sheet"
 import { EmptyState, ErrorState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
+import { ScopeNotice } from "@/components/scope-notice"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -118,7 +119,7 @@ export default function OntologyPage() {
       ) : (
         <>
           {ontology.error ? <ErrorState error={ontology.error} onRetry={() => ontology.refetch()} />
-            : ontology.data ? <Summary o={ontology.data} />
+            : ontology.data ? <><ScopeNotice access={ontology.data.access} /><Summary o={ontology.data} /></>
             : <Skeleton className="mb-6 h-28" />}
           <form role="search" id="concept-search" onSubmit={(e) => { e.preventDefault(); update({ q: q.trim() || null, page: null }) }}
                 className="mb-4 grid gap-2 sm:grid-cols-[1fr_auto_auto]">

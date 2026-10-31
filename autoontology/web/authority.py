@@ -82,6 +82,7 @@ _policies(
 )
 _policies("source.edit", "POST", "/api/ontology/documents/{document_id}/archive")
 _policies("exports.read", "GET", "/api/exports", "/api/exports/{rev}/{file_path:path}")
+_policies("exports.read", "GET", "/api/ontology/export", "/api/ontology/export/{format}")
 _policies(
     "settings.read", "GET", "/api/status", "/api/settings", "/api/settings/restart/{restart_id}"
 )
@@ -154,7 +155,22 @@ _policies(
 _policies("identity.admin", "DELETE", "/api/identity/delegations/{principal_id}")
 _policies("audit.read", "GET", "/api/identity/audit")
 
-RULES = [(method, compile_path(path)[0], action) for (method, path), action in POLICIES.items()]
+DOMAIN_READS = {
+    ("GET", path)
+    for path in (
+        "/api/ontology",
+        "/api/ontology/graph",
+        "/api/ontology/concepts",
+        "/api/ontology/concepts/{concept_id}",
+        "/api/ontology/documents",
+        "/api/ontology/documents/{document_id}/original",
+        "/api/ontology/export",
+        "/api/ontology/export/{format}",
+    )
+}
+RULES = [
+    (method, compile_path(path)[0], action, path) for (method, path), action in POLICIES.items()
+]
 
 
 def public_path(path, method):
@@ -200,8 +216,8 @@ async def authenticate_request(api, request):
     actor = service.authenticate(raw)
     matched = next(
         (
-            (action,)
-            for method, pattern, action in RULES
+            (action, path)
+            for method, pattern, action, path in RULES
             if method == request.method and pattern.fullmatch(request.url.path)
         ),
         None,
@@ -224,7 +240,10 @@ async def authenticate_request(api, request):
         if action is None:
             raise AccessError("Choose a supported execution kind.", "invalid_request", 400)
     if action:
-        service.require(actor, action)
+        if (request.method, matched[1]) in DOMAIN_READS:
+            service.require_any(actor, action)
+        else:
+            service.require(actor, action)
     if request.url.path.startswith("/api/ontology") and any(
         k in request.query_params for k in ("revision", "from", "to")
     ):
@@ -235,7 +254,11 @@ async def authenticate_request(api, request):
                 selected = int(request.query_params[parameter])
             except (KeyError, ValueError):
                 continue
-            service.require(
-                actor, "history.read" if visible_revision(api.store, selected) else "candidate.read"
+            selected_action = (
+                "history.read" if visible_revision(api.store, selected) else "candidate.read"
             )
+            if (request.method, matched[1]) in DOMAIN_READS and selected_action == "history.read":
+                service.require_any(actor, selected_action)
+            else:
+                service.require(actor, selected_action)
     return actor

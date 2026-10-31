@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { EmptyState, ErrorState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
+import { ScopeNotice } from "@/components/scope-notice"
 import { StatusChip } from "@/components/status-chip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -22,6 +23,7 @@ import {
 } from "@/lib/exports"
 import { fmtDate, t, tn, type MessageKey } from "@/i18n"
 import { fmtBytes } from "@/lib/labels"
+import { useIdentity } from "@/lib/identity"
 
 const DIR_INFO: Record<string, MessageKey> = {
   ossie: "exports.dir.ossie",
@@ -165,7 +167,7 @@ function ExportCard({ entry, latest, onPreview, loading }: {
   )
 }
 
-export default function ExportsPage() {
+function FullExportsPage() {
   const [params] = useSearchParams()
   const revision = Number(params.get("revision")) || null
   const list = useQuery({ queryKey: keys.exports, queryFn: api.exports })
@@ -231,4 +233,23 @@ export default function ExportsPage() {
       </Dialog>
     </>
   )
+}
+
+function ScopedExportsPage() {
+  const view = useQuery({ queryKey: ["knowledge-view-exports"], queryFn: api.viewExports })
+  return <>
+    <PageHeader title={t("exports.title")} description={t("identity.scope.exports")} />
+    {view.error ? <ErrorState error={view.error} onRetry={() => view.refetch()} /> : !view.data ? <Skeleton className="h-32" /> : <>
+      <ScopeNotice access={view.data.access} />
+      <p className="mb-6 text-xs text-muted-foreground">{t("ontology.revision", { n: view.data.revision })}</p>
+      <div className="divide-y border-y">
+        {view.data.formats.map(format => <a key={format} href={api.viewExportUrl(format, view.data!.revision)} download className="flex items-center justify-between gap-8 py-4 text-sm hover:bg-muted/30"><span>{({ ttl: "Turtle", jsonld: "JSON-LD", graphml: "GraphML" } as Record<string, string>)[format] ?? format}</span><Download className="size-4" aria-hidden /></a>)}
+      </div>
+    </>}
+  </>
+}
+
+export default function ExportsPage() {
+  const identity = useIdentity()
+  return identity && !(identity.session.capabilities["exports.read"] ?? []).includes("*") ? <ScopedExportsPage /> : <FullExportsPage />
 }

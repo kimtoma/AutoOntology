@@ -240,6 +240,11 @@ class Publications:
         source_ids = {
             s.get("source_revision") for b in manifest["source_bindings"] for s in b["sources"]
         }
+        from autoontology.security.views import publication_authority
+
+        authority = publication_authority(self.store, model, manifest["source_bindings"])
+        if authority is not None:
+            manifest["source_authority"] = authority
         source_ids.update(r for o in manifest["originals"] for r in o["source_revisions"])
         manifest["source_inputs"] = self.source_inputs(source_ids - {None})
         try:

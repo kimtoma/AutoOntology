@@ -3,6 +3,10 @@ import { koAccess } from "@/i18n/ko.access"
 
 export const koIdentity: Record<keyof typeof enIdentity, string> = {
   ...koAccess,
+  "identity.scope.title": "내 접근 범위의 지식",
+  "identity.scope.hint": "읽을 수 있는 소스로 뒷받침된 완전한 항목만 표시합니다. 여러 소스가 합쳐진 항목은 모든 기여 소스의 접근 권한이 필요합니다.",
+  "identity.scope.exports": "현재 접근 범위의 승인된 지식을 Turtle·JSON-LD·GraphML로 다운로드합니다.",
+  "identity.scope.legacy": "과거 소스 식별이 기록되지 않아 일부 지식이 제한됩니다. 관리자에게 입력 계보와 접근 분류 확인을 요청하세요.",
   "identity.checking": "작업 공간 접근 권한을 확인하고 있습니다…",
   "identity.title": "작업 공간에 로그인",
   "identity.hint": "작업 공간 관리자가 부여한 개인 계정으로 로그인하세요.",

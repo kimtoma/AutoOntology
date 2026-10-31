@@ -13,7 +13,7 @@ from pathlib import Path
 
 import typer
 
-from autoontology.security.context import acting_as, authorize
+from autoontology.security.context import acting_as, authorize, authorize_any
 from autoontology.security.credential_file import _parent, load_credential, save_credential
 from autoontology.security.internal import identity_enabled
 from autoontology.security.policy import AccessError
@@ -71,6 +71,7 @@ GROUPS = {
         "restore": "knowledge.restore",
         "preserve-original": "source.edit",
         "original": "originals.read",
+        "export-view": "exports.read",
         "execution": "runs.read",
         "ask": "query.run",
         "retrieve": "query.run",
@@ -87,6 +88,7 @@ GROUPS = {
 }
 
 _CREDENTIAL_PATH: ContextVar[Path | None] = ContextVar("autoontology_cli_credential", default=None)
+DOMAIN_READ_COMMANDS = {("ops", "documents"), ("ops", "original"), ("ops", "export-view")}
 
 
 def _emit(value):
@@ -233,11 +235,13 @@ def install(app, settings_for):
                     raise AccessError(
                         "No permission is defined for this command.", "permission_not_defined", 403
                     )
-                authorize(service.store, action)
+                (authorize_any if ctx.invoked_subcommand == "ontology" else authorize)(
+                    service.store, action
+                )
         except AccessError as error:
             _fail(error)
 
-    def group_boundary(policies):
+    def group_boundary(group_name, policies):
         def check(ctx: typer.Context):
             settings = settings_for()
             if not identity_enabled(settings.home):
@@ -248,7 +252,11 @@ def install(app, settings_for):
                     raise AccessError(
                         "No permission is defined for this command.", "permission_not_defined", 403
                     )
-                authorize(Store.for_home(settings.home), action)
+                (
+                    authorize_any
+                    if (group_name, ctx.invoked_subcommand) in DOMAIN_READ_COMMANDS
+                    else authorize
+                )(Store.for_home(settings.home), action)
             except AccessError as error:
                 _fail(error)
 
@@ -256,7 +264,7 @@ def install(app, settings_for):
 
     for group in app.registered_groups:
         if group.name in GROUPS:
-            group.typer_instance.callback()(group_boundary(GROUPS[group.name]))
+            group.typer_instance.callback()(group_boundary(group.name, GROUPS[group.name]))
 
     @auth.command("login")
     def login(username: str, password_file: Path = typer.Option(None, "--password-file")):

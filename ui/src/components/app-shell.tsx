@@ -17,7 +17,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { openCommandMenu } from "@/lib/command-menu"
-import { isCurrent, NAV } from "@/components/nav"
+import { isCurrent, navigationFor } from "@/components/nav"
 import { useOperations, useLegacy } from "@/hooks/operations"
 import { useStatus } from "@/hooks/queries"
 import { cn } from "@/lib/utils"
@@ -25,8 +25,6 @@ import { GATEWAY_ACCESS, SHARED_DEMO } from "@/lib/demo"
 import { useT } from "@/i18n"
 import { CanUse, IdentityControls } from "@/components/identity-gate"
 import { useCanUse, useIdentity } from "@/lib/identity"
-
-const navigationAuthority: Record<string, string> = { home: "candidate.read", review: "candidate.read", sources: "source.read", ontology: "knowledge.read", playground: "query.run", history: "candidate.read", settings: "settings.read" }
 
 function StatusBadge() {
   const t = useT()
@@ -99,8 +97,8 @@ function WorkspaceNavigation() {
       <SidebarContent>
         <nav id="workspace-navigation" aria-label={t("shell.mainMenu")} className="console-sidebar-nav">
           <SidebarMenu className="console-sidebar-menu">
-            {NAV.map((item) => (
-              <CanUse capability={navigationAuthority[item.id]} key={item.path}><SidebarMenuItem className={item.id === "settings" ? "console-sidebar-settings" : undefined}>
+            {navigationFor(identity?.session).map((item) => (
+              <SidebarMenuItem key={item.path} className={item.id === "settings" ? "console-sidebar-settings" : undefined}>
                 <SidebarMenuButton
                   asChild
                   isActive={isCurrent(item, pathname)}
@@ -121,7 +119,7 @@ function WorkspaceNavigation() {
                     )}
                   </Link>
                 </SidebarMenuButton>
-              </SidebarMenuItem></CanUse>
+              </SidebarMenuItem>
             ))}
           </SidebarMenu>
         </nav>

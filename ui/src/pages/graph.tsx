@@ -382,6 +382,7 @@ export default function GraphPage() {
             </Badge>
           )}
           {!webgl && <Badge variant="outline" className="border-warning/40 bg-warning/10" id="graph-2d-badge">{forced2d ? t("graph.view2d") : t("graph.fallback2d")}</Badge>}
+          {q.data?.access?.restricted && <Badge variant="outline" className="font-normal" title={t("identity.scope.hint")}>{t("identity.scope.title")}</Badge>}
           {q.data?.truncated && (
             <Badge variant="outline" className="border-warning/40 bg-warning/10 font-normal" id="graph-truncated">
               {t("graph.truncated", { n: q.data.counts.nodes, total: q.data.counts.total_nodes })}

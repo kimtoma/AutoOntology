@@ -1,6 +1,10 @@
 import { enAccess } from "@/i18n/en.access"
 export const enIdentity = {
   ...enAccess,
+  "identity.scope.title": "Knowledge within your access",
+  "identity.scope.hint": "Only complete items supported by sources you can read are shown. A combined item requires access to every contributing source.",
+  "identity.scope.exports": "Download the approved knowledge within your current access as Turtle, JSON-LD or GraphML.",
+  "identity.scope.legacy": "Some historical source identities were not recorded. Ask the administrator to review input lineage and access classification.",
   "identity.checking": "Checking workspace access…",
   "identity.title": "Sign in to your workspace",
   "identity.hint": "Use the individual account provided by your workspace administrator.",

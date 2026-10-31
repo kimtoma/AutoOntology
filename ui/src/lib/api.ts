@@ -99,6 +99,7 @@ export interface SnapshotSource {
 }
 
 export interface OntologySummary {
+  access?: { restricted: boolean; policy_version: number | null; historical_scope_missing?: boolean }
   revision: number
   created_at: string
   run_id: string
@@ -233,6 +234,7 @@ export interface GraphEdgeJson {
   count?: number
 }
 export interface GraphJson {
+  access?: { restricted: boolean; policy_version: number | null; historical_scope_missing?: boolean }
   name?: string
   layer: string
   revision?: number
@@ -637,6 +639,8 @@ export const api = {
   graph: () => request<GraphJson>("/ontology/graph?layer=all&evidence=true"),
   exports: () => request<{ exports: ExportEntry[] }>("/exports").then((r) => r.exports),
   exportFileUrl: (dir: string, file: string) => `${API}/exports/${enc(dir)}/${encPath(file)}`,
+  viewExports: () => request<{ revision: number; counts: Record<string, number>; access: { restricted: boolean }; formats: string[] }>("/ontology/export"),
+  viewExportUrl: (format: string, revision?: number) => `${API}/ontology/export/${enc(format)}${revision ? `?revision=${revision}` : ""}`,
   exportText: (dir: string, file: string) =>
     requestText(`/exports/${enc(dir)}/${encPath(file)}?inline=true`),
   playground: {

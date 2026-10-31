@@ -19,9 +19,23 @@ export function IdentityGate({ children }: { children: ReactNode }) {
   const [locked, setLocked] = useState(false)
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [acceptedAuthority, setAcceptedAuthority] = useState<string | null>(null)
+  const [refreshingAuthority, setRefreshingAuthority] = useState(false)
   const status = useQuery({ queryKey: statusKey, queryFn: ({ signal }) => identityApi.status(signal), retry: false })
   const configured = status.data?.configured === true
   const me = useQuery({ queryKey: meKey, queryFn: ({ signal }) => identityApi.me(signal), enabled: configured && !locked, retry: false, refetchInterval: 30_000 })
+  const authorityKey = me.data ? `${me.data.workspace.workspace_id}:${me.data.principal.id}:${me.data.credential_id}:${me.data.policy_version}` : null
+
+  useEffect(() => {
+    if (!configured || !authorityKey || authorityKey === acceptedAuthority) return
+    let active = true
+    void qc.cancelQueries({ predicate: query => query.queryKey[0] !== "identity" }).then(() => {
+      if (!active) return
+      qc.removeQueries({ predicate: query => query.queryKey[0] !== "identity" })
+      setAcceptedAuthority(authorityKey)
+    })
+    return () => { active = false }
+  }, [configured, authorityKey, acceptedAuthority, qc])
 
   const clearWork = () => {
     qc.removeQueries({ predicate: query => query.queryKey[0] !== "identity" })
@@ -34,7 +48,14 @@ export function IdentityGate({ children }: { children: ReactNode }) {
       qc.removeQueries({ predicate: query => query.queryKey[0] !== "identity" })
       qc.removeQueries({ queryKey: meKey, exact: true })
     }
-    const refresh = () => { if (configured) void qc.invalidateQueries({ queryKey: meKey, exact: true }) }
+    const refresh = () => {
+      if (!configured) return
+      setRefreshingAuthority(true)
+      void qc.cancelQueries({ predicate: query => query.queryKey[0] !== "identity" }).then(() => {
+        qc.removeQueries({ predicate: query => query.queryKey[0] !== "identity" })
+        return qc.invalidateQueries({ queryKey: meKey, exact: true })
+      }).finally(() => setRefreshingAuthority(false))
+    }
     window.addEventListener(IDENTITY_REQUIRED, lock)
     window.addEventListener(AUTHORITY_CHANGED, refresh)
     return () => {
@@ -90,6 +111,9 @@ export function IdentityGate({ children }: { children: ReactNode }) {
         {login.isPending && <p role="status" className="text-xs text-muted-foreground">{t("identity.signingIn")}</p>}
       </form>
     </main>
+  }
+  if (refreshingAuthority || acceptedAuthority !== authorityKey) {
+    return <main className="mx-auto max-w-sm px-6 py-24"><p className="text-sm text-muted-foreground" role="status">{t("identity.checking")}</p></main>
   }
   return <IdentityContext.Provider value={{ session: me.data, signOut: () => logout.mutate(), signingOut: logout.isPending, logoutFailed: logout.isError }}>{children}</IdentityContext.Provider>
 }

@@ -284,3 +284,72 @@ only after the current model artifact, model inputs, all 806 element text hashes
 and normalized vector fingerprint matched the earlier actual receipt. The initial
 fresh-copy attempt had legitimately begun re-embedding legacy, unidentified vectors;
 its timeout and subsequent diagnosis are preserved separately. See stage-13 evidence.
+
+## Domain-bound graph, originals and view downloads
+
+Stage 14 adds source-complete read projections for ontology summaries, graph,
+concept lists/details and original documents. The native `ontology`, `ops documents`
+and `ops original` commands use the same selection. A domain entry gate only allows
+the request to select resources; it never grants an unfiltered workspace read.
+Other operations retain their whole-workspace gate until their consumers enforce
+the corresponding resource selection.
+
+A class may contain definitions, aliases and evidence from several document
+merges even when its `documents_source` names only the first. Its complete record
+requires every contributing source, including merge/evidence dependencies.
+Relations also require their endpoint dependencies. Unknown owners and missing
+evidence remain unclassified. The projection does not manufacture a new partially
+redacted meaning that was never reviewed. Legacy diagnostics and human notes have
+no complete field provenance and are omitted from restricted read models.
+Upstream Terms can span databases while legacy snapshots record one structured
+owner. Structured components therefore conservatively require every included
+structured source; finer cross-database field provenance and independent views
+remain work rather than an inferred ownership claim.
+
+Historical source IDs come from captured snapshot/publication bindings, never
+today's same-named registry row. Legacy known IDs require every recorded source
+classification, including the initial `general` classification assigned at
+enrollment. New configured publication manifests pin identified input IDs and
+current domain classifications. Reads require both pinned and current domains;
+moving a source cannot expose older private history to its new readers. An input
+with an unknown older ID is not made known by a later same-named input.
+The copied normal r8 remains unmodified and its unrecorded IDs stay unknown.
+
+Model caches hold private full models; returned models are fresh projections.
+Concept-index cache keys include the projected model hash. The browser cancels
+and removes work queries before mounting a changed principal/credential/workspace/
+policy context. Its actual 30-second session poll also invalidates stale graph
+and concept views after a classification change. Already downloaded bytes cannot
+be revoked by a later policy change.
+
+`GET /api/ontology/export` describes the current authorized view, and
+`GET /api/ontology/export/{ttl|jsonld|graphml}` serializes it without reading the
+unfiltered archive. Domain readers see these downloads in the sidebar, section
+tabs and quick navigation. Existing full archived bundles keep their workspace
+gate. The native equivalent is:
+
+```sh
+autoontology --credential-file PRIVATE_SESSION ontology
+autoontology --credential-file PRIVATE_SESSION ops documents
+autoontology --credential-file PRIVATE_SESSION ops original DOC_ID --out NEW_FILE
+autoontology --credential-file PRIVATE_SESSION ops export-view --format ttl --out NEW_FILE
+```
+
+View downloads do not overwrite files or write into operational exports. The
+final file effect verifies the selected model hash, current individual credential,
+workspace, action and policy version. Drift or a mutated model aborts before the
+atomic destination link. HTTP serialization also rechecks before returning bytes.
+RDF comparisons verify semantic equality, not incidental blank-node ordering.
+
+Executed local acceptance uses the copied actual model/originals, real browser
+and native commands. A separately seeded r9 binding/operational pointer is a
+controlled fixture, explicitly distinguished from historical adoption or approval/
+publication acceptance. It checks unknown legacy bindings, authorized graph and
+five originals, foreign-original and whole-bundle denial, browser/native RDF
+equivalence, current classification changes and browser cache removal. Initial
+enrollment's `general` history is explicitly granted in that fixture, never erased
+to make a finance-only credential pass. No external model call is made.
+
+Query/search/index/SQL/SPARQL consumers, saved-result knowledge-scope rechecks,
+remaining history/source/queue/effect adapters and exact approval/recovery gates
+remain in progress. Normal-workspace enrollment and public deployment stay off.

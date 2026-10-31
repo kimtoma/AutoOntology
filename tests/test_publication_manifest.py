@@ -104,6 +104,56 @@ def test_manifest_binds_model_originals_source_versions_validation_vectors_and_e
     assert "password" not in json.dumps(manifest).lower()
 
 
+def test_configured_publication_pins_identified_current_domain_and_later_moves_only_restrict(
+    prepared,
+):
+    from autoontology.security.context import acting_as
+    from autoontology.security.views import knowledge_view
+    from autoontology.store.identity import Identity
+
+    store, settings, candidate, _, _ = prepared
+    identity = Identity(store)
+    issued = identity.bootstrap("Org", "owner", "Owner", "long publication owner password")
+    owner = identity.authenticate(issued.secret.reveal())
+    finance = identity.create_domain(owner, "finance", "Finance")
+    hr = identity.create_domain(owner, "hr", "HR")
+    source = store.get_source("rules")
+    identity.assign_source(owner, source.id, finance["id"])
+    identity.create_human(
+        owner,
+        "reader",
+        "Finance reader",
+        "long finance reader password",
+        ["viewer"],
+        domains=[finance["id"]],
+    )
+    reader = identity.authenticate(
+        identity.login("reader", "long finance reader password").secret.reveal()
+    )
+    with acting_as(store, owner):
+        for item in Operations(store).changes():
+            Operations(store).decide(
+                item["id"], "accept", candidate=candidate, note="Original and scope checked"
+            )
+        validation = validate(
+            store, settings, revision=candidate, embedder=(embed, "test"), llm=Answer()
+        )
+        result = run_publish(
+            store, settings, revision=candidate, token=validation["token"], embedder=(embed, "test")
+        )
+        publication = Publications(store).get(result.revision)
+        binding = publication["manifest"]["source_authority"]["sources"]["rules"]
+        assert binding["source_ids"] == [source.id] and binding["domains"] == [finance["id"]]
+        assert Publications(store).verify(result.revision, settings.exports_dir)["ok"]
+    with acting_as(store, reader):
+        selected = knowledge_view(store, store.get_snapshot(result.revision))
+        assert "concept-rule" in selected.model.classes
+    identity.assign_source(owner, source.id, hr["id"])
+    with acting_as(store, reader):
+        assert not knowledge_view(store, store.get_snapshot(result.revision)).model.classes
+    assert Publications(store).get(result.revision) == publication
+
+
 def test_missing_original_or_changed_validation_vectors_blocks_publication(prepared):
     store, settings, _, validation, _ = prepared
     with store._conn() as conn:

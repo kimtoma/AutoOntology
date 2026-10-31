@@ -340,6 +340,27 @@ class Identity:
             raise AccessError()
         return Decision(actor, action, state["workspace_id"], selected, state["policy_version"])
 
+    def require_any(self, actor, action, *, conn=None):
+        """An entry gate only: consumers must still select/authorize actual resources."""
+        if conn is None:
+            with self._read() as read:
+                return self.require_any(actor, action, conn=read)
+        try:
+            return self.require(actor, action, conn=conn)
+        except AccessError as error:
+            if error.code != "forbidden":
+                raise
+        for (domain,) in conn.execute(
+            "SELECT id FROM identity_domains WHERE workspace_id=? ORDER BY id",
+            (self._state(conn)["workspace_id"],),
+        ):
+            try:
+                return self.require(actor, action, domains=[domain], conn=conn)
+            except AccessError as error:
+                if error.code != "forbidden":
+                    raise
+        raise AccessError()
+
     def bootstrap(self, workspace, username, name, password):
         """Trusted host-owner enrollment only; never expose this as an anonymous API."""
         username, name = _username(username), _name(name)

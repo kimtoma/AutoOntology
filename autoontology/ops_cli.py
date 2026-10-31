@@ -21,6 +21,7 @@ def commands(settings_for, store_for, fail):
         from autoontology.engine.build import WORKSPACE_LEASE
         from autoontology.engine.jobs import JobError, hold_sources
         from autoontology.engine.model_artifacts import ModelArtifactError
+        from autoontology.security.policy import AccessError
         from autoontology.store.processing import ProcessingError
         from autoontology.store.provenance import ProvenanceError
         from autoontology.store.publications import PublicationError
@@ -31,7 +32,7 @@ def commands(settings_for, store_for, fail):
             store = store_for(settings)
             with hold_sources(store, [WORKSPACE_LEASE], edit) if edit else nullcontext():
                 return action(store, settings)
-        except (RestoreError, ModelArtifactError, ProcessingError) as exc:
+        except (RestoreError, ModelArtifactError, ProcessingError, AccessError) as exc:
             emit({"error": exc.code, "detail": str(exc)})
             raise typer.Exit(1) from exc
         except ProvenanceError as exc:
@@ -150,6 +151,34 @@ def commands(settings_for, store_for, fail):
         from autoontology.store.provenance import SourceArchive
 
         emit(run(lambda store, settings: {"items": SourceArchive(store).revisions(name)}))
+
+    @app.command("export-view")
+    def export_view(
+        out: Path = typer.Option(..., "--out", help="New file outside operational exports."),
+        format: str = typer.Option("ttl", "--format", help="ttl | jsonld | graphml"),
+        revision: int = typer.Option(None, "--revision", min=1),
+    ):
+        from autoontology.export.view import FORMATS, save
+        from autoontology.security.views import knowledge_view
+        from autoontology.store.operations import read_snapshot
+
+        def action(store, settings):
+            if format not in FORMATS:
+                raise OperationsError("Choose ttl, jsonld or graphml.")
+            if out.expanduser().resolve().is_relative_to(settings.exports_dir.resolve()):
+                raise OperationsError("Write view downloads outside operational exports.")
+            selected = read_snapshot(store, revision)
+            if selected is None:
+                raise OperationsError("No published ontology is available.")
+            view = knowledge_view(
+                store,
+                selected,
+                action="exports.read",
+                additional_actions=("history.read",) if revision is not None else (),
+            )
+            return save(store, view, format, out)
+
+        emit(run(action))
 
     @app.command("publications")
     def publications():

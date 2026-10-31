@@ -20,7 +20,9 @@ export const identityApi = {
 
 export const IdentityContext = createContext<{ session: IdentitySession; signOut: () => void; signingOut: boolean; logoutFailed: boolean } | null>(null)
 export const useIdentity = () => useContext(IdentityContext)
-export const useCanUse = (capability: string) => {
-  const identity = useIdentity()
-  return !identity || (identity.session.capabilities[capability] ?? []).includes("*")
+export const canUse = (session: IdentitySession | null | undefined, capability: string) => {
+  const scopes = session?.capabilities[capability] ?? []
+  const projected = ["knowledge.read", "originals.read", "exports.read"].includes(capability)
+  return !session || scopes.includes("*") || (projected && scopes.length > 0)
 }
+export const useCanUse = (capability: string) => canUse(useIdentity()?.session, capability)

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router"
 
-import { NAV } from "@/components/nav"
+import { navigationFor } from "@/components/nav"
+import { useCanUse, useIdentity } from "@/lib/identity"
 import { useT } from "@/i18n"
 import {
   CommandDialog,
@@ -16,6 +17,8 @@ import { OPEN_COMMAND_MENU } from "@/lib/command-menu"
 
 /** ⌘K / Ctrl+K: jump to a page or search the ontology's concepts. */
 export function CommandMenu() {
+  const identity = useIdentity()
+  const canReadKnowledge = useCanUse("knowledge.read")
   const t = useT()
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
@@ -50,7 +53,7 @@ export function CommandMenu() {
       <CommandInput placeholder={t("cmd.placeholder")} value={text} onValueChange={setText} />
       <CommandList>
         <CommandEmpty>{t("cmd.empty")}</CommandEmpty>
-        {text.trim() && (
+        {text.trim() && canReadKnowledge && (
           <CommandGroup heading={t("cmd.concepts")}>
             <CommandItem
               value={`concept-search ${text}`}
@@ -61,7 +64,7 @@ export function CommandMenu() {
           </CommandGroup>
         )}
         <CommandGroup heading={t("cmd.pages")}>
-          {NAV.map((n) => (
+          {navigationFor(identity?.session).map((n) => (
             <CommandItem key={n.path} value={`${n.label} ${n.hint}`} onSelect={() => go(n.path)}>
               <n.icon aria-hidden /> {n.label}
               <span className="ml-auto text-xs text-muted-foreground">{n.hint}</span>

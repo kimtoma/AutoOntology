@@ -788,11 +788,29 @@ def ontology(
     ),
 ) -> None:
     """Show the operational ontology: revision, sources and counts."""
+    from autoontology.security.policy import AccessError
     from autoontology.store.operations import OperationsError, read_snapshot
 
     settings = _settings()
     try:
-        snap = read_snapshot(_store(settings), revision, preview=preview, with_model=False)
+        store = _store(settings)
+        snap = read_snapshot(store, revision, preview=preview)
+        if snap is not None:
+            from autoontology.security.views import knowledge_view
+            from autoontology.store.operations import visible_revision
+
+            view = knowledge_view(
+                store,
+                snap,
+                additional_actions=("history.read",)
+                if revision is not None and visible_revision(store, revision)
+                else (),
+            )
+            snap = view.snapshot
+    except AccessError as exc:
+        from autoontology.security.cli import _fail as authority_fail
+
+        authority_fail(exc)
     except OperationsError as exc:
         _fail(str(exc))
     if snap is None:

@@ -128,6 +128,16 @@ def requires(action):
     return decorate
 
 
+def authorize_any(store, action, *, conn=None):
+    """Enter a resource-selecting read; this alone never authorizes whole data."""
+    service = _identity(store)
+    if conn is None:
+        with service._read() as read:
+            return authorize_any(store, action, conn=read)
+    actor = current_actor(store, conn=conn)
+    return service.require_any(actor, action, conn=conn) if actor is not None else None
+
+
 def audit_effect(store, decision, target, detail, *, conn):
     """Append a controlled effect receipt in the same transaction as its mutation."""
     if decision is not None:
