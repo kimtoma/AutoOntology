@@ -1,5 +1,9 @@
 # Public implementation checkpoint — 2026-11-01
 
+A subsequent user-authorized [side-by-side Cloudflare deployment](../deploy/cloudflare/VERSIONS.md)
+lets visitors choose classic and Ontology Ops. The source-validation checkpoint
+below remains unchanged.
+
 This is an incomplete local-development alpha (`0.3.0a1`). This source snapshot
 adds the implemented features below to the earlier published checkpoint. It does
 not deploy a service, change existing user data, or establish production readiness.

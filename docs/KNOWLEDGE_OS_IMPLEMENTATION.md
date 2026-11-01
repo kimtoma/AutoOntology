@@ -503,3 +503,22 @@ See [the contract and remaining independent-marker/owner-ceremony work](ENROLLME
 Actual private-copy UI flow captures, full regression and checkpoint evidence
 are recorded separately. This stage does not complete owner recovery or bounded
 autonomy and does not update the frozen review or public applications.
+
+
+## Deployment C1 — selectable classic and Ontology Ops versions
+
+The user separately authorized public side-by-side deployment after the local
+development pause. An authenticated comparison page opens fixed classic/next
+hosts with independent audience-bound gateway sessions. The existing classic
+source/workspace/tunnel are preserved. The newer application uses an independent
+fictional sample, PostgreSQL cluster, exports and runtime; no source is retired.
+See [deployment controls and actual acceptance](../deploy/cloudflare/VERSIONS.md).
+
+Worker20tests, actual loopback proxy5tests, Ruff and shell syntax checks passed.
+Real external acceptance completed four Codex calls across both versions,
+graphs, cited evidence, customer-count40SQL, CSV/Turtle downloads, new original
+download, saved-result replay, fictional comparison, isolation and web restart.
+Twenty-one light-mode captures and precise restoration/rollback references remain
+private. Broader application code/bundle stays identical to the validated public
+alpha snapshot. This deployment does not resume the unfinished development goal,
+mint historical approval or establish a measured business outcome.
