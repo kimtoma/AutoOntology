@@ -17,6 +17,7 @@ app = typer.Typer(
     help="AutoOntology: build one ontology from structured and unstructured enterprise data.",
     no_args_is_help=True,
     add_completion=False,
+    pretty_exceptions_show_locals=False,
 )
 source_app = typer.Typer(help="Register structured and document sources.", no_args_is_help=True)
 app.add_typer(source_app, name="source")

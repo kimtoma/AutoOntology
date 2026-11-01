@@ -96,6 +96,10 @@ def verify_binding(store, settings, source_name, binding):
         from autoontology.engine.build import source_set
 
         valid = source_set([source])[0]["config"] == binding.get("legacy_source_config")
+    from autoontology.recovery.read_review import allow_binding
+
+    if allow_binding(store, settings, source, binding):
+        valid = True
     if not valid:
         raise SqlError(
             "The source connection changed after this publication. Review the new target before querying it.",

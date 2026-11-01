@@ -1,5 +1,9 @@
 # Ontology Ops handoff and continuation plan
 
+For subsequent implemented additions, see the
+[2026-11-01 public checkpoint](PUBLIC_CHECKPOINT.md). The record below remains
+the historical published checkpoint.
+
 Recorded on 2026-10-31 (Asia/Seoul) for the requested wrap-up and GitHub sync.
 This is an alpha development checkpoint. The full Knowledge OS objective is not
 complete. Do not resume feature development until the user resumes the work.

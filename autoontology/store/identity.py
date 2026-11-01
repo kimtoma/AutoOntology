@@ -137,7 +137,7 @@ class Identity:
                     try:
                         self.require(actor, action, domains=[domain], conn=conn)
                     except AccessError as error:
-                        if error.status != 403:
+                        if error.status != 403 and error.code != "restored_catalog_review_required":
                             raise
                     else:
                         allowed.append(domain)
@@ -308,6 +308,9 @@ class Identity:
         capability = CAPABILITIES.get(action) if isinstance(action, str) else None
         if capability is None:
             raise AccessError("No permission is defined for this operation.")
+        from autoontology.recovery.transfer import require_action
+
+        require_action(self.store, action, conn=conn)
         selected = self._domains(conn, domains)
         if actor.kind == "human":
             allowed = self._human_allowed(conn, actor.principal_id, action, selected)
@@ -356,6 +359,30 @@ class Identity:
                     raise
         raise AccessError()
 
+    def _seed_owner(self, conn, workspace, username, name, password_record, ids):
+        """Seed one verified-empty snapshot inside a trusted local ceremony."""
+        now = self.clock()
+        ws, org, pid, domain = ids
+        conn.execute("INSERT INTO identity_state VALUES(1,?,?,?,?,?)", (org, ws, workspace, 1, now))
+        conn.execute(
+            "INSERT INTO identity_domains VALUES(?,?,?,?,?)",
+            (domain, ws, "general", "General", now),
+        )
+        conn.execute(
+            "INSERT INTO identity_principals VALUES(?,?,?,'human','active',?,1,?)",
+            (pid, username, name, password_record, now),
+        )
+        conn.execute(
+            "INSERT INTO identity_grants VALUES(?,?,?,?,?,?,?,NULL)",
+            (uuid.uuid4().hex, pid, ws, "*", "admin", pid, now),
+        )
+        for source in conn.execute("SELECT id FROM sources"):
+            conn.execute(
+                "INSERT INTO identity_source_domains VALUES(?,1,?,?,?)",
+                (source[0], domain, pid, now),
+            )
+        return conn.execute("SELECT * FROM identity_principals WHERE id=?", (pid,)).fetchone()
+
     def bootstrap(self, workspace, username, name, password):
         """Trusted host-owner enrollment only; never expose this as an anonymous API."""
         username, name = _username(username), _name(name)
@@ -369,31 +396,10 @@ class Identity:
                     "identity_already_configured",
                     409,
                 )
-            now = self.clock()
             ws, org, pid, domain = (uuid.uuid4().hex for _ in range(4))
-            conn.execute(
-                "INSERT INTO identity_state VALUES(1,?,?,?,?,?)", (org, ws, workspace, 1, now)
+            principal = self._seed_owner(
+                conn, workspace, username, name, password_record, (ws, org, pid, domain)
             )
-            conn.execute(
-                "INSERT INTO identity_domains VALUES(?,?,?,?,?)",
-                (domain, ws, "general", "General", now),
-            )
-            conn.execute(
-                "INSERT INTO identity_principals VALUES(?,?,?,'human','active',?,1,?)",
-                (pid, username, name, password_record, now),
-            )
-            conn.execute(
-                "INSERT INTO identity_grants VALUES(?,?,?,?,?,?,?,NULL)",
-                (uuid.uuid4().hex, pid, ws, "*", "admin", pid, now),
-            )
-            for source in conn.execute("SELECT id FROM sources"):
-                conn.execute(
-                    "INSERT INTO identity_source_domains VALUES(?,1,?,?,?)",
-                    (source[0], domain, pid, now),
-                )
-            principal = conn.execute(
-                "SELECT * FROM identity_principals WHERE id=?", (pid,)
-            ).fetchone()
             issued = self._issue(conn, principal, SESSION_TTL)
             actor = Actor(
                 pid,

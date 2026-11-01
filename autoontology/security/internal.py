@@ -18,6 +18,9 @@ from autoontology.security.policy import AccessError
 def identity_enabled(home):
     """Probe without creating a store or migrating during a CLI dry-run."""
     path = Path(home).absolute() / "autoontology.db"
+    from autoontology.security.owner_registry import guard_missing_database
+
+    guard_missing_database(path)
     if not path.exists():
         return False
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:

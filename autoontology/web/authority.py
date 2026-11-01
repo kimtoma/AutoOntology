@@ -90,7 +90,8 @@ _policies(
     "settings.manage", "POST", "/api/providers/test", "/api/settings/test", "/api/settings/restart"
 )
 _policies("settings.manage", "PUT", "/api/settings")
-_policies("validation.run", "POST", "/api/ops/validate")
+_policies("validation.run", "POST", "/api/ops/validate", "/api/evaluation/compare")
+_policies("validation.run", "GET", "/api/evaluation/sample")
 _policies("knowledge.publish", "POST", "/api/ops/publish")
 _policies("candidate.prepare", "POST", "/api/ops/restores", "/api/playground/index")
 _policies("candidate.read", "GET", "/api/ops/restores", "/api/ops/restores/{proposal}")

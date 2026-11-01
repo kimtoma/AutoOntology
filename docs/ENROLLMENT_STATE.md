@@ -76,3 +76,29 @@ database remain included. Codex recreates its isolated home from the host login;
 use the existing document-tool setup procedure before processing new documents
 on a restored workspace without its tool cache. Other unexpected file symlinks
 are refused. Earlier private checkpoints are retained unchanged.
+
+
+## Independent host pin and legacy adoption
+
+[The host-owned pin](HOST_OWNER_PIN.md) supplements the database classifier.
+An active pin binds a canonical database to the exact immutable adoption audit
+event; pending, missing, rolled-back or mismatched pairs fail closed. A missing
+pinned database is not recreated by native probes or Store connections. The new
+local `auth owner-adopt` ceremony verifies an existing human workspace admin,
+preserves IDs and uses reserve/commit/finalize with explicit resume. Identity
+foreign-key corruption is refused before pinning. Checkpoints retain and verify
+the pair without automatically adopting a restored home.
+
+This advances only the marker/existing-identity portion of the original remaining
+boundary above. Initial enrollment, password recovery, restored-home rebind and
+complete UI/CLI owner-gate acceptance remain pending. No normal-workspace
+enrollment, new model call, UI layout change or public deployment is implied.
+
+
+## Journaled first enrollment
+
+[The local first-owner command](OWNER_ENROLLMENT.md) reserves the independent pin
+before committing identity, resumes the same operation after interruption, and
+saves a private session only after activation. Pending first-enrollment snapshots
+are preserved and verified without granting a restored copy authority. Credential
+recovery, explicit rebind and the full owner gate remain pending.

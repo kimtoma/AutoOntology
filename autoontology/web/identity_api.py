@@ -76,7 +76,23 @@ def install(app, api):
     def status(response: Response):
         response.headers["Cache-Control"] = "no-store"
         state = service.status()
-        return {"configured": state["configured"], "workspace_id": state.get("workspace_id")}
+        result = {"configured": state["configured"], "workspace_id": state.get("workspace_id")}
+        if state["configured"]:
+            from autoontology.security import owner_registry as host
+
+            marker = host.read(api.store.path)
+            if marker is not None and marker.get("version") == 4:
+                from autoontology.recovery.transfer_registry import guard_binding, read
+
+                guard_binding(marker)
+                from autoontology.recovery.read_review import status as read_status
+
+                read(marker["workspace_id"])
+                result["restoration"] = {
+                    "catalog_ready": read_status(api.store)["query_ready"],
+                    "source_authority_retired": True,
+                }
+        return result
 
     @router.post("/login")
     def login(body: LoginIn, request: Request, response: Response):

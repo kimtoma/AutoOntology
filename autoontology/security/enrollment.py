@@ -46,7 +46,7 @@ def _mismatch():
     )
 
 
-def enrollment_state(conn, *, bound_workspace=None):
+def database_enrollment_state(conn, *, bound_workspace=None):
     """Return verified state or None for an untouched local/legacy workspace.
 
     The caller holds one read or write transaction so metadata checks cannot
@@ -115,3 +115,15 @@ def enrollment_state(conn, *, bound_workspace=None):
         return None
     except sqlite3.DatabaseError:
         raise _missing() from None
+
+
+def enrollment_state(conn, *, bound_workspace=None):
+    """Classify one database snapshot, then enforce its independent host pin."""
+    from autoontology.security.owner_registry import check
+
+    state = database_enrollment_state(conn, bound_workspace=bound_workspace)
+    try:
+        check(conn, state)
+    except sqlite3.DatabaseError:
+        raise _missing() from None
+    return state

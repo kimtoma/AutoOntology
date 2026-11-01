@@ -1,5 +1,7 @@
 # AutoOntology
 
+[Local development checkpoint (2026-11-01)](docs/PUBLIC_CHECKPOINT.md)
+
 **English** | [한국어](README.ko.md)
 
 **Development preview: 0.3.0a1.** This alpha adds Ontology Ops, versioned review and
@@ -712,8 +714,12 @@ are overridden.
 ## Security notes
 
 - The service and the engine backend bind to `127.0.0.1`. Requests with a non-local
-  `Host` or a cross-site `Origin` are rejected. **There is no authentication:** do not
-  expose either port, and do not put them behind a public proxy.
+  `Host` or a cross-site `Origin` are rejected by default. A local workspace starts
+  without individual login; its OS owner can explicitly enable the development
+  [first-owner enrollment](docs/OWNER_ENROLLMENT.md). Complete owner recovery and
+  the full authority audit remain in progress. Keep both ports private and use only
+  the documented external gateway controls; a shared gateway password is separate
+  from individual identity.
 - Document text is treated as untrusted. It is quoted inside delimited prompt blocks,
   model output is validated against schemas (fail-closed), and the OKF bundle escapes
   Markdown and HTML in extracted text. If you render the `.md` files as HTML elsewhere,
@@ -765,8 +771,8 @@ tailscaled marks a request as Funnel traffic); a login outside
 tag instead of a user) get no identity header and are refused the same way; open the UI
 from a device logged in as a user. Cross-origin writes stay
 refused on that hostname too. `/api/status` lists the hostnames under `remote` (never the
-logins). **Never use `tailscale funnel`** for AutoOntology: it has no authentication of
-its own.
+logins). **Never use `tailscale funnel`** for AutoOntology: this application's
+remote access controls do not support Funnel traffic.
 
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 

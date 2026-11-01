@@ -312,4 +312,8 @@ def commands(settings_for, store_for, fail):
 
     install_collection(app, settings_for, store_for)
 
+    from autoontology.comparison_cli import install as install_comparison
+
+    install_comparison(app, settings_for, store_for)
+
     return app

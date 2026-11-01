@@ -23,7 +23,7 @@ import { useStatus } from "@/hooks/queries"
 import { cn } from "@/lib/utils"
 import { GATEWAY_ACCESS, SHARED_DEMO } from "@/lib/demo"
 import { useT } from "@/i18n"
-import { CanUse, IdentityControls } from "@/components/identity-gate"
+import { CanUse, IdentityControls, RestoredWorkspaceNotice } from "@/components/identity-gate"
 import { useCanUse, useIdentity } from "@/lib/identity"
 
 function StatusBadge() {
@@ -212,6 +212,7 @@ export function AppShell() {
             </div>
           </div>
         </header>
+        <RestoredWorkspaceNotice />
         {GATEWAY_ACCESS && (
           <div className="console-remote-note" role="note">
             <span>{t(SHARED_DEMO ? "shell.demo.hint" : "shell.remote.hint")}</span>

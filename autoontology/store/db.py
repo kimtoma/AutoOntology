@@ -724,6 +724,12 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE TRIGGER collection_events_no_delete BEFORE DELETE ON collection_events BEGIN SELECT RAISE(ABORT,'immutable collection event'); END;
         """,
     ),
+    (
+        20,
+        """
+        CREATE INDEX identity_events_sha_idx ON identity_events(sha256);
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
@@ -966,7 +972,10 @@ class Store:
     """Thin typed wrapper. Opens a short-lived connection per call (safe across threads)."""
 
     def __init__(self, path: Path) -> None:
+        from autoontology.security.owner_registry import guard_missing_database
+
         self.path = Path(path)
+        guard_missing_database(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.migrate()
         # The store can hold external DB credentials (database sources): owner-only.
@@ -978,6 +987,9 @@ class Store:
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
+        from autoontology.security.owner_registry import guard_missing_database
+
+        guard_missing_database(self.path)
         conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000)
         conn.row_factory = sqlite3.Row
         try:
@@ -986,6 +998,7 @@ class Store:
             conn.execute("PRAGMA foreign_keys=ON")
             with conn:  # one transaction per call
                 yield conn
+                guard_missing_database(self.path)
         finally:
             conn.close()
 
@@ -993,6 +1006,9 @@ class Store:
     def _immediate(self) -> Iterator[sqlite3.Connection]:
         """A connection inside ``BEGIN IMMEDIATE`` (write lock up front): check-then-write
         sequences in it are atomic across threads and processes."""
+        from autoontology.security.owner_registry import guard_missing_database
+
+        guard_missing_database(self.path)
         conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
         conn.row_factory = sqlite3.Row
         try:
@@ -1002,6 +1018,7 @@ class Store:
             conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             try:
                 yield conn
+                guard_missing_database(self.path)
                 conn.execute("COMMIT")
             except BaseException:
                 if conn.in_transaction:

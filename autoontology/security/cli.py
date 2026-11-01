@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import stat
 import sys
 import time
@@ -116,6 +117,8 @@ GROUPS = {
         "feedback-case": "review.suggest",
         "feedback-resolve": "feedback.manage",
         "check-remove": "checks.edit",
+        "comparison-sample": "validation.run",
+        "compare": "validation.run",
         "quality": "candidate.read",
         "quality-version": "candidate.read",
         "quality-prepare": "review.suggest",
@@ -237,6 +240,36 @@ def _password(path, *, new=False):
         ) from None
 
 
+def _enrollment_session(settings, result, username, password):
+    """Save/reuse only this owner session after the host pin became active."""
+    service = Identity(Store.for_home(settings.home))
+    path = credential_path(settings)
+    if path.exists() or path.is_symlink():
+        saved = load_credential(
+            path, workspace_id=result["workspace_id"], origin=settings.service_url
+        )
+        actor = service.authenticate(saved.secret.reveal())
+        if actor.principal_id != result["principal_id"] or actor.kind != "human":
+            raise AccessError(
+                "The existing credential file belongs to another principal.",
+                "credential_file_exists",
+                409,
+            )
+    else:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        issued = service.login(username, password, peer="local-cli-enrollment")
+        try:
+            saved = save_credential(
+                path, issued, workspace_id=result["workspace_id"], origin=settings.service_url
+            )
+        except (AccessError, OSError):
+            service.revoke_credential(
+                service.authenticate(issued.secret.reveal()), issued.credential_id
+            )
+            raise
+    return {**result, "session": saved.public(), "credential_file": str(path)}
+
+
 class AuthorityGroup(TyperGroup):
     """Report effect-time denials with the same stable contract as entry-time denials."""
 
@@ -329,6 +362,350 @@ def install(app, settings_for):
     for group in app.registered_groups:
         if group.name in GROUPS:
             group.typer_instance.callback()(group_boundary(group.name, GROUPS[group.name]))
+
+    @auth.command("enroll")
+    def enroll_owner(
+        username: str,
+        workspace: str = typer.Option(..., "--workspace"),
+        name: str = typer.Option(..., "--name"),
+        password_file: Path = typer.Option(None, "--password-file"),
+        confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner"),
+        resume: bool = typer.Option(False, "--resume"),
+    ):
+        """Enroll the first owner locally, pin the workspace, and save a private session."""
+        from autoontology.security.owner_enrollment import enroll
+
+        try:
+            if not confirm_local_owner:
+                raise AccessError(
+                    "Confirm the local OS-owner ceremony with --confirm-local-owner.",
+                    "local_owner_confirmation_required",
+                    400,
+                )
+            if _CREDENTIAL_PATH.get() is not None:
+                raise AccessError(
+                    "An application credential cannot authorize first enrollment.",
+                    "local_owner_required",
+                    403,
+                )
+            settings = settings_for()
+            password = _password(password_file, new=True)
+            result = enroll(
+                Store.for_home(settings.home), workspace, username, name, password, resume=resume
+            )
+            _emit(_enrollment_session(settings, result, username, password))
+        except AccessError as error:
+            _fail(error)
+        except (OSError, sqlite3.DatabaseError):
+            _fail(
+                AccessError(
+                    "Enrollment or session saving could not finish. Preserve the database and pin; use --resume for a pending enrollment or auth login for an active enrollment.",
+                    "owner_enrollment_incomplete",
+                    503,
+                )
+            )
+
+    @auth.command("restore-read-review")
+    def restore_read_review(
+        destination: Path,
+        confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner"),
+    ):
+        """Inspect the exact restored local SQL target without enabling a query."""
+        from autoontology.recovery.read_review import prepare
+
+        try:
+            if not confirm_local_owner or _CREDENTIAL_PATH.get() is not None:
+                raise AccessError(
+                    "Use the explicit local OS-owner review without an application credential.",
+                    "local_owner_required",
+                    403,
+                )
+            _emit(prepare(destination))
+        except AccessError as error:
+            _fail(error)
+
+    @auth.command("restore-read-confirm")
+    def restore_read_confirm(
+        destination: Path,
+        review_sha256: str = typer.Option(..., "--review-sha256"),
+        confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner"),
+        acknowledge_new_data_target: bool = typer.Option(False, "--acknowledge-new-data-target"),
+        resume: bool = typer.Option(False, "--resume"),
+    ):
+        """Confirm one exact physical target review; keep ingestion and business effects held."""
+        from autoontology.recovery.read_review import confirm
+
+        try:
+            if (
+                not confirm_local_owner
+                or not acknowledge_new_data_target
+                or _CREDENTIAL_PATH.get() is not None
+            ):
+                raise AccessError(
+                    "Confirm the exact local read target with --confirm-local-owner --acknowledge-new-data-target; application credentials cannot authorize this ceremony.",
+                    "local_owner_required",
+                    403,
+                )
+            _emit(confirm(destination, review_sha256, resume=resume))
+        except AccessError as error:
+            _fail(error)
+
+    @auth.command("restore-activate")
+    def restore_activate(
+        destination: Path,
+        username: str,
+        workspace_id: str = typer.Option(..., "--workspace-id"),
+        password_file: Path = typer.Option(None, "--password-file"),
+        confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner"),
+        confirm_source_offline: bool = typer.Option(False, "--confirm-source-offline"),
+        revoke_all_sessions: bool = typer.Option(False, "--revoke-all-sessions"),
+        resume: bool = typer.Option(False, "--resume"),
+    ):
+        """Retire an offline source and activate restored identity; hold unreviewed consumers."""
+        from autoontology.recovery.transfer import activate
+
+        try:
+            if not confirm_local_owner or not confirm_source_offline or not revoke_all_sessions:
+                raise AccessError(
+                    "Confirm local ownership, the stopped original and workspace-wide session revocation with --confirm-local-owner --confirm-source-offline --revoke-all-sessions.",
+                    "restore_confirmation_required",
+                    400,
+                )
+            if _CREDENTIAL_PATH.get() is not None:
+                raise AccessError(
+                    "Application credentials cannot authorize host transfer.",
+                    "local_owner_required",
+                    403,
+                )
+            _emit(
+                activate(
+                    destination,
+                    username,
+                    _password(password_file, new=True),
+                    workspace_id=workspace_id,
+                    resume=resume,
+                )
+            )
+        except AccessError as error:
+            _fail(error)
+
+    @auth.command("restore-stage")
+    def restore_stage(
+        checkpoint: Path,
+        destination: Path,
+        workspace_id: str = typer.Option(..., "--workspace-id"),
+        request_id: str = typer.Option(..., "--request-id"),
+        ui_port: int = typer.Option(..., "--ui-port"),
+        backend_port: int = typer.Option(..., "--backend-port"),
+        postgres_port: int = typer.Option(..., "--postgres-port"),
+        copy_mode: str = typer.Option("clone", "--copy-mode"),
+        confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner"),
+        resume: bool = typer.Option(False, "--resume"),
+    ):
+        """Prepare a new inactive runtime; do not transfer authority or start services."""
+        from autoontology.recovery.staging import stage_restore
+
+        try:
+            if not confirm_local_owner:
+                raise AccessError(
+                    "Confirm the local OS-owner ceremony with --confirm-local-owner.",
+                    "local_owner_confirmation_required",
+                    400,
+                )
+            if _CREDENTIAL_PATH.get() is not None:
+                raise AccessError(
+                    "Application credentials cannot authorize host restoration.",
+                    "local_owner_required",
+                    403,
+                )
+            _emit(
+                stage_restore(
+                    checkpoint,
+                    destination,
+                    workspace_id=workspace_id,
+                    request_id=request_id,
+                    ports={"ui": ui_port, "backend": backend_port, "postgres": postgres_port},
+                    copy_mode=copy_mode,
+                    resume=resume,
+                )
+            )
+        except AccessError as error:
+            _fail(error)
+
+    @auth.command("restore-status")
+    def restore_status(
+        destination: Path,
+        confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner"),
+    ):
+        """Inspect an inactive reservation without opening its database."""
+        from autoontology.recovery.staging import restore_status as inspect_restore
+
+        try:
+            if not confirm_local_owner:
+                raise AccessError(
+                    "Confirm local OS-owner diagnostics with --confirm-local-owner.",
+                    "local_owner_confirmation_required",
+                    400,
+                )
+            if _CREDENTIAL_PATH.get() is not None:
+                raise AccessError(
+                    "Application credentials cannot authorize host restoration.",
+                    "local_owner_required",
+                    403,
+                )
+            _emit(inspect_restore(destination))
+        except AccessError as error:
+            _fail(error)
+
+    @auth.command("backup-verify")
+    def backup_verify(
+        checkpoint: Path,
+        confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner"),
+    ):
+        """Inspect a complete offline backup; never activate or start its runtime."""
+        from autoontology.recovery.checkpoint import verify_bundle
+
+        try:
+            if not confirm_local_owner:
+                raise AccessError(
+                    "Confirm local OS-owner backup inspection with --confirm-local-owner.",
+                    "local_owner_confirmation_required",
+                    400,
+                )
+            if _CREDENTIAL_PATH.get() is not None:
+                raise AccessError(
+                    "An application credential cannot authorize host backup inspection.",
+                    "local_owner_required",
+                    403,
+                )
+            # Deliberately no Settings/Store construction: the current home may be lost.
+            _emit(verify_bundle(checkpoint))
+        except AccessError as error:
+            _fail(error)
+
+    @auth.command("owner-status")
+    def owner_status(confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner")):
+        """Inspect host-local enrollment/recovery state without creating a store."""
+        from autoontology.security.owner_recovery import local_status
+
+        try:
+            if not confirm_local_owner:
+                raise AccessError(
+                    "Confirm local OS-owner diagnostics with --confirm-local-owner.",
+                    "local_owner_confirmation_required",
+                    400,
+                )
+            if _CREDENTIAL_PATH.get() is not None:
+                raise AccessError(
+                    "Application credentials do not authorize local owner diagnostics.",
+                    "local_owner_required",
+                    403,
+                )
+            _emit(local_status(settings_for().home / "autoontology.db"))
+        except AccessError as error:
+            _fail(error)
+        except (OSError, sqlite3.DatabaseError):
+            _fail(
+                AccessError(
+                    "Preserve the host pin and database; local owner diagnostics could not verify this workspace.",
+                    "identity_configuration_missing",
+                    503,
+                )
+            )
+
+    @auth.command("owner-recover")
+    def owner_recover(
+        username: str,
+        workspace_id: str = typer.Option(..., "--workspace-id"),
+        request_id: str = typer.Option(None, "--request-id"),
+        password_file: Path = typer.Option(None, "--password-file"),
+        confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner"),
+        revoke_all_sessions: bool = typer.Option(False, "--revoke-all-sessions"),
+        resume: bool = typer.Option(False, "--resume"),
+    ):
+        """Recover an existing admin password locally; revoke all sessions and delegations."""
+        from autoontology.security.owner_recovery import recover
+
+        try:
+            if not confirm_local_owner:
+                raise AccessError(
+                    "Confirm the local OS-owner ceremony with --confirm-local-owner.",
+                    "local_owner_confirmation_required",
+                    400,
+                )
+            if not revoke_all_sessions:
+                raise AccessError(
+                    "Confirm workspace-wide session/delegation revocation with --revoke-all-sessions.",
+                    "recovery_scope_confirmation_required",
+                    400,
+                )
+            if _CREDENTIAL_PATH.get() is not None:
+                raise AccessError(
+                    "An application credential cannot authorize local owner recovery.",
+                    "local_owner_required",
+                    403,
+                )
+            settings = settings_for()
+            _emit(
+                recover(
+                    Store.for_home(settings.home),
+                    username,
+                    _password(password_file, new=True),
+                    workspace_id=workspace_id,
+                    request_id=request_id,
+                    resume=resume,
+                )
+            )
+        except AccessError as error:
+            _fail(error)
+        except (OSError, sqlite3.DatabaseError):
+            _fail(
+                AccessError(
+                    "Credential recovery could not finish. Preserve the database and pin; resume the same request explicitly.",
+                    "owner_recovery_incomplete",
+                    503,
+                )
+            )
+
+    @auth.command("owner-adopt")
+    def owner_adopt(
+        username: str,
+        password_file: Path = typer.Option(None, "--password-file"),
+        confirm_local_owner: bool = typer.Option(False, "--confirm-local-owner"),
+        resume: bool = typer.Option(False, "--resume"),
+    ):
+        """Pin an existing complete identity under the local OS owner's registry."""
+        from autoontology.security.owner_adoption import adopt
+
+        try:
+            if not confirm_local_owner:
+                raise AccessError(
+                    "Confirm the local OS-owner ceremony with --confirm-local-owner.",
+                    "local_owner_confirmation_required",
+                    400,
+                )
+            if _CREDENTIAL_PATH.get() is not None:
+                raise AccessError(
+                    "An application credential cannot authorize host-owner adoption.",
+                    "local_owner_required",
+                    403,
+                )
+            settings = settings_for()
+            _emit(
+                adopt(
+                    Store.for_home(settings.home), username, _password(password_file), resume=resume
+                )
+            )
+        except AccessError as error:
+            _fail(error)
+        except (OSError, sqlite3.DatabaseError):
+            _fail(
+                AccessError(
+                    "Owner adoption could not finish; preserve its pending pin and retry with --resume.",
+                    "identity_configuration_missing",
+                    503,
+                )
+            )
 
     @auth.command("login")
     def login(username: str, password_file: Path = typer.Option(None, "--password-file")):

@@ -12,6 +12,16 @@ Version 0.3.0a1 is an Ontology Ops development preview. The
 [handoff and remaining plan](SESSION_HANDOFF.md) identifies implemented flows and
 unfinished owner recovery, agent autonomy and Knowledge OS acceptance gates.
 
+For optional individual workspace login, the trusted OS owner can use the
+[local first-owner enrollment procedure](OWNER_ENROLLMENT.md). It preserves existing
+knowledge and saves a private CLI session. This development feature does not
+complete metadata recovery or authorize a new public deployment.
+
+For a forgotten individual administrator password in a complete pinned workspace,
+use [local owner credential recovery](OWNER_CREDENTIAL_RECOVERY.md). It preserves
+knowledge but explicitly revokes all workspace sessions and agent delegations;
+normal logout/login then saves a fresh private session.
+
 This guide is for people who know their business data (contracts, invoices, customers,
 policies, manuals) but are not data engineers. It walks you from an empty computer to your
 own ontology, alone, using the commands and screens exactly as they are. Every time in this

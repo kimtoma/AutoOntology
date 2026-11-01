@@ -100,6 +100,11 @@ class UsageTraces:
                     "workspace_id": authority.workspace_id,
                     "policy_version": authority.policy_version,
                 }
+            from autoontology.recovery.read_review import trace_binding
+
+            restored = trace_binding(self.store, conn)
+            if restored is not None:
+                data["binding"]["restored_target"] = restored
             conn.execute(
                 "INSERT INTO usage_traces (id,workspace,kind,revision,publication_id,status,conversation_id,owner_pid,started_at,finished_at,data_json,sha256,principal_id,identity_workspace) VALUES(?,?,?,?,?,'running',?,?,?,NULL,?,NULL,?,?)",
                 (

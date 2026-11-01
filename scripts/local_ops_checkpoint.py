@@ -91,12 +91,38 @@ def verify(checkpoint: Path) -> dict:
     if manifest["sha256"] != hashes(checkpoint / "payload"):
         raise ValueError("checkpoint integrity check failed")
     database = checkpoint / "payload/workspace/autoontology.db"
+    marker_path = checkpoint / "payload/host-owner.json"
+    if (manifest.get("host_pin_present") or marker_path.exists()) and not database.exists():
+        raise ValueError("host pin checkpoint is missing its database")
+    if (
+        "host_pin_present" in manifest
+        and bool(manifest["host_pin_present"]) != marker_path.exists()
+    ):
+        raise ValueError("host pin manifest does not match its payload")
     if database.exists():
+        if manifest.get("host_pin_present") and not marker_path.exists():
+            raise ValueError("checkpoint is missing its host pin")
         # A checkpoint is offline and consolidated. Plain mode=ro still creates
         # WAL sidecars, changing the very payload whose hashes we verified.
         with closing(sqlite3.connect(f"file:{database}?mode=ro&immutable=1", uri=True)) as conn:
+            conn.row_factory = sqlite3.Row
             if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite integrity check failed")
+            if marker_path.exists():
+                from autoontology.security.owner_registry import check_snapshot, decode_snapshot
+
+                marker = decode_snapshot(marker_path.read_bytes(), manifest["host_database"])
+                conn.execute("BEGIN")
+                check_snapshot(conn, marker)
+            elif (
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_events'"
+                ).fetchone()
+                and conn.execute(
+                    "SELECT 1 FROM identity_events WHERE action='identity.owner_pinned' LIMIT 1"
+                ).fetchone()
+            ):
+                raise ValueError("pinned database backup is missing its host pin")
     return manifest
 
 
@@ -167,6 +193,11 @@ def create(runtime: Path, label: str, *, copy_mode="auto") -> Path:
         with closing(sqlite3.connect(runtime / "workspace/autoontology.db")) as source:
             with closing(sqlite3.connect(payload / "workspace/autoontology.db")) as target:
                 source.backup(target)
+        from autoontology.security.owner_registry import read as read_host_pin
+
+        host_pin = read_host_pin(settings.home / "autoontology.db")
+        if host_pin is not None:
+            (payload / "host-owner.json").write_text(json.dumps(host_pin, sort_keys=True))
         for name in ("exports", "postgres"):
             shutil.copytree(
                 runtime / name,
@@ -190,6 +221,12 @@ def create(runtime: Path, label: str, *, copy_mode="auto") -> Path:
             "runtime": str(runtime),
             "copy_mode": copy_mode,
             "excluded_runtime_caches": ["workspace/kordoc", "workspace/run/codex-home"],
+            "host_database": (
+                host_pin["database"]
+                if host_pin is not None
+                else str((settings.home / "autoontology.db").resolve())
+            ),
+            "host_pin_present": host_pin is not None,
             "sha256": hashes(payload),
         }
         (staging / "manifest.json").write_text(json.dumps(manifest, indent=2))

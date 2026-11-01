@@ -73,3 +73,22 @@ The subsequent [shared enrollment-state boundary](ENROLLMENT_STATE.md) implement
 the database classification and corresponding UI cache/exception behavior.
 The observations above remain the preserved audit at 56af1c0; the independent
 host marker and supported owner ceremony are still implementation work.
+
+## Subsequent implementation
+
+Stage 27 adds the independent host pin and explicit legacy adoption.
+Stage 28 adds [journaled first enrollment and native session setup](OWNER_ENROLLMENT.md),
+including pending first-enrollment backup validation. Historical audit observations
+above are retained; they are not the current implementation verdict. Credential
+recovery, explicit restored-home rebind, UI handoff and the full acceptance gate
+remain incomplete.
+
+
+## Subsequent credential recovery unit
+
+Stage 29 adds [explicit local credential recovery](OWNER_CREDENTIAL_RECOVERY.md)
+for a complete pinned workspace, with current-admin verification, workspace-wide
+session/delegation revocation, policy-bound review invalidation and resumable
+receipts. It does not reconstruct metadata or rebind a restored canonical home.
+Historical remaining-scope notes above describe their original stage boundaries;
+the full owner/effect gate and Knowledge OS roadmap are still incomplete.

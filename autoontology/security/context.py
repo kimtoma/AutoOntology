@@ -15,6 +15,7 @@ from functools import wraps
 from pathlib import Path
 
 from autoontology.security.enrollment import enrollment_state
+from autoontology.security.owner_registry import database_path
 from autoontology.security.policy import CAPABILITIES, AccessError, Actor
 
 
@@ -43,7 +44,7 @@ def acting_as(store, actor):
     with service._read() as conn:
         verified = service._actor(conn, actor)
         workspace = service._state(conn)["workspace_id"]
-    token = _IDENTITY.set(ExecutionIdentity(store.path.resolve(), workspace, verified))
+    token = _IDENTITY.set(ExecutionIdentity(Path(database_path(store.path)), workspace, verified))
     try:
         yield verified
     finally:
@@ -56,7 +57,7 @@ def current_actor(store, *, conn=None):
         with service._read() as read:
             return current_actor(store, conn=read)
     execution = _IDENTITY.get()
-    if execution is not None and execution.database != store.path.resolve():
+    if execution is not None and execution.database != Path(database_path(store.path)):
         raise AccessError(
             "An authenticated execution cannot change or lose its workspace.",
             "execution_workspace_mismatch",

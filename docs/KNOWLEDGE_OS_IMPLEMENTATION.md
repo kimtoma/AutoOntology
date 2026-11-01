@@ -1,5 +1,9 @@
 # Knowledge OS implementation and recovery ledger
 
+For subsequent implemented additions, see the
+[2026-11-01 public checkpoint](PUBLIC_CHECKPOINT.md). The record below remains
+the historical published checkpoint.
+
 The complete scope is the lifecycle roadmap dated 2026-10-30, not just the
 first publication fix. Implementation stays on `codex/ontology-ops-local`.
 The public checkout, service and Cloudflare configuration are out of scope.

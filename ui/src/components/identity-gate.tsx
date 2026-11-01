@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
+import { Link } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Button } from "@/components/ui/button"
@@ -139,7 +140,17 @@ export function IdentityGate({ children }: { children: ReactNode }) {
   if (refreshingAuthority || acceptedAuthority !== authorityKey) {
     return <main className="mx-auto max-w-sm px-6 py-24"><p className="text-sm text-muted-foreground" role="status">{t("identity.checking")}</p></main>
   }
-  return <IdentityContext.Provider value={{ session: me.data, signOut: () => logout.mutate(), signingOut: logout.isPending, logoutFailed: logout.isError }}>{children}{authorityNotice && <div role="status" className="fixed right-5 bottom-5 z-50 flex max-w-sm items-start gap-3 border border-border bg-background p-4 text-xs leading-6 shadow-sm"><span>{t("identity.authorityChanged")}</span><button type="button" className="shrink-0 underline underline-offset-4" onClick={() => setAuthorityNotice(false)}>{t("common.close")}</button></div>}</IdentityContext.Provider>
+  return <IdentityContext.Provider value={{ session: me.data, restoration: status.data?.restoration, signOut: () => logout.mutate(), signingOut: logout.isPending, logoutFailed: logout.isError }}>{children}{authorityNotice && <div role="status" className="fixed right-5 bottom-5 z-50 flex max-w-sm items-start gap-3 border border-border bg-background p-4 text-xs leading-6 shadow-sm"><span>{t("identity.authorityChanged")}</span><button type="button" className="shrink-0 underline underline-offset-4" onClick={() => setAuthorityNotice(false)}>{t("common.close")}</button></div>}</IdentityContext.Provider>
+}
+
+export function RestoredWorkspaceNotice() {
+  const identity = useIdentity()
+  const t = useT()
+  if (!identity?.restoration) return null
+  return <aside role="status" data-restored-scope className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-muted/30 px-5 py-3 text-xs leading-5">
+    <div className="min-w-0 flex-1"><strong className="block font-medium">{t(identity.restoration.catalog_ready ? "identity.restore.readyTitle" : "identity.restore.title")}</strong><p className="text-muted-foreground">{t(identity.restoration.catalog_ready ? "identity.restore.readyHint" : "identity.restore.hint")}</p></div>
+    <Link to="/access" className="shrink-0 underline underline-offset-4">{t("identity.restore.link")}</Link>
+  </aside>
 }
 
 export function IdentityControls() {
@@ -155,7 +166,11 @@ export function CanUse({ capability, children, fallback = null }: { capability: 
 
 export function AccessBoundary({ capability, children }: { capability: string; children: ReactNode }) {
   const allowed = useCanUse(capability)
+  const identity = useIdentity()
   const t = useT()
   if (allowed) return children
+  if (capability === "query.run" && identity?.restoration?.catalog_ready === false) {
+    return <section className="m-6 max-w-xl border-t border-border py-8"><h1 className="text-xl font-medium">{t("identity.restore.waiting")}</h1><p className="mt-3 text-sm text-muted-foreground">{t("identity.restore.waitingHint")}</p></section>
+  }
   return <section className="m-6 max-w-xl border-t border-border py-8"><h1 className="text-xl font-medium">{t("identity.denied")}</h1><p className="mt-3 text-sm text-muted-foreground">{t("identity.deniedHint")}</p></section>
 }

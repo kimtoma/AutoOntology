@@ -9,6 +9,7 @@ from pathlib import Path
 
 from autoontology.config import REPO_ROOT
 from autoontology.security.context import audit_effect, authorize
+from autoontology.security.fs_paths import canonical_path
 from autoontology.security.policy import AccessError
 from autoontology.store.db import now_iso
 
@@ -48,12 +49,14 @@ class HostFiles:
 
     def defaults(self):
         roots = [
-            Path(os.environ.get("AUTOONTOLOGY_SAMPLES_DIR") or REPO_ROOT / "samples")
-            .expanduser()
-            .resolve()
+            canonical_path(
+                Path(
+                    os.environ.get("AUTOONTOLOGY_SAMPLES_DIR") or REPO_ROOT / "samples"
+                ).expanduser()
+            )
         ]
         if self.store:
-            roots.append((self.store.path.parent / "uploads").resolve())
+            roots.append(canonical_path(self.store.path.parent / "uploads"))
         return roots
 
     @contextmanager
@@ -87,7 +90,7 @@ class HostFiles:
                 "host_secret_path",
             )
         try:
-            resolved = original.resolve()
+            resolved = canonical_path(original)
         except (OSError, RuntimeError):
             fail("The input path cannot be safely resolved.")
         if not safe_name(resolved):
@@ -96,8 +99,8 @@ class HostFiles:
                 "host_secret_path",
             )
         if self.store and (
-            resolved == self.store.path.resolve()
-            or resolved.is_relative_to((self.store.path.parent / "security").resolve())
+            resolved == canonical_path(self.store.path)
+            or resolved.is_relative_to(canonical_path(self.store.path.parent / "security"))
         ):
             fail(
                 "Runtime identity and workspace database files are not ingestion sources.",
@@ -118,13 +121,14 @@ class HostFiles:
                     "host_policy_missing",
                     503,
                 )
-            roots = [
-                *self.defaults(),
-                *[
-                    Path(row[0])
-                    for row in conn.execute("SELECT path FROM host_file_roots WHERE active=1")
-                ],
-            ]
+            roots = self.defaults()
+            for row in conn.execute("SELECT path FROM host_file_roots WHERE active=1"):
+                try:
+                    roots.append(canonical_path(row[0]))
+                except (OSError, ValueError, RuntimeError):
+                    # A replaced/symlinked root grants nothing. Keep the row
+                    # for explicit owner revocation and other valid roots usable.
+                    continue
             if not any(
                 path == root or (root.is_dir() or not root.exists()) and path.is_relative_to(root)
                 for root in roots
@@ -152,7 +156,10 @@ class HostFiles:
         reason = reason.strip() if isinstance(reason, str) else ""
         if not 1 <= len(reason) <= 2000:
             fail("Provide a bounded host-root reason.", "host_root_input", 400)
-        target = Path(path).expanduser().resolve()
+        try:
+            target = canonical_path(Path(path).expanduser())
+        except (OSError, ValueError, RuntimeError):
+            fail("The host root cannot be safely resolved.", "host_root_input", 400)
         if (
             not target.exists()
             or not (target.is_dir() or target.is_file())
@@ -172,8 +179,8 @@ class HostFiles:
                 400,
             )
         if self.store and (
-            target == self.store.path.resolve()
-            or target.is_relative_to((self.store.path.parent / "security").resolve())
+            target == canonical_path(self.store.path)
+            or target.is_relative_to(canonical_path(self.store.path.parent / "security"))
         ):
             fail("Runtime authority files cannot be approved as inputs.", "host_root_input", 400)
         with self.store._immediate() as conn:
@@ -211,21 +218,31 @@ class HostFiles:
             decision = authorize(self.store, "identity.admin", conn=conn)
             if decision is None:
                 fail("Use an individual workspace administrator.", "host_owner_required")
-            if not conn.execute("SELECT 1 FROM host_file_roots WHERE path=?", (target,)).fetchone():
-                target = str(Path(path).expanduser().resolve())
-                if not conn.execute(
-                    "SELECT 1 FROM host_file_roots WHERE path=?", (target,)
-                ).fetchone():
-                    fail("The approved host root was not found.", "host_root_missing", 404)
-            conn.execute(
-                "UPDATE host_file_roots SET active=0,reason=?,actor=?,updated_at=? WHERE path=?",
-                (reason, decision.actor.principal_id, now_iso(), target),
-            )
+            recorded = [row[0] for row in conn.execute("SELECT path FROM host_file_roots")]
+            matches = {target} & set(recorded)
+            try:
+                canonical = canonical_path(Path(path).expanduser())
+            except (OSError, ValueError, RuntimeError):
+                canonical = None
+            if canonical is not None:
+                for entry in recorded:
+                    try:
+                        if canonical_path(entry) == canonical:
+                            matches.add(entry)
+                    except (OSError, ValueError, RuntimeError):
+                        continue
+            if not matches:
+                fail("The approved host root was not found.", "host_root_missing", 404)
+            for entry in sorted(matches):
+                conn.execute(
+                    "UPDATE host_file_roots SET active=0,reason=?,actor=?,updated_at=? WHERE path=?",
+                    (reason, decision.actor.principal_id, now_iso(), entry),
+                )
             audit_effect(
                 self.store,
                 decision,
                 "host-file-roots",
-                {"operation": "root_revoked", "path": target},
+                {"operation": "root_revoked", "path": target, "paths": sorted(matches)},
                 conn=conn,
             )
             return {"path": target, "active": False}
