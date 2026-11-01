@@ -145,6 +145,129 @@ class OriginTests(unittest.TestCase):
             gateway.shutdown()
             gateway.server_close()
 
+    def test_authenticated_version_dispatch_is_bounded_and_strips_version_headers(self):
+        class Selected(Upstream):
+            do_GET = Upstream.do_POST
+
+        classic = ThreadingHTTPServer(("127.0.0.1", 0), Selected)
+        next_app = ThreadingHTTPServer(("127.0.0.1", 0), Selected)
+        gateway = ThreadingHTTPServer(("127.0.0.1", 0), proxy.Proxy)
+        gateway.secret = "synthetic-gateway-secret-only-for-tests"
+        gateway.app_port = classic.server_port
+        gateway.next_app_port = next_app.server_port
+        for server in (classic, next_app, gateway):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            for version, expected in [
+                (None, classic.server_port),
+                ("classic", classic.server_port),
+                ("next", next_app.server_port),
+            ]:
+                with self.subTest(version=version):
+                    headers = {
+                        "X-AutoOntology-Gateway": gateway.secret,
+                        "Host": "untrusted.example",
+                        "Authorization": "synthetic-do-not-forward",
+                    }
+                    if version is not None:
+                        headers["X-AutoOntology-Version"] = version
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", gateway.server_port, timeout=3
+                    )
+                    connection.request("GET", "/api/status?check=1", headers=headers)
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    data = json.loads(response.read())
+                    self.assertEqual(data["headers"]["Host"], f"127.0.0.1:{expected}")
+                    self.assertEqual(data["path"], "/api/status?check=1")
+                    for header in (
+                        "X-AutoOntology-Version",
+                        "X-AutoOntology-Gateway",
+                        "Authorization",
+                    ):
+                        self.assertNotIn(header, data["headers"])
+                    connection.close()
+            for version, secret, status in [
+                ("next", "wrong", 403),
+                ("http://localhost:5432", gateway.secret, 400),
+                ("other", gateway.secret, 400),
+            ]:
+                connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=3)
+                connection.request(
+                    "GET",
+                    "/api/status",
+                    headers={"X-AutoOntology-Version": version, "X-AutoOntology-Gateway": secret},
+                )
+                response = connection.getresponse()
+                self.assertEqual(response.status, status)
+                response.read()
+                connection.close()
+            gateway.next_app_port = None
+            connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=3)
+            connection.request(
+                "GET",
+                "/api/status",
+                headers={
+                    "X-AutoOntology-Version": "next",
+                    "X-AutoOntology-Gateway": gateway.secret,
+                },
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 503)
+            response.read()
+            connection.close()
+            connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=3)
+            connection.putrequest("GET", "/api/status")
+            connection.putheader("X-AutoOntology-Gateway", gateway.secret)
+            connection.putheader("X-AutoOntology-Version", "classic")
+            connection.putheader("X-AutoOntology-Version", "next")
+            connection.endheaders()
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            response.read()
+            connection.close()
+        finally:
+            for server in (gateway, classic, next_app):
+                server.shutdown()
+                server.server_close()
+
+    def test_selected_loopback_redirect_is_normalized_without_open_redirects(self):
+        class Redirect(Upstream):
+            def do_GET(self):
+                self.send_response(307)
+                self.send_header(
+                    "Location", f"http://127.0.0.1:{self.server.server_port}/ui/?lang=ko#graph"
+                )
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        upstream = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+        gateway = ThreadingHTTPServer(("127.0.0.1", 0), proxy.Proxy)
+        gateway.secret = "synthetic-gateway-secret-only-for-tests"
+        gateway.app_port = upstream.server_port
+        gateway.next_app_port = upstream.server_port
+        for server in (upstream, gateway):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=3)
+            connection.request(
+                "GET",
+                "/ui",
+                headers={
+                    "X-AutoOntology-Gateway": gateway.secret,
+                    "X-AutoOntology-Version": "next",
+                },
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 307)
+            self.assertEqual(response.getheader("Location"), "/ui/?lang=ko#graph")
+            response.read()
+            connection.close()
+        finally:
+            for server in (gateway, upstream):
+                server.shutdown()
+                server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -59,6 +59,32 @@ function page(message = '', status = 200, full = false) {
     status, headers: headers({ 'referrer-policy': 'same-origin', 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" }),
   });
 }
+function escapeHtml(value) {
+  return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
+function versions(env, hostname) {
+  const main = env.MAIN_APP_HOST || 'autoontology.kimtoma.com';
+  const classic = env.CLASSIC_APP_HOST || 'autoontology-classic.kimtoma.com';
+  const next = env.NEXT_APP_HOST || 'autoontology-next.kimtoma.com';
+  const hosts = [main, classic, next];
+  if (new Set(hosts).size !== 3 || hosts.some(host => !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(host) || host.includes('..'))) throw new Error('invalid version hosts');
+  if (!hosts.includes(hostname)) return null;
+  return { main, classic, next, version: hostname === next ? 'next' : 'classic', isMain: hostname === main };
+}
+function versionPage(config) {
+  return new Response(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoOntology · 버전 선택</title>
+<style>*{box-sizing:border-box}body{margin:0;background:#fafafa;color:#171717;font-family:system-ui,-apple-system,sans-serif}main{max-width:1080px;margin:0 auto;padding:64px 28px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;border-bottom:1px solid #e5e5e5;padding-bottom:24px}header strong{font-size:19px;letter-spacing:-.5px}header a{color:#525252;font-size:14px}h1{font-size:clamp(30px,5vw,44px);font-weight:600;letter-spacing:-1.5px;margin:48px 0 14px}p{color:#646464;line-height:1.7;margin:0}.cards{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:36px 0 30px}article{border:1px solid #e0e0e0;background:white;border-radius:12px;padding:28px;display:flex;flex-direction:column}article.next{border-color:#171717}.tag{font-size:12px;color:#666;font-family:monospace}h2{font-size:23px;font-weight:600;letter-spacing:-.6px;margin:14px 0 12px}ul{padding-left:20px;line-height:1.75;color:#454545;flex:1}li{padding:3px 0}.open{display:block;text-align:center;text-decoration:none;background:#171717;color:white;border:1px solid #171717;padding:13px 16px;border-radius:7px;font-weight:600;margin-top:24px}.classic .open{background:white;color:#171717}.note{border-top:1px solid #e5e5e5;padding-top:22px;font-size:14px}a:focus-visible{outline:3px solid #719fff;outline-offset:4px}form button{font:inherit;background:none;border:0;text-decoration:underline;color:#525252;cursor:pointer}@media(max-width:650px){main{padding:28px 18px}.cards{grid-template-columns:1fr;gap:16px}article{padding:24px}h1{margin-top:34px}}</style></head>
+<body><main><header><strong>AutoOntology</strong><form method="post" action="/__demo/logout"><button type="submit">로그아웃</button></form></header><h1>두 버전을 직접 비교해 보세요.</h1><p>기존 구축 흐름과 새 운영 흐름을 각각 열어 사용할 수 있습니다.</p><div class="cards">
+<article class="classic"><span class="tag">CLASSIC · 42efdba</span><h2>기존 버전</h2><p>데이터·문서를 연결하고 온톨로지를 구축하는 흐름</p><ul><li>기존 배포본의 화면과 작업 공간 유지</li><li>데이터 추가, 구축, 그래프 탐색</li><li>질문, SQL, 결과 다운로드</li></ul><a class="open" href="https://${escapeHtml(config.classic)}/ui/?lang=ko" target="_blank" rel="noopener">기존 버전 열기 ↗</a></article>
+<article class="next"><span class="tag">ONTOLOGY OPS · 0.3.0a1</span><h2>새 버전</h2><p>변경을 검토하고 조직의 지식을 계속 운영하는 흐름</p><ul><li>좌측 내비게이션과 운영 대시보드</li><li>변경 검토, 업무 케이스와 근거 확인</li><li>저장된 질문·SQL 결과와 가상 데이터 비교</li></ul><a class="open" href="https://${escapeHtml(config.next)}/ui/?lang=ko" target="_blank" rel="noopener">새 버전 열기 ↗</a></article>
+</div><div class="note"><p>두 버전의 데이터와 설정은 분리됩니다. 한쪽의 변경은 다른 쪽에 자동 반영되지 않습니다.<br>각 주소에서 같은 공유 비밀번호로 한 번씩 로그인하면 두 탭을 함께 사용할 수 있습니다.<br>새 버전은 개발 중인 alpha입니다. 공유 비밀번호 접속과 앱의 개별 사용자·승인 권한은 별개입니다.</p></div></main></body></html>`, {
+    headers: headers({ 'content-type': 'text/html; charset=utf-8', 'x-autoontology-version': 'chooser', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" }),
+  });
+}
+function versionBanner(config) {
+  const label = config.version === 'next' ? '새 버전 · Ontology Ops' : '기존 버전';
+  return `<nav id="ao-version-switch" aria-label="배포 버전" style="position:fixed;right:16px;bottom:16px;z-index:2147483000;display:flex;align-items:center;gap:12px;border:1px solid #d4d4d4;border-radius:8px;background:#fff;color:#171717;padding:9px 12px;font:12px/1.4 system-ui,sans-serif;box-shadow:0 2px 10px #0000000d"><span>${label}</span><a href="https://${escapeHtml(config.main)}/__versions" target="_blank" rel="noopener" style="color:#171717;text-underline-offset:3px">버전 비교 ↗</a></nav>`;
+}
 function sameOrigin(request) {
   return request.headers.get('origin') === new URL(request.url).origin && request.headers.get('sec-fetch-site') !== 'cross-site';
 }
@@ -81,6 +107,8 @@ async function boundedText(request, maxBytes) {
 async function handle(request, env) {
   const url = new URL(request.url), path = url.pathname;
   const full = env.ACCESS_MODE === 'full';
+  const config = versions(env, url.hostname);
+  if (!config) return json('unknown_host', '등록된 서비스 주소를 이용해 주세요.', 421);
   const loginPage = (message = '', status = 200) => page(message, status, full);
   if (!env.SESSION_SECRET || !env.ACCESS_PASSWORD_SHA256 || !env.ORIGIN_SECRET || !env.ORIGIN_URL) return json('not_configured', '체험 공간을 준비하고 있습니다.', 503);
   if (path === '/robots.txt') return new Response('User-agent: *\nDisallow: /\n', { headers: headers() });
@@ -97,7 +125,7 @@ async function handle(request, env) {
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(password))), x => x.toString(16).padStart(2, '0')).join('');
     if (!safeEqual(env.ACCESS_PASSWORD_SHA256, digest)) return loginPage('비밀번호를 확인해 주세요.', 401);
     return new Response(null, { status: 303, headers: headers({
-      location: full ? '/ui/?lang=ko' : '/ui/ontology?lang=ko',
+      location: full && config.isMain ? '/__versions' : full ? '/ui/?lang=ko' : '/ui/ontology?lang=ko',
       'set-cookie': `${COOKIE}=${await session(env, url.origin)}; Path=/; Max-Age=${SESSION_SECONDS}; Secure; HttpOnly; SameSite=Lax`,
     }) });
   }
@@ -109,6 +137,11 @@ async function handle(request, env) {
   if (path === '/__demo/logout' && request.method === 'POST') {
     if (!sameOrigin(request)) return json('cross_origin', '이 페이지에서 다시 시도해 주세요.', 403);
     return new Response(null, { status: 303, headers: headers({ location: '/__demo/login', 'set-cookie': `${COOKIE}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax` }) });
+  }
+  if (full && (path === '/__versions' || (path === '/' && config.isMain))) {
+    if (!['GET', 'HEAD'].includes(request.method)) return json('method_not_allowed', '허용되지 않는 요청입니다.', 405);
+    const response = versionPage(config);
+    return request.method === 'HEAD' ? new Response(null, response) : response;
   }
   if (path === '/') return new Response(null, { status: 303, headers: headers({ location: full ? '/ui/?lang=ko' : '/ui/ontology?lang=ko' }) });
   if (!full && path === '/api/playground/conversations' && request.method === 'GET') return Response.json({ conversations: [] }, { headers: headers() });
@@ -126,6 +159,7 @@ async function handle(request, env) {
     const value = request.headers.get(name); if (value) forwarded.set(name, value);
   }
   forwarded.set('x-autoontology-gateway', env.ORIGIN_SECRET);
+  forwarded.set('x-autoontology-version', config.version);
   let body;
   if (full && !['GET', 'HEAD'].includes(request.method)) {
     const length = request.headers.get('content-length');
@@ -146,17 +180,20 @@ async function handle(request, env) {
   const upstream = await (env.FETCH || fetch)(new Request(origin, { method: request.method, headers: forwarded, body, duplex: 'half', redirect: 'manual' }));
   const output = new Headers(upstream.headers);
   for (const [name, value] of Object.entries(headers())) output.set(name, value);
+  output.set('x-autoontology-version', config.version);
   output.delete('set-cookie');
   output.delete('access-control-allow-origin');
   if (output.has('location')) {
     const target = new URL(output.get('location'), origin);
     if (target.origin !== origin.origin) return json('origin_redirect', '페이지를 열 수 없습니다.', 502);
-    output.set('location', target.pathname + target.search);
+    output.set('location', target.pathname + target.search + target.hash);
   }
   const response = new Response(upstream.body, { status: upstream.status, headers: output });
   if ((output.get('content-type') || '').includes('text/html')) {
     return new HTMLRewriter().on('head', {
       element(element) { element.append(`<meta name="autoontology-demo" content="${full ? 'full' : 'sample'}">`, { html: true }); },
+    }).on('body', {
+      element(element) { if (full) element.append(versionBanner(config), { html: true }); },
     }).transform(response);
   }
   return response;

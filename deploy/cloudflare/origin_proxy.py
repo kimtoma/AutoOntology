@@ -15,6 +15,7 @@ import os
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 MAX_BODY_BYTES = 100_000_000
 CHUNK_BYTES = 65536
@@ -39,6 +40,17 @@ class Proxy(BaseHTTPRequestHandler):
         ):
             self.send_error(403, "Gateway required")
             return
+        versions = self.headers.get_all("X-AutoOntology-Version", [])
+        if len(versions) > 1 or (versions and versions[0] not in {"classic", "next"}):
+            self.send_error(400, "Invalid version")
+            return
+        version = versions[0] if versions else "classic"
+        app_port = self.server.app_port
+        if version == "next":
+            app_port = getattr(self.server, "next_app_port", None)
+            if app_port is None:
+                self.send_error(503, "Version unavailable")
+                return
         if not self.path.startswith("/") or self.path.startswith("//"):
             self.send_error(400)
             return
@@ -56,8 +68,8 @@ class Proxy(BaseHTTPRequestHandler):
             if self.headers.get(name)
         }
         forwarded["Content-Length"] = str(length)
-        forwarded["Host"] = f"127.0.0.1:{self.server.app_port}"
-        connection = http.client.HTTPConnection("127.0.0.1", self.server.app_port, timeout=240)
+        forwarded["Host"] = f"127.0.0.1:{app_port}"
+        connection = http.client.HTTPConnection("127.0.0.1", app_port, timeout=240)
         try:
             connection.request(self.command, self.path, body=body, headers=forwarded)
             response = connection.getresponse()
@@ -71,6 +83,14 @@ class Proxy(BaseHTTPRequestHandler):
                     "server",
                     "date",
                 }:
+                    if name.lower() == "location":
+                        target = urlsplit(value)
+                        if target.scheme == "http" and target.netloc == f"127.0.0.1:{app_port}":
+                            value = target.path or "/"
+                            if target.query:
+                                value += "?" + target.query
+                            if target.fragment:
+                                value += "#" + target.fragment
                     self.send_header(name, value)
             self.send_header("Connection", "close")
             self.end_headers()
@@ -174,6 +194,11 @@ def serve():
     server.daemon_threads = True
     server.secret = secret
     server.app_port = int(os.environ.get("AUTOONTOLOGY_PORT", "7800"))
+    next_port = os.environ.get("AUTOONTOLOGY_NEXT_PORT")
+    server.next_app_port = int(next_port) if next_port else None
+    ports = [server.app_port] + ([server.next_app_port] if server.next_app_port else [])
+    if any(not 1024 <= port <= 65535 for port in ports) or len(set(ports)) != len(ports):
+        raise ValueError("invalid application ports")
     server.serve_forever()
 
 

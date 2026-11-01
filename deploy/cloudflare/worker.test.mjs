@@ -10,6 +10,9 @@ const environment = () => ({
   SESSION_SECRET: 'test-session-secret-used-only-in-tests',
   ORIGIN_SECRET: 'test-origin-secret-used-only-in-tests',
   ORIGIN_URL: 'https://origin.example.com',
+  MAIN_APP_HOST: 'autoontology.example.com',
+  CLASSIC_APP_HOST: 'autoontology-classic.example.com',
+  NEXT_APP_HOST: 'autoontology-next.example.com',
   LOGIN_LIMIT: { limit: async () => ({ success: true }) },
   QUERY_LIMIT: { limit: async () => ({ success: true }) },
 });
@@ -171,12 +174,16 @@ test('full access HTML identifies the full workspace without enabling sample res
   env.FETCH = async () => new Response('<html><head></head></html>', { headers: { 'content-type': 'text/html' } });
   const previous = globalThis.HTMLRewriter;
   globalThis.HTMLRewriter = class {
-    on(_selector, handler) { this.handler = handler; return this; }
+    handlers = [];
+    on(selector, handler) { this.handlers.push([selector, handler]); return this; }
     transform(response) {
       let injected = '';
-      this.handler.element({ append(text) { injected += text; } });
+      for (const [_selector, handler] of this.handlers) handler.element({ append(text) { injected += text; } });
       assert.match(injected, /content="full"/);
       assert.doesNotMatch(injected, /content="sample"/);
+      assert.match(injected, /ao-version-switch/);
+      assert.match(injected, /기존 버전/);
+      assert.match(injected, /https:\/\/autoontology.example.com\/__versions/);
       return response;
     }
   };
@@ -194,4 +201,86 @@ test('full workspace build event streams retain their resume cursor', async () =
   const response = await worker.fetch(request('/api/runs/example/events', { headers: { Cookie: cookie, 'Last-Event-ID': '1234' } }), env);
   assert.equal(response.status, 200);
   assert.match(await response.text(), /event: end/);
+});
+
+
+async function hostLogin(host, env) {
+  const origin = `https://${host}`;
+  return worker.fetch(new Request(origin + '/__demo/login', {
+    method: 'POST', headers: { Origin: origin }, body: new URLSearchParams({ password }),
+  }), env);
+}
+
+test('root login opens the authenticated chooser; version hosts open their own UI', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full' };
+  assert.equal((await login(env)).headers.get('location'), '/__versions');
+  for (const host of [env.CLASSIC_APP_HOST, env.NEXT_APP_HOST]) {
+    const response = await hostLogin(host, env);
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/ui/?lang=ko');
+    assert.doesNotMatch(response.headers.get('set-cookie'), /Domain=/i);
+  }
+  assert.equal((await worker.fetch(new Request('https://unregistered.example.com/__demo/login'), env)).status, 421);
+});
+
+test('chooser is private, describes separate workspaces, and never calls either app', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full', FETCH: () => assert.fail('chooser must not proxy') };
+  assert.equal((await worker.fetch(request('/__versions'), env)).status, 303);
+  const cookie = (await login(env)).headers.get('set-cookie').split(';')[0];
+  for (const path of ['/', '/__versions']) {
+    const response = await worker.fetch(request(path, { headers: { Cookie: cookie } }), env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-autoontology-version'), 'chooser');
+    const html = await response.text();
+    assert.match(html, /autoontology-classic.example.com/);
+    assert.match(html, /autoontology-next.example.com/);
+    assert.match(html, /한쪽의 변경은 다른 쪽에 자동 반영되지 않습니다/);
+    assert.doesNotMatch(html, /origin.example.com/);
+  }
+  assert.equal((await worker.fetch(request('/__versions', { method: 'POST', headers: { Cookie: cookie, Origin: base } }), env)).status, 405);
+});
+
+test('version is bound to host and client routing or identity headers cannot override it', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full' };
+  for (const [host, version] of [[env.MAIN_APP_HOST, 'classic'], [env.CLASSIC_APP_HOST, 'classic'], [env.NEXT_APP_HOST, 'next']]) {
+    const cookie = (await hostLogin(host, env)).headers.get('set-cookie').split(';')[0];
+    env.FETCH = async req => {
+      assert.equal(req.url, 'https://origin.example.com/api/settings');
+      assert.equal(req.headers.get('x-autoontology-version'), version);
+      for (const name of ['cookie', 'authorization', 'x-autoontology-principal', 'tailscale-user-login']) assert.equal(req.headers.get(name), null);
+      return new Response('ok');
+    };
+    const response = await worker.fetch(new Request(`https://${host}/api/settings`, {
+      headers: { Cookie: cookie, 'X-AutoOntology-Version': version === 'next' ? 'classic' : 'next', 'X-AutoOntology-Principal': 'forged', 'Tailscale-User-Login': 'forged', Authorization: 'forged' },
+    }), env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-autoontology-version'), version);
+  }
+});
+
+test('sessions from one version are refused by the other version', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full', FETCH: () => assert.fail('wrong audience reached origin') };
+  for (const [from, to] of [[env.MAIN_APP_HOST, env.NEXT_APP_HOST], [env.CLASSIC_APP_HOST, env.NEXT_APP_HOST], [env.NEXT_APP_HOST, env.CLASSIC_APP_HOST]]) {
+    const cookie = (await hostLogin(from, env)).headers.get('set-cookie').split(';')[0];
+    assert.equal((await worker.fetch(new Request(`https://${to}/api/ontology`, { headers: { Cookie: cookie } }), env)).status, 401);
+  }
+});
+
+test('origin redirects remain on the selected visitor host and external redirects are rejected', async () => {
+  const env = { ...environment(), ACCESS_MODE: 'full' };
+  const cookie = (await hostLogin(env.NEXT_APP_HOST, env)).headers.get('set-cookie').split(';')[0];
+  const req = () => new Request(`https://${env.NEXT_APP_HOST}/ui`, { headers: { Cookie: cookie } });
+  env.FETCH = async () => new Response(null, { status: 307, headers: { Location: 'https://origin.example.com/ui/?lang=ko#graph' } });
+  let response = await worker.fetch(req(), env);
+  assert.equal(response.status, 307);
+  assert.equal(response.headers.get('location'), '/ui/?lang=ko#graph');
+  env.FETCH = async () => new Response(null, { status: 307, headers: { Location: 'https://external.example.com/' } });
+  assert.equal((await worker.fetch(req(), env)).status, 502);
+});
+
+test('invalid configured hosts fail closed', async () => {
+  for (const invalid of ['evil.example/path', 'user@example.com', 'autoontology.example.com', 'bad..example.com']) {
+    const response = await worker.fetch(request('/__demo/login'), { ...environment(), NEXT_APP_HOST: invalid });
+    assert.equal(response.status, 503);
+  }
 });
