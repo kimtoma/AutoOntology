@@ -445,7 +445,7 @@ Once something is built, the start page (**Overview**, first in the sidebar) ans
   run. When nothing needs doing it is one line, "All clear".
 - **Ontology**: the revision, when it was built, the number of classes, relations,
   evidence sentences and documents, and what changed since the previous revision ("+2
-  added −1 removed ~3 changed"). **View changes** lists them.
+  classes added −1 class removed ~3 classes changed"). **View changes** lists them.
 - **Needs your confirmation**: how many items wait in each review category, and the first
   five, which you can accept or reject right there.
 - **Sources**: each source and whether it changed since its last build, in plain words

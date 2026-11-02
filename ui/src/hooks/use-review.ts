@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { invalidateAfterDecision, keys } from "@/hooks/queries"
 import { t } from "@/i18n"
 import {
-  api, errorMessage, type AcceptRelation, type Decision, type DecisionValue, type ReviewItem, type ReviewListing,
+  api, DECISION_WORD, errorMessage, type AcceptRelation, type Decision, type DecisionValue, type ReviewItem, type ReviewListing,
 } from "@/lib/api"
 
 /** The display name of a review item (concept, alias or source). */
@@ -53,7 +53,7 @@ export function useReviewActions() {
     onSuccess: (res, { item, decision }) => {
       patchItem(qc, item.id, res.decision)
       invalidateAfterDecision(qc)
-      setAnnouncement(t(`review.announce.${decision}`, { name: itemName(item) }))
+      setAnnouncement(t(`review.announce.${DECISION_WORD[decision]}`, { name: itemName(item) }))
     },
     onError: (e) => toast.error(t("review.failed"), { description: errorMessage(e) }),
   })

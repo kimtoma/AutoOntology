@@ -418,11 +418,11 @@ With the samples, the judge accepts 계약 → Contracts, 고객 → Customers a
 ### Reviewing and applying decisions
 
 `autoontology review list` (or `GET /api/review`) lists the items to review, and
-`autoontology review accept|reject|acknowledge <id>` records a decision. A decision
-overrides the align judge on every later pass. `autoontology apply` writes a new revision
-with the decisions, and makes no model call. When nothing is pending it writes no
-revision (pass `--force` to write one anyway), so a scheduled run adds no empty
-revisions:
+`autoontology review accept|reject|acknowledge <id>` records a decision (`acknowledge` is
+**Keep separate** in the UI). A decision overrides the align judge on every later pass.
+`autoontology apply` writes a new revision with the decisions, and makes no model call.
+When nothing is pending it writes no revision (pass `--force` to write one anyway), so a
+scheduled run adds no empty revisions:
 
 ```bash
 # crontab: every night, rebuild what changed, then reflect the review decisions

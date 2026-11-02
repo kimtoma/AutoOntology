@@ -16,7 +16,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { keys, retryServerErrors } from "@/hooks/queries"
-import { api, type ConceptDecision, type ConceptDetail, type Origin } from "@/lib/api"
+import { api, DECISION_WORD, type ConceptDecision, type ConceptDetail, type Origin } from "@/lib/api"
 import { fmtDate, type MessageKey, t, tx, useT } from "@/i18n"
 import { CKIND_LABEL, ORIGIN_LABEL, REL_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
@@ -219,7 +219,7 @@ function DecisionLine({ d }: { d: ConceptDecision }) {
       <span className="flex flex-wrap items-center gap-1.5">
         <Badge variant="outline" className={cn("font-normal", d.decision === "reject"
           ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-success/30 bg-success/10 text-success")}>
-          {t(`concept.decision.${d.decision}`)}
+          {t(`concept.decision.${DECISION_WORD[d.decision]}`)}
         </Badge>
         {d.alias && <span>“{d.alias}”</span>}
         {d.decision === "accept" && d.relation && <RelationChip relation={d.relation} term={d.term?.name} />}

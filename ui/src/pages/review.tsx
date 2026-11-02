@@ -105,12 +105,16 @@ export default function ReviewPage() {
     return () => document.removeEventListener("keydown", onKey)
   }, [items, selected, relations, busyId, decide])
 
-  // a ?page past the end (decisions shrank the list): go to the last page
-  const lastPage = list.data && !list.isPlaceholderData ? Math.max(1, list.data.pages) : null
+  // a ?page past the end (decisions shrank the list, an old link): go to the last page. The
+  // listing names the page it answered, so a kept (placeholder) answer for another page is
+  // never taken for this one, and an empty out-of-range page shows a skeleton, not "Nothing
+  // to review", until the last page arrives.
+  const lastPage = list.data && !list.isPlaceholderData && list.data.page === page ? Math.max(1, list.data.pages) : null
   useEffect(() => {
     if (lastPage !== null && page > lastPage) update({ page: lastPage > 1 ? String(lastPage) : null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastPage, page])
+  const outOfRange = !!list.data && !items.length && (list.isPlaceholderData || list.data.page > list.data.pages)
 
   const checkedAt = list.dataUpdatedAt ? new Date(list.dataUpdatedAt).toISOString() : null
   return (
@@ -144,7 +148,7 @@ export default function ReviewPage() {
 
       {list.error ? <ErrorState error={list.error} onRetry={() => list.refetch()} />
         : !list.data ? <div className="grid gap-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-28" />)}</div>
-        : !items.length && lastPage !== null && page > lastPage ? <Skeleton className="h-28" />
+        : outOfRange ? <Skeleton className="h-28" id="review-clamping" />
         : !items.length ? (
           <EmptyState icon={Inbox} title={status === "decided" ? t("review.empty.decided") : t("review.empty")}
                       hint={checkedAt ? t("review.empty.hint", { time: fmtDate(checkedAt) }) : undefined} />

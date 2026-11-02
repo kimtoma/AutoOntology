@@ -53,9 +53,9 @@ behaviour).
   `/api/status` reports `remote`. See README "Remote access over Tailscale".
 - **Review decisions** (store schema v6, `review_decisions`). You can accept or reject an
   alignment proposal or a judge axiom (`same`, `related`, `narrower`, `broader`), accept
-  or reject a rejected alias, or acknowledge an unaligned concept. A decision overrides
-  the align judge on every later pass; the judge's verdict is kept and comes back when
-  the decision is removed. Accepted `related`/`narrower`/`broader` verdicts are the first
+  or reject a rejected alias, or keep an unaligned concept separate (`acknowledge`). A
+  decision overrides the align judge on every later pass; the judge's verdict is kept and
+  comes back when the decision is removed. Accepted `related`/`narrower`/`broader` verdicts are the first
   accepted alignment axioms. OKF marks decided concepts `stable`.
 - **`autoontology apply`** and `POST /api/runs {"kind": "apply"}`: a run of three steps,
   `decisions`, `merge` and `snapshot`. It reflects the decisions in a new revision with

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { isAlignment, itemName, RELATIONS, suggestedRelation, type DecideArgs } from "@/hooks/use-review"
 import { fmtDate, type MessageKey, useT } from "@/i18n"
-import type { AcceptRelation, Decision, ReviewItem } from "@/lib/api"
+import { DECISION_WORD, type AcceptRelation, type Decision, type ReviewItem } from "@/lib/api"
 import { CKIND_LABEL } from "@/lib/labels"
 import { ago, freshnessText } from "@/lib/ops"
 import { cn } from "@/lib/utils"
@@ -20,7 +20,7 @@ export function DecisionBadge({ decision }: { decision: Decision }) {
   return (
     <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-decision={decision.decision}>
       <Badge variant="outline" className={cn("font-normal", tone)}>
-        {t(`review.decided.${decision.decision}`)}
+        {t(`review.decided.${DECISION_WORD[decision.decision]}`)}
         {decision.decision === "accept" && decision.relation ? ` · ${t(`review.rel.${decision.relation}` as MessageKey)}` : ""}
       </Badge>
       <span title={fmtDate(decision.decided_at)}>{t("review.decided.by", { who: decision.decided_by, ago: ago(decision.decided_at) })}</span>
@@ -115,7 +115,7 @@ export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function Re
         ) : item.category === "unaligned" ? (
           <Button size="sm" variant="outline" disabled={busy} data-action="acknowledge"
                   onClick={() => onDecide({ item, decision: "acknowledge" })}>
-            <Check aria-hidden /> {t("review.acknowledge")}
+            <Check aria-hidden /> {t("review.keepSeparate")}
           </Button>
         ) : (
           <>

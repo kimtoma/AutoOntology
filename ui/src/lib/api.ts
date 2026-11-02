@@ -211,6 +211,10 @@ export const REVIEW_CATEGORIES: ReviewCategory[] = ["proposals", "axioms", "unal
 export const WAITING_CATEGORIES: ReviewCategory[] = ["proposals", "axioms", "unaligned", "aliases", "stale_sources"]
 export type DecisionKind = "alignment" | "alias" | "concept"
 export type DecisionValue = "accept" | "reject" | "acknowledge"
+/** The UI word of a decision value: the API's `acknowledge` reads "Keep separate". */
+export const DECISION_WORD: Record<DecisionValue, "accept" | "reject" | "keepSeparate"> = {
+  accept: "accept", reject: "reject", acknowledge: "keepSeparate",
+}
 export type AcceptRelation = "same" | "related" | "narrower" | "broader"
 
 export interface Decision {

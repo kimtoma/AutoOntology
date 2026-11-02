@@ -8,6 +8,8 @@ import { CommandMenu } from "@/components/command-menu"
 import BuildPage from "@/pages/build"
 import { NAV } from "@/components/nav"
 import { setLang } from "@/i18n/core"
+import { en } from "@/i18n/en"
+import { koOps } from "@/i18n/ko.ops"
 import type { ReviewItem, Run } from "@/lib/api"
 import { ago, deltaSummary, freshnessText, opsNotices } from "@/lib/ops"
 import OntologyPage from "@/pages/ontology"
@@ -104,9 +106,9 @@ describe("Overview (/)", () => {
     expect(within(ontology).getByText("Revision 3")).toBeInTheDocument()
     expect(within(ontology).getByText("by applying decisions")).toBeInTheDocument()
     expect(within(ontology).getByText("22")).toBeInTheDocument()
-    await waitFor(() => expect(document.querySelector("[data-delta=added]")).toHaveTextContent("+1 added"))
-    expect(document.querySelector("[data-delta=removed]")).toHaveTextContent("−1 removed")
-    expect(document.querySelector("[data-delta=changed]")).toHaveTextContent("~1 changed")
+    await waitFor(() => expect(document.querySelector("[data-delta=added]")).toHaveTextContent("+1 class added"))
+    expect(document.querySelector("[data-delta=removed]")).toHaveTextContent("−1 class removed")
+    expect(document.querySelector("[data-delta=changed]")).toHaveTextContent("~1 class changed")
     expect(screen.getByRole("link", { name: /View changes/ })).toHaveAttribute("href", "/ontology?changed=3")
     // needs confirmation: counts and the top items with their actions
     const review = screen.getByRole("region", { name: "Needs your confirmation" })
@@ -315,7 +317,25 @@ describe("Revision changes, paging, labels", () => {
     expect(document.querySelector("[data-changes=axioms] li")).toHaveTextContent("removed:")
   })
 
-  it("clamps a page past the end to the last page", async () => {
+  it("clamps a page past the end to the last page without an empty state in between", async () => {
+    const seen: string[] = []
+    const observer = new MutationObserver(() => {
+      if (document.body.textContent?.includes("Nothing to review")) seen.push("empty")
+    })
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+    const { calls } = mockFetch(dashboardRoutes({
+      "GET /review": (url: string) => (url.includes("page=9") ? { ...LISTING([]), page: 9, pages: 3, total: 41 }
+        : { ...LISTING([item(41)]), page: 3, pages: 3, total: 41 }),
+    }))
+    renderPage(<ReviewPage />, "/review?category=axioms&page=9")
+    expect(await screen.findByText("계약ID41")).toBeInTheDocument()
+    observer.disconnect()
+    expect(calls.filter((c) => c.path === "/review").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText("Page 3 of 3")).toBeInTheDocument()
+    expect(seen).toEqual([])
+  })
+
+  it("clamps a page past the end to page 1 when there is one page", async () => {
     const { calls } = mockFetch(dashboardRoutes({
       "GET /review": (url: string) => (url.includes("page=9") ? { ...LISTING([]), page: 9, pages: 1 } : LISTING([item(1)])),
     }))
@@ -331,6 +351,69 @@ describe("Revision changes, paging, labels", () => {
     setLang("ko", false)
     renderPage(<ReviewPage />, "/review?category=unaligned")
     expect(await screen.findByRole("button", { name: "독립 유지" })).toBeInTheDocument()
+  })
+
+  it("calls the unaligned decision Keep separate everywhere, with no Acknowledge key or text", async () => {
+    const kept = { ...DECISION(5), kind: "concept", decision: "acknowledge", relation: null }
+    const un: ReviewItem = { ...item(5), id: "un:c5", category: "unaligned", relation: null, term: null,
+                             suggested_action: "acknowledge", decision: kept as never }
+    mockFetch(dashboardRoutes({ "GET /review": LISTING([un]) }))
+    renderPage(<ReviewPage />, "/review?category=unaligned&status=decided")
+    const badge = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-decision=acknowledge]")
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(badge).toHaveTextContent("Kept separate")
+    expect(document.getElementById("review-help")).toHaveTextContent("Keep separate")
+    expect(Object.keys(en).filter((k) => k.includes("acknowledge"))).toEqual([])
+    expect(Object.values(en).filter((v) => /acknowledg/i.test(v))).toEqual([])
+  })
+
+  it("puts no Korean particle right after a number or a name in the ops strings", () => {
+    const particle = /\}[”"]?(?:\(으\))?(?:은|는|이|가|을|를|에서|에|의|로|으로|와|과|도|만)(?=$|[\s.,:;)(·])/
+    expect(Object.entries(koOps).filter(([, v]) => particle.test(v)).map(([k]) => k)).toEqual([])
+  })
+
+  it("reads the Overview delta and applied decisions in Korean without particles after numbers", async () => {
+    setLang("ko", false)
+    const applied = { ...DECISION(1), applied_revision: 3 }
+    mockFetch(dashboardRoutes({ "GET /review": LISTING([{ ...item(1), decision: applied as never }]) }))
+    renderPage(<IndexPage />)
+    await waitFor(() => expect(document.getElementById("ops-delta")).toHaveTextContent("리비전 2 기준:"))
+    expect(document.querySelector("[data-delta=added]")).toHaveTextContent("클래스 추가 1건")
+    expect(document.querySelector("[data-delta=changed]")).toHaveTextContent("클래스 변경 1건")
+    expect(document.getElementById("ops-delta")).toHaveTextContent("병합 변경 1건")
+    await waitFor(() => expect(document.querySelector("#ops-review-top [data-decision=accept]")).toHaveTextContent("리비전 3 적용"))
+  })
+
+  it("pluralises the English counts with one helper", async () => {
+    const two = { ...DIFF,
+      classes: { ...DIFF.classes, totals: { added: 2, removed: 0, changed: 3 } },
+      axioms: { ...DIFF.axioms, totals: { added: 1, removed: 0, changed: 0 } },
+      merges: { ...DIFF.merges, totals: { added: 1, removed: 1 } } }
+    mockFetch(dashboardRoutes({ "GET /ontology/diff": two }))
+    renderPage(<IndexPage />)
+    await waitFor(() => expect(document.querySelector("[data-delta=added]")).toHaveTextContent("+2 classes added"))
+    expect(document.querySelector("[data-delta=removed]")).toHaveTextContent("−0 classes removed")
+    expect(document.querySelector("[data-delta=changed]")).toHaveTextContent("~3 classes changed")
+    expect(document.getElementById("ops-delta")).toHaveTextContent("1 relation change")
+    expect(document.getElementById("ops-delta")).toHaveTextContent("2 merge changes")
+  })
+
+  it("labels the old-build notice's button with what it does", async () => {
+    const old = new Date(new Date(NOW).getTime() - 9 * 86_400_000).toISOString()
+    mockFetch(dashboardRoutes({
+      "GET /runs": { runs: [{ id: "b1", kind: "build", status: "succeeded", started_at: old, finished_at: old, error: null,
+                              params: {}, managed: true, steps: [], progress: {}, source: null }] },
+    }))
+    renderPage(<IndexPage />)
+    const row = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-notice=old-build]")
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(within(row).getByRole("button", { name: "Build changed sources" })).toBeInTheDocument()
   })
 
   it("labels apply runs on the Build page", async () => {
