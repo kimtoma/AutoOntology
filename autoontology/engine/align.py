@@ -631,10 +631,11 @@ def _raw_verdict(record: AlignmentRecord) -> al.ValidatedVerdict:
     )
 
 
-def _accepted_aliases(ctx: _AlignCtx) -> dict[str, set[str]]:
-    """term id -> the normalized names every accepted ``same`` (any documents source)
-    accounts for on it: never taken off."""
-    out: dict[str, set[str]] = {}
+def _accepted_supporters(ctx: _AlignCtx) -> dict[str, dict[str, list[AlignmentRecord]]]:
+    """term id -> normalized name -> the accepted ``same`` rows (any documents source)
+    whose concept accounts for that name on the Term: while one stands it is never taken
+    off."""
+    out: dict[str, dict[str, list[AlignmentRecord]]] = {}
     for source in ctx.store.list_sources():
         if source.kind != "documents":
             continue
@@ -646,31 +647,90 @@ def _accepted_aliases(ctx: _AlignCtx) -> dict[str, set[str]]:
             info = al.ConceptInfo(
                 id=c.id, name=c.name, kind=c.kind, name_en=c.name_en, synonyms=c.synonyms
             )
-            out.setdefault(a.term_id, set()).update(al.accepted_aliases(info))
+            names = out.setdefault(a.term_id, {})
+            for n in al.accepted_aliases(info):
+                names.setdefault(n, []).append(a)
     return out
 
 
+def _accounted_names(row: AlignmentRecord, concept: Any | None) -> set[str]:
+    """Normalized synonyms *row* accounts for on its Term: what it wrote (``applied``
+    ``synonyms_added``), what it took over while protecting it (``supported``) and its
+    concept's names."""
+    names = {
+        *(row.applied.get("synonyms_added") or []),
+        *(row.applied.get("supported") or []),
+    }
+    out = {al.norm_alias(n) for n in names}
+    if concept is not None:
+        out |= al.accepted_aliases(
+            al.ConceptInfo(
+                id=concept.id,
+                name=concept.name,
+                kind=concept.kind,
+                name_en=concept.name_en,
+                synonyms=concept.synonyms,
+            )
+        )
+    return out - {""}
+
+
 def _unfold(ctx: _AlignCtx) -> int:
-    """Take off the Terms the synonyms this source's alignment wrote for the concepts whose
-    row no longer accounts for them (:func:`overlay.unfold_pending`: a review decision
-    rejected, removed or moved the fold) and that no accepted ``same`` of any source
-    accounts for; then clear those rows' ``applied``. The records stay (still untrusted).
-    Derived from the rows, so a failed removal is retried by the next pass. Returns how
-    many synonyms were removed."""
+    """Take off the Terms the synonyms AutoOntology wrote that this source's rows no longer
+    account for (:func:`overlay.unfold_pending`: a review decision rejected, removed or
+    moved the fold) and that no accepted ``same`` of any documents source still accounts
+    for -- whichever source made the upstream write. A synonym another accepted fold still
+    protects stays, and that fold takes it over (its row's ``applied`` records it under
+    ``supported``), so rejecting that fold later takes it off. Then clear the rows'
+    ``applied``; the alias records stay (still untrusted). Derived from the rows, so a
+    failed removal is retried by the next pass. Returns how many synonyms were removed."""
     from autoontology.engine import overlay
 
     rows = [a for a in ctx.aligns.list(ctx.source.id) if overlay.unfold_pending(a)]
     if not rows:
         return 0
-    names = {a.concept_name for a in rows}
+    concepts = {c.id: c for c in ctx.docs.list_concepts(ctx.source.id)}
     terms = ctx.snapshot(refresh=True).term_map()
-    stale, _kept = al.stale_auto_aliases(
-        terms, ctx.aligns.alias_provenance(live=True), _accepted_aliases(ctx), ctx.source.id
-    )
+    recorded = {
+        term_id: {r["alias"]: r for r in records}  # exact strings: ownership is never normalised
+        for term_id, records in ctx.aligns.alias_provenance(live=True).items()
+    }
+    supporters = _accepted_supporters(ctx)
     plan: dict[str, list[str]] = {}
-    for alias in stale:
-        if set(alias.concepts) & names:
-            plan.setdefault(alias.term_id, []).append(alias.alias)
+    handover: dict[int, tuple[AlignmentRecord, str, set[str]]] = {}
+    for a in rows:
+        term_id = a.applied.get("term_id") or a.term_id
+        term = terms.get(term_id)
+        if term is None:
+            continue  # a Term of another structured source (or rebuilt away)
+        own = {al.norm_alias(n) for n in [term.name, *(t.get("name") or "" for t in term.tables)]}
+        accounted = _accounted_names(a, concepts.get(a.concept_id))
+        for synonym in term.synonyms:
+            rec = recorded.get(term_id, {}).get(synonym)
+            n = al.norm_alias(synonym)
+            if rec is None or n in own:
+                continue  # never written by AutoOntology, or the Term's own name
+            if n not in accounted and a.concept_name not in (rec.get("concepts") or []):
+                continue
+            others = [r for r in supporters.get(term_id, {}).get(n, []) if r.id != a.id]
+            if others:
+                for r in others:
+                    assert r.id is not None
+                    handover.setdefault(r.id, (r, term_id, set()))[2].add(synonym)
+                continue
+            if synonym not in plan.get(term_id, []):
+                plan.setdefault(term_id, []).append(synonym)
+    for r, term_id, synonyms in handover.values():
+        if (r.applied.get("term_id") or term_id) != term_id:
+            continue  # that fold moved: its own unfold handles it
+        supported = set(r.applied.get("supported") or [])
+        if synonyms <= supported | set(r.applied.get("synonyms_added") or []):
+            continue
+        assert r.id is not None
+        base = r.applied or {"run_id": ctx.run.id, "at": now_iso()}
+        ctx.aligns.set_applied(
+            r.id, {**base, "term_id": term_id, "supported": sorted(supported | synonyms)}
+        )
     removed = 0
     for term_id, aliases in sorted(plan.items()):
         result = ctx.writer.remove_synonyms(term_id, aliases)  # raises: retried next pass

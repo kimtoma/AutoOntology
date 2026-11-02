@@ -755,3 +755,80 @@ def test_keep_separate_on_a_folded_concept_unfolds_it_and_undo_folds_back(ops):
     row = _rows(ops)["고객"]
     assert (row.relation, row.accepted, row.judged) == ("same", True, {})
     assert "고객" in ops["client"].terms["t-customer"]["synonyms"]
+
+
+@pytest.fixture
+def two_sources(ops, tmp_path):
+    """A second documents source folds its own `계약` into the Contract Term the first one
+    already wrote `계약` to (so it writes nothing upstream itself)."""
+    from autoontology.engine import extract as ex
+
+    other = tmp_path / "other-docs"
+    other.mkdir()
+    (other / "계약서.md").write_text("# 계약\n\n계약은 고객과 맺는다.\n", encoding="utf-8")
+    ex.ensure_documents_source(ops["store"], "other-docs", other)
+    assert tb.run(ops, judge=ops["judge"]).status == "succeeded"
+    ops["other"] = ops["store"].get_source("other-docs")
+    return ops
+
+
+def _contract_rows(ops):
+    out = {}
+    for name in ("hanbit-docs", "other-docs"):
+        src = ops["store"].get_source(name)
+        out[name] = next(a for a in ops["aligns"].list(src.id) if a.concept_name == "계약")
+    return out
+
+
+def _snapshot_labels(ops):
+    model = MergedOntology.from_dict(ops["store"].latest_snapshot().model)
+    return model.classes["term-t-contract"].alt_labels
+
+
+@pytest.mark.parametrize(
+    "order", ["first_then_second", "second_then_first", "both", "both_by_a_build", "retry"]
+)
+def test_rejecting_shared_folds_takes_the_synonym_off_once_the_last_is_gone(two_sources, order):
+    from autoontology.engine.apply import pending_work, run_apply
+    from autoontology.engine.jobs import JobError
+
+    ops = two_sources
+    rows = _contract_rows(ops)
+    assert all(r.accepted and r.relation == "same" for r in rows.values())
+    assert "계약" in ops["client"].terms["t-contract"]["synonyms"]
+
+    def reject(name):
+        ops["decisions"].put(Decision("alignment", rows[name].concept_id, "reject"))
+
+    def apply():
+        _apply(ops)
+
+    if order in ("first_then_second", "second_then_first", "retry"):
+        first, second = ("hanbit-docs", "other-docs")
+        if order == "second_then_first":
+            first, second = second, first
+        reject(first)
+        apply()
+        # the other fold still accounts for the synonym: it stays, nothing is pending
+        assert "계약" in ops["client"].terms["t-contract"]["synonyms"]
+        assert "계약" in _snapshot_labels(ops)
+        assert pending_work(ops["store"])["total"] == 0
+        reject(second)
+        if order == "retry":
+            writer = _flaky_writer(ops)
+            with pytest.raises(JobError):
+                run_apply(ops["store"], ops["settings"], client=ops["client"], writer=writer)
+            assert "계약" in ops["client"].terms["t-contract"]["synonyms"]
+            assert pending_work(ops["store"])["total"] >= 1
+        apply()
+    else:
+        reject("hanbit-docs")
+        reject("other-docs")
+        if order == "both":
+            apply()
+        else:
+            assert tb.run(ops, judge=ops["judge"]).status == "succeeded"
+    assert "계약" not in ops["client"].terms["t-contract"]["synonyms"]
+    assert "계약" not in _snapshot_labels(ops)
+    assert pending_work(ops["store"])["total"] == 0
+    assert not any(r.applied for r in _contract_rows(ops).values())
