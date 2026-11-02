@@ -1543,6 +1543,9 @@ def provider_use(
     openai_chat_model: str = typer.Option(
         None, "--openai-chat-model", help=msg("help.provider.use.openai_chat_model")
     ),
+    clear_api_key: bool = typer.Option(
+        False, "--clear-api-key", help=msg("help.provider.use.clear_api_key")
+    ),
 ) -> None:
     """Switch the chat provider in .env (comments and other lines are kept)."""
     import re
@@ -1554,6 +1557,9 @@ def provider_use(
         CLI_PROVIDERS,
         EMBED_PROVIDERS,
         env_file_path,
+        env_origin,
+        key_origin_conflict,
+        url_origin,
     )
 
     if name not in CHAT_PROVIDERS:
@@ -1572,6 +1578,31 @@ def provider_use(
     settings = _settings()
     path = env_file_path()
     env_file = onboarding.EnvFile.load(path)
+    key_var, url_var = "AUTOONTOLOGY_OPENAI_API_KEY", "AUTOONTOLOGY_OPENAI_BASE_URL"
+    shell_key = env_origin(key_var, path) == "shell"
+    if clear_api_key and shell_key:
+        _fail(msg("provider.clear_shell_key", var=key_var), code=2)
+    new_url = settings.openai_base_url
+    if base_url and env_origin(url_var, path) != "shell":  # a shell value would win anyway
+        new_url = base_url
+    if not clear_api_key and key_origin_conflict(
+        settings.openai_api_key, settings.openai_base_url, new_url
+    ):
+        # the saved key is never sent to another endpoint than its own (as on Settings)
+        _fail(
+            msg(
+                "provider.key_other_origin",
+                old=url_origin(settings.openai_base_url) or "-",
+                new=url_origin(new_url) or "-",
+                url=f"{settings.service_url}/ui/settings",
+                hint=msg("provider.unset_shell_key", var=key_var)
+                if shell_key
+                else msg("provider.clear_key_hint"),
+            ),
+            code=2,
+        )
+    if clear_api_key:
+        env_file.unset(key_var)
     keys = {"AUTOONTOLOGY_CHAT_PROVIDER": name}
     if chat_model:
         keys[onboarding.CHAT_MODEL_VARS[name]] = chat_model

@@ -332,6 +332,16 @@ MESSAGES: dict[str, str] = {
         "API 키는 명령줄로 받지 않습니다: 설정 페이지({url})에서 입력하거나 {path}에 "
         "AUTOONTOLOGY_OPENAI_API_KEY를 직접 입력하세요"
     ),
+    "help.provider.use.clear_api_key": "저장된 API 키를 .env에서 지웁니다.",
+    "provider.key_other_origin": (
+        "저장된 API 키는 {old}의 키입니다: 다른 엔드포인트({new})로는 보내지 않습니다. "
+        "설정 페이지({url})에서 엔드포인트와 키를 함께 바꾸세요. {hint}"
+    ),
+    "provider.clear_key_hint": "또는 --clear-api-key를 붙여 저장된 키를 지우세요",
+    "provider.unset_shell_key": "또는 먼저 셸에서 `unset {var}` 하세요",
+    "provider.clear_shell_key": (
+        "--clear-api-key는 셸이 설정한 키를 지울 수 없습니다: 먼저 `unset {var}` 하세요"
+    ),
     "provider.restart_short": "또는: `uv run autoontology restart`",
     "restart.failed": "재시작 실패 (종료 코드 {code}): 위 출력을 보세요 ({log}에도 있음)",
     "restart.bad_only": "--only는 {choices} 중 하나여야 합니다 (받은 값 {value!r})",

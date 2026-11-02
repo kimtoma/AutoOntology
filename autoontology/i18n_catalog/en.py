@@ -353,6 +353,16 @@ MESSAGES: dict[str, str] = {
         "the API key is never taken on the command line: enter it on the Settings page "
         "({url}) or type AUTOONTOLOGY_OPENAI_API_KEY into {path} yourself"
     ),
+    "help.provider.use.clear_api_key": "Remove the saved API key from .env.",
+    "provider.key_other_origin": (
+        "the saved API key belongs to {old}: it is never sent to another endpoint ({new}). "
+        "Change the endpoint and its key together on the Settings page ({url}), {hint}"
+    ),
+    "provider.clear_key_hint": "or add --clear-api-key to drop the saved key",
+    "provider.unset_shell_key": "or `unset {var}` in your shell first",
+    "provider.clear_shell_key": (
+        "--clear-api-key cannot remove a key your shell sets: `unset {var}` first"
+    ),
     "provider.restart_short": "or: `uv run autoontology restart`",
     "restart.failed": "restart failed (exit {code}): see the output above (also in {log})",
     "restart.bad_only": "--only must be one of {choices}, got {value!r}",

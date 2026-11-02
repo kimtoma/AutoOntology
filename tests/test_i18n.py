@@ -257,7 +257,7 @@ HELP_SCREENS = {
     ("demo",): ("help.demo.set", "help.demo.no_open", "help.demo.resume", "help.demo.replace"),
     ("provider",): ("help.provider_app",),
     ("provider", "test"): ("help.provider.test.provider",),
-    ("provider", "use"): ("help.provider.use.chat_model",),
+    ("provider", "use"): ("help.provider.use.chat_model", "help.provider.use.clear_api_key"),
     ("doctor",): ("help.doctor", "help.doctor.skip_models"),
 }
 

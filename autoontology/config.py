@@ -249,6 +249,27 @@ def dotenv_copies() -> dict[str, str]:
     return dict(_DOTENV_LOADED)
 
 
+def url_origin(url: str) -> str:
+    """``scheme://host:port`` of *url* (lower case, default port filled in; "" if none)."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port or {"http": 80, "https": 443}.get(parts.scheme.lower())
+    except ValueError:
+        return ""
+    if not parts.scheme or not parts.hostname:
+        return ""
+    return f"{parts.scheme.lower()}://{parts.hostname.lower()}:{port}"
+
+
+def key_origin_conflict(saved_key: str, saved_url: str, new_url: str) -> bool:
+    """True when a saved OpenAI-compatible API key would follow the endpoint to another
+    origin: a key is never sent to (nor saved for) another endpoint than its own. The one
+    rule behind the Settings API (``key_required``) and ``provider use --base-url``."""
+    return bool(saved_key) and url_origin(new_url) != url_origin(saved_url)
+
+
 def env_origin(name: str, env_file: Path | None = None) -> str:
     """Where ``name``'s value comes from for a fresh read of the layers: ``shell`` (set in
     the environment, not copied from ``.env`` by this process nor derived by a parent),

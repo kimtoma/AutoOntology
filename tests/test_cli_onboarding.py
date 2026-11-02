@@ -653,6 +653,74 @@ def test_provider_use_sets_embeddings_and_the_openai_endpoint(isolated_env, monk
         assert runner.invoke(app, ["provider", "use", "claude", *bad]).exit_code == 2, bad
 
 
+KEY = "AUTOONTOLOGY_OPENAI_API_KEY"
+
+
+def _openai_env(isolated_env, monkeypatch, *, key_in_file: bool) -> Path:
+    env = Path(isolated_env) / ".env"
+    lines = [
+        "AUTOONTOLOGY_CHAT_PROVIDER=openai",
+        "AUTOONTOLOGY_OPENAI_BASE_URL=https://first.example/v1",
+    ]
+    if key_in_file:
+        lines.append(f"{KEY}=sk-first-synthetic")
+    env.write_text("\n".join(lines) + "\n")
+    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env))
+    monkeypatch.delenv(KEY, raising=False)
+    monkeypatch.delenv("AUTOONTOLOGY_OPENAI_BASE_URL", raising=False)
+    return env
+
+
+@pytest.mark.parametrize("where", ["file", "shell"])
+def test_provider_use_refuses_another_origin_while_a_key_is_saved(isolated_env, monkeypatch, where):
+    """The saved key belongs to its endpoint: a new origin is refused, nothing is written."""
+    env = _openai_env(isolated_env, monkeypatch, key_in_file=where == "file")
+    if where == "shell":  # not the value an earlier test's .env load recorded
+        monkeypatch.setenv(KEY, "sk-first-shell-synthetic")
+    before = env.read_text()
+    res = runner.invoke(
+        app, ["provider", "use", "openai", "--base-url", "https://second.example/v1"]
+    )
+    assert res.exit_code == 2, res.output
+    assert "https://first.example:443" in res.output and "/ui/settings" in res.output
+    assert "sk-first" not in res.output
+    assert env.read_text() == before
+    assert not list(Path(isolated_env).glob(".env.bak-*"))
+
+
+def test_provider_use_keeps_the_key_on_the_same_origin(isolated_env, monkeypatch):
+    env = _openai_env(isolated_env, monkeypatch, key_in_file=True)
+    for url in ("https://first.example/v1/", "https://First.Example:443/v2"):
+        res = runner.invoke(app, ["provider", "use", "openai", "--base-url", url])
+        assert res.exit_code == 0, res.output
+        assert f"{KEY}=sk-first-synthetic" in env.read_text()
+
+
+def test_provider_use_clear_api_key_drops_the_file_key(isolated_env, monkeypatch):
+    env = _openai_env(isolated_env, monkeypatch, key_in_file=True)
+    res = runner.invoke(
+        app,
+        ["provider", "use", "openai", "--base-url", "https://second.example/v1", "--clear-api-key"],
+    )
+    assert res.exit_code == 0, res.output
+    text = env.read_text()
+    assert KEY not in text and "AUTOONTOLOGY_OPENAI_BASE_URL=https://second.example/v1" in text
+    assert "sk-first" not in res.output
+
+
+def test_provider_use_clear_api_key_cannot_drop_a_shell_key(isolated_env, monkeypatch):
+    env = _openai_env(isolated_env, monkeypatch, key_in_file=False)
+    monkeypatch.setenv(KEY, "sk-first-shell-synthetic")
+    before = env.read_text()
+    res = runner.invoke(
+        app,
+        ["provider", "use", "openai", "--base-url", "https://second.example/v1", "--clear-api-key"],
+    )
+    assert res.exit_code == 2, res.output
+    assert f"unset {KEY}" in res.output and "sk-first" not in res.output
+    assert env.read_text() == before
+
+
 def test_restart_runs_the_helper_in_the_foreground(isolated_env, monkeypatch):
     import subprocess
 

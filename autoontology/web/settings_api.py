@@ -51,6 +51,8 @@ from autoontology.config import (
     dotenv_layer,
     env_file_path,
     env_origin,
+    key_origin_conflict,
+    url_origin,
     validate_model_profile,
 )
 from autoontology.web.api import PREFIX, Api, ApiError, mask
@@ -178,20 +180,6 @@ def _clean_model(value: str, what: str) -> str:
     return value
 
 
-def url_origin(url: str) -> str:
-    """``scheme://host:port`` of *url* (lower case, default port filled in; "" if none)."""
-    from urllib.parse import urlsplit
-
-    try:
-        parts = urlsplit(url.strip())
-        port = parts.port or {"http": 80, "https": 443}.get(parts.scheme.lower())
-    except ValueError:
-        return ""
-    if not parts.scheme or not parts.hostname:
-        return ""
-    return f"{parts.scheme.lower()}://{parts.hostname.lower()}:{port}"
-
-
 def candidate_settings(pending: Settings, body: SettingsIn, *, test: bool) -> Settings:
     """*pending* with the body's changes applied (validated: 400 ``invalid_settings``)."""
     chat = body.chat_provider or pending.chat_provider
@@ -220,10 +208,8 @@ def candidate_settings(pending: Settings, body: SettingsIn, *, test: bool) -> Se
     elif (body.clear_api_key and not test) or (test and not body.use_saved_key):
         updates["openai_api_key"] = ""
     new_url = updates.get("openai_base_url", pending.openai_base_url)
-    if (
-        "openai_api_key" not in updates
-        and pending.openai_api_key
-        and url_origin(new_url) != url_origin(pending.openai_base_url)
+    if "openai_api_key" not in updates and key_origin_conflict(
+        pending.openai_api_key, pending.openai_base_url, new_url
     ):
         # the saved key is never sent to (nor saved for) another endpoint than its own
         old = url_origin(pending.openai_base_url) or "no endpoint"
