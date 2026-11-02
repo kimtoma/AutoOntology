@@ -21,30 +21,19 @@ from typing import Any
 from autoontology.config import Settings
 from autoontology.store.db import Source, Store
 
-#: build runs searched for a source's last recorded fingerprint
-RUN_LOOKBACK = 50
 EXAMPLES = 3
 
 
 def _last_built(store: Store, source: Source) -> tuple[str, str] | None:
     """``(inputs_sha, finished_at)`` of the newest succeeded step of *source* that recorded
-    its fingerprint, over the recent build runs (None: never built)."""
+    its fingerprint, in the newest build run that has one (None: never built)."""
     from autoontology.engine.build import BUILD_KIND, INPUTS_KEY
 
     group = "documents" if source.kind == "documents" else "structured"
-    prefix = f"{group}:{source.name}:"
-    for run in store.list_runs(None, limit=RUN_LOOKBACK):
-        if run.kind != BUILD_KIND:
-            continue
-        steps = [
-            s
-            for s in store.get_steps(run.id)
-            if s.name.startswith(prefix) and s.status == "succeeded" and INPUTS_KEY in s.detail
-        ]
-        if steps:
-            last = max(steps, key=lambda s: s.finished_at or "")
-            return str(last.detail[INPUTS_KEY]), last.finished_at or ""
-    return None
+    last = store.last_succeeded_step(BUILD_KIND, f"{group}:{source.name}:", INPUTS_KEY)
+    if last is None:
+        return None
+    return str(last.detail[INPUTS_KEY]), last.finished_at or ""
 
 
 def _reason(kind: str, items: list[str]) -> dict[str, Any]:

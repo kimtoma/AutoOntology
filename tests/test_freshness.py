@@ -137,3 +137,14 @@ def test_freshness_api_caches_for_a_minute(built):
     items = c.get("/api/review", params={"category": "stale_sources"}).json()["items"]
     assert [i["id"] for i in items] == ["src:hanbit-docs"]
     assert items[0]["suggested_action"] == "build" and items[0]["source"]["stale"] is True
+
+
+def test_unrelated_runs_never_hide_the_last_build(built):
+    """Sixty no-op apply/export runs after the build: the build is still the baseline."""
+    store = built["store"]
+    for i in range(60):
+        run = store.create_run(kind="apply" if i % 2 else "export", source_id=None, params={})
+        store.update_run(run.id, status="succeeded")
+    rows = _by_name(built)
+    assert {n: r["state"] for n, r in rows.items()} == {"hanbit": "fresh", "hanbit-docs": "fresh"}
+    assert all(r["last_built_at"] for r in rows.values())

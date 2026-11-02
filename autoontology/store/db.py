@@ -1055,6 +1055,22 @@ class Store:
             ).fetchall()
         return [_step(r) for r in rows]
 
+    def last_succeeded_step(self, run_kind: str, prefix: str, detail_key: str) -> Step | None:
+        """The succeeded step named ``prefix*`` whose detail carries *detail_key*, from the
+        newest run of *run_kind* that has one (the newest finished of that run's steps).
+        No run-count cutoff: unrelated runs never hide it."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT s.* FROM steps s JOIN runs r ON r.id = s.run_id "
+                "WHERE r.kind = ? AND s.status = 'succeeded' "
+                "AND substr(s.name, 1, ?) = ? "
+                "AND json_extract(s.detail_json, '$.' || ?) IS NOT NULL "
+                "ORDER BY r.started_at DESC, r.rowid DESC, s.finished_at DESC, s.id DESC "
+                "LIMIT 1",
+                (run_kind, len(prefix), prefix, detail_key),
+            ).fetchone()
+        return _step(row) if row is not None else None
+
     def succeeded_steps(self, run_id: str) -> set[str]:
         return {s.name for s in self.get_steps(run_id) if s.status == "succeeded"}
 
