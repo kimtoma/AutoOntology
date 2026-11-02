@@ -321,9 +321,9 @@ def _step_judge(ctx: _AlignCtx) -> dict[str, Any]:
     # a person's decision replaces the judge for its concept, on every pass (never a dry
     # run: previews stay the judge's)
     from autoontology.engine import overlay
-    from autoontology.store.decisions import DecisionStore
 
-    decided = {} if ctx.dry_run else DecisionStore(ctx.store).by_subject("alignment")
+    # (an acknowledged -- "Keep separate" -- concept counts as a rejection)
+    decided = {} if ctx.dry_run else overlay.alignment_decisions(ctx.store)
     decided_count = 0
 
     def guard(

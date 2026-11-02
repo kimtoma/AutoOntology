@@ -7,6 +7,10 @@ judge never runs for it again (``engine/align.py`` checks :func:`decided_record`
 ``apply`` writes the same rows without a model call. Removing the decision restores the
 judged verdict (or drops the row when the concept was never judged), so the next align
 pass decides again.
+
+A ``concept/acknowledge`` decision ("Keep separate") is laid over the same way, as a
+rejection: the concept is never folded automatically while it stands
+(:func:`alignment_decisions`).
 """
 
 from __future__ import annotations
@@ -14,7 +18,13 @@ from __future__ import annotations
 from typing import Any
 
 from autoontology.store.alignments import AlignmentRecord, AlignmentStore
-from autoontology.store.decisions import HUMAN_RATIONALE, Decision
+from autoontology.store.db import Store
+from autoontology.store.decisions import HUMAN_RATIONALE, Decision, DecisionStore
+
+#: rationale of the row of an acknowledged ("Keep separate") concept
+KEPT_SEPARATE = "kept separate by decision"
+#: payload marker of the rejection an acknowledgement stands for
+KEPT_SEPARATE_KEY = "kept_separate"
 
 #: keys of a row saved in ``judged`` (and restored from it)
 JUDGED_KEYS: tuple[str, ...] = (
@@ -46,8 +56,34 @@ def is_decided(row: AlignmentRecord | None) -> bool:
     return row is not None and bool(row.judged)
 
 
+def alignment_decisions(store: Store) -> dict[str, Decision]:
+    """``{concept id: decision}`` the alignment overlay applies: every ``alignment``
+    decision, and every ``concept/acknowledge`` one as a rejection (``none``, never
+    accepted: "Keep separate" means never fold the concept automatically). A concept holds
+    one decision of either kind (:data:`~autoontology.store.decisions.CONCEPT_KINDS`)."""
+    decisions = DecisionStore(store)
+    out = {
+        d.subject_key: Decision(
+            kind="alignment",
+            subject_key=d.subject_key,
+            decision="reject",
+            payload={KEPT_SEPARATE_KEY: True},
+            note=d.note,
+            decided_by=d.decided_by,
+            decided_at=d.decided_at,
+            applied_revision=d.applied_revision,
+            id=d.id,
+        )
+        for d in decisions.list("concept")
+        if d.decision == "acknowledge"
+    }
+    out.update(decisions.by_subject("alignment"))
+    return out
+
+
 def rationale(decision: Decision) -> str:
-    return f"{HUMAN_RATIONALE}: {decision.note}" if decision.note else HUMAN_RATIONALE
+    base = KEPT_SEPARATE if decision.payload.get(KEPT_SEPARATE_KEY) else HUMAN_RATIONALE
+    return f"{base}: {decision.note}" if decision.note else base
 
 
 def unfold_pending(row: AlignmentRecord | None) -> bool:

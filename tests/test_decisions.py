@@ -400,19 +400,19 @@ def test_apply_reflects_the_decisions_in_a_new_revision_without_a_model(ops, mon
     assert run.params["applied_revision"] == 2 and run.params["decisions_applied"] == 4
     steps = {s.name: s for s in store.get_steps(result.run_id)}
     assert list(steps) == ["decisions", "merge", "snapshot"]
-    assert steps["decisions"].detail["written"] == 3
+    assert steps["decisions"].detail["written"] == 4  # "Keep separate" (고객) included
     assert steps["decisions"].detail["synonyms_added"] >= 1
     assert "수납" in ops["client"].terms["t-customer"]["synonyms"]
     assert {d.applied_revision for d in ops["decisions"].list()} == {2}
     model = MergedOntology.from_dict(store.latest_snapshot().model)
-    assert {m.concept_name for m in model.merges} == {"고객", "수납"}
+    assert {m.concept_name for m in model.merges} == {"수납"}  # 고객 kept separate
     axiom = next(a for a in model.axioms if a.source == "alignment")
     assert (axiom.subject, axiom.kind, axiom.accepted) == ("term-t-contract", "subclass_of", True)
     # nothing pending: no new revision (merge and snapshot skipped), unless forced
     again = _apply(ops)
     steps = {s.name: s for s in store.get_steps(again.run_id)}
     assert again.status == "succeeded" and again.revision == 2 and store.latest_revision() == 2
-    assert steps["decisions"].detail["written"] == 0 and steps["decisions"].detail["unchanged"] == 3
+    assert steps["decisions"].detail["written"] == 0 and steps["decisions"].detail["unchanged"] == 4
     assert {steps[n].status for n in ("merge", "snapshot")} == {"skipped"}
     assert steps["snapshot"].detail["reason"] == "no pending decisions"
     assert store.get_run(again.run_id).params["applied_revision"] == 2
@@ -672,3 +672,86 @@ def test_a_v6_store_without_the_review_index_gets_it_on_open(tmp_path):
     assert "alignments_review_idx" not in indexes()
     assert Store(path).schema_version() == 6
     assert "alignments_review_idx" in indexes()
+
+
+# --- round 2: Keep separate constrains alignment; shared folds across sources -----------
+
+
+class SameJudge(OpsJudge):
+    """`청구서` is the Contract Term (an accepted `same`), whenever it has that candidate."""
+
+    def structured(self, system, human, schema):
+        if '"청구서"' in human.split("\n", 2)[1]:
+            self.judged.append("청구서")
+            self.calls += 1
+            return _v("t-contract", "same", 0.97, "청구서 = Contract")
+        return super().structured(system, human, schema)
+
+
+def test_keep_separate_stops_a_later_fold_and_undo_restores_it(env, monkeypatch):  # noqa: F811
+    """An acknowledged ("Keep separate") concept that was unaligned gains a matching
+    candidate: no pass folds it (fresh, cached, resumed, apply); after Undo it folds."""
+    monkeypatch.setitem(tb.VECTORS, "수납", [0.1, 0.9, 0.0])
+    monkeypatch.setitem(tb.VECTORS, "청구서", [0.0, 0.0, 1.0])  # no candidate yet
+    tb.add_structured(env)
+    tb.add_documents(env)
+    judge = SameJudge()
+    assert tb.run(env, judge=judge).status == "succeeded"
+    store, aligns = env["store"], AlignmentStore(env["store"])
+    source = store.get_source("hanbit-docs")
+
+    def row():
+        return {a.concept_name: a for a in aligns.list(source.id)}["청구서"]
+
+    def folded():
+        model = MergedOntology.from_dict(store.latest_snapshot().model)
+        return "청구서" in {m.concept_name for m in model.merges}
+
+    assert (row().relation, row().accepted) == ("none", False)
+    cid = row().concept_id
+    DecisionStore(store).put(Decision("concept", cid, "acknowledge"))
+    # now it matches Contract, with identity evidence (a person put the name on the Term)
+    monkeypatch.setitem(tb.VECTORS, "청구서", [0.9, 0.1, 0.0])
+    env["client"].terms["t-contract"]["synonyms"].append("청구서")
+    judge.judged.clear()
+    for resume in (False, True):  # a fresh pass, then the resumed path
+        result = tb.run(env, judge=judge, resume=resume)
+        assert result.status == "succeeded", result.problems
+        assert "청구서" not in judge.judged
+        r = row()
+        assert (r.relation, r.accepted, r.rationale) == ("none", False, "kept separate by decision")
+        assert not folded()
+    # the apply path writes the same row and folds nothing
+    _apply(env)
+    assert (row().relation, row().accepted) == ("none", False) and not folded()
+    from autoontology.engine.apply import pending_work
+
+    assert pending_work(store)["total"] == 0
+    # Undo: the judge decides again and the concept folds
+    DecisionStore(store).delete("concept", cid)
+    assert pending_work(store)["total"] >= 1
+    assert tb.run(env, judge=judge).status == "succeeded"
+    assert "청구서" in judge.judged
+    r = row()
+    assert (r.relation, r.accepted, r.judged) == ("same", True, {})
+    assert folded()
+
+
+def test_keep_separate_on_a_folded_concept_unfolds_it_and_undo_folds_back(ops):
+    rows = _rows(ops)
+    cid = rows["고객"].concept_id
+    ops["decisions"].put(Decision("concept", cid, "acknowledge"))
+    _apply(ops)
+    row = _rows(ops)["고객"]
+    assert (row.relation, row.accepted, row.rationale) == (
+        "none",
+        False,
+        "kept separate by decision",
+    )
+    assert row.judged["relation"] == "same"  # the judge's verdict, kept for Undo
+    _check_unfolded(ops, "고객", "t-customer", "term-t-customer")
+    ops["decisions"].delete("concept", cid)
+    _apply(ops)
+    row = _rows(ops)["고객"]
+    assert (row.relation, row.accepted, row.judged) == ("same", True, {})
+    assert "고객" in ops["client"].terms["t-customer"]["synonyms"]

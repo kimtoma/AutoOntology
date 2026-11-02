@@ -73,7 +73,12 @@ def pending_work(store: Store, model: Any | None = None) -> dict[str, Any]:
     reverted = {
         ("alignment", row.concept_id)
         for row in AlignmentStore(store).review_rows()
-        if (row.judged and ("alignment", row.concept_id) not in keys) or overlay.unfold_pending(row)
+        if (
+            row.judged
+            and ("alignment", row.concept_id) not in keys
+            and ("concept", row.concept_id) not in keys  # an acknowledgement: a rejection
+        )
+        or overlay.unfold_pending(row)
     }
     if model is None:
         snap = store.latest_snapshot()
@@ -188,7 +193,7 @@ def _min_conf(store: Store) -> float:
 
 def _step_decisions(build: _Build) -> dict[str, Any]:
     store, client = build.store, build.client
-    decisions = DecisionStore(store).by_subject("alignment")
+    decisions = overlay.alignment_decisions(store)  # "Keep separate" included
     aligns, docs = AlignmentStore(store), DocumentStore(store)
     structured = build.built_structured()
     snap = combine([fetch_snapshot(client, s) for s in structured]) if structured else None
