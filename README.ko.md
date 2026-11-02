@@ -1,40 +1,89 @@
 # AutoOntology
 
-[로컬 개발 체크포인트 (2026-11-01)](docs/PUBLIC_CHECKPOINT.md)
-
-방문자 컴퓨터에 설치하지 않고 전체 작업 공간을 공유하려면
-[비밀번호를 사용하는 Cloudflare 배포 안내](deploy/cloudflare/README.md)를 참고하세요.
-앱은 기존 서버에서 실행하며, 로그인한 사용자는 데이터 업로드·빌드·검토·질문·내보내기와 설정 변경을
-이용할 수 있습니다. 샘플 탐색만 허용하는 제한 모드도 선택할 수 있습니다.
-
 [English](README.md) | **한국어**
 
-**개발 프리뷰: 0.3.0a1.** Ontology Ops, 버전별 검토·게시, 사람·에이전트 권한,
-업무 사건과 지속 수집을 포함한 알파 버전입니다. 소유자 등록·복구와 자율적으로 운영되는
-지식 OS의 전체 계획은 아직 미완료입니다. [진행 현황과 재개 계획](docs/SESSION_HANDOFF.md)을 참고하세요.
+AutoOntology는 **정형 데이터와 비정형 문서를 하나의 버전 관리 온톨로지로 연결**합니다.
+Ontology Ops는 그 지식을 계속 운영하는 흐름입니다. 변경 발견 → 근거 확인 → 검토 → 검증·운영 반영
+→ 질문·활용을 웹 UI와 CLI에서 이어갈 수 있습니다.
 
-AutoOntology는 표와 문서를 함께 읽어 **하나의 온톨로지**를 만듭니다. 스프레드시트, 데이터베이스
-내보내기 파일이나 Postgres 데이터베이스, 그리고 그것을 설명하는 규정, 매뉴얼, 회의록, 발표 자료,
-스캔본(HWP/HWPX, PDF, Word, PowerPoint, Excel, Markdown, HTML, OCR을 거친 이미지)을 지정하면
-됩니다. 양쪽에서 비즈니스 개념을 찾고, 문서 개념을 표의 용어(Term)에 매칭한 뒤, 버전이 매겨진
-스냅샷 하나로 저장합니다. 스냅샷은 둘러보고 질의할 수 있으며 RDF/OWL, GraphML,
-[Apache Ossie](https://github.com/apache/ossie),
-[Open Knowledge Format(OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)로
-내보낼 수 있습니다. 표를 비즈니스 용어로 컴파일하는
-[NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology) 위에 만들어졌고, Postgres +
-pgvector와 원하는 모델로 내 컴퓨터에서 실행됩니다. 모델은 로컬 Ollama, 내 Claude 또는 ChatGPT
-구독, 또는 임의의 OpenAI 호환 API 중에서 고릅니다.
+**현재 공개 개발 버전: `0.3.0a1`(alpha).** 최초 구축, 지속적인 검토와 질문 기능을 구현했습니다.
+조직 전체 권한 체계, 무인 에이전트 운영, 지식 OS 전체 범위는 아직 미완료입니다.
+이 README는 **2026-11-03의 공개 저장소 형상**을 기준으로 정리했습니다.
 
-**처음이라면 [단계별 가이드](docs/GUIDE.ko.md)를 읽으세요** ([English](docs/GUIDE.md)). 데이터
-엔지니어링 배경이 없는 현업 전문가를 위해 썼습니다. 용어 설명, 점검 목록, 10분 코스, 내 파일을
-준비하는 방법, 문제 해결 표가 들어 있습니다.
+## 어떤 코드를 받으면 되나요?
 
-![시작하기 페이지](docs/screenshots/home.ko.png)
+| 구분 | 포함된 내용 |
+| --- | --- |
+| `main` | 기본 브랜치. 앱 기준점은 `c4b7dca`이며 Ontology Ops UI·CLI를 포함합니다. |
+| [`codex/ontology-ops-local`](https://github.com/kimtoma/AutoOntology/tree/codex/ontology-ops-local) | 최신 공개 개발본. 소유자 등록·복구, 고정 데이터 비교, 백업 검증, 복원 후 읽기 연결 검토, 두 버전 선택 게이트웨이를 추가했습니다. 앱·배포 체크포인트는 `042637c`입니다. |
+| 공개 Classic | 비교를 위해 별도로 유지하는 이전 `0.2.0` 앱입니다. |
+
+README 변경만으로 두 브랜치의 앱 코드가 병합되지는 않습니다. 최신 공개 구현을 받으려면 아래
+빠른 시작의 개발 브랜치 클론 명령을 사용하세요.
+[구현 체크포인트](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/docs/PUBLIC_CHECKPOINT.md)에서
+검증 범위와 남은 제약을 확인할 수 있습니다. 이전 인수인계·단계 기록은 각각 당시 시점을 보존합니다.
+
+## 배포된 두 버전 체험
+
+| 주소 | 용도 |
+| --- | --- |
+| [버전 선택](https://autoontology.kimtoma.com/) | 비밀번호 로그인 후 두 버전의 차이를 보고 선택 |
+| [Classic](https://autoontology-classic.kimtoma.com/) | 기존 설치·구축·탐색·질문 흐름 |
+| [Ontology Ops](https://autoontology-next.kimtoma.com/) | 운영 홈, 검토함, 변경 이력, 저장 결과와 고정 데이터 비교 |
+
+접속 권한은 작업 공간 소유자에게 요청하세요. 공유 비밀번호는 저장소에 기록하지 않습니다.
+주소별로 한 번씩 로그인하면 두 탭을 함께 사용할 수 있습니다. 변경 가능한 데이터·설정·PostgreSQL은 서로 분리됩니다.
+앱·데이터베이스·Tunnel·Ollama는 소유자의 Mac mini에서 실행합니다.
+현재 배포는 채팅에 Codex(`gpt-6-astra`), 임베딩에 Ollama(`qwen3-embedding:4b`)를 사용합니다.
+이 값은 배포 환경의 선택이며 새 설치의 기본값과 구분됩니다.
+
+11월 1일 검증에서는 두 주소의 실제 질문 답변·인용 근거·그래프·SQL·파일 다운로드를 완료했습니다.
+새 버전은 원본 다운로드, 저장 결과 재열람, 가상 데이터 비교, 업로드 격리와 웹 재시작도 확인했습니다.
+해당 날짜의 검증 기록이며 상시 가동이나 운영 환경 완성을 보장하는 의미는 아닙니다.
+[버전별 구성과 실행·중지 방법](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/deploy/cloudflare/VERSIONS.md)을 참고하세요.
+
+## 할 수 있는 일
+
+| 사용자 업무 | 화면·기능 |
+| --- | --- |
+| 오늘 할 일 확인 | 운영 홈에서 검토 대기, 변경된 소스, 업무 사건과 운영 중인 지식 확인 |
+| 데이터 연결 | 지식 소스에서 CSV/XLSX/Parquet/Postgres, HWP/HWPX·PDF·Office·Markdown·HTML·OCR 이미지 등록 |
+| 변경 검토 | 검토함에서 이전/이후·원문 근거 확인, 수정·보류·거절과 사유 기록 |
+| 검토를 업무로 관리 | 관련 변경·담당자·우선순위·기한·검토 상태를 업무 사건으로 연결. 신원이 확인된 확정은 개별 신원 설정 필요 |
+| 지식 탐색 | 온톨로지 개념과 정형·문서·연결 계층의 그래프 탐색 |
+| 질문·활용 | 인용이 있는 질문 답변, 범위가 제한된 SQL·SPARQL, 저장된 실행 결과와 다운로드 |
+| 운영 반영 확인 | 변경 이력에서 검증·버전 비교·운영 반영·복원. 최신 브랜치는 가상 고정 데이터 비교도 제공 |
+| 결과 재사용 | RDF/OWL·GraphML·Apache Ossie·Open Knowledge Format 내보내기 |
+
+```mermaid
+flowchart LR
+    A[데이터와 문서] --> B[변경안 구축]
+    B --> C[변경과 근거 검토]
+    C --> D[검증 후 운영 반영]
+    D --> E[탐색·질문·다운로드]
+    E --> F[피드백·새 변경 기록]
+    F --> C
+```
+
+접고 펼치는 좌측 메뉴는 **운영 홈 · 검토함 · 지식 소스 · 온톨로지 · 질문·활용 · 변경 이력 · 설정**으로
+구성됩니다. 분석·빌드는 지식 소스, 그래프는 온톨로지, 다운로드는 질문·활용, 서비스 상태는 설정에서
+접근합니다. 최초 설치 안내는 필요할 때 사용할 수 있습니다.
+UI·CLI는 공통 업무 로직을 사용하지만 전체 기능 동등성과 자율 운영은 추가 검증 범위입니다.
+현재 그래프 화면은 지식 탐색용이며 워크플로 빌더를 의미하지 않습니다.
+
+수정하지 않은 [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology) submodule을 엔진으로 사용하며,
+PostgreSQL 17 + pgvector와 로컬 파일에 저장합니다. 채팅 제공자는 Ollama·Claude/Codex CLI 로그인·
+OpenAI 호환 API 중 고르고, 임베딩은 Ollama 또는 OpenAI 호환 엔드포인트를 사용합니다.
+
+**처음이라면 [단계별 가이드](docs/GUIDE.ko.md)**([English](docs/GUIDE.md))를 읽으세요.
+직접 공유 환경을 구성하려면 [Cloudflare 배포 안내](deploy/cloudflare/README.md)를 참고하고,
+현재 두 버전 구성은 위 최신 개발 브랜치의 운영 문서를 확인하세요.
 
 ## 빠른 시작
 
 ```
-git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git && cd AutoOntology
+git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
+cd AutoOntology
 docker compose up -d            # or point POSTGRES_* in .env at your own Postgres 17 + pgvector
 uv sync
 uv run autoontology init        # checks what is installed, picks a model, writes .env, runs setup
@@ -120,7 +169,7 @@ uv run autoontology export      # exports the published operational version
 **터미널의 Claude Code.** 홈 폴더에서 `claude`를 실행하고 다음을 붙여 넣습니다.
 
 ```text
-https://github.com/kimtoma/AutoOntology 를 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
+https://github.com/kimtoma/AutoOntology 의 codex/ontology-ops-local 브랜치를 submodule과 함께 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
 ```
 
 `--yes`는 묻지 않고 진행합니다. uv가 없으면 공식 설치 스크립트로 설치하고, `init`의 기본값을
@@ -131,7 +180,7 @@ mini, 2026-10-29, uv 캐시 있음, quickstart 빌드만 547초).
 영어로는:
 
 ```text
-Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
+Clone the codex/ontology-ops-local branch of https://github.com/kimtoma/AutoOntology with submodules into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
 ```
 
 **Claude 데스크톱 앱.** **Code** 탭(데스크톱 앱 안의 Claude Code)을 열고, 작업 폴더로 홈
@@ -165,20 +214,23 @@ Google Vertex AI, API 키로 설정한 Claude Code는 여기서 `loggedIn: false
 - 관리자가 Claude Code 사용을 제한했다면 로그인이나 호출이 실패합니다. `uv run autoontology
   doctor`의 `chat provider` 행에 해결 방법이 나옵니다.
 
-**Claude Code가 없다면** 같은 스크립트를 직접 실행합니다. 먼저
-[`scripts/bootstrap.sh`](scripts/bootstrap.sh)를 읽어 보세요. 인터넷의 스크립트를 `bash`로
-파이프하면 그 안의 내용이 그대로 실행됩니다.
+**Claude Code가 없다면** 최신 공개 브랜치를 클론한 뒤 해당 폴더에서
+[`scripts/bootstrap.sh`](scripts/bootstrap.sh)를 직접 실행합니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/bootstrap.sh | bash -s -- --yes --provider claude
+git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
+cd AutoOntology
+scripts/bootstrap.sh --yes --provider claude
 ```
 
-`./AutoOntology`에 클론합니다(`--dir`로 바꿀 수 있습니다).
+다른 폴더를 원하면 `git clone`의 대상 경로를 바꾸고 해당 폴더에서 bootstrap을 실행하세요.
 
 ## 모델 제공자 고르기
 
-채팅 제공자는 표를 컴파일하고, 문서 개념을 추출하고, 매칭을 판정하는 모델입니다. 임베딩(비슷한
-개념 찾기)에는 항상 Ollama의 `bge-m3`(1.2 GB)나 OpenAI 호환 임베딩 엔드포인트를 씁니다.
+채팅 제공자는 표를 컴파일하고, 문서 개념을 추출하고, 매칭을 판정하는 모델입니다. 임베딩은 설정한
+Ollama 모델이나 OpenAI 호환 엔드포인트를 사용합니다. 새 로컬 설치의 기본값은
+`bge-m3`이며, 공개 비교 환경은 `qwen3-embedding:4b`를 사용합니다. 임베딩 모델을 바꾸면 해당 벡터와
+검색 인덱스를 다시 구축해야 합니다.
 
 | 제공자 | `AUTOONTOLOGY_CHAT_PROVIDER` | 비용 | 데이터가 컴퓨터 밖으로 나감 | quickstart / hanbit 첫 빌드 | 준비 방법 |
 |---|---|---|---|---|---|
@@ -290,7 +342,7 @@ AUTOONTOLOGY_EMBED_PROVIDER=ollama
 ## 샘플 세트
 
 샘플 데이터는 가상의 한국 무역회사 "한빛상사"이며, 내용은 한국어입니다. `demo --set <set>`(또는
-웹 UI의 **시작하기 → 샘플 데이터 불러오기**)으로 세트를 등록합니다.
+웹 UI의 **초기 설정(`/ui/setup`) → 샘플 데이터 불러오기**)으로 세트를 등록합니다.
 [samples/README.md](samples/README.md)([English](samples/README.en.md))에 모든 파일과 표 사이의
 관계가 설명되어 있습니다.
 
@@ -665,10 +717,9 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 ## 보안 참고
 
 - 서비스와 엔진 백엔드는 `127.0.0.1`에 바인딩됩니다. 로컬이 아닌 `Host`나 교차 사이트
-  `Origin`을 가진 요청은 기본적으로 거부합니다. 로컬 작업 공간은 개별 로그인 없이 시작하며,
-  OS 소유자가 개발 중인 [최초 소유자 등록](docs/OWNER_ENROLLMENT.md)을 명시적으로 활성화할 수 있습니다.
-  전체 소유자 복구·권한 감사는 아직 진행 중입니다. 두 포트 모두 외부에 노출하지 말고,
-  문서화된 외부 게이트웨이를 통해서만 공유하세요. 게이트웨이의 공유 비밀번호와 개별 신원은 별개입니다.
+  `Origin`을 가진 요청은 거부합니다. 작업 공간은 개별 로그인 없이 시작합니다. 개별 신원 기능은 alpha 단계이며 최신 브랜치에
+  명시적인 소유자 등록·복구 절차가 문서화돼 있습니다. 두 포트 모두 비공개로 유지하고 문서화된
+  게이트웨이를 통해 공유하세요. 공유 비밀번호와 개별 신원·승인 권한은 별개입니다.
 - 문서 텍스트는 신뢰하지 않는 입력으로 다룹니다. 구분된 프롬프트 블록 안에 인용하고, 모델 출력은
   스키마로 검증하며(fail-closed), OKF 번들은 추출한 텍스트의 Markdown과 HTML을 이스케이프합니다.
   `.md` 파일을 다른 곳에서 HTML로 렌더링한다면 직접 정화(sanitize)하세요.
@@ -717,7 +768,7 @@ uv run autoontology down && uv run autoontology up
 ACL 태그로 로그인한 서버)는 신원 헤더가 없으므로 같은 방식으로 거부됩니다. 사용자 계정으로 로그인한
 기기에서 UI를 여세요. 그 호스트 이름에서도 교차 출처 쓰기는 계속 거부됩니다.
 `/api/status`의 `remote`에 호스트 이름이 나옵니다(로그인은 나오지 않습니다).
-**AutoOntology에는 `tailscale funnel`을 절대 쓰지 마세요.** 이 앱의 원격 접근 제어는 Funnel 트래픽을 지원하지 않습니다.
+**AutoOntology에는 `tailscale funnel`을 절대 쓰지 마세요.** 원격 접근 제어가 Funnel 트래픽을 지원하지 않습니다.
 
 취약점 신고 방법은 [SECURITY.md](SECURITY.md)를 보세요.
 
@@ -743,6 +794,16 @@ ACL 태그로 로그인한 서버)는 신원 헤더가 없으므로 같은 방�
 | 빌드가 멈춘 것 같음 | `uv run autoontology runs`를 실행하고 `data/logs/`를 읽어 보세요. `qwen3:8b`로는 청크 하나에 1~2분이 걸립니다. |
 
 ## 개발
+
+기여할 대상 브랜치에서 시작해 [CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md),
+[기여 안내](CONTRIBUTING.md), [아키텍처](docs/ARCHITECTURE.md)를 읽으세요. 최신 브랜치의 검증 범위는
+이 README 앞부분의 공개 구현 체크포인트를 기준으로 확인합니다.
+현재 브랜치·HEAD·미커밋 변경을 먼저 확인하고 기존 `.env`, `data/`, `exports/`를 보존하세요.
+다른 인스턴스가 실행 중이면 작업 공간·데이터베이스·포트를 분리합니다. bootstrap/demo는 설치·샘플
+준비를 명시적으로 진행할 때 사용하며 `--yes`는 샘플 소스를 교체할 수 있습니다. 운영 중인 데이터에서
+이어서 개발하기 위해 다시 실행하는 명령은 아닙니다.
+개발을 Claude Code로 이어가더라도 실행 중인 앱의 채팅 제공자는 Codex나 Ollama로 유지할 수 있습니다.
+개발 도구 선택과 서비스 제공자 설정은 별개입니다. 문서 변경에 서비스 배포를 포함하지 마세요.
 
 ```bash
 uv run ruff check . && uv run ruff format --check . && uv run pytest -q   # unit tests

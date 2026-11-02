@@ -1,41 +1,97 @@
 # AutoOntology
 
-[Local development checkpoint (2026-11-01)](docs/PUBLIC_CHECKPOINT.md)
-
 **English** | [한국어](README.ko.md)
 
-**Development preview: 0.3.0a1.** This alpha adds Ontology Ops, versioned review and
-publication, scoped human/agent access, business cases and continuous collection.
-Owner enrollment/recovery and the full autonomous Knowledge OS roadmap remain
-incomplete. See the [current handoff and remaining plan](docs/SESSION_HANDOFF.md).
+AutoOntology combines **structured data and unstructured documents into one
+versioned ontology**. Ontology Ops provides the operating workflow around it:
+find changes, inspect evidence, review proposals, validate, publish and reuse
+knowledge through the web UI and native CLI.
 
-AutoOntology builds **one ontology** from your tables and your documents together. Point it
-at spreadsheets, database exports or a Postgres database, and at the policies, manuals,
-minutes, slide decks and scans that explain them (HWP/HWPX, PDF, Word, PowerPoint, Excel,
-Markdown, HTML, images through OCR). It finds the business concepts in both, matches the
-document concepts to the tables' Terms, and saves one versioned snapshot you can browse,
-query and export as RDF/OWL, GraphML, [Apache Ossie](https://github.com/apache/ossie) and
-[Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md).
-It is built on [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology), which
-compiles tables into business Terms, and runs on your machine with Postgres + pgvector and
-a model of your choice: local Ollama, your Claude or ChatGPT subscription, or any
-OpenAI-compatible API.
+**Current public development version: `0.3.0a1` (alpha).** Initial construction,
+ongoing review and question answering are implemented. Organization-wide authority,
+unattended agent operation and the complete Knowledge OS remain unfinished.
+This README was refreshed against the public source on **2026-11-03**.
 
-**New here? Read the [step-by-step guide](docs/GUIDE.md)** ([한국어](docs/GUIDE.ko.md)). It is
-written for domain experts with no data-engineering background: words explained, a
-checklist, the 10-minute path, how to prepare your own files, and a troubleshooting table.
+## Which code should I use?
 
-To share a complete workspace without installing on each visitor's computer, see the
-[password-protected Cloudflare deployment](deploy/cloudflare/README.md). The app stays
-on its server; signed-in users can upload data, build, review, query, export and change
-settings. A restricted sample-viewer mode is also available.
+| Reference | What it contains |
+| --- | --- |
+| `main` | Default branch; application baseline `c4b7dca`, already including the Ontology Ops UI and CLI |
+| [`codex/ontology-ops-local`](https://github.com/kimtoma/AutoOntology/tree/codex/ontology-ops-local) | Latest public application additions: owner enrollment/recovery, frozen-data comparison, backup verification, reviewed restored reads and the two-version gateway; application/deployment checkpoint `042637c` |
+| Hosted Classic | Earlier `0.2.0` application, maintained separately for comparison |
 
-![Get started page](docs/screenshots/home.png)
+Documentation updates do not merge application changes between branches. For the
+latest public implementation, use the development-branch clone in Quickstart.
+Read its [implementation checkpoint](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/docs/PUBLIC_CHECKPOINT.md)
+for tested scope and remaining limitations. Older handoff and ledger entries retain
+their original checkpoint dates.
+
+## Try the two deployed versions
+
+| Service | Purpose |
+| --- | --- |
+| [Version chooser](https://autoontology.kimtoma.com/) | Compare the two versions after password login |
+| [Classic](https://autoontology-classic.kimtoma.com/) | Earlier setup, build, exploration and query workflow |
+| [Ontology Ops](https://autoontology-next.kimtoma.com/) | Operations home, review inbox, history, saved results and frozen-data comparison |
+
+Ask the workspace owner for access; the sharing password is not stored in this
+repository. Each host requires its own login, so both versions can remain open in
+separate tabs. Their mutable data, settings and PostgreSQL clusters are isolated.
+The app, database, tunnel and Ollama run on the owner's Mac mini. The deployed
+chat provider is Codex (`gpt-6-astra`) and embeddings use Ollama
+(`qwen3-embedding:4b`); these are deployment choices, not fresh-install defaults.
+
+The November 1 acceptance completed real chat, cited evidence, graph, SQL and file
+downloads on both hosts. The newer version also exercised original-file download,
+saved-result replay, fictional-data comparison, isolated uploads and web restart.
+These are dated verification results, not a continuous uptime or production-readiness
+guarantee. See the [version gateway and controls](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/deploy/cloudflare/VERSIONS.md).
+
+## What you can do
+
+| User task | Screen or capability |
+| --- | --- |
+| Find the next operational task | Operations home: pending reviews, changed sources, cases and current operational knowledge |
+| Bring in data | Knowledge sources: CSV/XLSX/Parquet/Postgres and documents including HWP/HWPX, PDF, Office, Markdown, HTML and OCR images |
+| Inspect a proposed change | Review inbox: before/after, original evidence, correction, hold/reject decisions and reasons |
+| Organize review work | Cases: related changes, ownership, priority, due date and review state; attributable confirmation needs configured identity |
+| Explore knowledge | Ontology concepts and structured/document/linked graph layers |
+| Use knowledge | Cited questions, bounded SQL and SPARQL, saved execution results and downloads |
+| Check an operational update | Change history: validation, version comparison, publication and restoration; the latest branch also includes frozen fictional-data comparison |
+| Reuse outputs | RDF/OWL, GraphML, Apache Ossie and Open Knowledge Format exports |
+
+```mermaid
+flowchart LR
+    A[Data and documents] --> B[Build a candidate]
+    B --> C[Review changes and evidence]
+    C --> D[Validate and publish]
+    D --> E[Explore, ask and download]
+    E --> F[Record feedback and new changes]
+    F --> C
+```
+
+The collapsible left navigation groups work by task: **Operations home · Review
+inbox · Knowledge sources · Ontology · Questions/use · Change history · Settings**.
+Build/analysis is under sources, graph under ontology, downloads under questions/use,
+and service status under settings. Setup remains available when needed.
+UI and CLI share application operations; full parity and autonomous operation are
+still acceptance work. A visible graph is an exploration view, not a workflow builder.
+
+The engine is the unmodified [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology)
+submodule. Runtime storage is PostgreSQL 17 + pgvector and local workspace files.
+Chat supports Ollama, the user's Claude/Codex CLI login or an OpenAI-compatible API;
+embeddings use Ollama or an OpenAI-compatible endpoint.
+
+**New here?** Read the [step-by-step guide](docs/GUIDE.md)
+([한국어](docs/GUIDE.ko.md)). For your own password-protected deployment, use the
+[Cloudflare guide](deploy/cloudflare/README.md); the current two-version setup is
+documented on the latest development branch linked above.
 
 ## Quickstart
 
 ```
-git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git && cd AutoOntology
+git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
+cd AutoOntology
 docker compose up -d            # or point POSTGRES_* in .env at your own Postgres 17 + pgvector
 uv sync
 uv run autoontology init        # checks what is installed, picks a model, writes .env, runs setup
@@ -125,7 +181,7 @@ handle each outcome.
 **Claude Code in the terminal.** Start `claude` in your home folder and paste:
 
 ```text
-Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
+Clone the codex/ontology-ops-local branch of https://github.com/kimtoma/AutoOntology with submodules into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
 ```
 
 `--yes` makes it non-interactive: it installs uv with the official installer if it is
@@ -137,7 +193,7 @@ terminal then. A measured run from an empty folder took 9 min 34 s (Apple M4 Mac
 In Korean:
 
 ```text
-https://github.com/kimtoma/AutoOntology 를 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
+https://github.com/kimtoma/AutoOntology 의 codex/ontology-ops-local 브랜치를 submodule과 함께 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
 ```
 
 **Claude desktop app.** Open the **Code** tab (Claude Code in the desktop app), choose
@@ -173,21 +229,24 @@ up through Amazon Bedrock, Google Vertex AI or an API key reports `loggedIn: fal
 - If your administrator restricts Claude Code, the login or the calls fail; `uv run
   autoontology doctor` shows the `chat provider` row with the remedy.
 
-**Without Claude Code**, run the same script directly. Read it first
-([`scripts/bootstrap.sh`](scripts/bootstrap.sh)); piping a script from the internet into
-`bash` runs whatever it contains:
+**Without Claude Code**, clone the latest public branch and run
+[`scripts/bootstrap.sh`](scripts/bootstrap.sh) from that checkout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/bootstrap.sh | bash -s -- --yes --provider claude
+git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
+cd AutoOntology
+scripts/bootstrap.sh --yes --provider claude
 ```
 
-It clones into `./AutoOntology` (change it with `--dir`).
+Choose a different destination in `git clone` if needed, then run bootstrap from that checkout.
 
 ## Choose a provider
 
 The chat provider is the model that compiles the tables, extracts the document concepts
-and judges the matches. Embeddings (finding similar concepts) always use Ollama's `bge-m3`
-(1.2 GB) or an OpenAI-compatible embedding endpoint.
+and judges the matches. Embeddings use a configured Ollama model or an
+OpenAI-compatible endpoint. Fresh
+local installs default to `bge-m3`; the hosted comparison uses `qwen3-embedding:4b`.
+Changing embedding models requires rebuilding the relevant vectors and index.
 
 | Provider | `AUTOONTOLOGY_CHAT_PROVIDER` | Cost | Data leaves the machine | quickstart / hanbit first build | Set up with |
 |---|---|---|---|---|---|
@@ -308,7 +367,7 @@ source has been ingested (see Troubleshooting).
 ## Sample sets
 
 The sample data is a fictitious Korean trading company, "한빛상사" (Hanbit Trading); the
-content is in Korean. `demo --set <set>` (or **Get started → Load sample data** in the web
+content is in Korean. `demo --set <set>` (or **Setup (`/ui/setup`) → Load sample data** in the web
 UI) registers a set; [samples/README.en.md](samples/README.en.md)
 ([한국어](samples/README.md)) describes every file and the relations between the tables.
 
@@ -440,12 +499,13 @@ With the samples, the judge accepts 계약 → Contracts, 고객 → Customers a
 `autoontology review list` (or `GET /api/review`) lists the items to review, and
 `autoontology review accept|reject|acknowledge <id>` records a decision. A decision
 overrides the align judge on every later pass. `autoontology apply` writes a new revision
-with the decisions, and makes no model call. When nothing is pending it writes no
+with the decisions, and makes no model call. This prepares a candidate; operational
+publication still requires review, validation and explicit publication. When nothing is pending it writes no
 revision (pass `--force` to write one anyway), so a scheduled run adds no empty
 revisions:
 
 ```bash
-# crontab: every night, rebuild what changed, then reflect the review decisions
+# optional candidate preparation only; review, validate and publish separately
 30 2 * * * cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
 ```
 
@@ -714,12 +774,11 @@ are overridden.
 ## Security notes
 
 - The service and the engine backend bind to `127.0.0.1`. Requests with a non-local
-  `Host` or a cross-site `Origin` are rejected by default. A local workspace starts
-  without individual login; its OS owner can explicitly enable the development
-  [first-owner enrollment](docs/OWNER_ENROLLMENT.md). Complete owner recovery and
-  the full authority audit remain in progress. Keep both ports private and use only
-  the documented external gateway controls; a shared gateway password is separate
-  from individual identity.
+  `Host` or a cross-site `Origin` are rejected. Workspaces start without individual
+  login. Individual identity remains an alpha
+  feature; the latest branch documents explicit owner enrollment and recovery.
+  Keep both ports private and share only through documented gateway controls.
+  A shared gateway password is separate from individual identity and approval.
 - Document text is treated as untrusted. It is quoted inside delimited prompt blocks,
   model output is validated against schemas (fail-closed), and the OKF bundle escapes
   Markdown and HTML in extracted text. If you render the `.md` files as HTML elsewhere,
@@ -771,8 +830,8 @@ tailscaled marks a request as Funnel traffic); a login outside
 tag instead of a user) get no identity header and are refused the same way; open the UI
 from a device logged in as a user. Cross-origin writes stay
 refused on that hostname too. `/api/status` lists the hostnames under `remote` (never the
-logins). **Never use `tailscale funnel`** for AutoOntology: this application's
-remote access controls do not support Funnel traffic.
+logins). **Never use `tailscale funnel`** for AutoOntology: the remote access controls
+do not support Funnel traffic.
 
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
@@ -798,6 +857,18 @@ The [guide's troubleshooting table](docs/GUIDE.md#9-troubleshooting) lists every
 | A build seems stuck | Run `uv run autoontology runs` and read `data/logs/`. Each chunk takes one to two minutes with `qwen3:8b`. |
 
 ## Development
+
+For a new change, start from the branch you intend to contribute to. Read
+[CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md),
+then [the architecture](docs/ARCHITECTURE.md). For the latest branch's tested scope,
+use its public implementation checkpoint linked at the top of this README.
+Check branch/HEAD and dirty files first; preserve existing `.env`, `data/` and
+`exports/`. Use a separate workspace, database and ports when another instance
+is running. Bootstrap/demo commands are for deliberate installation/sample setup;
+`--yes` can replace sample sources and is not a continuation command for live data.
+Claude Code can assist development while the application's chat provider remains
+Codex or Ollama; changing the developer's assistant does not require switching
+the running service's provider. Do not deploy as a side effect of a documentation change.
 
 ```bash
 uv run ruff check . && uv run ruff format --check . && uv run pytest -q   # unit tests
