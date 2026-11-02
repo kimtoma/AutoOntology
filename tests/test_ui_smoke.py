@@ -448,6 +448,115 @@ def test_review_accept_then_apply_flow(live, browser):
     page.close()
 
 
+def test_review_reject_fold_then_apply_shows_it_unfolded(live, browser):
+    """Merged tab: reject an automatic fold, apply, and the changes view lists it under Split
+    ("taken apart from"). Decision, run and diff are intercepted: nothing is stored."""
+    url, _, summary = live
+    folds = httpx.get(f"{url}/api/review", params={"category": "folds", "size": 5}).json()
+    fold = next((i for i in folds["items"] if i["concept"] and i["term"]), None)
+    if fold is None:
+        pytest.skip("no automatic fold in this snapshot")
+    revision = summary["revision"]
+    page = new_page(browser, VIEWPORTS["desktop"])
+    posts, runs = [], []
+    state = {"unapplied": 0, "polls": 0}
+    decision = {
+        "id": 1,
+        "kind": "alignment",
+        "subject_key": fold["concept"]["id"],
+        "decision": "reject",
+        "relation": None,
+        "payload": {},
+        "note": "",
+        "decided_by": "local",
+        "decided_at": "2026-10-29T12:00:00+00:00",
+        "applied_revision": None,
+    }
+
+    def decide(route):
+        posts.append(json.loads(route.request.post_data or "{}"))
+        state["unapplied"] = 1
+        _json(route, {"item": {**fold, "decision": decision}, "decision": decision})
+
+    def count(route):
+        body = httpx.get(f"{url}/api/review/pending-count").json()
+        _json(route, {**body, "unapplied": state["unapplied"]})
+
+    def start(route):
+        if route.request.method != "POST":
+            route.continue_()
+            return
+        runs.append(json.loads(route.request.post_data or "{}"))
+        _json(route, {"run_id": "apply-fold"}, status=202)
+
+    def run(route):
+        state["polls"] += 1
+        done = state["polls"] > 1
+        if done:
+            state["unapplied"] = 0
+        _json(
+            route,
+            {
+                "id": "apply-fold",
+                "kind": "apply",
+                "status": "succeeded" if done else "running",
+                "source": None,
+                "started_at": "2026-10-29T12:00:00+00:00",
+                "finished_at": "2026-10-29T12:00:01+00:00" if done else None,
+                "error": None,
+                "params": {"applied_revision": revision} if done else {},
+                "managed": True,
+                "progress": {},
+                "steps": [
+                    {
+                        "name": s,
+                        "status": "succeeded",
+                        "started_at": None,
+                        "finished_at": None,
+                        "detail": {},
+                    }
+                    for s in ("decisions", "merge", "snapshot")
+                ],
+            },
+        )
+
+    real = httpx.get(f"{url}/api/ontology/diff").json()
+    split = {
+        "concept": fold["concept"]["node"],
+        "concept_name": fold["concept"]["name"],
+        "term": fold["term"]["node"],
+        "term_name": fold["term"]["name"],
+    }
+    unfolded = {
+        **real,
+        "merges": {"added": [], "removed": [split], "totals": {"added": 0, "removed": 1}},
+    }
+    page.route(re.compile(r".*/api/review/.+/decision$"), decide)
+    page.route(re.compile(r".*/api/review/pending-count$"), count)
+    page.route(re.compile(r".*/api/runs$"), start)
+    page.route(re.compile(r".*/api/runs/apply-fold$"), run)
+    page.route(re.compile(r".*/api/ontology/diff(\?.*)?$"), lambda r: _json(r, unfolded))
+    page.goto(f"{url}/ui/review?category=folds")
+    card = page.locator(f"[data-review-item='{fold['id']}']")
+    card.wait_for()
+    card.locator("[data-action=reject]").click()
+    page.locator(f"[data-review-item='{fold['id']}'][data-decided=reject]").wait_for()
+    assert posts == [{"decision": "reject"}], posts
+    page.locator("#apply-banner").wait_for()
+    page.click("#btn-apply")
+    page.get_by_text(f"Revision {revision} written").wait_for(timeout=10000)
+    assert runs == [{"kind": "apply"}], runs
+    page.goto(f"{url}/ui/ontology?changed=1")
+    group = page.locator("[data-changes=splits]")
+    group.wait_for(timeout=15000)
+    text = group.inner_text()
+    assert fold["concept"]["name"] in text and f"taken apart from {fold['term']['name']}" in text, (
+        text
+    )
+    assert page.errors == []
+    page.close()
+
+
 def test_sources_preview_classifies_files(live, browser, tmp_path):
     url, _, _ = live
     (tmp_path / "manual.doc").write_bytes(b"x")
