@@ -246,6 +246,8 @@ class Api:
         self._freshness_lock = threading.Lock()
         #: the computation in progress (concurrent callers wait for it), or None
         self._freshness_flight: threading.Event | None = None
+        #: bumped by every finished computation (a waiter shares only a newer result)
+        self._freshness_gen = 0
 
     @property
     def store(self) -> Store:
@@ -408,38 +410,46 @@ class Api:
                 self._concepts[key] = index
         return head, model, index
 
-    def freshness(self, refresh: bool = False) -> tuple[list[dict[str, Any]], float]:
+    def freshness(self, refresh: bool = False) -> tuple[list[dict[str, Any]], float | None]:
         """``(rows, age in seconds)`` of the per-source freshness, computed at most every
         :data:`FRESHNESS_CACHE_S` (``refresh``: now). One computation at a time (file hashes,
-        database connections), outside the lock: a caller arriving meanwhile waits for it
-        and shares its result; only the cache swap holds the lock."""
+        database connections), outside the lock: only the caller that atomically takes the
+        producer role computes; a caller arriving meanwhile waits for it (at most
+        :data:`FRESHNESS_WAIT_S`) and shares its result. A wait that runs out while the
+        producer is still active returns the cached rows however old, or ``([], None)``
+        (still computing) -- it never starts a second computation."""
         from autoontology.web.freshness import freshness
 
-        with self._freshness_lock:
-            cached = self._freshness
-            fresh = cached and time.monotonic() - cached[0] < FRESHNESS_CACHE_S
-            if cached and fresh and not refresh:
-                return cached[1], time.monotonic() - cached[0]
-            flight = self._freshness_flight
-            leader = flight is None
-            if leader:
-                flight = self._freshness_flight = threading.Event()
-        assert flight is not None
-        if not leader:
-            flight.wait(FRESHNESS_WAIT_S)
-            done = self.cached_freshness()
-            if done is not None:
-                return done
+        deadline = time.monotonic() + FRESHNESS_WAIT_S
+        waited_gen: int | None = None
+        while True:
+            with self._freshness_lock:
+                cached = self._freshness
+                if cached and not refresh and time.monotonic() - cached[0] < FRESHNESS_CACHE_S:
+                    return cached[1], time.monotonic() - cached[0]
+                if waited_gen is not None and self._freshness_gen != waited_gen and cached:
+                    # the producer this caller waited for finished: share its result
+                    return cached[1], time.monotonic() - cached[0]
+                flight = self._freshness_flight
+                if flight is None:
+                    flight = self._freshness_flight = threading.Event()
+                    break  # the producer role, taken under the lock
+                if waited_gen is None:
+                    waited_gen = self._freshness_gen
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not flight.wait(remaining):
+                done = self.cached_freshness()
+                return done if done is not None else ([], None)
         try:
             rows = freshness(self.store, self.settings)
             with self._freshness_lock:
                 self._freshness = (time.monotonic(), rows)
+                self._freshness_gen += 1
             return rows, 0.0
         finally:
-            if leader:
-                with self._freshness_lock:
-                    self._freshness_flight = None
-                flight.set()
+            with self._freshness_lock:
+                self._freshness_flight = None
+            flight.set()
 
     def cached_freshness(self) -> tuple[list[dict[str, Any]], float] | None:
         """The last computed freshness and its age, never computing it (None: never)."""
@@ -887,8 +897,9 @@ def build_router(api: Api) -> APIRouter:
         return {
             "sources": rows,
             "stale": sum(bool(r.get("stale")) for r in rows),
-            "age_s": round(age, 1),
+            "age_s": round(age, 1) if age is not None else None,
             "cache_s": FRESHNESS_CACHE_S,
+            "computing": age is None,
         }
 
     # ontology (the latest snapshot) -----------------------------------------------------

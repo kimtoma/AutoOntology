@@ -479,6 +479,73 @@ def test_concurrent_freshness_requests_share_one_computation(ops, monkeypatch): 
     assert len(calls) == 1 and [r[0] for r in results] == [[{"name": "x", "stale": False}]] * 2
 
 
+def test_freshness_waiters_never_compute_while_the_producer_runs(ops, monkeypatch):  # noqa: F811
+    """A slow producer outlives the wait: both waiters return without computing --
+    the stale cache when there is one, else a "computing" state."""
+    import threading
+    import time
+
+    from autoontology.web import api as api_mod
+    from autoontology.web import freshness as fr
+
+    monkeypatch.setattr(api_mod, "FRESHNESS_WAIT_S", 0.02)
+    api_ = api_mod.Api(Settings.from_env())
+    calls, entered, release = [], threading.Event(), threading.Event()
+    lock = threading.Lock()
+    active = {"now": 0, "max": 0}
+
+    def slow(store, settings):
+        with lock:
+            calls.append(1)
+            active["now"] += 1
+            active["max"] = max(active["max"], active["now"])
+        entered.set()
+        release.wait(5)
+        with lock:
+            active["now"] -= 1
+        return [{"name": "new", "stale": False}]
+
+    monkeypatch.setattr(fr, "freshness", slow)
+
+    def waiters():
+        out: list = []
+        threads = [
+            threading.Thread(target=lambda: out.append(api_.freshness(refresh=True)))
+            for _ in range(2)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(5)
+        return out
+
+    # no cache yet: the waiters report "computing" (age None) with no rows
+    producer = threading.Thread(target=lambda: api_.freshness(refresh=True))
+    producer.start()
+    assert entered.wait(5)
+    assert waiters() == [([], None), ([], None)]
+    assert len(calls) == 1
+    release.set()
+    producer.join(5)
+    # a stale cache: the waiters share it
+    api_._freshness = (time.monotonic() - 3600, [{"name": "old", "stale": True}])
+    entered.clear()
+    release.clear()
+    producer = threading.Thread(target=lambda: api_.freshness(refresh=True))
+    producer.start()
+    assert entered.wait(5)
+    got = waiters()
+    assert [rows for rows, _ in got] == [[{"name": "old", "stale": True}]] * 2
+    assert all(age is not None and age > 3000 for _, age in got)
+    release.set()
+    producer.join(5)
+    assert len(calls) == 2 and active["max"] == 1
+    # the producer is gone: the next caller computes (the producer role is free again)
+    release.set()
+    assert api_.freshness(refresh=True)[0] == [{"name": "new", "stale": False}]
+    assert len(calls) == 3
+
+
 def test_pending_work_reads_only_the_review_rows(ops):  # noqa: F811
     store = ops["store"]
     rows = _rows(ops)

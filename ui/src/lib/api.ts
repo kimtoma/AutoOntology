@@ -245,7 +245,7 @@ export interface SourceFreshness {
   last_inputs_sha?: string | null
   error?: string
 }
-export interface FreshnessList { sources: SourceFreshness[]; stale: number; age_s: number; cache_s: number }
+export interface FreshnessList { sources: SourceFreshness[]; stale: number; age_s: number | null; cache_s: number; computing?: boolean }
 
 export interface ReviewItem {
   /** al:<concept> | ax:<concept> | un:<concept> | alias:<term>|<alias> | src:<source> */
