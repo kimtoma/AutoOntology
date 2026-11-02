@@ -100,6 +100,9 @@ behaviour).
 - Rejecting folds that two documents sources share takes the synonym off the Term once the
   last of them is rejected or its source removed, in any order or mix, together, or after
   a failed removal: a fold that kept the synonym in place takes it over.
+- A pending decision whose concept is gone (its documents source was removed before
+  apply) is retired by the next apply or build: kept for the record with `retired` in its
+  payload, no longer counted as pending work.
 - Source freshness finds a source's last build however many other runs (exports, no-op
   applies) followed it; concurrent freshness requests never start a second computation
   while one runs (a waiter that runs out of time gets the cached rows, or `computing`).

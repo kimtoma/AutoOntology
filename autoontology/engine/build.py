@@ -454,19 +454,31 @@ class _Build:
 
     def mark_decisions(self, revision: int) -> int:
         """Record *revision* on the pending review decisions the merged model reflects: an
-        alias or concept decision always, an alignment one once its row carries it."""
+        alias or concept decision always, an alignment one once its row carries it. A
+        pending concept or alignment decision whose concept is gone (its documents source
+        was removed) is retired instead: marked with *revision* and ``retired`` in its
+        payload, the row kept for the audit trail, never pending again."""
         from autoontology.engine.overlay import reflects
         from autoontology.store.alignments import AlignmentStore
-        from autoontology.store.decisions import DecisionStore
+        from autoontology.store.decisions import CONCEPT_KINDS, DecisionStore
 
-        aligns = AlignmentStore(self.store)
+        aligns, docs = AlignmentStore(self.store), DocumentStore(self.store)
+        decisions = DecisionStore(self.store)
+        pending = [d for d in self.decisions if d.applied_revision is None]
+        gone = [
+            d
+            for d in pending
+            if d.kind in CONCEPT_KINDS and docs.get_concept(d.subject_key) is None
+        ]
         done = [
             d
-            for d in self.decisions
-            if d.applied_revision is None
-            and (d.kind != "alignment" or reflects(aligns.get(d.subject_key), d))
+            for d in pending
+            if d not in gone and (d.kind != "alignment" or reflects(aligns.get(d.subject_key), d))
         ]
-        return DecisionStore(self.store).mark_applied(done, revision) if done else 0
+        retired = decisions.retire(gone, revision, "subject_gone") if gone else 0
+        if retired:
+            logger.info("  retired %d decision(s) whose concept is gone", retired)
+        return decisions.mark_applied(done, revision) if done else 0
 
 
 def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[dict[str, Any]]:

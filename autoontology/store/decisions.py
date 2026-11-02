@@ -179,6 +179,24 @@ class DecisionStore:
     def by_subject(self, kind: str) -> dict[str, Decision]:
         return {d.subject_key: d for d in self.list(kind)}
 
+    def retire(self, decisions: list[Decision], revision: int, reason: str) -> int:
+        """Close *decisions* still pending as they were read whose subject is gone: the row
+        stays (audit), with ``retired: reason`` in its payload and *revision* as its
+        ``applied_revision``, so it is never pending again. Returns how many were retired."""
+        with self._conn() as conn:
+            retired = 0
+            for d in decisions:
+                payload = json.dumps(
+                    {**d.payload, "retired": reason}, ensure_ascii=False, default=str
+                )
+                cur = conn.execute(
+                    "UPDATE review_decisions SET applied_revision = ?, payload_json = ? "
+                    "WHERE id = ? AND decided_at = ? AND applied_revision IS NULL",
+                    (revision, payload, d.id, d.decided_at),
+                )
+                retired += cur.rowcount
+        return retired
+
     def mark_applied(self, decisions: list[Decision], revision: int) -> int:
         """Record *revision* on *decisions* still pending as they were read (a decision
         replaced meanwhile stays pending); returns how many were marked."""

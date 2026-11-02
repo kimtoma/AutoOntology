@@ -934,3 +934,44 @@ def test_a_manually_supplied_synonym_is_never_taken_off(two_sources, sequence):
         reject("hanbit-docs")
         reject("other-docs")
     assert "계약" in ops["client"].terms["t-contract"]["synonyms"]
+
+
+# --- decisions whose subject is gone are retired, not pending forever --------------------
+
+
+def test_decisions_on_removed_sources_are_retired_by_the_next_apply(two_sources):
+    from autoontology.engine.apply import pending_work
+
+    ops = two_sources
+    rows = _contract_rows(ops)
+    for name in ("hanbit-docs", "other-docs"):
+        ops["decisions"].put(Decision("alignment", rows[name].concept_id, "reject"))
+    _rm_source(ops, "hanbit-docs")
+    _rm_source(ops, "other-docs")
+    assert "계약" not in ops["client"].terms["t-contract"]["synonyms"]
+    result = _apply(ops)
+    assert pending_work(ops["store"])["total"] == 0
+    for name in ("hanbit-docs", "other-docs"):
+        d = ops["decisions"].get("alignment", rows[name].concept_id)
+        assert d is not None and d.decision == "reject"  # the audit row stays
+        assert d.applied_revision == result.revision and d.payload["retired"] == "subject_gone"
+    again = _apply(ops)
+    assert again.revision == result.revision  # nothing pending: no new revision
+
+
+def test_a_source_removed_after_a_failed_unfold_retires_its_decision(two_sources):
+    from autoontology.engine.apply import pending_work, run_apply
+    from autoontology.engine.jobs import JobError
+
+    ops = two_sources
+    rows = _contract_rows(ops)
+    for name in ("hanbit-docs", "other-docs"):
+        ops["decisions"].put(Decision("alignment", rows[name].concept_id, "reject"))
+    with pytest.raises(JobError):
+        run_apply(ops["store"], ops["settings"], client=ops["client"], writer=_flaky_writer(ops))
+    _rm_source(ops, "other-docs")
+    assert "계약" not in ops["client"].terms["t-contract"]["synonyms"]
+    _apply(ops)
+    assert pending_work(ops["store"])["total"] == 0
+    retired = [d for d in ops["decisions"].list() if d.payload.get("retired")]
+    assert [d.subject_key for d in retired] == [rows["other-docs"].concept_id]
