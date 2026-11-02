@@ -178,7 +178,12 @@ process can send any Host and login header.
   alias stays untrusted). It removes the recorded additions the rejected rows account for
   that no accepted `same` of any documents source still accounts for, whichever source
   wrote them. A synonym another fold still protects is handed over to that fold (its row's
-  `applied` lists it under `supported`), so rejecting that fold later removes it. So the
+  `applied` lists it under `supported`, and `term_alias_additions` names its source), so
+  rejecting that fold or removing its source later removes it. Rejection and `source rm`
+  share this one ownership model (`engine/align.py`: `alias_supporters`,
+  `departing_aliases`, `hand_over_aliases`): the alias log records what AutoOntology wrote,
+  and who still supports a synonym is derived from the accepted folds of every documents
+  source when it is about to come off. A synonym AutoOntology never wrote stays. So the
   Term's `skos:altLabel` and the concept's own class never both carry the name in RDF,
   Ossie or OKF. This runs in a build's align pass and in apply. What to take off is read
   from the rows themselves (`overlay.unfold_pending`): a row keeps the `applied` record of

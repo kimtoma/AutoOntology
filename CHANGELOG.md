@@ -98,8 +98,8 @@ behaviour).
   verdict is kept for **Undo**), even when it later gains a matching candidate, and
   acknowledging a folded concept takes its synonyms off the Term.
 - Rejecting folds that two documents sources share takes the synonym off the Term once the
-  last of them is rejected, in either order, together, or after a failed removal: a fold
-  that kept the synonym in place takes it over.
+  last of them is rejected or its source removed, in any order or mix, together, or after
+  a failed removal: a fold that kept the synonym in place takes it over.
 - Source freshness finds a source's last build however many other runs (exports, no-op
   applies) followed it; concurrent freshness requests never start a second computation
   while one runs (a waiter that runs out of time gets the cached rows, or `computing`).

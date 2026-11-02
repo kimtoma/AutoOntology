@@ -832,3 +832,105 @@ def test_rejecting_shared_folds_takes_the_synonym_off_once_the_last_is_gone(two_
     assert "계약" not in _snapshot_labels(ops)
     assert pending_work(ops["store"])["total"] == 0
     assert not any(r.applied for r in _contract_rows(ops).values())
+
+
+# --- recheck: rejection and source removal share one ownership model --------------------
+
+
+def _rm_source(ops, name, remover=None):
+    """``source rm`` of a documents source (its synonyms first, then the rows)."""
+    from autoontology.structured import remove
+    from tests.test_align import ClientWriter
+
+    src = ops["store"].get_source(name)
+    writer = ClientWriter(ops["client"])
+    remove.remove_added_aliases(
+        ops["settings"],
+        ops["store"],
+        src,
+        force=False,
+        say=lambda m, w=False: None,
+        remover=remover
+        or (lambda settings, term_id, aliases: writer.remove_synonyms(term_id, aliases)),
+    )
+    ops["store"].delete_source(src.id)
+
+
+def _gone_everywhere(ops):
+    from autoontology.engine.apply import pending_work
+
+    assert "계약" not in ops["client"].terms["t-contract"]["synonyms"]
+    _apply(ops, force=True)
+    assert "계약" not in _snapshot_labels(ops)
+    assert pending_work(ops["store"])["total"] == 0
+
+
+def test_reject_the_writer_then_remove_the_supporting_source(two_sources):
+    """A wrote 계약, B folds it without writing: reject A (B takes it over), then remove B
+    -- the last supporter -- takes it off."""
+    ops = two_sources
+    rows = _contract_rows(ops)
+    ops["decisions"].put(Decision("alignment", rows["hanbit-docs"].concept_id, "reject"))
+    _apply(ops)
+    assert "계약" in ops["client"].terms["t-contract"]["synonyms"]
+    _rm_source(ops, "other-docs")
+    _gone_everywhere(ops)
+
+
+def test_remove_the_writing_source_then_reject_the_supporter(two_sources):
+    """Same start: removing A hands 계약 to B; rejecting B then takes it off."""
+    from autoontology.engine.apply import pending_work
+
+    ops = two_sources
+    rows = _contract_rows(ops)
+    _rm_source(ops, "hanbit-docs")
+    assert "계약" in ops["client"].terms["t-contract"]["synonyms"]
+    assert pending_work(ops["store"])["total"] == 0
+    ops["decisions"].put(Decision("alignment", rows["other-docs"].concept_id, "reject"))
+    assert pending_work(ops["store"])["total"] >= 1
+    _apply(ops)
+    _gone_everywhere(ops)
+
+
+def test_a_failed_source_removal_keeps_the_source_and_is_retried(two_sources):
+    from autoontology.structured import remove
+
+    ops = two_sources
+    rows = _contract_rows(ops)
+    ops["decisions"].put(Decision("alignment", rows["hanbit-docs"].concept_id, "reject"))
+    _apply(ops)
+
+    def down(settings, term_id, aliases):
+        raise ConnectionError("backend went away")
+
+    with pytest.raises(remove.RemoveError):
+        _rm_source(ops, "other-docs", remover=down)
+    assert ops["store"].get_source("other-docs") is not None
+    assert "계약" in ops["client"].terms["t-contract"]["synonyms"]
+    _rm_source(ops, "other-docs")
+    _gone_everywhere(ops)
+
+
+@pytest.mark.parametrize("sequence", ["reject_then_rm", "rm_then_reject", "reject_both"])
+def test_a_manually_supplied_synonym_is_never_taken_off(two_sources, sequence):
+    """계약 put on the Term by a person (no AutoOntology write recorded) stays whatever
+    happens to the folds that also account for it."""
+    ops = two_sources
+    with ops["store"]._conn() as conn:
+        conn.execute("DELETE FROM term_alias_additions WHERE alias = '계약'")
+    rows = _contract_rows(ops)
+
+    def reject(name):
+        ops["decisions"].put(Decision("alignment", rows[name].concept_id, "reject"))
+        _apply(ops)
+
+    if sequence == "reject_then_rm":
+        reject("hanbit-docs")
+        _rm_source(ops, "other-docs")
+    elif sequence == "rm_then_reject":
+        _rm_source(ops, "hanbit-docs")
+        reject("other-docs")
+    else:
+        reject("hanbit-docs")
+        reject("other-docs")
+    assert "계약" in ops["client"].terms["t-contract"]["synonyms"]

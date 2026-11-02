@@ -337,55 +337,47 @@ def prune_orphan_connections(
     return deleted
 
 
-def _other_support(store: Store, src: Source) -> dict[str, dict[str, list[str]]]:
-    """term id -> normalized alias -> ids of the *other* documents sources whose accepted
-    ``same`` alignment still accounts for that alias on the Term (sorted)."""
+def _split_plan(
+    store: Store, src: Source
+) -> tuple[dict[str, list[str]], dict[tuple[str, str], list[Any]]]:
+    """(removal plan, handover) of documents source *src*, in the ownership model of
+    ``engine/align.py`` (:func:`~autoontology.engine.align.alias_supporters`): the live
+    logged synonyms *src* departs from -- the ones the log names *src* for, and the ones its
+    folds account for whoever wrote them -- go unless an accepted ``same`` of another
+    documents source supports them; the supported ones stay and are handed over to those
+    rows (``{(term id, synonym): rows}``), so removing or rejecting the last supporter takes
+    them off too."""
+    from autoontology.engine import align as align_job
+    from autoontology.engine import overlay
     from autoontology.store.alignments import AlignmentStore
     from autoontology.store.documents import DocumentStore
     from autoontology.unstructured import align as al
 
-    aligns, docs = AlignmentStore(store), DocumentStore(store)
-    support: dict[str, dict[str, set[str]]] = {}
-    for other in store.list_sources():
-        if other.kind != "documents" or other.id == src.id:
-            continue
-        concepts = {c.id: c for c in docs.list_concepts(other.id)}
-        for a in aligns.list(other.id):
-            c = concepts.get(a.concept_id)
-            if not (a.accepted and a.relation == "same" and a.term_id and c is not None):
-                continue
-            info = al.ConceptInfo(
-                id=c.id, name=c.name, kind=c.kind, name_en=c.name_en, synonyms=c.synonyms
-            )
-            per_term = support.setdefault(a.term_id, {})
-            for alias in al.accepted_aliases(info):
-                per_term.setdefault(alias, set()).add(other.id)
-    return {t: {k: sorted(v) for k, v in m.items()} for t, m in support.items()}
-
-
-def _split_plan(
-    store: Store, src: Source
-) -> tuple[dict[str, list[str]], list[tuple[str, str, str]]]:
-    """(removal plan, handover): *src*'s live recorded synonyms that no other documents
-    source supports go; the supported ones stay and are handed over to a supporting
-    source ``(term id, alias, new source id)``, so removing the last supporter takes them
-    off too."""
-    from autoontology.store.alignments import AlignmentStore
-    from autoontology.unstructured import align as al
-
-    support = _other_support(store, src)
+    aligns = AlignmentStore(store)
+    supporters = align_job.alias_supporters(store, exclude_source_id=src.id)
+    provenance = aligns.alias_provenance(live=True)
+    recorded = {t: {r["alias"]: r for r in records} for t, records in provenance.items()}
+    departing: set[tuple[str, str]] = {
+        (term_id, r["alias"])
+        for term_id, records in provenance.items()
+        for r in records
+        if r["source_id"] == src.id
+    }
+    concepts = {c.id: c for c in DocumentStore(store).list_concepts(src.id)}
+    for a in aligns.list(src.id):
+        folded = a.accepted and a.relation == "same" and a.term_id
+        if not (folded or overlay.unfold_pending(a) or a.applied):
+            continue  # never supported anything on a Term
+        term_id, aliases = align_job.departing_aliases(a, concepts.get(a.concept_id), recorded)
+        departing.update((term_id, alias) for alias in aliases)
     plan: dict[str, list[str]] = {}
-    handover: list[tuple[str, str, str]] = []
-    for term_id, records in AlignmentStore(store).alias_provenance(live=True).items():
-        safe = support.get(term_id, {})
-        for r in records:
-            if r["source_id"] != src.id:
-                continue
-            others = safe.get(al.norm_alias(r["alias"]))
-            if others:
-                handover.append((term_id, r["alias"], others[0]))
-            else:
-                plan.setdefault(term_id, []).append(r["alias"])
+    handover: dict[tuple[str, str], list[Any]] = {}
+    for term_id, alias in sorted(departing):
+        others = supporters.get(term_id, {}).get(al.norm_alias(alias))
+        if others:
+            handover[(term_id, alias)] = others
+        else:
+            plan.setdefault(term_id, []).append(alias)
     return plan, handover
 
 
@@ -408,12 +400,12 @@ def remove_added_aliases(
     """Take the synonyms *src*'s alignments added (:func:`alias_removal_plan`) off the
     upstream Terms before the source goes. A failure keeps the source (RemoveError)
     unless *force*, which only warns."""
+    from autoontology.engine.align import hand_over_aliases
     from autoontology.store.alignments import AlignmentStore
 
     plan, handover = _split_plan(store, src)
     aligns = AlignmentStore(store)
-    for term_id, alias, new_owner in handover:  # still supported: the supporter owns it now
-        aligns.reassign_alias_source(term_id, alias, new_owner)
+    hand_over_aliases(aligns, handover)  # still supported: the supporters own it now
     if not plan:
         return
     if remover is None:

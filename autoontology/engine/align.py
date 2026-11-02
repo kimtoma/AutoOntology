@@ -631,16 +631,31 @@ def _raw_verdict(record: AlignmentRecord) -> al.ValidatedVerdict:
     )
 
 
-def _accepted_supporters(ctx: _AlignCtx) -> dict[str, dict[str, list[AlignmentRecord]]]:
-    """term id -> normalized name -> the accepted ``same`` rows (any documents source)
-    whose concept accounts for that name on the Term: while one stands it is never taken
-    off."""
+# --- who supports an AutoOntology synonym on a Term ---------------------------------------
+#
+# One ownership model for rejection (:func:`_unfold`), ``source rm``
+# (``structured/remove.py``) and repair: ``term_alias_additions`` is the log of synonyms
+# AutoOntology wrote upstream (live = still on the Term); who still *supports* one is
+# derived, when it is about to come off, from the accepted ``same`` rows of every documents
+# source (:func:`alias_supporters`). A synonym a departing fold accounts for and no other
+# accepted fold supports comes off; one still supported is handed over
+# (:func:`hand_over_aliases`): the supporting row's ``applied`` lists it under
+# ``supported`` (so rejecting that fold later takes it off) and the log names that row's
+# source (so removing that source later takes it off).
+
+
+def alias_supporters(
+    store: Store, *, exclude_source_id: str | None = None
+) -> dict[str, dict[str, list[AlignmentRecord]]]:
+    """term id -> normalized name -> the accepted ``same`` rows (every documents source but
+    *exclude_source_id*) whose concept accounts for that name on the Term."""
+    docs, aligns = DocumentStore(store), AlignmentStore(store)
     out: dict[str, dict[str, list[AlignmentRecord]]] = {}
-    for source in ctx.store.list_sources():
-        if source.kind != "documents":
+    for source in store.list_sources():
+        if source.kind != "documents" or source.id == exclude_source_id:
             continue
-        concepts = {c.id: c for c in ctx.docs.list_concepts(source.id)}
-        for a in ctx.aligns.list(source.id):
+        concepts = {c.id: c for c in docs.list_concepts(source.id)}
+        for a in aligns.list(source.id):
             c = concepts.get(a.concept_id)
             if not (a.accepted and a.relation == "same" and a.term_id and c is not None):
                 continue
@@ -653,10 +668,9 @@ def _accepted_supporters(ctx: _AlignCtx) -> dict[str, dict[str, list[AlignmentRe
     return out
 
 
-def _accounted_names(row: AlignmentRecord, concept: Any | None) -> set[str]:
+def accounted_names(row: AlignmentRecord, concept: Any | None) -> set[str]:
     """Normalized synonyms *row* accounts for on its Term: what it wrote (``applied``
-    ``synonyms_added``), what it took over while protecting it (``supported``) and its
-    concept's names."""
+    ``synonyms_added``), what it took over (``supported``) and its concept's names."""
     names = {
         *(row.applied.get("synonyms_added") or []),
         *(row.applied.get("supported") or []),
@@ -673,6 +687,48 @@ def _accounted_names(row: AlignmentRecord, concept: Any | None) -> set[str]:
             )
         )
     return out - {""}
+
+
+def departing_aliases(
+    row: AlignmentRecord, concept: Any | None, recorded: dict[str, dict[str, Any]]
+) -> tuple[str, list[str]]:
+    """``(term id, live logged synonyms)`` *row* accounts for on its Term (the one it
+    wrote to, else its verdict's): what a departing fold may take off."""
+    term_id = row.applied.get("term_id") or row.term_id
+    accounted = accounted_names(row, concept)
+    return term_id, [
+        alias
+        for alias, rec in recorded.get(term_id, {}).items()
+        if al.norm_alias(alias) in accounted or row.concept_name in (rec.get("concepts") or [])
+    ]
+
+
+def hand_over_aliases(
+    aligns: AlignmentStore,
+    handover: dict[tuple[str, str], list[AlignmentRecord]],
+    *,
+    run_id: str | None = None,
+) -> None:
+    """``{(term id, synonym): supporting rows}``: each supporting row records the synonym
+    under ``applied.supported`` and the log names the first supporter's source."""
+    per_row: dict[int, tuple[AlignmentRecord, str, set[str]]] = {}
+    for (term_id, synonym), rows in sorted(handover.items()):
+        for r in rows:
+            assert r.id is not None
+            per_row.setdefault(r.id, (r, term_id, set()))[2].add(synonym)
+        owner = min(rows, key=lambda r: (r.source_id, r.id or 0)).source_id
+        aligns.reassign_alias_source(term_id, synonym, owner)
+    for r, term_id, synonyms in per_row.values():
+        fresh = aligns.get(r.concept_id) or r
+        if fresh.id != r.id or (fresh.applied.get("term_id") or term_id) != term_id:
+            continue  # that fold changed meanwhile: its own unfold handles it
+        supported = set(fresh.applied.get("supported") or [])
+        if synonyms <= supported | set(fresh.applied.get("synonyms_added") or []):
+            continue
+        base = fresh.applied or {"at": now_iso(), **({"run_id": run_id} if run_id else {})}
+        aligns.set_applied(
+            r.id, {**base, "term_id": term_id, "supported": sorted(supported | synonyms)}
+        )
 
 
 def _unfold(ctx: _AlignCtx) -> int:
@@ -695,42 +751,27 @@ def _unfold(ctx: _AlignCtx) -> int:
         term_id: {r["alias"]: r for r in records}  # exact strings: ownership is never normalised
         for term_id, records in ctx.aligns.alias_provenance(live=True).items()
     }
-    supporters = _accepted_supporters(ctx)
+    supporters = alias_supporters(ctx.store)
     plan: dict[str, list[str]] = {}
-    handover: dict[int, tuple[AlignmentRecord, str, set[str]]] = {}
+    handover: dict[tuple[str, str], list[AlignmentRecord]] = {}
     for a in rows:
-        term_id = a.applied.get("term_id") or a.term_id
+        term_id, aliases = departing_aliases(a, concepts.get(a.concept_id), recorded)
         term = terms.get(term_id)
         if term is None:
             continue  # a Term of another structured source (or rebuilt away)
         own = {al.norm_alias(n) for n in [term.name, *(t.get("name") or "" for t in term.tables)]}
-        accounted = _accounted_names(a, concepts.get(a.concept_id))
         for synonym in term.synonyms:
-            rec = recorded.get(term_id, {}).get(synonym)
             n = al.norm_alias(synonym)
-            if rec is None or n in own:
-                continue  # never written by AutoOntology, or the Term's own name
-            if n not in accounted and a.concept_name not in (rec.get("concepts") or []):
-                continue
+            if synonym not in aliases or n in own:
+                continue  # not AutoOntology's write of this fold, or the Term's own name
             others = [r for r in supporters.get(term_id, {}).get(n, []) if r.id != a.id]
             if others:
-                for r in others:
-                    assert r.id is not None
-                    handover.setdefault(r.id, (r, term_id, set()))[2].add(synonym)
-                continue
-            if synonym not in plan.get(term_id, []):
+                handover.setdefault((term_id, synonym), []).extend(
+                    r for r in others if r not in handover.get((term_id, synonym), [])
+                )
+            elif synonym not in plan.get(term_id, []):
                 plan.setdefault(term_id, []).append(synonym)
-    for r, term_id, synonyms in handover.values():
-        if (r.applied.get("term_id") or term_id) != term_id:
-            continue  # that fold moved: its own unfold handles it
-        supported = set(r.applied.get("supported") or [])
-        if synonyms <= supported | set(r.applied.get("synonyms_added") or []):
-            continue
-        assert r.id is not None
-        base = r.applied or {"run_id": ctx.run.id, "at": now_iso()}
-        ctx.aligns.set_applied(
-            r.id, {**base, "term_id": term_id, "supported": sorted(supported | synonyms)}
-        )
+    hand_over_aliases(ctx.aligns, handover, run_id=ctx.run.id)
     removed = 0
     for term_id, aliases in sorted(plan.items()):
         result = ctx.writer.remove_synonyms(term_id, aliases)  # raises: retried next pass
