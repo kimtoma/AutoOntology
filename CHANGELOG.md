@@ -89,6 +89,20 @@ behaviour).
 
 ### Fixed
 
+- `provider use --base-url` refuses an endpoint on another origin (scheme, host, port)
+  while an API key is saved, in `.env` or the shell, like the Settings page: the key is
+  never carried to another endpoint. Change both on the Settings page, or drop a `.env` key
+  with the new `--clear-api-key`.
+- **Keep separate** now holds on every later pass: an acknowledged concept is never folded
+  automatically (its row is `none`, rationale `kept separate by decision`; the judge's
+  verdict is kept for **Undo**), even when it later gains a matching candidate, and
+  acknowledging a folded concept takes its synonyms off the Term.
+- Rejecting folds that two documents sources share takes the synonym off the Term once the
+  last of them is rejected, in either order, together, or after a failed removal: a fold
+  that kept the synonym in place takes it over.
+- Source freshness finds a source's last build however many other runs (exports, no-op
+  applies) followed it; concurrent freshness requests never start a second computation
+  while one runs (a waiter that runs out of time gets the cached rows, or `computing`).
 - Values the supervisor copied from `.env` into its children are now listed in
   `AUTOONTOLOGY_DERIVED_ENV`, so a restarted service re-reads a rewritten `.env` instead of
   keeping the old values as if they came from the shell.

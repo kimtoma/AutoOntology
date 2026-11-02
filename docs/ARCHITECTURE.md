@@ -168,12 +168,17 @@ process can send any Host and login header.
   `judged_json` and comes back when the decision is removed. The align judge step checks
   for a decision before the resume and cache paths, so a decided concept is never judged
   again (its Term must still exist; otherwise it is judged as usual).
+  A `concept/acknowledge` decision (**Keep separate**) is laid over as a rejection
+  (`overlay.alignment_decisions`): `none`, never accepted, rationale `kept separate by
+  decision`, on the fresh, cached, resumed and apply paths alike.
 - **Synonyms upstream.** The align apply step writes the synonyms of a person's accepted
   `same` to the Term whatever its confidence. When a decision rejects or removes a fold
   whose synonyms were already written, the same step takes them off the Term
   (`TermWriter.remove_synonyms`, then `mark_aliases_removed`; the record stays, so the
-  alias stays untrusted). It removes only the recorded additions of that source's
-  alignment that no accepted `same` of any documents source still accounts for. So the
+  alias stays untrusted). It removes the recorded additions the rejected rows account for
+  that no accepted `same` of any documents source still accounts for, whichever source
+  wrote them. A synonym another fold still protects is handed over to that fold (its row's
+  `applied` lists it under `supported`), so rejecting that fold later removes it. So the
   Term's `skos:altLabel` and the concept's own class never both carry the name in RDF,
   Ossie or OKF. This runs in a build's align pass and in apply. What to take off is read
   from the rows themselves (`overlay.unfold_pending`): a row keeps the `applied` record of
