@@ -395,10 +395,36 @@ describe("Revision changes, paging, labels", () => {
     mockFetch(dashboardRoutes({ "GET /ontology/diff": two }))
     renderPage(<IndexPage />)
     await waitFor(() => expect(document.querySelector("[data-delta=added]")).toHaveTextContent("+2 classes added"))
-    expect(document.querySelector("[data-delta=removed]")).toHaveTextContent("−0 classes removed")
+    expect(document.querySelector("[data-delta=removed]")).toBeNull()
     expect(document.querySelector("[data-delta=changed]")).toHaveTextContent("~3 classes changed")
     expect(document.getElementById("ops-delta")).toHaveTextContent("1 relation change")
     expect(document.getElementById("ops-delta")).toHaveTextContent("2 merge changes")
+  })
+
+  it("shows only the nonzero class deltas, and no changes when all are zero", async () => {
+    const some = { ...DIFF, classes: { ...DIFF.classes, totals: { added: 2, removed: 0, changed: 0 } } }
+    mockFetch(dashboardRoutes({ "GET /ontology/diff": some }))
+    const { unmount } = renderPage(<IndexPage />)
+    await waitFor(() => expect(document.querySelector("[data-delta=added]")).toHaveTextContent("+2 classes added"))
+    expect(document.querySelector("[data-delta=removed]")).toBeNull()
+    expect(document.querySelector("[data-delta=changed]")).toBeNull()
+    unmount()
+    const none = { ...DIFF, classes: { ...DIFF.classes, totals: { added: 0, removed: 0, changed: 0 } } }
+    mockFetch(dashboardRoutes({ "GET /ontology/diff": none }))
+    renderPage(<IndexPage />)
+    await waitFor(() => expect(document.getElementById("ops-delta")).toHaveTextContent("Since revision 2: no changes to the classes."))
+    expect(document.querySelector("[data-delta]")).toBeNull()
+  })
+
+  it("names the changed fields of a class in words", async () => {
+    const diff = { ...DIFF, classes: { ...DIFF.classes, changed: [{ id: "term-c", name: "Contract", fields: ["definitions", "synonyms", "odd"] }] } }
+    mockFetch({ "GET /ontology": SUMMARY, "GET /ontology/revisions": { revisions: [] }, "GET /ontology/diff": diff })
+    const { unmount } = renderPage(<OntologyPage />, "/ontology?changed=1")
+    await waitFor(() => expect(document.querySelector("[data-changes=changed]")).toHaveTextContent("changed: definitions, synonyms, odd"))
+    unmount()
+    setLang("ko", false)
+    renderPage(<OntologyPage />, "/ontology?changed=1")
+    await waitFor(() => expect(document.querySelector("[data-changes=changed]")).toHaveTextContent("바뀐 항목: 정의, 동의어, odd"))
   })
 
   it("labels the old-build notice's button with what it does", async () => {

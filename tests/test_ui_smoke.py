@@ -558,6 +558,8 @@ def test_review_reject_fold_then_apply_shows_it_unfolded(live, browser):
 
 
 def test_sources_preview_classifies_files(live, browser, tmp_path):
+    from playwright.sync_api import expect
+
     url, _, _ = live
     (tmp_path / "manual.doc").write_bytes(b"x")
     (tmp_path / "data.xyz").write_bytes(b"x")
@@ -565,9 +567,10 @@ def test_sources_preview_classifies_files(live, browser, tmp_path):
     page.goto(f"{url}/ui/sources")
     page.click("#btn-new-source")
     page.click("#source-kind [data-family=documents]")
-    accept = page.get_attribute("#source-files", "accept")
     formats = httpx.get(f"{url}/api/status").json()["formats"]
-    assert accept == ",".join(sorted(formats["documents"])), accept
+    expect(page.locator("#source-files")).to_have_attribute(
+        "accept", ",".join(sorted(formats["documents"]))
+    )
     page.set_input_files(
         "#source-files", [str(tmp_path / "manual.doc"), str(tmp_path / "data.xyz")]
     )

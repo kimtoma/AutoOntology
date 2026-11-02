@@ -6,11 +6,18 @@ import { RelationChip } from "@/components/concept-sheet"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { keys, retryServerErrors } from "@/hooks/queries"
-import { useT } from "@/i18n"
+import { t, useT, type MessageKey } from "@/i18n"
 import { api, type DiffNode } from "@/lib/api"
 import { CKIND_LABEL } from "@/lib/labels"
 
 const isConcept = (id: string) => /^(term|concept)-/.test(id)
+
+/** A diff field (`definitions`, `synonyms`, ...) in words; an unknown one as it is. */
+function fieldName(field: string): string {
+  const key = `ontology.changed.field.${field}` as MessageKey
+  const text = t(key)
+  return text === key ? field : text
+}
 
 function Group({ id, title, total, shown, children }: {
   id: string; title: string; total: number; shown: number; children: ReactNode
@@ -78,7 +85,7 @@ export function RevisionChanges({ from, to, onOpen }: {
       </Group>
       <Group id="changed" title={t("ontology.changed.changed")} total={d.classes.totals.changed ?? 0} shown={d.classes.changed.length}>
         {d.classes.changed.map((n) => node(n, true, n.fields?.length
-          ? <span className="text-xs text-muted-foreground">{t("ontology.changed.fields", { list: n.fields.join(", ") })}</span> : null))}
+          ? <span className="text-xs text-muted-foreground">{t("ontology.changed.fields", { list: n.fields.map(fieldName).join(", ") })}</span> : null))}
       </Group>
       <Group id="removed" title={t("ontology.changed.removed")} total={d.classes.totals.removed} shown={d.classes.removed.length}>
         {d.classes.removed.map((n) => node(n, false))}

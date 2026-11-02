@@ -86,9 +86,9 @@ function OntologyCard({ o, now, className }: { o: OntologySummary; now: number; 
               {d.added + d.removed + d.changed === 0 ? <span>{t("overview.delta.none", { from: diff.data.from })}</span> : (
                 <>
                   <span>{t("overview.delta", { from: diff.data.from })}</span>
-                  <span className="font-medium text-success tabular-nums" data-delta="added">{tn("overview.delta.added", d.added)}</span>
-                  <span className="font-medium text-destructive tabular-nums" data-delta="removed">{tn("overview.delta.removed", d.removed)}</span>
-                  <span className="font-medium tabular-nums" data-delta="changed">{tn("overview.delta.changed", d.changed)}</span>
+                  {d.added > 0 && <span className="font-medium text-success tabular-nums" data-delta="added">{tn("overview.delta.added", d.added)}</span>}
+                  {d.removed > 0 && <span className="font-medium text-destructive tabular-nums" data-delta="removed">{tn("overview.delta.removed", d.removed)}</span>}
+                  {d.changed > 0 && <span className="font-medium tabular-nums" data-delta="changed">{tn("overview.delta.changed", d.changed)}</span>}
                 </>
               )}
               {d.axioms > 0 && <span className="text-xs text-muted-foreground">{tn("overview.delta.axioms", d.axioms)}</span>}
