@@ -637,6 +637,7 @@ def test_korean_help(monkeypatch):
         ["exports", "show", "1", "report.md#x"],
         ["exports", "show", "1", "/etc/passwd"],
         ["exports", "show", "1", "okf\\validation.json"],
+        ["exports", "show", "1", ""],
         ["exports", "get", "1", "../settings", "--out", "x.json"],
     ],
 )
@@ -704,16 +705,13 @@ NEW_COMMANDS = [
 ]
 
 _HELP_SCRIPT = """
-import json, re, sys
-TOP = r"\\W+(ontology|runs|samples|exports|playground|settings) "
+import json, sys
 from typer.testing import CliRunner
 from autoontology.cli import app
 bad = {}
 for args in json.loads(sys.argv[1]):
     out = CliRunner().invoke(app, [*args, "--help"], env={"COLUMNS": "80"}).output
     lines = [line for line in out.splitlines() if "\\u2026" in line]
-    if not args:  # the top level: only the rows of the groups this module adds
-        lines = [x for x in lines if re.match(TOP, x)]
     if lines or not out.strip():
         bad[" ".join(args)] = lines
 print(json.dumps(bad, ensure_ascii=False))

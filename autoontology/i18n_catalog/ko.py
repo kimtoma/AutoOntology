@@ -10,8 +10,8 @@ MESSAGES: dict[str, str] = {
     "help.doctor.skip_models": "채팅/임베딩 호출을 건너뜁니다.",
     "help.provider_app": "채팅 제공자를 확인, 테스트, 전환합니다.",
     "help.init": (
-        "Postgres, 채팅 제공자, 임베딩, 문서 엔진, .env를 차례로 설정하고 `setup`까지 "
-        "실행합니다. 여러 번 실행해도 안전합니다."
+        "단계별 설정: Postgres, 채팅 제공자, 임베딩, 문서 엔진, .env, 그리고 `setup`. "
+        "다시 실행해도 안전합니다."
     ),
     "help.init.provider": "채팅 제공자: ollama, claude, codex, openai 중 하나 (기본값: 자동 감지).",
     "help.init.chat_model": "해당 제공자의 채팅 모델.",
@@ -19,10 +19,7 @@ MESSAGES: dict[str, str] = {
     "help.init.vision_model": "이미지 설명용 Ollama 비전 모델 (선택).",
     "help.init.yes": "묻지 않고 감지된 기본값으로 진행 (스크립트, CI용).",
     "help.init.env": "작성할 .env 파일 (기본값: <repo>/.env).",
-    "help.demo": (
-        "샘플 세트로 전체 파이프라인을 실행합니다: 서비스 시작, 샘플 소스 등록, 빌드, "
-        "내보내기, 웹 UI 열기."
-    ),
+    "help.demo": ("샘플 세트로 전체 실행: 서비스 시작, 소스 등록, 빌드, 내보내기, 웹 UI 열기."),
     "help.demo.set": "샘플 세트: quickstart (소형) | hanbit (가상 회사 전체).",
     "help.demo.no_open": "웹 UI를 열지 않음.",
     "help.demo.resume": "가장 최근 빌드를 이어서 실행 (성공한 단계는 유지).",
@@ -322,8 +319,8 @@ MESSAGES: dict[str, str] = {
         "OpenAI 호환 엔드포인트의 채팅 모델 (AUTOONTOLOGY_OPENAI_CHAT_MODEL)."
     ),
     "help.restart": (
-        "서비스와 백엔드를 재시작해 둘 다 현재 .env를 읽게 합니다 (제공자를 바꾼 뒤). "
-        "down + up과 같아서 진행 중인 빌드를 기다리지 않습니다."
+        "서비스와 백엔드를 재시작해 현재 .env를 읽게 합니다 (제공자 변경 후). "
+        "down + up처럼 진행 중인 빌드는 기다리지 않습니다."
     ),
     "help.restart.only": "이 프로세스만 재시작합니다: backend.",
     "provider.unknown_embed": "알 수 없는 임베딩 제공자 {name!r}: {choices} 중에서 고르세요",

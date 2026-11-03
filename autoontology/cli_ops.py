@@ -851,9 +851,9 @@ def exports_show(
     as_json: bool = typer.Option(False, "--json", help=msg("help.opt.json")),
 ) -> None:
     folder = _rev_dir(rev)
-    segs = _export_path(path) if path else ""
+    segs = _export_path(path) if path is not None else ""
     api = _local()
-    if path:
+    if path is not None:
         resp = _guard(
             lambda: api.raw("GET", f"/exports/{folder}/{segs}", params={"inline": True}),
             as_json=as_json,
