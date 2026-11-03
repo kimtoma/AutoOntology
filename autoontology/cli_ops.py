@@ -29,8 +29,19 @@ from typing import Any
 import httpx
 import typer
 
-from autoontology import cli as base
 from autoontology.i18n import msg
+
+
+class _Cli:
+    """``autoontology.cli`` on first use (it imports this module at its end)."""
+
+    def __getattr__(self, name: str) -> Any:
+        from autoontology import cli
+
+        return getattr(cli, name)
+
+
+base = _Cli()
 
 PREFIX = "/api"
 #: Seconds `settings restart --wait` waits for the restart to finish.
@@ -627,7 +638,7 @@ def _reasons(row: dict[str, Any]) -> str:
         return f"error {row['error']}"
     parts = []
     for r in row.get("reasons") or []:
-        examples = ", ".join(r.get("examples") or [])
+        examples = ", ".join(Path(x).name or x for x in r.get("examples") or [])
         parts.append(f"{r['kind']}({r.get('count', 0)})" + (f": {examples}" if examples else ""))
     return "; ".join(parts) or "-"
 
@@ -1232,8 +1243,8 @@ def settings_set(
         embed_model=embed_model,
         base_url=base_url,
         key=key,
-        clear_api_key=clear_api_key,
-        confirm_reingest=confirm_reingest,
+        clear_api_key=clear_api_key or None,
+        confirm_reingest=confirm_reingest or None,
     )
     if not body.model_fields_set - {"confirm_reingest"}:
         base._fail(msg("ops.settings_nothing"), code=2)
