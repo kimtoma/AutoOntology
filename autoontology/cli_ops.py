@@ -25,6 +25,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import typer
@@ -211,16 +212,81 @@ def _json(value: Any) -> None:
     typer.echo(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+def _json_mode() -> bool:
+    """True when the running command (or its group) was given ``--json``."""
+    try:  # typer >= 0.2x runs its own copy of click
+        from typer._click.globals import get_current_context
+    except ImportError:  # pragma: no cover - older typer on the real click
+        from click import get_current_context
+
+    ctx = get_current_context(silent=True)
+    while ctx is not None:
+        if ctx.params.get("as_json"):
+            return True
+        ctx = ctx.parent
+    return False
+
+
+def _error(
+    error: str, detail: str, code: int, *, extra: dict[str, Any] | None = None, text: str = ""
+) -> None:
+    """Exit *code* with ``error: detail`` on stderr; under ``--json`` also the envelope
+    ``{"error", "detail", ...}`` on stdout (every command, every failure)."""
+    if _json_mode():
+        _json({"error": error, "detail": detail, **(extra or {})})
+    base._fail(text or f"{error}: {detail}", code=code)
+
+
+def _call_error(exc: CallError) -> None:
+    extra = {k: v for k, v in exc.body.items() if k not in ("error", "detail")}
+    _error(exc.error, exc.detail, 1, extra={**extra, "status": exc.status})
+
+
+def _service_down(exc: ServiceDown) -> None:
+    text = msg("ops.service_down", url=exc.url)
+    _error("service_down", text, 2, text=text)
+
+
 def _guard(fn: Callable[[], Any], *, as_json: bool = False) -> Any:
-    """*fn*'s result; a service that is down exits 2, an API error exits 1."""
+    """*fn*'s result; a service that is down exits 2, an API error exits 1 (``--json``:
+    the error envelope on stdout)."""
     try:
         return fn()
     except ServiceDown as exc:
-        base._fail(msg("ops.service_down", url=exc.url), code=2)
+        _service_down(exc)
     except CallError as exc:
-        if as_json:
-            _json({"status": exc.status, **exc.body})
-        base._fail(f"{exc.error}: {exc.detail}", code=1)
+        _call_error(exc)
+
+
+def _run_seg(run_id: str) -> str:
+    """*run_id* as one URL path segment (anything but a run id: exit 2)."""
+    from autoontology.web.runs import RUN_ID_RE
+
+    if not RUN_ID_RE.fullmatch(run_id):
+        _error("invalid_run_id", f"invalid run id {run_id!r}", 2)
+    return quote(run_id, safe="")
+
+
+def _concept_seg(concept_id: str) -> str:
+    from autoontology.web.api import CONCEPT_ID_RE
+
+    if not CONCEPT_ID_RE.fullmatch(concept_id):
+        _error("invalid_concept_id", f"invalid concept id {concept_id!r}", 2)
+    return quote(concept_id, safe="")
+
+
+def _export_path(path: str) -> str:
+    """An export file path as quoted URL segments; refuses what could leave the folder
+    or change the request (``.``/``..``, empty segments, absolute, ``\\``, ``?``, ``#``)."""
+    parts = path.split("/")
+    if (
+        not path
+        or path.startswith("/")
+        or any(c in path for c in "\\?#\x00")
+        or any(p in ("", ".", "..") for p in parts)
+    ):
+        _error("invalid_path", f"invalid export path {path!r}", 2)
+    return "/".join(quote(p, safe="") for p in parts)
 
 
 def _local(settings: Any | None = None) -> LocalApi:
@@ -405,8 +471,9 @@ def ontology_concept(
     as_json: bool = typer.Option(False, "--json", help=msg("help.opt.json")),
 ) -> None:
     params = {"revision": revision} if revision else {}
+    seg = _concept_seg(concept_id)
     body = _guard(
-        lambda: _local().call("GET", f"/ontology/concepts/{concept_id}", params=params),
+        lambda: _local().call("GET", f"/ontology/concepts/{seg}", params=params),
         as_json=as_json,
     )
     if as_json:
@@ -511,7 +578,7 @@ def runs_main(
     if ctx.invoked_subcommand is not None:
         return
     if as_json:
-        _json(_local().call("GET", "/runs", params={"limit": limit}))
+        _json(_guard(lambda: _local().call("GET", "/runs", params={"limit": limit})))
         return
     base.runs_table(limit)
 
@@ -521,7 +588,8 @@ def runs_show(
     run_id: str = typer.Argument(..., help=msg("help.runs.id")),
     as_json: bool = typer.Option(False, "--json", help=msg("help.opt.json")),
 ) -> None:
-    body = _guard(lambda: _service().call("GET", f"/runs/{run_id}"), as_json=as_json)
+    seg = _run_seg(run_id)
+    body = _guard(lambda: _service().call("GET", f"/runs/{seg}"), as_json=as_json)
     if as_json:
         _json(body)
         return
@@ -560,10 +628,9 @@ def runs_logs(
     as_json: bool = typer.Option(False, "--json", help=msg("help.runs.logs.json")),
 ) -> None:
     from autoontology.web.api import mask
-    from autoontology.web.runs import RUN_ID_RE, run_log_path
+    from autoontology.web.runs import run_log_path
 
-    if not RUN_ID_RE.fullmatch(run_id):
-        base._fail(f"invalid_run_id: invalid run id {run_id!r}", code=2)
+    _run_seg(run_id)
     if follow:
         status = None
         for event, data, _id in _guard(lambda: list_or_stream(run_id)):
@@ -581,12 +648,13 @@ def runs_logs(
         return
     settings = base._settings()
     if base._store(settings).get_run(run_id) is None:
-        base._fail(f"unknown_run: unknown run {run_id!r}", code=1)
+        _error("unknown_run", f"unknown run {run_id!r}", 1)
     path = run_log_path(settings, run_id)
     if not path.is_file():
         from autoontology.engine.jobs import jobs_log_path
 
-        base._fail(msg("ops.no_run_log", run=run_id, log=jobs_log_path(settings)), code=1)
+        text = msg("ops.no_run_log", run=run_id, log=jobs_log_path(settings))
+        _error("no_run_log", text, 1, text=text)
     with path.open("r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             text = mask(line.rstrip("\n"))
@@ -599,7 +667,7 @@ def runs_logs(
 def list_or_stream(run_id: str) -> Iterator[tuple[str, Any, str | None]]:
     """The run's live events (``GET /api/runs/{id}/events``) until ``end``, consumed eagerly
     per event so a service error surfaces before any output."""
-    stream = _service().events("GET", f"/runs/{run_id}/events")
+    stream = _service().events("GET", f"/runs/{_run_seg(run_id)}/events")
     first = next(stream, None)  # raises ServiceDown / CallError here, inside _guard
 
     def rest() -> Iterator[tuple[str, Any, str | None]]:
@@ -623,7 +691,8 @@ def runs_cancel(
     run_id: str = typer.Argument(..., help=msg("help.runs.id")),
     as_json: bool = typer.Option(False, "--json", help=msg("help.opt.json")),
 ) -> None:
-    body = _guard(lambda: _service().call("POST", f"/runs/{run_id}/cancel"), as_json=as_json)
+    seg = _run_seg(run_id)
+    body = _guard(lambda: _service().call("POST", f"/runs/{seg}/cancel"), as_json=as_json)
     if as_json:
         _json(body)
         return
@@ -705,17 +774,24 @@ def samples_load(
     replace: bool = typer.Option(False, "--replace", help=msg("help.samples.load.replace")),
     as_json: bool = typer.Option(False, "--json", help=msg("help.opt.json")),
 ) -> None:
+    payload = {"set": set_name, "replace": replace}
     try:
-        body = _local().call("POST", "/samples/load", json={"set": set_name, "replace": replace})
+        try:  # the running service holds the workspace claim (no build starts meanwhile)
+            body = _service().call("POST", "/samples/load", json=payload)
+        except ServiceDown:
+            body = _local().call("POST", "/samples/load", json=payload)
     except CallError as exc:
-        if as_json:
-            _json({"status": exc.status, **exc.body})
+        extra = {k: v for k, v in exc.body.items() if k not in ("error", "detail")}
+        extra["status"] = exc.status
         if exc.error == "sample_conflict":
             for c in exc.body.get("conflicts") or []:
                 typer.echo(msg("demo.conflict", **c), err=True)
             detail = exc.detail.split('; send "replace"')[0]
-            base._fail(f"sample_conflict: {detail}\n{msg('ops.sample_replace_hint')}", code=2)
-        base._fail(f"{exc.error}: {exc.detail}", code=2 if exc.status == 400 else 1)
+            hint = msg("ops.sample_replace_hint")
+            _error(
+                "sample_conflict", detail, 2, extra=extra, text=f"sample_conflict: {detail}\n{hint}"
+            )
+        _error(exc.error, exc.detail, 2 if exc.status == 400 else 1, extra=extra)
     if as_json:
         _json(body)
         return
@@ -739,7 +815,7 @@ def _rev_dir(rev: str) -> str:
     if raw.lower().startswith("r") and raw[1:].isdigit():
         raw = raw[1:]
     if not raw.isdigit():
-        base._fail(msg("ops.bad_revision", value=rev), code=2)
+        _error("invalid_revision", msg("ops.bad_revision", value=rev), 2)
     from autoontology.engine.export_job import revision_dir_name
 
     return revision_dir_name(int(raw))
@@ -775,10 +851,11 @@ def exports_show(
     as_json: bool = typer.Option(False, "--json", help=msg("help.opt.json")),
 ) -> None:
     folder = _rev_dir(rev)
+    segs = _export_path(path) if path else ""
     api = _local()
     if path:
         resp = _guard(
-            lambda: api.raw("GET", f"/exports/{folder}/{path}", params={"inline": True}),
+            lambda: api.raw("GET", f"/exports/{folder}/{segs}", params={"inline": True}),
             as_json=as_json,
         )
         text = resp.text
@@ -790,7 +867,7 @@ def exports_show(
     exports = _guard(lambda: api.call("GET", "/exports"))["exports"]
     entry = next((e for e in exports if e["dir"] == folder), None)
     if entry is None:
-        base._fail(f"unknown_export: no export {folder}", code=1)
+        _error("unknown_export", f"no export {folder}", 1)
     if as_json:
         _json(entry)
         return
@@ -804,15 +881,21 @@ def exports_show(
 def exports_get(
     rev: str = typer.Argument(..., help=msg("help.exports.rev")),
     path: str = typer.Argument(..., help=msg("help.exports.path")),
-    out: Path = typer.Option(..., "--out", help=msg("help.exports.out")),
+    out: str = typer.Option(..., "--out", help=msg("help.exports.out")),
 ) -> None:
+    import os
+
     folder = _rev_dir(rev)
-    data = _guard(lambda: _local().raw("GET", f"/exports/{folder}/{path}")).content
-    if out.is_dir():
-        out = out / Path(path).name
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(data)
-    typer.echo(msg("ops.saved", path=out, bytes=len(data)))
+    segs = _export_path(path)
+    target = Path(out).expanduser()
+    if target.is_dir():
+        target = target / Path(path).name
+    elif out.endswith(("/", os.sep)):
+        _error("no_such_directory", msg("ops.no_such_dir", path=target), 2)
+    data = _guard(lambda: _local().raw("GET", f"/exports/{folder}/{segs}")).content
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    typer.echo(msg("ops.saved", path=target, bytes=len(data)))
 
 
 # --- playground ---------------------------------------------------------------------
@@ -959,15 +1042,25 @@ def playground_sparql(
     query: str = typer.Argument(None, help=msg("help.playground.sparql.query")),
     file: Path = typer.Option(None, "--file", help=msg("help.playground.sparql.file")),
     limit: int = typer.Option(500, "--limit", min=1, help=msg("help.playground.sparql.limit")),
+    examples: bool = typer.Option(False, "--examples", help=msg("help.playground.sparql.examples")),
     as_json: bool = typer.Option(False, "--json", help=msg("help.opt.json")),
 ) -> None:
+    if examples:
+        listing = _guard(lambda: _service().call("GET", "/playground/sparql/examples"))
+        if as_json:
+            _json(listing)
+            return
+        for example in listing.get("examples") or []:
+            typer.echo(f"# {example.get('title') or example.get('label') or '-'}")
+            typer.echo(str(example.get("query", "")).rstrip("\n") + "\n")
+        return
     if (query is None) == (file is None):
-        base._fail(msg("ops.sparql_one_of"), code=2)
+        _error("invalid_query", msg("ops.sparql_one_of"), 2)
     if file is not None:
         try:
             query = file.read_text(encoding="utf-8")
         except OSError as exc:
-            base._fail(f"{file}: {exc.strerror or exc}", code=2)
+            _error("unreadable_file", f"{file}: {exc.strerror or exc}", 2)
     body = _guard(
         lambda: _service().call(
             "POST", "/playground/sparql", json={"query": query, "limit": limit}
@@ -1036,10 +1129,21 @@ def _settings_call(fn: Callable[[], Any], *, as_json: bool) -> Any:
     try:
         return fn()
     except ApiError as exc:
-        body = {"error": exc.error, "detail": exc.detail, **exc.extra}
-        if as_json:
-            _json({"status": exc.status, **body})
-        base._fail(f"{exc.error}: {exc.detail}", code=1)
+        _error(exc.error, exc.detail, 1, extra={**exc.extra, "status": exc.status})
+
+
+def _settings_request(method: str, path: str, body: Any, local: Callable[[Any], Any]) -> Any:
+    """The Settings page's call through the running service (its shell decides which keys
+    are locked, its run manager whether a save may run), else *local* in this process."""
+    payload = body.model_dump(mode="json", exclude_unset=True)
+    if body.api_key is not None:  # over loopback in the JSON body, as the UI sends it
+        payload["api_key"] = body.api_key.get_secret_value()
+    try:
+        return _service().call(method, path, json=payload)
+    except ServiceDown:
+        return _settings_call(lambda: local(_settings_state(base._settings())), as_json=False)
+    except CallError as exc:
+        _call_error(exc)
 
 
 def _read_key(api_key_stdin: bool) -> str | None:
@@ -1054,7 +1158,7 @@ def _read_key(api_key_stdin: bool) -> str | None:
         key = sys.stdin.readline()
     key = key.strip()
     if not key:
-        base._fail(msg("ops.key_empty"), code=2)
+        _error("invalid_settings", msg("ops.key_empty"), 2)
     return key
 
 
@@ -1090,7 +1194,7 @@ def _settings_body(
             f"--{'.'.join(str(p) for p in e['loc']).replace('_', '-')}: {e['msg']}"
             for e in exc.errors()
         )
-        base._fail(f"invalid_settings: {problems}", code=2)
+        _error("invalid_settings", problems, 2)
 
 
 _CHAT_PROVIDER = typer.Option(None, "--chat-provider", help=msg("help.settings.chat_provider"))
@@ -1113,9 +1217,7 @@ def settings_show(as_json: bool = _JSON) -> None:
         body = _settings_call(lambda: _settings_state(settings).get(), as_json=as_json)
         body["service_running"] = False
     except CallError as exc:
-        if as_json:
-            _json({"status": exc.status, **exc.body})
-        base._fail(f"{exc.error}: {exc.detail}", code=1)
+        _call_error(exc)
     else:
         body["service_running"] = True
     if as_json:
@@ -1189,8 +1291,9 @@ def settings_test(
         key=key,
         use_saved_key=use_saved_key,
     )
-    state = _settings_state(base._settings())
-    result = _settings_call(lambda: anyio.run(state.test, body), as_json=as_json)
+    result = _settings_request(
+        "POST", "/settings/test", body, lambda state: anyio.run(state.test, body)
+    )
     if as_json:
         _json(result)
     else:
@@ -1234,7 +1337,7 @@ def settings_set(
     as_json: bool = _JSON,
 ) -> None:
     if api_key_stdin and clear_api_key:
-        base._fail(msg("ops.key_and_clear"), code=2)
+        _error("invalid_settings", msg("ops.key_and_clear"), 2)
     key = _read_key(api_key_stdin)
     body = _settings_body(
         chat_provider=chat_provider,
@@ -1247,9 +1350,8 @@ def settings_set(
         confirm_reingest=confirm_reingest or None,
     )
     if not body.model_fields_set - {"confirm_reingest"}:
-        base._fail(msg("ops.settings_nothing"), code=2)
-    state = _settings_state(base._settings())
-    result = _settings_call(lambda: state.put(body), as_json=as_json)
+        _error("invalid_settings", msg("ops.settings_nothing"), 2)
+    result = _settings_request("PUT", "/settings", body, lambda state: state.put(body))
     if as_json:
         _json(result)
         return
@@ -1289,7 +1391,9 @@ def settings_restart(
     while time.monotonic() < deadline:
         time.sleep(RESTART_POLL_S)
         try:
-            record = _service(settings).call("GET", f"/settings/restart/{restart_id}")
+            record = _service(settings).call(
+                "GET", f"/settings/restart/{quote(str(restart_id), safe='')}"
+            )
         except (ServiceDown, CallError):  # the service is between stop and start
             continue
         if record.get("state") != "running":

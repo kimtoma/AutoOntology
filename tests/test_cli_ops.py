@@ -145,7 +145,7 @@ def test_ontology_concept_shows_alignments_evidence_and_decisions(two_revisions)
     assert "note: 수납은 고객 계정" in out
     missing = runner.invoke(app, ["ontology", "concept", "term-nope"])
     assert missing.exit_code == 1 and "unknown_concept" in missing.output
-    assert runner.invoke(app, ["ontology", "concept", "../x"]).exit_code == 1
+    assert runner.invoke(app, ["ontology", "concept", "../x"]).exit_code == 2
 
 
 def test_ontology_graph_writes_the_page_json(two_revisions, tmp_path):
@@ -349,8 +349,8 @@ def test_exports_list_show_get(exports, tmp_path):
         in _ok(["exports", "get", "2", "ossie/validation.json", "--out", str(target)]).output
     )
     assert (target / "validation.json").read_text() == '{"ontology": "ok"}'
-    for args in (["exports", "show", "2", "../../etc/passwd"], ["exports", "show", "2", ".hidden"]):
-        assert runner.invoke(app, args).exit_code == 1
+    assert runner.invoke(app, ["exports", "show", "2", "../../etc/passwd"]).exit_code == 2
+    assert runner.invoke(app, ["exports", "show", "2", ".hidden"]).exit_code == 1
     assert runner.invoke(app, ["exports", "show", "x2"]).exit_code == 2
     assert runner.invoke(app, ["exports", "show", "9"]).exit_code == 1
 
@@ -617,3 +617,256 @@ def test_korean_help(monkeypatch):
         check=True,
     ).stdout
     assert "표준 입력" in out and "--api-key-stdin" in out
+
+
+# --- fix wave: path segments, Korean help, service-first writes, --json errors ---------
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["ontology", "concept", "../../ontology"],
+        ["ontology", "concept", "term-x?revision=1"],
+        ["runs", "show", "../settings"],
+        ["runs", "cancel", "../settings/restart?x="],
+        ["runs", "logs", "../settings", "--follow"],
+        ["exports", "show", "1", "../../samples"],
+        ["exports", "show", "1", "okf/../../samples"],
+        ["exports", "show", "1", "okf/./validation.json"],
+        ["exports", "show", "1", "report.md?inline=0"],
+        ["exports", "show", "1", "report.md#x"],
+        ["exports", "show", "1", "/etc/passwd"],
+        ["exports", "show", "1", "okf\\validation.json"],
+        ["exports", "get", "1", "../settings", "--out", "x.json"],
+    ],
+)
+def test_path_segments_never_reach_another_endpoint(isolated_env, monkeypatch, args):
+    seen = _mock(monkeypatch, lambda r: httpx.Response(200, json={"id": "x"}))
+    res = runner.invoke(app, args)
+    assert res.exit_code == 2, res.output
+    assert (
+        "Traceback" not in res.output
+        and res.exception is None
+        or isinstance(res.exception, SystemExit)
+    )
+    assert seen == []
+
+
+def test_export_paths_are_quoted(exports):
+    (exports / "okf" / "계약-갱신.md").write_text("본문", "utf-8")
+    assert _ok(["exports", "show", "2", "okf/계약-갱신.md"]).output == "본문\n"
+
+
+def test_restart_id_from_the_service_is_quoted(isolated_env, monkeypatch):
+    def handler(request):
+        if request.method == "POST":
+            return httpx.Response(202, json={"restart_id": "../../ontology", "previous_pid": 1})
+        return httpx.Response(200, json={"id": "x", "state": "done", "new_pid": 2})
+
+    seen = _mock(monkeypatch, handler)
+    monkeypatch.setattr(cli_ops, "RESTART_POLL_S", 0.0)
+    _ok(["settings", "restart", "--wait"])
+    assert seen[-1].url.raw_path == b"/api/settings/restart/..%2F..%2Fontology"
+
+
+NEW_COMMANDS = [
+    ["ontology"],
+    ["ontology", "revisions"],
+    ["ontology", "diff"],
+    ["ontology", "concepts"],
+    ["ontology", "concept"],
+    ["ontology", "graph"],
+    ["runs"],
+    ["runs", "show"],
+    ["runs", "logs"],
+    ["runs", "cancel"],
+    ["source"],
+    ["source", "freshness"],
+    ["samples"],
+    ["samples", "list"],
+    ["samples", "load"],
+    ["exports"],
+    ["exports", "list"],
+    ["exports", "show"],
+    ["exports", "get"],
+    ["playground"],
+    ["playground", "chat"],
+    ["playground", "sql"],
+    ["playground", "sparql"],
+    ["playground", "index"],
+    ["settings"],
+    ["settings", "show"],
+    ["settings", "test"],
+    ["settings", "set"],
+    ["settings", "restart"],
+    ["review", "list"],
+    [],
+]
+
+_HELP_SCRIPT = """
+import json, re, sys
+TOP = r"\\W+(ontology|runs|samples|exports|playground|settings) "
+from typer.testing import CliRunner
+from autoontology.cli import app
+bad = {}
+for args in json.loads(sys.argv[1]):
+    out = CliRunner().invoke(app, [*args, "--help"], env={"COLUMNS": "80"}).output
+    lines = [line for line in out.splitlines() if "\\u2026" in line]
+    if not args:  # the top level: only the rows of the groups this module adds
+        lines = [x for x in lines if re.match(TOP, x)]
+    if lines or not out.strip():
+        bad[" ".join(args)] = lines
+print(json.dumps(bad, ensure_ascii=False))
+"""
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+def test_help_never_truncates_at_80_columns(lang):
+    import os
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-c", _HELP_SCRIPT, json.dumps(NEW_COMMANDS)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "AUTOONTOLOGY_LANG": lang, "COLUMNS": "80"},
+        check=True,
+    ).stdout
+    assert json.loads(out) == {}
+
+
+def test_settings_set_and_test_go_through_the_running_service(isolated_env, monkeypatch):
+    def handler(request):
+        if request.method == "PUT":
+            return httpx.Response(
+                200,
+                json={
+                    "written": ["AUTOONTOLOGY_OPENAI_API_KEY"],
+                    "backup": None,
+                    "restart_required": True,
+                },
+            )
+        if request.url.path == "/api/settings/test":
+            return httpx.Response(
+                200,
+                json={
+                    "chat": {
+                        "ok": True,
+                        "provider": "claude",
+                        "model": "m",
+                        "answer": "pong",
+                        "seconds": 1.0,
+                    },
+                    "embed": {
+                        "ok": True,
+                        "provider": "ollama",
+                        "model": "bge-m3",
+                        "dimension": 1024,
+                    },
+                },
+            )
+        return httpx.Response(
+            400, json={"error": "shell_override", "detail": "set in the service's shell"}
+        )
+
+    seen = _mock(monkeypatch, handler)
+    res = runner.invoke(
+        app,
+        ["settings", "set", "--base-url", "http://127.0.0.1:9/v1", "--api-key-stdin"],
+        input=KEY + "\n",
+    )
+    assert res.exit_code == 0, res.output
+    assert KEY not in res.output
+    assert seen[0].method == "PUT" and seen[0].url.path == "/api/settings"
+    assert json.loads(seen[0].content) == {
+        "openai_base_url": "http://127.0.0.1:9/v1",
+        "api_key": KEY,
+    }
+    out = _ok(["settings", "test", "--no-saved-key"]).output
+    assert "'pong'" in out and json.loads(seen[-1].content) == {"use_saved_key": False}
+    _mock(
+        monkeypatch,
+        lambda r: httpx.Response(
+            400, json={"error": "shell_override", "detail": "set in the service's shell"}
+        ),
+    )
+    refused = runner.invoke(app, ["settings", "set", "--chat-provider", "codex", "--json"])
+    assert refused.exit_code == 1
+    assert json.loads(refused.stdout)["error"] == "shell_override"
+
+
+def test_samples_load_uses_the_running_service(isolated_env, monkeypatch):
+    seen = _mock(
+        monkeypatch,
+        lambda r: httpx.Response(
+            409, json={"error": "run_active", "detail": "a build or export is running"}
+        ),
+    )
+    res = runner.invoke(app, ["samples", "load", "quickstart"])
+    assert res.exit_code == 1 and "run_active" in res.output
+    assert json.loads(seen[0].content) == {"set": "quickstart", "replace": False}
+    assert seen[0].url.path == "/api/samples/load"
+
+
+def test_exports_get_into_a_directory(exports, tmp_path):
+    missing = tmp_path / "nope"
+    res = runner.invoke(app, ["exports", "get", "2", "report.md", "--out", f"{missing}/"])
+    assert res.exit_code == 2 and not missing.exists()
+    existing = tmp_path / "dl"
+    existing.mkdir()
+    _ok(["exports", "get", "2", "report.md", "--out", str(existing)])
+    assert (existing / "report.md").read_text("utf-8") == "# 보고서\n"
+    _ok(["exports", "get", "2", "report.md", "--out", str(tmp_path / "new" / "r.md")])
+    assert (tmp_path / "new" / "r.md").is_file()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["runs", "show", "20261101T000000Z-abcdef", "--json"],
+        ["playground", "chat", "q", "--json"],
+        ["playground", "sql", "q", "--json"],
+        ["settings", "restart", "--json"],
+    ],
+)
+def test_json_error_envelope_when_the_service_is_down(isolated_env, args):
+    res = runner.invoke(app, args)
+    assert res.exit_code == 2
+    body = json.loads(res.stdout)
+    assert body["error"] == "service_down" and "uv run autoontology up" in body["detail"]
+
+
+def test_json_error_envelope_for_api_and_usage_errors(exports, monkeypatch):
+    for args, code, error in (
+        (["exports", "show", "2", "nope.md", "--json"], 1, "unknown_export"),
+        (["exports", "show", "x", "--json"], 2, "invalid_revision"),
+        (["ontology", "concept", "../x", "--json"], 2, "invalid_concept_id"),
+    ):
+        res = runner.invoke(app, args)
+        assert res.exit_code == code, res.output
+        body = json.loads(res.stdout)
+        assert body["error"] == error and body["detail"]
+
+    def broken(self, method, path, **kw):
+        raise cli_ops.CallError(500, "internal_error", "boom")
+
+    monkeypatch.setattr(cli_ops.LocalApi, "call", broken)
+    for args in (["runs", "--json"], ["exports", "list", "--json"], ["samples", "list", "--json"]):
+        res = runner.invoke(app, args)
+        assert res.exit_code == 1 and json.loads(res.stdout) == {
+            "error": "internal_error",
+            "detail": "boom",
+            "status": 500,
+        }, args
+
+
+def test_playground_sparql_examples(isolated_env, monkeypatch):
+    examples = [{"title": "Classes", "query": "SELECT ?c WHERE { ?c a owl:Class }"}]
+    seen = _mock(monkeypatch, lambda r: httpx.Response(200, json={"examples": examples}))
+    out = _ok(["playground", "sparql", "--examples"]).output
+    assert "Classes" in out and "SELECT ?c WHERE" in out
+    assert seen[0].url.path == "/api/playground/sparql/examples"
+    assert json.loads(_ok(["playground", "sparql", "--examples", "--json"]).stdout) == {
+        "examples": examples
+    }

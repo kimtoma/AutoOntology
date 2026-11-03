@@ -517,7 +517,7 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | `autoontology source freshness` | Which sources changed since their last build, and why (also `sources freshness`). |
 | `autoontology samples list` / `load <set> [--replace]` | Lists the sample sets; registers one set's sources without building (a source of the same name with other data is replaced only with `--replace`). |
 | `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` | Lists the export folders; lists one revision's files or prints a text file (e.g. `ossie/validation.json`, `okf/validation.json`); saves a file. |
-| `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F [--limit N]` / `index [--rebuild]` | The Playground through the running service: the RAG answer streamed with its citations, the NL-to-SQL agent, a SPARQL query over the latest snapshot, the chat index. |
+| `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F\|--examples [--limit N]` / `index [--rebuild]` | The Playground through the running service: the RAG answer streamed with its citations, the NL-to-SQL agent, a SPARQL query over the latest snapshot, the chat index. |
 | `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | The Settings page: the selection and where each value comes from (never the key), a candidate test (chat pong and embedding dimension), saving to `.env` (`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; the key only from stdin), and the service's self-restart. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
@@ -530,7 +530,13 @@ Every command that prints a table also takes `--json` (the web API's body). The 
 under `ontology`, `source freshness`, `samples`, `exports`, `settings show|test|set` and
 `runs logs` (without `--follow`) read the local store and files, so they work with the
 service down; the others call the running service and exit 2 with a hint when it is not
-up. [The guide](docs/GUIDE.md#the-same-from-a-terminal) maps every UI page to its commands.
+up. With `--json` a failure also prints `{"error": <code>, "detail": <text>, ...}` on stdout
+(exit 1 for an API error, 2 for a usage error or a service that is down); `runs logs`,
+`playground chat` and `playground sql` stream JSON Lines (one event object per line).
+Path arguments (run and concept ids, export paths) are validated and URL-encoded, so an id
+taken from data can never reach another endpoint. `settings set|test` and `samples load`
+go through the running service when it is up (its shell decides which keys are locked, its
+run manager whether a load may run) and run in-process only when it is down. [The guide](docs/GUIDE.md#the-same-from-a-terminal) maps every UI page to its commands.
 
 `build` exits 1 when a run is partial (for example a document failed to read or a chunk
 failed to extract), and prints a `--resume` hint. A partial run still saves its snapshot.

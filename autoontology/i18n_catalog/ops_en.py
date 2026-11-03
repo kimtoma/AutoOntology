@@ -2,6 +2,8 @@
 """English texts of the UI-parity commands (``autoontology/cli_ops.py``)."""
 
 MESSAGES: dict[str, str] = {
+    "help.playground.sparql.examples": "List the example queries of the Playground page.",
+    "ops.no_such_dir": "no such directory: {path}",
     "help.opt.json": "Print the answer as JSON (the web API's body).",
     "help.opt.limit": "At most this many rows.",
     "help.opt.page": "Page number (from 1).",
@@ -43,7 +45,7 @@ MESSAGES: dict[str, str] = {
         "until the run ends."
     ),
     "help.runs.logs.follow": "Stream new lines from the service until the run ends.",
-    "help.runs.logs.json": "One JSON event per line.",
+    "help.runs.logs.json": "JSON Lines: one event object per line.",
     "help.runs.cancel": "Cancel a run the service is running.",
     "help.sources.freshness": (
         "Which sources changed since their last build: source, kind, stale, reasons, last built."
@@ -72,7 +74,7 @@ MESSAGES: dict[str, str] = {
     "help.playground.question": "The question.",
     "help.playground.conversation": "Continue this conversation (its id is printed after an answer).",
     "help.playground.top_k": "Elements to retrieve (1-40).",
-    "help.playground.json": "One JSON event per line (the SSE events).",
+    "help.playground.json": "JSON Lines: one SSE event object per line.",
     "help.playground.sql": "Ask the data in natural language (the upstream SQL agent).",
     "help.playground.sql.source": "Structured source to query (default: the first one).",
     "help.playground.sql.conversation": "Conversation UUID to continue.",

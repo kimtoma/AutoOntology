@@ -487,10 +487,10 @@ quickstart 샘플에서 1초 미만입니다(큰 온톨로지에서는 약 1분,
 | 개요 | `uv run autoontology ontology`, `ontology diff`, `review list`, `source freshness`, `runs` |
 | 검토 | `uv run autoontology review list [--category C] [--page P]`, `review accept <id>` / `reject` / `acknowledge` / `undo`, `apply` |
 | 소스 | `uv run autoontology source add` / `list` / `rm`, `source freshness`, `samples list`, `samples load <set>` |
-| 빌드 | `uv run autoontology build [--source S] [--resume]`, `runs`, `runs show <id>` *(서비스)*, `runs logs <id> [--follow]`, `runs cancel <id>` *(서비스)* |
+| 빌드 | `uv run autoontology build [--source S] [--resume]`, `runs`, `runs show <id>` *(서비스)*, `runs logs <id>`, `runs logs <id> --follow` *(서비스)*, `runs cancel <id>` *(서비스)* |
 | 온톨로지 | `uv run autoontology ontology revisions`, `ontology concepts [-q TEXT]`, `ontology concept <id>`, `ontology diff --from R --to R` |
 | 그래프 | `uv run autoontology ontology graph [--layer L] [--out graph.json]` |
-| 플레이그라운드 *(서비스)* | `uv run autoontology playground chat "질문"`, `playground sql "질문" --source S`, `playground sparql --file q.rq`, `playground index --rebuild` |
+| 플레이그라운드 *(서비스)* | `uv run autoontology playground chat "질문"`, `playground sql "질문" --source S`, `playground sparql --file q.rq`(`--examples`는 페이지의 예제 목록), `playground index --rebuild` |
 | 내보내기 | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F` |
 | 상태 | `uv run autoontology status`, `doctor`, `provider status` |
 | 설정 | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(서비스)* |

@@ -2,6 +2,8 @@
 """Korean texts of the UI-parity commands (``autoontology/cli_ops.py``)."""
 
 MESSAGES: dict[str, str] = {
+    "help.playground.sparql.examples": "플레이그라운드 페이지의 예제 질의를 보여 줍니다.",
+    "ops.no_such_dir": "디렉터리가 없습니다: {path}",
     "help.opt.json": "결과를 JSON으로 출력합니다 (웹 API 응답 본문).",
     "help.opt.limit": "최대 행 수.",
     "help.opt.page": "페이지 번호 (1부터).",
@@ -9,10 +11,7 @@ MESSAGES: dict[str, str] = {
     "help.opt.revision": "스냅샷 리비전 (기본: 최신).",
     "help.review.limit": "페이지당 행 수 (--size와 같음).",
     "help.review.size": "페이지당 행 수 (기본: --limit).",
-    "help.ontology": (
-        "온톨로지 스냅샷: 하위 명령 없이 실행하면 최신(또는 --revision N) 요약; revisions, "
-        "diff, concepts, concept, graph는 저장소를 직접 읽습니다 (서비스가 꺼져 있어도 됨)."
-    ),
+    "help.ontology": "온톨로지 스냅샷: 요약, revisions, diff, concepts, graph.",
     "help.ontology.revisions": "스냅샷 리비전 목록 (최신 순).",
     "help.ontology.diff": "두 리비전 사이의 변경 사항 (기본: 직전 -> 최신).",
     "help.ontology.diff.from": "이전 리비전 (기본: --to 직전).",
@@ -27,13 +26,10 @@ MESSAGES: dict[str, str] = {
     ),
     "help.ontology.concept.id": "개념 ID (term-<id> 또는 concept-<id>, `ontology concepts` 참고).",
     "help.ontology.graph": "그래프 페이지가 그리는 그래프 (노드와 엣지).",
-    "help.ontology.graph.layer": "레이어: all | structured | documents | aligned.",
+    "help.ontology.graph.layer": "레이어: all (기본) 또는 structured, documents, aligned.",
     "help.ontology.graph.evidence": "근거 노드도 추가합니다.",
     "help.ontology.graph.out": "그래프 JSON을 이 파일에 씁니다.",
-    "help.runs": (
-        "최근 실행과 단계 (하위 명령 없이); show, logs --follow, cancel은 실행 중인 서비스와 "
-        "통신합니다."
-    ),
+    "help.runs": "최근 실행 목록(기본)과 show, logs, cancel.",
     "help.runs.id": "실행 ID (`uv run autoontology runs` 참고).",
     "help.runs.show": "실행 하나의 단계와 진행 상황 (서비스 필요).",
     "help.runs.logs": (
@@ -41,11 +37,9 @@ MESSAGES: dict[str, str] = {
         "이벤트를 받습니다."
     ),
     "help.runs.logs.follow": "실행이 끝날 때까지 서비스에서 새 줄을 받습니다.",
-    "help.runs.logs.json": "한 줄에 JSON 이벤트 하나.",
+    "help.runs.logs.json": "JSON Lines: 이벤트 한 줄씩.",
     "help.runs.cancel": "서비스가 실행 중인 실행을 취소합니다.",
-    "help.sources.freshness": (
-        "마지막 빌드 이후 바뀐 소스: 소스, 종류, 오래됨 여부, 이유, 마지막 빌드."
-    ),
+    "help.sources.freshness": "마지막 빌드 뒤 바뀐 소스와 그 이유.",
     "help.sources.refresh": "UI와의 대응을 위해 받습니다: CLI는 항상 지금 계산합니다.",
     "help.samples": "포함된 샘플 세트: 목록, 등록 (빌드 없이).",
     "help.samples.list": "샘플 세트와 소스, 등록 여부를 보여 줍니다.",
@@ -70,7 +64,7 @@ MESSAGES: dict[str, str] = {
     "help.playground.question": "질문.",
     "help.playground.conversation": "이 대화를 이어 갑니다 (답변 뒤에 ID가 출력됨).",
     "help.playground.top_k": "검색할 요소 수 (1-40).",
-    "help.playground.json": "한 줄에 JSON 이벤트 하나 (SSE 이벤트).",
+    "help.playground.json": "JSON Lines: SSE 이벤트 한 줄씩.",
     "help.playground.sql": "데이터에 자연어로 질문합니다 (업스트림 SQL 에이전트).",
     "help.playground.sql.source": "질의할 정형 소스 (기본: 첫 번째).",
     "help.playground.sql.conversation": "이어 갈 대화 UUID.",
@@ -82,10 +76,7 @@ MESSAGES: dict[str, str] = {
     "help.playground.index.rebuild": "최신 스냅샷의 인덱스를 지금 만듭니다.",
     "help.settings": "설정 페이지: 모델 제공자 보기·테스트·저장, 서비스 재시작.",
     "help.settings.show": ".env가 고른 값, 각 값의 출처, 로그인, 벡터 (키는 절대 표시 안 함).",
-    "help.settings.test": (
-        "후보 설정을 저장하지 않고 테스트합니다: 채팅 pong 한 번과 임베딩 한 번 (저장된 "
-        "벡터와 차원 비교)."
-    ),
+    "help.settings.test": "후보 설정 테스트(저장 안 함): 채팅 pong과 임베딩 차원 확인.",
     "help.settings.set": (
         "후보 설정을 .env에 저장합니다 (백업, 권한 0600). API 키는 --api-key-stdin으로만."
     ),

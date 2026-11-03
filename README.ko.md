@@ -479,7 +479,7 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `autoontology source freshness` | 마지막 빌드 이후 바뀐 소스와 그 이유(`sources freshness`도 가능). |
 | `autoontology samples list` / `load <set> [--replace]` | 샘플 세트 목록; 빌드 없이 세트의 소스를 등록(같은 이름에 다른 데이터를 가진 소스는 `--replace`일 때만 교체). |
 | `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` | 내보내기 폴더 목록; 리비전의 파일 목록 또는 텍스트 파일 출력(예: `ossie/validation.json`, `okf/validation.json`); 파일 저장. |
-| `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F [--limit N]` / `index [--rebuild]` | 실행 중인 서비스로 플레이그라운드 사용: 인용과 함께 스트리밍되는 RAG 답변, 자연어 SQL 에이전트, 최신 스냅샷에 대한 SPARQL, 채팅 인덱스. |
+| `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F\|--examples [--limit N]` / `index [--rebuild]` | 실행 중인 서비스로 플레이그라운드 사용: 인용과 함께 스트리밍되는 RAG 답변, 자연어 SQL 에이전트, 최신 스냅샷에 대한 SPARQL, 채팅 인덱스. |
 | `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | 설정 페이지: 현재 선택과 각 값의 출처(키는 표시 안 함), 후보 테스트(채팅 pong과 임베딩 차원), `.env` 저장(`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; 키는 표준 입력으로만), 서비스 자체 재시작. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
@@ -491,7 +491,13 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 표를 출력하는 명령은 모두 `--json`(웹 API 응답 본문)도 받습니다. `ontology` 아래 명령,
 `source freshness`, `samples`, `exports`, `settings show|test|set`, `runs logs`(`--follow` 없이)는
 로컬 저장소와 파일을 읽으므로 서비스가 꺼져 있어도 동작합니다. 나머지는 실행 중인 서비스를
-호출하며, 서비스가 없으면 안내와 함께 종료 코드 2로 끝납니다. UI 페이지별 대응 명령은
+호출하며, 서비스가 없으면 안내와 함께 종료 코드 2로 끝납니다. `--json`일 때 실패하면 stdout에도
+`{"error": <code>, "detail": <text>, ...}`를 출력합니다(API 오류는 1, 사용법 오류나 서비스 꺼짐은 2).
+`runs logs`, `playground chat`, `playground sql`은 JSON Lines(한 줄에 이벤트 객체 하나)로 스트리밍합니다.
+경로 인수(실행·개념 ID, 내보내기 경로)는 검증하고 URL 인코딩하므로 데이터에서 가져온 ID가 다른
+엔드포인트로 가지 않습니다. `settings set|test`와 `samples load`는 서비스가 켜져 있으면 서비스를
+거치고(잠긴 키는 서비스의 셸이, 등록 가능 여부는 서비스의 실행 관리자가 판단), 꺼져 있을 때만
+프로세스 안에서 실행합니다. UI 페이지별 대응 명령은
 [가이드](docs/GUIDE.ko.md#터미널에서-똑같이-하기)에 있습니다.
 
 실행이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 청크 추출이 실패한 경우) `build`는
