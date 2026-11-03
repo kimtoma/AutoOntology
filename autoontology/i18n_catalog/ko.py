@@ -346,3 +346,8 @@ MESSAGES: dict[str, str] = {
     "restart.failed": "재시작 실패 (종료 코드 {code}): 위 출력을 보세요 ({log}에도 있음)",
     "restart.bad_only": "--only는 {choices} 중 하나여야 합니다 (받은 값 {value!r})",
 }
+
+
+from autoontology.i18n_catalog.ops_ko import MESSAGES as _OPS  # noqa: E402
+
+MESSAGES.update(_OPS)

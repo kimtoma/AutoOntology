@@ -41,7 +41,7 @@ def is_group(command) -> bool:
 def resolve(root, args: list[str]):
     command = root
     rest = list(args)
-    while is_group(command) and rest:
+    while is_group(command) and rest and not rest[0].startswith(("-", "[")):
         name = rest.pop(0)
         sub = command.commands.get(name)
         if sub is None:
@@ -73,7 +73,7 @@ def test_invocation_parser():
 def test_resolve_rejects_unknown():
     root = typer.main.get_command(app)
     with pytest.raises(AssertionError):
-        resolve(root, ["sources", "list"])
+        resolve(root, ["nope", "list"])
     command, rest = resolve(root, ["tools", "install-kordoc", "--force"])
     assert command.name == "install-kordoc" and rest == ["--force"]
 
@@ -95,7 +95,7 @@ def test_documented_commands_exist(doc: Path):
         except AssertionError as exc:
             problems.append(str(exc))
             continue
-        if is_group(command):
+        if is_group(command) and not command.invoke_without_command:
             problems.append(f"`autoontology {call}` names a group, not a command")
             continue
         known = option_names(command)

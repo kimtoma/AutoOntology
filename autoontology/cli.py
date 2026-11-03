@@ -611,10 +611,12 @@ def review_list(
         "when asked for)",
     ),
     status: str = typer.Option("pending", "--status", help="pending | decided | all"),
-    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+    limit: int = typer.Option(50, "--limit", min=1, max=1000, help=msg("help.review.limit")),
+    page: int = typer.Option(1, "--page", min=1, help=msg("help.opt.page")),
+    size: int = typer.Option(None, "--size", min=1, max=1000, help=msg("help.review.size")),
     as_json: bool = typer.Option(False, "--json", help="Print the items as JSON."),
 ) -> None:
-    """List the review items (pending ones by default)."""
+    """List the review items (pending ones by default), one page at a time."""
     import json
 
     from autoontology.web.review import CATEGORIES, STATUSES
@@ -625,7 +627,7 @@ def review_list(
         _fail(f"--status must be one of {', '.join(STATUSES)}", code=2)
     settings = _settings()
     listing = _inbox(settings, _store(settings)).listing(
-        category=category, status=status, page=1, size=limit
+        category=category, status=status, page=page, size=size or limit
     )
     if as_json:
         typer.echo(json.dumps(listing, ensure_ascii=False, indent=2, default=str))
@@ -655,6 +657,11 @@ def review_list(
         typer.echo(_table(("ID", "CONCEPT", "RELATION", "TERM", "CONF", "DECISION"), rows))
     else:
         typer.echo("nothing to review")
+    if listing["pages"] > 1 or page > 1:
+        typer.echo(
+            f"page {listing['page']}/{listing['pages']} ({listing['total']} items; "
+            "--page N for more)"
+        )
 
 
 def _decide(item_id: str, decision: str, relation, term, note: str) -> None:
@@ -725,9 +732,8 @@ def review_undo(item_id: str = typer.Argument(...)) -> None:
     typer.echo(f"{item_id}: decision removed; run `uv run autoontology apply` to snapshot it")
 
 
-@app.command()
-def runs(limit: int = typer.Option(20, "--limit")) -> None:
-    """Show recent runs and their steps."""
+def runs_table(limit: int = 20) -> None:
+    """Show recent runs and their steps (``autoontology runs``)."""
     from autoontology.engine.build import is_top_step
 
     settings = _settings()
@@ -767,11 +773,18 @@ def runs(limit: int = typer.Option(20, "--limit")) -> None:
     typer.echo(_table(("RUN", "KIND", "SOURCE", "STATUS", "STARTED", "STEPS"), rows))
 
 
-@app.command()
-def ontology() -> None:
-    """Show the latest ontology snapshot: revision, sources and counts."""
+def ontology_summary(revision: int | None = None) -> None:
+    """Show an ontology snapshot (default: the latest): revision, sources and counts
+    (``autoontology ontology [--revision N]``)."""
     settings = _settings()
-    snap = _store(settings).latest_snapshot(with_model=False)
+    store = _store(settings)
+    snap = (
+        store.latest_snapshot(with_model=False)
+        if revision is None
+        else store.get_snapshot(revision, with_model=False)
+    )
+    if snap is None and revision is not None:
+        _fail(f"unknown revision {revision}")
     if snap is None:
         _fail("no ontology snapshot yet: run `uv run autoontology build`")
     c = snap.counts
@@ -1668,3 +1681,10 @@ def restart(
     if code:
         log = settings.logs_dir  # the service and backend logs
         _fail(msg("restart.failed", code=code, log=log), code=code)
+
+
+# --- UI parity: ontology/runs groups, samples, exports, playground, settings ------------
+
+from autoontology import cli_ops  # noqa: E402 - registers on the app defined above
+
+cli_ops.register(app, source_app)

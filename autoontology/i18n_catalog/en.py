@@ -367,3 +367,8 @@ MESSAGES: dict[str, str] = {
     "restart.failed": "restart failed (exit {code}): see the output above (also in {log})",
     "restart.bad_only": "--only must be one of {choices}, got {value!r}",
 }
+
+
+from autoontology.i18n_catalog.ops_en import MESSAGES as _OPS  # noqa: E402
+
+MESSAGES.update(_OPS)
