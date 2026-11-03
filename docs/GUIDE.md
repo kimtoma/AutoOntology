@@ -506,6 +506,28 @@ revision when no decision waits, so a quiet night costs almost nothing. `build` 
 a partial run, so `apply` is skipped then. People keep reviewing during the day, in the
 browser or with `uv run autoontology review list` and `review accept <id>`.
 
+### The same from a terminal
+
+Everything the web UI does has a command, for scripts and for people who prefer a terminal.
+Add `--json` to any of them for the same data the page shows. Commands marked *service*
+need `uv run autoontology up`; the others read the local data and work with it down.
+
+| Page | Commands |
+|---|---|
+| Overview | `uv run autoontology ontology`, `ontology diff`, `review list`, `source freshness`, `runs` |
+| Review | `uv run autoontology review list [--category C] [--page P]`, `review accept <id>` / `reject` / `acknowledge` / `undo`, `apply` |
+| Sources | `uv run autoontology source add` / `list` / `rm`, `source freshness`, `samples list`, `samples load <set>` |
+| Build | `uv run autoontology build [--source S] [--resume]`, `runs`, `runs show <id>` *(service)*, `runs logs <id> [--follow]`, `runs cancel <id>` *(service)* |
+| Ontology | `uv run autoontology ontology revisions`, `ontology concepts [-q TEXT]`, `ontology concept <id>`, `ontology diff --from R --to R` |
+| Graph | `uv run autoontology ontology graph [--layer L] [--out graph.json]` |
+| Playground *(service)* | `uv run autoontology playground chat "질문"`, `playground sql "질문" --source S`, `playground sparql --file q.rq`, `playground index --rebuild` |
+| Exports | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F` |
+| Status | `uv run autoontology status`, `doctor`, `provider status` |
+| Settings | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(service)* |
+
+The API key is never a command-line argument: `settings set --api-key-stdin` reads it from
+the terminal without showing it (or from a pipe, e.g. a password manager's output).
+
 ## 9. When results look wrong
 
 **Rebuild or resume?** `uv run autoontology build --resume` continues the last build and

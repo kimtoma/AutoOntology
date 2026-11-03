@@ -504,17 +504,33 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | `autoontology source list` | Lists the sources. |
 | `autoontology source rm N [--drop-db] [--force]` | Removes a source; `--drop-db` also drops its database. For a documents source it first removes, from the upstream Terms, the synonyms that source's alignments added (manual aliases, other sources' aliases and aliases still covered by another source's accepted `same` alignment are kept). This needs the engine database; if it fails, the source is kept unless `--force` is given. When `--force` cannot delete the upstream connection (backend down), `--drop-db` keeps the database and tells you to run `tools prune-connections <database> --include-unowned --drop-db` later. |
 | `autoontology build [--source N ...] [--resume]` | Builds every source into one snapshot. `--source` rebuilds only the named sources (align, merge and snapshot still cover all of them). `--resume` continues the latest build and keeps steps whose inputs did not change (see [Resuming a build](#resuming-a-build)). |
-| `autoontology ontology` | Shows the latest snapshot: revision, sources and counts. |
-| `autoontology review list [--category C] [--status pending\|decided\|all] [--limit N] [--json]` | Lists the review inbox (proposals, axioms, unaligned, aliases, stale sources). |
+| `autoontology ontology [--revision R] [--json]` | Shows a snapshot (default: the latest): revision, sources and counts. |
+| `autoontology ontology revisions [--limit N]` / `diff [--from R] [--to R]` | Lists the revisions; what changed between two of them (default: previous -> latest). |
+| `autoontology ontology concepts [-q TEXT] [--kind K] [--origin structured\|document\|aligned] [--source S] [--revision R] [--page P] [--size N]` | Lists or searches the concepts, a page at a time (the Ontology page's table). |
+| `autoontology ontology concept <id> [--revision R]` | One concept: definitions, synonyms, rejected aliases, alignments with their status, evidence quotes and review decisions. |
+| `autoontology ontology graph [--layer all\|structured\|documents\|aligned] [--evidence] [--revision R] [--out FILE]` | The Graph page's nodes and edges (`--out` writes the JSON). |
+| `autoontology review list [--category C] [--status pending\|decided\|all] [--page P] [--size N] [--json]` | Lists the review inbox (proposals, axioms, unaligned, aliases, stale sources), a page at a time. |
 | `autoontology review accept <id> [--relation same\|related\|narrower\|broader] [--term T] [--note N]` / `reject <id>` / `acknowledge <id>` / `undo <id>` | Records or removes a person's decision on one item. |
 | `autoontology apply [--force]` | Writes the pending decisions into a new revision (decisions, merge, snapshot) without any model call; with nothing pending it writes none (`--force` writes one anyway). |
-| `autoontology runs [--limit N]` | Shows recent runs and their steps. |
+| `autoontology runs [--limit N] [--json]` | Shows recent runs and their steps. |
+| `autoontology runs show <id>` / `logs <id> [--follow]` / `cancel <id>` | One run's steps and progress, its log (masked; `--follow` streams the live events until the run ends) and cancelling it. `show`, `logs --follow` and `cancel` need the service (`up`); without it they exit 2. |
+| `autoontology source freshness` | Which sources changed since their last build, and why (also `sources freshness`). |
+| `autoontology samples list` / `load <set> [--replace]` | Lists the sample sets; registers one set's sources without building (a source of the same name with other data is replaced only with `--replace`). |
+| `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` | Lists the export folders; lists one revision's files or prints a text file (e.g. `ossie/validation.json`, `okf/validation.json`); saves a file. |
+| `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F [--limit N]` / `index [--rebuild]` | The Playground through the running service: the RAG answer streamed with its citations, the NL-to-SQL agent, a SPARQL query over the latest snapshot, the chat index. |
+| `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | The Settings page: the selection and where each value comes from (never the key), a candidate test (chat pong and embedding dimension), saving to `.env` (`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; the key only from stdin), and the service's self-restart. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
 | `autoontology tools build-ui` | Rebuilds the web UI into `autoontology/web/static/dist` (needs pnpm). |
 | `autoontology tools status` | Shows the kordoc engine and the Node binary in use. |
 | `autoontology tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | Deletes upstream connections named `autoontology_src_*` whose database is gone. Connections whose database exists but that no source in this checkout owns are listed and deleted only with `--include-unowned` (another checkout sharing the catalog may use them); `--drop-db` then also drops their databases. |
 | `autoontology version` | Prints the version. |
+
+Every command that prints a table also takes `--json` (the web API's body). The commands
+under `ontology`, `source freshness`, `samples`, `exports`, `settings show|test|set` and
+`runs logs` (without `--follow`) read the local store and files, so they work with the
+service down; the others call the running service and exit 2 with a hint when it is not
+up. [The guide](docs/GUIDE.md#the-same-from-a-terminal) maps every UI page to its commands.
 
 `build` exits 1 when a run is partial (for example a document failed to read or a chunk
 failed to extract), and prints a `--resume` hint. A partial run still saves its snapshot.

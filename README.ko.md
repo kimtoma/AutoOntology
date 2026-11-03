@@ -466,17 +466,33 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `autoontology source list` | 소스 목록을 보여 줍니다. |
 | `autoontology source rm N [--drop-db] [--force]` | 소스를 제거합니다. `--drop-db`는 그 데이터베이스도 삭제합니다. 문서 소스라면 먼저 그 소스의 매칭이 업스트림 용어에 추가한 동의어를 지웁니다(수동 별칭, 다른 소스의 별칭, 다른 소스의 수용된 `same` 매칭이 여전히 덮는 별칭은 유지). 이 작업에는 엔진 데이터베이스가 필요하며, 실패하면 `--force`를 주지 않는 한 소스를 유지합니다. `--force`로도 업스트림 연결을 지우지 못하면(백엔드 꺼짐) `--drop-db`는 데이터베이스를 남기고, 나중에 `tools prune-connections <database> --include-unowned --drop-db`를 실행하라고 안내합니다. |
 | `autoontology build [--source N ...] [--resume]` | 모든 소스를 스냅샷 하나로 빌드합니다. `--source`는 지정한 소스만 다시 빌드합니다(align, merge, snapshot은 여전히 전체를 대상으로 합니다). `--resume`은 최근 빌드를 이어 가며, 입력이 바뀌지 않은 단계는 유지합니다([빌드 이어 가기](#빌드-이어-가기) 참고). |
-| `autoontology ontology` | 최신 스냅샷의 리비전, 소스, 개수를 보여 줍니다. |
-| `autoontology review list [--category C] [--status pending\|decided\|all] [--limit N] [--json]` | 검토 대기 항목(제안, 관계, 미정렬, 동의어, 바뀐 소스)을 보여 줍니다. |
+| `autoontology ontology [--revision R] [--json]` | 스냅샷(기본: 최신)의 리비전, 소스, 개수를 보여 줍니다. |
+| `autoontology ontology revisions [--limit N]` / `diff [--from R] [--to R]` | 리비전 목록, 두 리비전 사이의 변경 사항(기본: 직전 -> 최신). |
+| `autoontology ontology concepts [-q TEXT] [--kind K] [--origin structured\|document\|aligned] [--source S] [--revision R] [--page P] [--size N]` | 개념 목록·검색, 페이지 단위(온톨로지 페이지의 표). |
+| `autoontology ontology concept <id> [--revision R]` | 개념 하나: 정의, 동의어, 거절된 별칭, 정렬과 상태, 근거 인용, 검토 결정. |
+| `autoontology ontology graph [--layer all\|structured\|documents\|aligned] [--evidence] [--revision R] [--out FILE]` | 그래프 페이지의 노드와 엣지(`--out`은 JSON을 파일로 저장). |
+| `autoontology review list [--category C] [--status pending\|decided\|all] [--page P] [--size N] [--json]` | 검토 대기 항목(제안, 관계, 미정렬, 동의어, 바뀐 소스)을 페이지 단위로 보여 줍니다. |
 | `autoontology review accept <id> [--relation same\|related\|narrower\|broader] [--term T] [--note N]` / `reject <id>` / `acknowledge <id>` / `undo <id>` | 항목 하나에 대한 사람의 결정을 기록하거나 지웁니다. |
 | `autoontology apply [--force]` | 대기 중인 결정을 새 리비전에 반영합니다(결정, 병합, 스냅샷). 모델을 호출하지 않습니다. 대기 중인 결정이 없으면 리비전을 만들지 않습니다(`--force`는 강제로 만듦). |
-| `autoontology runs [--limit N]` | 최근 실행과 그 단계들을 보여 줍니다. |
+| `autoontology runs [--limit N] [--json]` | 최근 실행과 그 단계들을 보여 줍니다. |
+| `autoontology runs show <id>` / `logs <id> [--follow]` / `cancel <id>` | 실행 하나의 단계와 진행 상황, 로그(비밀 마스킹; `--follow`는 실행이 끝날 때까지 실시간 이벤트를 받음), 취소. `show`, `logs --follow`, `cancel`은 서비스(`up`)가 필요하며, 없으면 종료 코드 2로 끝납니다. |
+| `autoontology source freshness` | 마지막 빌드 이후 바뀐 소스와 그 이유(`sources freshness`도 가능). |
+| `autoontology samples list` / `load <set> [--replace]` | 샘플 세트 목록; 빌드 없이 세트의 소스를 등록(같은 이름에 다른 데이터를 가진 소스는 `--replace`일 때만 교체). |
+| `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` | 내보내기 폴더 목록; 리비전의 파일 목록 또는 텍스트 파일 출력(예: `ossie/validation.json`, `okf/validation.json`); 파일 저장. |
+| `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F [--limit N]` / `index [--rebuild]` | 실행 중인 서비스로 플레이그라운드 사용: 인용과 함께 스트리밍되는 RAG 답변, 자연어 SQL 에이전트, 최신 스냅샷에 대한 SPARQL, 채팅 인덱스. |
+| `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | 설정 페이지: 현재 선택과 각 값의 출처(키는 표시 안 함), 후보 테스트(채팅 pong과 임베딩 차원), `.env` 저장(`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; 키는 표준 입력으로만), 서비스 자체 재시작. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
 | `autoontology tools build-ui` | 웹 UI를 `autoontology/web/static/dist`로 다시 빌드합니다(pnpm 필요). |
 | `autoontology tools status` | 사용 중인 kordoc 엔진과 Node 바이너리를 보여 줍니다. |
 | `autoontology tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | 데이터베이스가 사라진 `autoontology_src_*` 업스트림 연결을 지웁니다. 데이터베이스는 있지만 이 체크아웃의 소스가 소유하지 않은 연결은 목록에만 나오고 `--include-unowned`일 때만 지웁니다(카탈로그를 공유하는 다른 체크아웃이 쓸 수 있음). 그때 `--drop-db`는 그 데이터베이스도 삭제합니다. |
 | `autoontology version` | 버전을 출력합니다. |
+
+표를 출력하는 명령은 모두 `--json`(웹 API 응답 본문)도 받습니다. `ontology` 아래 명령,
+`source freshness`, `samples`, `exports`, `settings show|test|set`, `runs logs`(`--follow` 없이)는
+로컬 저장소와 파일을 읽으므로 서비스가 꺼져 있어도 동작합니다. 나머지는 실행 중인 서비스를
+호출하며, 서비스가 없으면 안내와 함께 종료 코드 2로 끝납니다. UI 페이지별 대응 명령은
+[가이드](docs/GUIDE.ko.md#터미널에서-똑같이-하기)에 있습니다.
 
 실행이 부분 실패(partial)하면(예: 문서 하나를 읽지 못했거나 청크 추출이 실패한 경우) `build`는
 1로 종료하고 `--resume` 힌트를 출력합니다. 부분 실패한 실행도 스냅샷은 저장합니다. kordoc이

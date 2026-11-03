@@ -9,6 +9,14 @@ behaviour).
 
 ### Added
 
+- **Every web UI function from the CLI** (`autoontology/cli_ops.py`), each with `--json`
+  and English/Korean help: `ontology revisions|diff|concepts|concept|graph` (and
+  `ontology --revision R`), `runs show|logs [--follow]|cancel`, `source freshness` (alias
+  `sources`), `samples list|load [--replace]`, `exports list|show|get`,
+  `playground chat|sql|sparql|index`, `settings show|test|set|restart [--wait]` (the API
+  key only through `--api-key-stdin`), `review list --page/--size`. Read-only commands run
+  the UI's own `/api` route functions in-process, so they work with the service down; the
+  others call the running service and exit 2 with the `up` hint when it is not running.
 - **Settings page** (`/ui/settings`, gear after Status): choose the chat provider (Ollama,
   Claude subscription, Codex/ChatGPT subscription, OpenAI-compatible API with base URL and
   API key), the embedding provider and models, **Test** a candidate without applying it,

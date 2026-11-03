@@ -475,6 +475,29 @@ quickstart 샘플에서 1초 미만입니다(큰 온톨로지에서는 약 1분,
 리비전을 만들지 않으므로 조용한 밤에는 거의 비용이 들지 않습니다. 부분 실패한 빌드는 종료 코드 1을 내므로 그때는 `apply`가 실행되지 않습니다. 검토는 낮 동안
 브라우저에서, 또는 `uv run autoontology review list`와 `review accept <id>`로 계속합니다.
 
+### 터미널에서 똑같이 하기
+
+웹 UI에서 하는 모든 일에는 대응하는 명령이 있습니다(스크립트용, 또는 터미널이 편한 분용).
+어느 명령이든 `--json`을 붙이면 페이지가 보여 주는 것과 같은 데이터를 받습니다. *서비스*로
+표시한 명령은 `uv run autoontology up`이 필요하고, 나머지는 로컬 데이터를 읽으므로 서비스가
+꺼져 있어도 됩니다.
+
+| 페이지 | 명령 |
+|---|---|
+| 개요 | `uv run autoontology ontology`, `ontology diff`, `review list`, `source freshness`, `runs` |
+| 검토 | `uv run autoontology review list [--category C] [--page P]`, `review accept <id>` / `reject` / `acknowledge` / `undo`, `apply` |
+| 소스 | `uv run autoontology source add` / `list` / `rm`, `source freshness`, `samples list`, `samples load <set>` |
+| 빌드 | `uv run autoontology build [--source S] [--resume]`, `runs`, `runs show <id>` *(서비스)*, `runs logs <id> [--follow]`, `runs cancel <id>` *(서비스)* |
+| 온톨로지 | `uv run autoontology ontology revisions`, `ontology concepts [-q TEXT]`, `ontology concept <id>`, `ontology diff --from R --to R` |
+| 그래프 | `uv run autoontology ontology graph [--layer L] [--out graph.json]` |
+| 플레이그라운드 *(서비스)* | `uv run autoontology playground chat "질문"`, `playground sql "질문" --source S`, `playground sparql --file q.rq`, `playground index --rebuild` |
+| 내보내기 | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F` |
+| 상태 | `uv run autoontology status`, `doctor`, `provider status` |
+| 설정 | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(서비스)* |
+
+API 키는 명령줄 인수로 받지 않습니다. `settings set --api-key-stdin`은 터미널에서 화면에 표시하지
+않고 읽거나, 파이프(예: 비밀번호 관리자 출력)로 받습니다.
+
 ## 9. 결과가 이상할 때
 
 **다시 빌드할까, 이어서 할까?** `uv run autoontology build --resume`은 마지막 빌드를 이어 가며

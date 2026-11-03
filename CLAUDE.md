@@ -33,6 +33,10 @@ uv run autoontology demo --set quickstart --no-open  # up, register samples, bui
 uv run autoontology ui                               # http://127.0.0.1:7800/ui/ (AUTOONTOLOGY_PORT)
 uv run autoontology doctor                           # every check with a remedy
 uv run autoontology down                             # stop the services
+uv run autoontology ontology concepts -q 계약 --json   # every UI page has commands (--json):
+#   ontology revisions|diff|concept|graph, runs show|logs|cancel, source freshness,
+#   samples list|load, exports list|show|get, playground chat|sql|sparql|index,
+#   settings show|test|set|restart (docs/GUIDE.md "The same from a terminal")
 
 uv run ruff check . && uv run ruff format --check . && uv run pytest -q   # unit tests
 AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration                   # real Postgres + Ollama
