@@ -31,21 +31,54 @@ export function toCsv(columns: string[], rows: unknown[][]): string {
   return [columns, ...rows].map((r) => r.map((v) => esc(neutralizeFormula(v))).join(",")).join("\r\n")
 }
 
-/** The executed result as columns/rows, whatever shape upstream returned. */
-export function tabulate(value: unknown, columns: string[] = []): { columns: string[]; rows: unknown[][] } | null {
+const isRecord = (x: unknown): x is Record<string, unknown> =>
+  typeof x === "object" && x !== null && !Array.isArray(x)
+
+function parseJson(s: string): { ok: true; value: unknown } | { ok: false } {
+  try { return { ok: true, value: JSON.parse(s) } } catch { return { ok: false } }
+}
+
+/** Upstream's executed-SQL envelope unwrapped: `sql_execution` stores `QueryResponse.result`,
+    a list of JSON-records strings (`['[{"n":40}]']`), and the whole value may itself arrive as
+    a JSON string. A list whose every item is a string holding a JSON list is concatenated;
+    anything else is returned as is. */
+function unwrapResult(value: unknown): { ok: true; value: unknown } | { ok: false } {
   let v = value
   if (typeof v === "string") {
-    try { v = JSON.parse(v) } catch { return null }
+    const p = parseJson(v)
+    if (!p.ok) return p
+    v = p.value
   }
-  if (!Array.isArray(v) || !v.length) return Array.isArray(v) ? { columns, rows: [] } : null
-  if (Array.isArray(v[0])) {
+  if (Array.isArray(v) && v.length && v.every((x) => typeof x === "string")) {
+    const parts = (v as string[]).map(parseJson)
+    if (parts.every((p) => p.ok && Array.isArray(p.value))) {
+      return { ok: true, value: parts.flatMap((p) => (p as { value: unknown[] }).value) }
+    }
+  }
+  return { ok: true, value: v }
+}
+
+/** The executed result as columns/rows, whatever shape upstream returned. Records (objects)
+    take their headers from their own keys (first-seen order across rows); *columns* names
+    positional (array) rows only when it has exactly their width, else `col1..n`. Upstream's
+    `sql_columns` are semantic-layer column ids, so the SQL tab does not pass them. The CSV
+    download is written from the same columns/rows. */
+export function tabulate(value: unknown, columns: string[] = []): { columns: string[]; rows: unknown[][] } | null {
+  const u = unwrapResult(value)
+  if (!u.ok) return null
+  const v = u.value
+  if (!Array.isArray(v)) return null
+  if (!v.length) return { columns, rows: [] }
+  if (v.every(Array.isArray)) {
     const width = Math.max(...v.map((r) => (r as unknown[]).length))
-    const cols = columns.length === width ? columns : Array.from({ length: width }, (_, i) => columns[i] ?? `col${i + 1}`)
+    const cols = columns.length === width ? columns : Array.from({ length: width }, (_, i) => `col${i + 1}`)
     return { columns: cols, rows: v as unknown[][] }
   }
-  if (typeof v[0] === "object" && v[0] !== null) {
-    const cols = columns.length ? columns : Object.keys(v[0] as object)
-    return { columns: cols, rows: v.map((r) => cols.map((c) => (r as Record<string, unknown>)[c])) }
+  if (v.every(isRecord)) {
+    const cols: string[] = []
+    const seen = new Set<string>()
+    for (const r of v) for (const k of Object.keys(r)) if (!seen.has(k)) { seen.add(k); cols.push(k) }
+    return { columns: cols, rows: v.map((r) => cols.map((c) => r[c])) }
   }
-  return { columns: columns.length ? columns.slice(0, 1) : ["value"], rows: v.map((x) => [x]) }
+  return { columns: columns.length === 1 ? columns : ["value"], rows: v.map((x) => [x]) }
 }

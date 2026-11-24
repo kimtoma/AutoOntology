@@ -193,6 +193,7 @@ export const enExplore = {
   "playground.sql.starting": "Starting the agent…",
   "playground.sql.answer": "Answer",
   "playground.sql.copy": "Copy SQL",
+  "playground.sql.notice.conversationStoreMissing": "Asked without the earlier turns: the conversation history is not stored upstream (its frontend schema is missing).",
   "playground.sparql.example": "Example query",
   "playground.sparql.pick": "Pick an example query",
   "playground.sparql.label": "SPARQL query",

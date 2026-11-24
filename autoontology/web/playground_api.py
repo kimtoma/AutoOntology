@@ -239,6 +239,7 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             timeout=httpx.Timeout(30.0, read=UPSTREAM_READ_TIMEOUT_S), transport=UPSTREAM_TRANSPORT
         )
         notices: list[str] = []
+        notice_codes: list[str] = []  # one per notice, for the UI's own language
         url = f"{api.settings.backend_url}/api/chat/completions"
         headers = {
             "x-auto-ontology-user-id": UPSTREAM_USER,
@@ -264,6 +265,7 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                         "the upstream conversation store (frontend schema) is "
                         "missing: asking without the earlier turns"
                     )
+                    notice_codes.append("conversation_store_missing")
                     resp = await open_stream(False)
             if resp.status_code >= 400:
                 raw = (await resp.aread()).decode("utf-8", "replace")
@@ -300,6 +302,7 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                     {
                         "target_db": target_db,
                         "notices": notices,
+                        "notice_codes": notice_codes,
                         "stateless": bool(notices) or not body.conversation_id,
                     },
                 )

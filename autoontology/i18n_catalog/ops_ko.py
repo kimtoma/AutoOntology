@@ -119,6 +119,9 @@ MESSAGES: dict[str, str] = {
     "ops.bad_revision": "리비전은 3 또는 r0003 같은 숫자여야 합니다 (받은 값 {value!r})",
     "ops.no_exports": "아직 내보내기가 없습니다: `uv run autoontology export`를 실행하세요",
     "ops.conversation": "대화 {id} (이어 가려면 --conversation {id})",
+    "ops.notice.conversation_store_missing": (
+        "업스트림에 대화 기록 저장소(frontend 스키마)가 없어 이전 대화 없이 질문했습니다"
+    ),
     "ops.sparql_one_of": "질의를 인수 또는 --file 중 하나로 주세요",
     "ops.no_index": "아직 인덱스가 없습니다: `uv run autoontology playground index --rebuild`",
     "ops.settings_offline": (

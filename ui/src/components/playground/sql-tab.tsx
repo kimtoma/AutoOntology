@@ -8,19 +8,31 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { api, errorMessage, type SseEvent } from "@/lib/api"
-import { useT } from "@/i18n"
-import { tabulate } from "@/lib/playground"
+import { useT, type MessageKey } from "@/i18n"
+import { cell, tabulate } from "@/lib/playground"
 
 interface Step { node: string; label: string; done: boolean }
 interface SqlAnswer {
   response?: string
   sql_code?: string
-  sql_columns?: string[]
+  sql_columns?: string[]  // semantic-layer column ids, not result headers
   sql_response_from_db?: unknown
 }
 
 const newConversation = () =>
   (globalThis.crypto?.randomUUID?.() ?? "00000000-0000-4000-8000-" + Date.now().toString(16).padStart(12, "0").slice(-12))
+
+/** Known server notice codes (meta `notice_codes`, parallel to `notices`) in the UI language;
+    an unknown code keeps the server's English text. */
+const NOTICE_KEYS: Record<string, MessageKey> = {
+  conversation_store_missing: "playground.sql.notice.conversationStoreMissing",
+}
+
+function localizeNotices(t: ReturnType<typeof useT>, d: Record<string, unknown>): string[] {
+  const texts = Array.isArray(d.notices) ? d.notices.map(String) : []
+  const codes = Array.isArray(d.notice_codes) ? d.notice_codes.map(String) : []
+  return texts.map((text, i) => (Object.hasOwn(NOTICE_KEYS, codes[i] ?? "") ? t(NOTICE_KEYS[codes[i]]) : text))
+}
 
 /** *source*: the structured source to query; null = the snapshot's first one. */
 export function SqlTab({ source }: { source: string | null }) {
@@ -46,7 +58,7 @@ export function SqlTab({ source }: { source: string | null }) {
     abort.current = ctrl
     const onEvent = (ev: SseEvent) => {
       const d = ev.data as Record<string, unknown>
-      if (ev.event === "meta") setNotices((d.notices as string[]) ?? [])
+      if (ev.event === "meta") setNotices(localizeNotices(t, d))
       else if (ev.event === "step") {
         const node = String(d.node ?? "")
         const label = String(d.label ?? node)
@@ -73,7 +85,7 @@ export function SqlTab({ source }: { source: string | null }) {
     }
   }
 
-  const table = answer ? tabulate(answer.sql_response_from_db, answer.sql_columns ?? []) : null
+  const table = answer ? tabulate(answer.sql_response_from_db) : null
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4" id="playground-sql">
       <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); run(question) }}>
@@ -134,7 +146,7 @@ export function SqlTab({ source }: { source: string | null }) {
       )}
       {table && <ResultTable columns={table.columns} rows={table.rows} csvName="query-result.csv" id="sql-result" />}
       {answer && !table && answer.sql_response_from_db != null && (
-        <pre className="overflow-x-auto rounded-md border p-3 text-xs">{String(answer.sql_response_from_db)}</pre>
+        <pre className="overflow-x-auto rounded-md border p-3 text-xs">{cell(answer.sql_response_from_db)}</pre>
       )}
     </div>
   )

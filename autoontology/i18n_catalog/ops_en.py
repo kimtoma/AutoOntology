@@ -137,6 +137,10 @@ MESSAGES: dict[str, str] = {
     "ops.bad_revision": "revision must be a number like 3 or r0003, got {value!r}",
     "ops.no_exports": "no exports yet: run `uv run autoontology export`",
     "ops.conversation": "conversation {id} (continue with --conversation {id})",
+    "ops.notice.conversation_store_missing": (
+        "asked without the earlier turns: the upstream conversation store "
+        "(frontend schema) is missing"
+    ),
     "ops.sparql_one_of": "give the query as an argument or with --file (one of them)",
     "ops.no_index": "no index yet: `uv run autoontology playground index --rebuild`",
     "ops.settings_offline": (

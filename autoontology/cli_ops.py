@@ -1004,6 +1004,47 @@ def playground_chat(
         raise typer.Exit(code=1)
 
 
+def _sql_parse(text: str) -> tuple[bool, Any]:
+    try:
+        return True, json.loads(text)
+    except ValueError:
+        return False, None
+
+
+def _sql_rows(value: Any, columns: list[str] | None = None) -> tuple[list[str], list[list]] | None:
+    """Upstream's executed-SQL result (``sql_response_from_db``) as (columns, rows), or None
+    when it is not tabular. Upstream stores ``QueryResponse.result``: a list of JSON-records
+    strings (``['[{"n": 40}]']``); the value may also be one JSON string, records or
+    positional rows. Records take their headers from their keys (first-seen order);
+    *columns* names positional rows only when it has exactly their width (``col1..n``
+    otherwise), since upstream's ``sql_columns`` are semantic-layer column ids. Mirrors
+    ``tabulate`` in ``ui/src/lib/playground.ts``."""
+    columns = list(columns or [])
+    v = value
+    if isinstance(v, str):
+        ok, v = _sql_parse(v)
+        if not ok:
+            return None
+    if isinstance(v, list) and v and all(isinstance(x, str) for x in v):
+        parts = [_sql_parse(x) for x in v]
+        if all(ok and isinstance(p, list) for ok, p in parts):
+            v = [row for _, p in parts for row in p]
+    if not isinstance(v, list):
+        return None
+    if not v:
+        return columns, []
+    if all(isinstance(r, (list, tuple)) for r in v):
+        width = max(len(r) for r in v)
+        cols = columns if len(columns) == width else [f"col{i + 1}" for i in range(width)]
+        return cols, [list(r) for r in v]
+    if all(isinstance(r, dict) for r in v):
+        cols: list[str] = []
+        for r in v:
+            cols.extend(k for k in r if k not in cols)
+        return cols, [[r.get(c) for c in cols] for r in v]
+    return (columns if len(columns) == 1 else ["value"]), [[x] for x in v]
+
+
 @playground_app.command("sql", help=msg("help.playground.sql"))
 def playground_sql(
     question: str = typer.Argument(..., help=msg("help.playground.question")),
@@ -1026,8 +1067,12 @@ def playground_sql(
             continue
         d = data if isinstance(data, dict) else {}
         if event == "meta":
-            for notice in d.get("notices") or []:
-                typer.echo(f"notice: {notice}", err=True)
+            codes = d.get("notice_codes") or []
+            for i, notice in enumerate(d.get("notices") or []):
+                code = codes[i] if i < len(codes) else None
+                key = f"ops.notice.{code}"
+                text = msg(key) if code and msg(key) != key else notice
+                typer.echo(f"notice: {text}", err=True)
         elif event == "step" and d.get("phase") != "end":
             typer.echo(f"[{d.get('label') or d.get('node')}]", err=True)
         elif event == "sql":
@@ -1036,16 +1081,17 @@ def playground_sql(
             answer = d.get("answer") or {}
             if answer.get("sql_code"):
                 typer.echo(f"SQL: {answer['sql_code']}")
-            rows = answer.get("sql_response_from_db")
-            cols = answer.get("sql_columns") or []
-            if isinstance(rows, list) and rows and cols:
+            # sql_columns are semantic-layer column ids: they only name positional rows
+            # of exactly their width (see _sql_rows)
+            shaped = _sql_rows(answer.get("sql_response_from_db"), answer.get("sql_columns") or [])
+            if shaped and shaped[0] and shaped[1]:
+                cols, rows = shaped
                 table = [
-                    tuple(_short(v, 40) for v in (r if isinstance(r, (list, tuple)) else [r]))
+                    tuple(
+                        _short(v if v is not None else "", 40)
+                        for v in (list(r)[: len(cols)] + [""] * (len(cols) - len(r)))
+                    )
                     for r in rows[:50]
-                ]
-                width = len(cols)
-                table = [
-                    tuple(list(r)[:width] + ["" for _ in range(width - len(r))]) for r in table
                 ]
                 typer.echo(base._table(tuple(cols), table))
             if answer.get("response"):

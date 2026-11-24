@@ -952,6 +952,8 @@ def test_sql_passthrough_relays_events_and_handles_storage_and_409(client, monke
     )
     assert [n for n, _ in events] == ["meta", "step", "result", "done"]
     assert events[0][1]["stateless"] is True and events[0][1]["notices"]
+    # a code per notice, so the UI can show it in its own language
+    assert events[0][1]["notice_codes"] == ["conversation_store_missing"]
     assert events[0][1]["target_db"] == "db1"
     assert events[2][1]["answer"]["sql_code"].startswith("SELECT")
     headers, body = seen[0]

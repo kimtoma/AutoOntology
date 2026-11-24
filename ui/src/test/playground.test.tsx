@@ -52,6 +52,23 @@ describe("playground helpers", () => {
     expect(toCsv(["a", "b"], [["x,y", 'q"'], [null, { k: 1 }]])).toBe('a,b\r\n"x,y","q"""\r\n,"{""k"":1}"')
   })
 
+  it("tabulates upstream's executed-SQL envelope: a list of JSON-records strings", () => {
+    // sql_execution stores QueryResponse.result (list[str], one JSON blob of records);
+    // sql_columns are semantic-layer column ids, never result headers
+    const ID = "5a33d98c-4b46-406c-9111-effd0b1eeb2a"
+    const one = { columns: ["customer_count"], rows: [[40]] }
+    expect(tabulate(['[{"customer_count":40}]'])).toEqual(one)
+    expect(tabulate(['[{"customer_count":40}]'], [ID])).toEqual(one)
+    expect(tabulate('["[{\\"customer_count\\":40}]"]')).toEqual(one)
+    expect(tabulate(['[{"a":1}]', '[{"a":2,"b":"x"}]'])).toEqual({ columns: ["a", "b"], rows: [[1, undefined], [2, "x"]] })
+    expect(tabulate([{ n: 1 }, { n: 2 }], [ID])).toEqual({ columns: ["n"], rows: [[1], [2]] })
+    expect(tabulate(["[]"])).toEqual({ columns: [], rows: [] })
+    expect(tabulate([[1, 2]], [ID])).toEqual({ columns: ["col1", "col2"], rows: [[1, 2]] })
+    expect(tabulate(["plain text"])).toEqual({ columns: ["value"], rows: [["plain text"]] })
+    const t = tabulate(['[{"customer_count":40}]'], [ID])!
+    expect(toCsv(t.columns, t.rows)).toBe("customer_count\r\n40")
+  })
+
   it("neutralizes spreadsheet formulas in CSV cells and headers, keeps numbers", () => {
     expect(toCsv(["label"], [["=1+1"]])).toBe("label\r\n'=1+1")
     expect(toCsv(["=HYPERLINK(\"x\")", "b"], [["+cmd", "-2+3"], ["@SUM(A1)", "\tx"]]))
@@ -188,6 +205,33 @@ describe("playground page", () => {
     expect(screen.getByText(/ontology.ttl/)).toBeInTheDocument()
     const body = JSON.parse(String(calls.find((c) => c.path === "/playground/sparql")!.init!.body))
     expect(Object.keys(body).sort()).toEqual(["limit", "query"])
+  })
+
+  it("renders an SQL result from upstream's envelope with its own headers and a localized notice", async () => {
+    mockFetch({
+      ...BASE,
+      "POST /playground/sql": () => sse([
+        ["meta", { target_db: "db1", notices: ["the upstream conversation store (frontend schema) is missing: asking without the earlier turns"],
+                   notice_codes: ["conversation_store_missing"], stateless: true }],
+        ["result", { type: "result", answer: {
+          response: "Counts customers.", sql_code: "SELECT COUNT(*) AS customer_count FROM customers",
+          sql_columns: ["5a33d98c-4b46-406c-9111-effd0b1eeb2a"],
+          sql_response_from_db: ['[{"customer_count":40}]'] } }],
+        ["done", {}],
+      ]),
+    })
+    renderPage(<PlaygroundPage />, "/playground?tab=sql")
+    await userEvent.type(await screen.findByLabelText("Data question"), "고객은 몇 명인가요?")
+    await userEvent.click(screen.getByRole("button", { name: /Ask/ }))
+    const result = await waitFor(() => {
+      const el = document.getElementById("sql-result")
+      expect(el).not.toBeNull()
+      return el as HTMLElement
+    })
+    expect(within(result).getByRole("columnheader")).toHaveTextContent("customer_count")
+    expect(within(result).getByRole("cell")).toHaveTextContent(/^40$/)
+    expect(result).not.toHaveTextContent("5a33d98c")
+    expect(screen.getByText(/conversation history is not stored upstream/)).toBeInTheDocument()
   })
 
   it("sends to Build when there is no snapshot", async () => {

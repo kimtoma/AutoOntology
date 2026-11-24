@@ -443,6 +443,44 @@ def test_playground_sql_relays_steps_and_result(isolated_env, monkeypatch):
     )
 
 
+def test_playground_sql_tabulates_upstreams_result_envelope(isolated_env, monkeypatch):
+    # upstream's sql_response_from_db is a list of JSON-records strings and sql_columns
+    # are semantic-layer column ids: the table takes its headers from the records
+    col_id = "5a33d98c-4b46-406c-9111-effd0b1eeb2a"
+    _mock(
+        monkeypatch,
+        lambda r: _sse(
+            (
+                "result",
+                {
+                    "answer": {
+                        "sql_code": "SELECT 1",
+                        "sql_columns": [col_id],
+                        "sql_response_from_db": ['[{"customer_count":40}]'],
+                        "response": "ok",
+                    }
+                },
+            ),
+            ("done", {}),
+        ),
+    )
+    res = _ok(["playground", "sql", "고객은 몇 명인가요?"])
+    assert col_id not in res.stdout and "[{" not in res.stdout
+    assert re.search(r"^customer_count\s*$", res.stdout, re.M)
+    assert re.search(r"^40\s*$", res.stdout, re.M)
+
+
+def test_sql_rows_shapes():
+    from autoontology.cli_ops import _sql_rows
+
+    assert _sql_rows(['[{"a":1}]', '[{"a":2,"b":"x"}]']) == (["a", "b"], [[1, None], [2, "x"]])
+    assert _sql_rows('[{"n": 3}]') == (["n"], [[3]])
+    assert _sql_rows([[1, 2]], ["x", "y"]) == (["x", "y"], [[1, 2]])
+    assert _sql_rows([[1, 2]], ["id"]) == (["col1", "col2"], [[1, 2]])
+    assert _sql_rows(["[]"]) == ([], [])
+    assert _sql_rows("not json") is None and _sql_rows(None) is None
+
+
 def test_playground_sparql_from_a_file(isolated_env, monkeypatch, tmp_path):
     result = {
         "type": "SELECT",

@@ -195,6 +195,7 @@ export const koExplore: Record<keyof typeof enExplore, string> = {
   "playground.sql.starting": "에이전트를 시작하는 중…",
   "playground.sql.answer": "답변",
   "playground.sql.copy": "SQL 복사",
+  "playground.sql.notice.conversationStoreMissing": "업스트림에 대화 기록 저장소(frontend 스키마)가 없어 이전 대화 없이 질문했습니다.",
   "playground.sparql.example": "예제 쿼리",
   "playground.sparql.pick": "예제 쿼리 선택",
   "playground.sparql.label": "SPARQL 쿼리",
