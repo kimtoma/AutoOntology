@@ -11,6 +11,10 @@ export const keys = {
   status: ["status"] as const,
   settings: ["settings"] as const,
   projects: ["projects"] as const,
+  me: ["auth", "me"] as const,
+  users: ["users"] as const,
+  members: (slug: string) => ["members", slug] as const,
+  audit: (q: object) => ["audit", q] as const,
   // the current project's (getters: read at use, after the project route set the project)
   get scope() { return scope() },
   get sources() { return [...scope(), "sources"] as const },

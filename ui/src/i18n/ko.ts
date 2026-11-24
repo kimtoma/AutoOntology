@@ -2,6 +2,7 @@
    (SPARQL, SQL, Turtle, JSON-LD, OKF, Ossie, kordoc, OCR, Postgres) stay as they are. */
 
 import type { en } from "@/i18n/en"
+import { koAccounts } from "@/i18n/ko.accounts"
 import { koConnect } from "@/i18n/ko.connect"
 import { koExplore } from "@/i18n/ko.explore"
 import { koOps } from "@/i18n/ko.ops"
@@ -523,4 +524,4 @@ const koCore = {
   "nav.settings.hint": "모델과 API 키",
 } as const
 
-export const ko: Record<keyof typeof en, string> = { ...koCore, ...koExplore, ...koOps, ...koConnect, ...koProjects }
+export const ko: Record<keyof typeof en, string> = { ...koCore, ...koExplore, ...koOps, ...koConnect, ...koProjects, ...koAccounts }

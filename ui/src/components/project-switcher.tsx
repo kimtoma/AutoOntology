@@ -1,7 +1,7 @@
 /* The project switcher at the top of the sidebar: the current project, the other projects
    (archived ones greyed under a separator), "New project" and "All projects". */
 
-import { Archive, Check, ChevronsUpDown, FolderKanban, Plus } from "lucide-react"
+import { Archive, Check, ChevronsUpDown, FolderKanban, Plus, ScrollText, Users } from "lucide-react"
 import { useState } from "react"
 import { useLocation, useNavigate } from "react-router"
 
@@ -14,6 +14,7 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/c
 import { useProjects } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import type { Project } from "@/lib/api"
+import { useAccounts, useCan } from "@/lib/auth"
 import { pagePathname, projectName, projectPath, useProject } from "@/lib/project"
 import { cn } from "@/lib/utils"
 
@@ -36,6 +37,10 @@ export function ProjectSwitcher() {
   const { pathname } = useLocation()
   const { isMobile, setOpenMobile } = useSidebar()
   const [creating, setCreating] = useState(false)
+  const accounts = useAccounts()
+  const canCreate = useCan("project.create")
+  const canMembers = useCan("members.manage") && accounts && !!scope?.project
+  const canAudit = useCan("audit.read") && accounts && !!scope?.project
   const list = projects.data?.projects ?? []
   const current = scope?.project ?? list.find((p) => p.slug === scope?.slug) ?? null
   const name = projectName(current, scope?.slug ?? "")
@@ -85,9 +90,21 @@ export function ProjectSwitcher() {
                 </>
               )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => setCreating(true)} id="project-menu-new">
-                <Plus aria-hidden /> {t("projects.new")}
-              </DropdownMenuItem>
+              {canMembers && (
+                <DropdownMenuItem onSelect={() => go(projectPath(scope!.slug, "/members"))} id="project-menu-members">
+                  <Users aria-hidden /> {t("nav.members")}
+                </DropdownMenuItem>
+              )}
+              {canAudit && (
+                <DropdownMenuItem onSelect={() => go(projectPath(scope!.slug, "/audit"))} id="project-menu-audit">
+                  <ScrollText aria-hidden /> {t("nav.audit")}
+                </DropdownMenuItem>
+              )}
+              {canCreate && (
+                <DropdownMenuItem onSelect={() => setCreating(true)} id="project-menu-new">
+                  <Plus aria-hidden /> {t("projects.new")}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => go("/projects")} id="project-menu-all">
                 <FolderKanban aria-hidden /> {t("projects.all")}
               </DropdownMenuItem>

@@ -9,6 +9,7 @@ import { ProjectLink as Link } from "@/components/project-link"
 import { toast } from "sonner"
 
 import { PageHeader } from "@/components/page-header"
+import { RoleNotice } from "@/components/role-notice"
 import { ProviderCard } from "@/components/provider-card"
 import { RunSheet } from "@/components/run-sheet"
 import { SamplesDialog } from "@/components/samples-dialog"
@@ -33,6 +34,7 @@ import {
 import { fmtSeconds, fmtTime, progressText, RUN_LABEL, runSeconds } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { NewSourceDialog } from "@/pages/sources"
+import { useCan } from "@/lib/auth"
 import { useArchived } from "@/lib/project"
 
 /** Poll while a step is incomplete (the runs' SSE stream also refreshes on every step). */
@@ -144,7 +146,10 @@ function Counts({ ontology }: { ontology: OntologySummary }) {
 
 export default function HomePage() {
   const t = useT()
-  const archived = useArchived()
+  const canSourcesWrite = useCan("sources.write")
+  const canRunsStart = useCan("runs.start")
+  // read-only: archived, or a role without the permission (the server decides too)
+  const archived = useArchived() || !canSourcesWrite || !canRunsStart
   const qc = useQueryClient()
   const interval = () => (allDone(cachedStates(qc)) ? false : POLL_MS)
   const status = useQuery({ queryKey: keys.status, queryFn: api.status, refetchInterval: interval })
@@ -192,6 +197,7 @@ export default function HomePage() {
   return (
     <>
       <PageHeader title={t("home.title")} description={t("home.description")} />
+      <RoleNotice permission="sources.write" message="auth.notice.setup" />
       <p className="mb-4 text-sm font-medium" id="checklist-progress" data-done={doneCount}>
         {t("home.progress", { done: doneCount })}
       </p>

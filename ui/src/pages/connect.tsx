@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, Check, Copy, FolderOpen, KeyRound, Loader2, Plus, Plug, RotateCw, Trash2 } from "lucide-react"
+import { AlertTriangle, FolderOpen, KeyRound, Loader2, Plus, Plug, RotateCw, Trash2 } from "lucide-react"
 import { useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import { toast } from "sonner"
 
+import { CopyButton, CopyField } from "@/components/copy-field"
 import { EmptyState, ErrorState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
 import {
@@ -28,6 +29,7 @@ import {
 import {
   endpoints, snippet, SNIPPETS, TOKEN_PLACEHOLDER, toolParams, type Endpoints,
 } from "@/lib/connect"
+import { useCan } from "@/lib/auth"
 import { projectName, useArchived, useProject } from "@/lib/project"
 import { cn } from "@/lib/utils"
 
@@ -36,44 +38,6 @@ const USAGE_DAYS = 30
 const TOKEN_COLS = {
   "--token-cols": "minmax(0,1.4fr) 5.5rem minmax(0,1.2fr) minmax(0,1.1fr) minmax(0,1.1fr) 3.5rem 12.5rem",
 } as CSSProperties
-
-/* --- copy --------------------------------------------------------------------------------- */
-
-function CopyButton({ text, what, className }: { text: string; what: string; className?: string }) {
-  const [done, setDone] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setDone(true)
-      window.setTimeout(() => setDone(false), 1500)
-    } catch {
-      toast.error(t("connect.copyFailed"))
-    }
-  }
-  return (
-    <Button type="button" size="sm" variant="outline" className={cn("shrink-0", className)}
-            aria-label={t("connect.copyLabel", { what })} onClick={copy}>
-      {done ? <Check aria-hidden /> : <Copy aria-hidden />}
-      <span aria-live="polite">{done ? t("connect.copied") : t("connect.copy")}</span>
-    </Button>
-  )
-}
-
-/** A labelled one-line value (URL, token) with a copy button; long values wrap. */
-function CopyField({ label, value, note, id }: { label: string; value: string; note?: string; id?: string }) {
-  return (
-    <div className="grid gap-1" data-field={id}>
-      <p className="text-xs font-medium text-muted-foreground">
-        {label}{note && <span className="font-normal"> · {note}</span>}
-      </p>
-      <div className="flex min-w-0 items-start gap-2">
-        <code className="min-w-0 flex-1 rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs break-all"
-              id={id}>{value}</code>
-        <CopyButton text={value} what={label} />
-      </div>
-    </div>
-  )
-}
 
 /* --- snippets ----------------------------------------------------------------------------- */
 
@@ -434,8 +398,10 @@ function UsageCard({ usage }: { usage: AgentUsage }) {
 export default function ConnectPage() {
   const qc = useQueryClient()
   const tools = useQuery({ queryKey: keys.agentTools, queryFn: api.agent.tools, staleTime: Infinity })
-  const tokens = useQuery({ queryKey: keys.agentTokens, queryFn: api.agent.tokens })
-  const usage = useQuery({ queryKey: keys.agentUsage, queryFn: () => api.agent.usage(USAGE_DAYS) })
+  // listing tokens and their usage needs agent.tokens (editor+): viewers get an explanation
+  const manage = useCan("agent.tokens")
+  const tokens = useQuery({ queryKey: keys.agentTokens, queryFn: api.agent.tokens, enabled: manage })
+  const usage = useQuery({ queryKey: keys.agentUsage, queryFn: () => api.agent.usage(USAGE_DAYS), enabled: manage })
   const [dialog, setDialog] = useState<"closed" | "form" | Issued>("closed")
   const [confirm, setConfirm] = useState<Confirm>(null)
 
@@ -490,7 +456,14 @@ export default function ConnectPage() {
           </CardContent>
         </Card>
 
-        {tokens.error ? <ErrorState error={tokens.error} onRetry={() => tokens.refetch()} />
+        {!manage ? (
+          <Card className="gap-3 py-4" id="connect-tokens" data-denied>
+            <CardHeader className="px-4">
+              <CardTitle className="flex items-center gap-2 text-base"><KeyRound className="size-4" aria-hidden /> {t("connect.tokens")}</CardTitle>
+              <CardDescription id="connect-tokens-denied">{t("connect.tokens.denied")}</CardDescription>
+            </CardHeader>
+          </Card>
+        ) : tokens.error ? <ErrorState error={tokens.error} onRetry={() => tokens.refetch()} />
           : tokens.isPending ? <Skeleton className="h-40" />
           : <TokensCard tokens={tokens.data} usage={usage.data} onCreate={() => setDialog("form")} onAsk={setConfirm} />}
 

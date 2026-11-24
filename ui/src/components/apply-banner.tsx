@@ -10,6 +10,7 @@ import { api, ApiError, errorMessage, type Run } from "@/lib/api"
 import { isActiveRun } from "@/lib/checklist"
 import { humanStep } from "@/lib/labels"
 import { cn } from "@/lib/utils"
+import { useCan } from "@/lib/auth"
 import { useArchived } from "@/lib/project"
 
 /** The step an apply run is on, in plain words ("" before the first step). */
@@ -22,7 +23,9 @@ function currentStep(run: Run | undefined): string {
     `apply` run and follows it to the new revision. Hidden while nothing waits. */
 export function ApplyBanner({ className }: { className?: string }) {
   const t = useT()
-  const archived = useArchived()
+  const canReviewApply = useCan("review.apply")
+  // read-only: archived, or a role without the permission (the server decides too)
+  const archived = useArchived() || !canReviewApply
   const qc = useQueryClient()
   const pending = usePendingCount()
   const [runId, setRunId] = useState<string | null>(null)

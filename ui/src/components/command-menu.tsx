@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { FolderKanban, FolderOpen } from "lucide-react"
 import { useLocation, useNavigate } from "react-router"
 
-import { NAV, SETUP } from "@/components/nav"
+import { SETUP, useNav } from "@/components/nav"
 import { useProjects } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { pagePathname, projectName, projectPath, useProject, useProjectPath } from "@/lib/project"
@@ -20,6 +20,7 @@ export function CommandMenu() {
   const scope = useProject()
   const projects = useProjects()
   const page = pagePathname(useLocation().pathname)
+  const nav = useNav()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
@@ -48,7 +49,7 @@ export function CommandMenu() {
           </CommandGroup>
         )}
         <CommandGroup heading={t("cmd.pages")}>
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <CommandItem key={n.path} value={`${n.label} ${n.hint}`} onSelect={() => go(n.path)}>
               <n.icon aria-hidden /> {n.label}
               <span className="ml-auto text-xs text-muted-foreground">{n.hint}</span>

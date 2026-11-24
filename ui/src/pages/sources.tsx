@@ -32,7 +32,9 @@ import { cn } from "@/lib/utils"
 import { t, tn, tx, useT } from "@/i18n"
 import { FilePreview, FolderCheck, type PickedName } from "@/components/file-preview"
 import { Code } from "@/components/provider-card"
+import { useCan } from "@/lib/auth"
 import { useArchived } from "@/lib/project"
+import { RoleNotice } from "@/components/role-notice"
 import {
   acceptList, classifyFile, extensionOf, extensionsByEngine, extLabel, isIgnoredName, KORDOC_INSTALL,
   type Family, type Formats,
@@ -72,7 +74,9 @@ function LastRun({ s }: { s: Source }) {
 
 export default function SourcesPage() {
   const t = useT()
-  const archived = useArchived()
+  // read-only: an archived project, or a role without sources.write (viewer, reviewer)
+  const canWrite = useCan("sources.write")
+  const archived = useArchived() || !canWrite
   const { data: sources, isPending, error, refetch } = useSources()
   const [adding, setAdding] = useState(false)
   const [removing, setRemoving] = useState<Source | null>(null)
@@ -89,6 +93,7 @@ export default function SourcesPage() {
         actions={<Button onClick={() => setAdding(true)} id="btn-new-source" disabled={archived}>
           <Plus aria-hidden /> {t("sources.add")}</Button>}
       />
+      <RoleNotice permission="sources.write" message="auth.notice.sources" />
       {error ? <ErrorState error={error} onRetry={() => refetch()} />
         : isPending ? <Skeleton className="h-48 w-full" />
         : !sources.length ? (

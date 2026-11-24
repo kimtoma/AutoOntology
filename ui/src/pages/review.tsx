@@ -6,6 +6,7 @@ import { useSearchParams } from "react-router"
 import { ApplyBanner } from "@/components/apply-banner"
 import { EmptyState, ErrorState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
+import { RoleNotice } from "@/components/role-notice"
 import { ReviewCard } from "@/components/review-card"
 import { RunSheet } from "@/components/run-sheet"
 import { Badge } from "@/components/ui/badge"
@@ -120,6 +121,7 @@ export default function ReviewPage() {
   return (
     <>
       <PageHeader title={t("review.title")} description={t("review.description")} />
+      <RoleNotice permission="review.decide" message="auth.notice.review" />
       <ApplyBanner className="mb-4" />
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1 overflow-x-auto">

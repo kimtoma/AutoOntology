@@ -16,7 +16,9 @@ import {
   SidebarInset, SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail,
   SidebarTrigger, useSidebar,
 } from "@/components/ui/sidebar"
-import { isCurrent, NAV, SETUP } from "@/components/nav"
+import { isCurrent, NAV, OTHER_PAGES, useNav } from "@/components/nav"
+import { UserMenu } from "@/components/user-menu"
+import { useAccounts } from "@/lib/auth"
 import { usePendingCount, useStatus } from "@/hooks/queries"
 import { pagePathname, projectName, useProject } from "@/lib/project"
 import { cn } from "@/lib/utils"
@@ -85,6 +87,11 @@ function AppSidebar() {
   const pathname = pagePathname(useLocation().pathname)
   const { setOpenMobile, isMobile } = useSidebar()
   const t = useT()
+  const nav = useNav()
+  // the review badge polls the project: not on pages without one (accounts: no membership yet)
+  const scope = useProject()
+  const accounts = useAccounts()
+  const hasProject = !(accounts && scope && !scope.project)
   return (
     <Sidebar collapsible="icon" aria-label={t("shell.mainMenu")}>
       <SidebarHeader>
@@ -112,7 +119,7 @@ function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV.map((item) => (
+              {nav.map((item) => (
                 <SidebarMenuItem key={item.path}>
                   <SidebarMenuButton asChild tooltip={item.label}
                                      isActive={isCurrent(item, pathname)}>
@@ -120,10 +127,10 @@ function AppSidebar() {
                              onClick={() => isMobile && setOpenMobile(false)}>
                       <item.icon aria-hidden />
                       <span>{item.label}</span>
-                      {item.id === "review" && <ReviewBadge sr />}
+                      {item.id === "review" && hasProject && <ReviewBadge sr />}
                     </NavLink>
                   </SidebarMenuButton>
-                  {item.id === "review" && <ReviewBadge />}
+                  {item.id === "review" && hasProject && <ReviewBadge />}
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>
@@ -140,10 +147,11 @@ function AppSidebar() {
 
 function Crumbs() {
   const pathname = pagePathname(useLocation().pathname)
-  const item = [...NAV, SETUP].find((n) => isCurrent(n, pathname))
+  const item = [...NAV, ...OTHER_PAGES].find((n) => isCurrent(n, pathname))
   const t = useT()
   const scope = useProject()
   const onProjects = pathname.startsWith("/projects")
+  const unscoped = onProjects || pathname.startsWith("/users")
   const name = projectName(scope?.project, scope?.slug)
   return (
     <Breadcrumb>
@@ -152,7 +160,7 @@ function Crumbs() {
           <Link to="/" className="hover:text-foreground">AutoOntology</Link>
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden sm:inline-flex" />
-        {!onProjects && name && (
+        {!unscoped && name && (
           <>
             <BreadcrumbItem className="hidden min-w-0 md:inline-flex">
               <Link to="/" className="max-w-48 truncate hover:text-foreground" id="crumb-project">{name}</Link>
@@ -187,6 +195,7 @@ export function AppShell() {
             <StatusBadge />
             <LangToggle />
             <ThemeToggle />
+            <UserMenu />
           </div>
         </header>
         <main id="main" className={cn("mx-auto w-full min-w-0 flex-1",

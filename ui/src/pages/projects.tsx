@@ -2,7 +2,7 @@
    open, edit (name, slug, description), archive and unarchive. */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Archive, ArchiveRestore, ArrowRight, Loader2, Pencil, Plus } from "lucide-react"
+import { Archive, ArchiveRestore, ArrowRight, FolderKanban, Loader2, Pencil, Plus, Users } from "lucide-react"
 import { useState } from "react"
 import { Link } from "react-router"
 import { toast } from "sonner"
@@ -23,6 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { keys, useProjects } from "@/hooks/queries"
 import { fmtDate, fmtNumber, useT } from "@/i18n"
 import { api, type Project } from "@/lib/api"
+import { allows, roleLabel, useAccounts, useCan, useMe } from "@/lib/auth"
 import { projectErrorMessage, projectName, projectPath } from "@/lib/project"
 import { cn } from "@/lib/utils"
 
@@ -39,6 +40,10 @@ function ProjectRow({ p, onEdit, onArchive }: {
   p: Project; onEdit: (p: Project) => void; onArchive: (p: Project) => void
 }) {
   const t = useT()
+  const me = useMe()
+  const accounts = me.auth === "accounts"
+  const manage = allows(me, "project.manage", p.slug, p.permissions)
+  const members = accounts && allows(me, "members.manage", p.slug, p.permissions)
   const archive = (
     <Button variant="ghost" size="sm" disabled={p.default} onClick={() => onArchive(p)}
             data-action={p.archived ? "unarchive" : "archive"}
@@ -68,7 +73,12 @@ function ProjectRow({ p, onEdit, onArchive }: {
         <span className="truncate font-mono text-xs text-muted-foreground">{p.slug}</span>
         {p.description && <p className="line-clamp-2 text-sm text-muted-foreground">{p.description}</p>}
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className={cn("grid gap-3", accounts ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")}>
+        {accounts && (
+          <Stat label={t("projects.col.role")}>
+            <span data-role={me.is_admin ? "admin" : p.role}>{roleLabel(me.is_admin ? "admin" : p.role)}</span>
+          </Stat>
+        )}
         <Stat label={t("projects.col.revision")}>
           {p.latest_revision
             ? <span title={fmtDate(p.latest_revision_at)}>r{p.latest_revision}
@@ -87,11 +97,21 @@ function ProjectRow({ p, onEdit, onArchive }: {
             {t("projects.open")} <ArrowRight aria-hidden />
           </Link>
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => onEdit(p)} data-action="edit"
-                aria-label={t("projects.edit.aria", { name: projectName(p) })}>
-          <Pencil aria-hidden /> {t("projects.edit")}
-        </Button>
-        {p.default ? (
+        {members && (
+          <Button variant="ghost" size="sm" asChild>
+            <Link to={projectPath(p.slug, "/members")} data-action="members"
+                  aria-label={t("projects.members.aria", { name: projectName(p) })}>
+              <Users aria-hidden /> {t("projects.members")}
+            </Link>
+          </Button>
+        )}
+        {manage && (
+          <Button variant="ghost" size="sm" onClick={() => onEdit(p)} data-action="edit"
+                  aria-label={t("projects.edit.aria", { name: projectName(p) })}>
+            <Pencil aria-hidden /> {t("projects.edit")}
+          </Button>
+        )}
+        {!manage ? null : p.default ? (
           <Tooltip>
             <TooltipTrigger asChild><span tabIndex={0} data-default-archive>{archive}</span></TooltipTrigger>
             <TooltipContent>{t("projects.archive.defaultHint")}</TooltipContent>
@@ -118,15 +138,19 @@ export default function ProjectsPage() {
     },
     onError: (e) => toast.error(t("projects.saveFailed"), { description: projectErrorMessage(e) }),
   })
+  const canCreate = useCan("project.create")
+  const accounts = useAccounts()
   const list = projects.data?.projects ?? []
   const sorted = [...list].sort((a, b) => Number(a.archived) - Number(b.archived))
   return (
     <>
       <PageHeader title={t("projects.title")} description={t("projects.description")}
-                  actions={<Button onClick={() => setCreating(true)} id="btn-new-project"><Plus aria-hidden /> {t("projects.new")}</Button>} />
+                  actions={canCreate && <Button onClick={() => setCreating(true)} id="btn-new-project"><Plus aria-hidden /> {t("projects.new")}</Button>} />
       {projects.error ? <ErrorState error={projects.error} onRetry={() => projects.refetch()} />
         : projects.isPending ? <Skeleton className="h-40" />
-          : !list.length ? <EmptyState title={t("projects.empty")} />
+          : !list.length ? (accounts && !canCreate
+            ? <EmptyState icon={FolderKanban} title={t("projects.none.title")} hint={t("projects.none.hint")} />
+            : <EmptyState title={t("projects.empty")} />)
             : (
               <div className="grid gap-3" id="project-list">
                 {sorted.map((p) => <ProjectRow key={p.slug} p={p} onEdit={setEditing} onArchive={setConfirm} />)}

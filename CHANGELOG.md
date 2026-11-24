@@ -46,6 +46,15 @@ behaviour).
 - **Audit log entries** for users, members, agent tokens, run starts and cancels, review
   decisions and undos, sources, samples, settings changes and restarts, and project
   create/rename/archive/unarchive.
+- **Accounts in the web UI** (accounts mode only; with accounts off the UI is unchanged):
+  `/ui/login` (password, emailed sign-in link when SMTP is set up, bad-link notice, back to
+  the page asked for), `/ui/invite` (invitation and reset links; the token is read from the
+  fragment and dropped from the history), an account menu (change password, sign out,
+  admin badge, role in the project), role-aware pages (actions a role cannot use are
+  disabled or hidden, 403 `forbidden` shows a toast naming the permission, 401 goes back to
+  sign-in), `/ui/p/<p>/members` and `/ui/p/<p>/audit` for owners, `/ui/users` and
+  `/ui/users/audit` for admins, a role column on the projects page, and the default project
+  falls back to the user's own projects.
 - **Agent token list and usage** (`GET /api/agent/tokens`, `/api/agent/usage`) need
   `agent.tokens` (editor+) with accounts on; `/api/agent/tools` stays readable by viewers.
   Deleting a playground conversation needs the new `playground.manage` (editor+; there is

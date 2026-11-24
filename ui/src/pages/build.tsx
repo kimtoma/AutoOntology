@@ -8,6 +8,7 @@ import { toast } from "sonner"
 
 import { EmptyState, ErrorState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
+import { RoleNotice } from "@/components/role-notice"
 import { RunSheet } from "@/components/run-sheet"
 import { StatusChip } from "@/components/status-chip"
 import { Button } from "@/components/ui/button"
@@ -26,6 +27,7 @@ import { api, errorMessage, isNoSnapshot, type RunRequest, type Source } from "@
 import { fmtSeconds, fmtTime, groupSteps, progressText, RUN_LABEL, runSeconds, sourceState } from "@/lib/labels"
 import { KindBadge } from "@/pages/sources"
 import { t, tn, tx, useT } from "@/i18n"
+import { useCan } from "@/lib/auth"
 import { useArchived } from "@/lib/project"
 
 function useStartRun(onStarted: (runId: string) => void) {
@@ -112,7 +114,9 @@ function Pipeline({ sources, onStarted, busy }: {
   busy: boolean
 }) {
   const t = useT()
-  const archived = useArchived()
+  const canRunsStart = useCan("runs.start")
+  // read-only: archived, or a role without the permission (the server decides too)
+  const archived = useArchived() || !canRunsStart
   const start = useStartRun(onStarted)
   const [options, setOptions] = useState(false)
   const ontology = useOntology()
@@ -177,6 +181,7 @@ export default function BuildPage() {
   return (
     <>
       <PageHeader title={t("build.title")} description={t("build.description")} />
+      <RoleNotice permission="runs.start" message="auth.notice.build" />
       <section aria-labelledby="h-actions" className="mb-8">
         <h2 id="h-actions" className="sr-only">{t("build.start")}</h2>
         {sources.error ? <ErrorState error={sources.error} onRetry={() => sources.refetch()} />

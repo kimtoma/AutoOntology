@@ -7,7 +7,7 @@ import { createContext, useCallback, useContext } from "react"
 import { useNavigate, type NavigateOptions } from "react-router"
 
 import { t, type MessageKey } from "@/i18n/core"
-import { ApiError, errorMessage, type Project } from "@/lib/api"
+import { ApiError, errorMessage, type Project, type ProjectList } from "@/lib/api"
 
 export interface ProjectScope {
   /** the slug in the URL */
@@ -30,8 +30,17 @@ export const useArchived = () => useContext(ProjectContext)?.archived ?? false
 export const projectName = (project: Pick<Project, "name" | "slug"> | null | undefined, slug = "") =>
   project?.name?.trim() || project?.slug || slug
 
+/** The project the app opens by default: the installation's default project when the caller
+    may open it, else their first active (then archived) project; null when they are in none
+    (accounts mode: a user nobody added to a project yet). */
+export function homeSlug(list: ProjectList): string | null {
+  const ps = list.projects
+  if (ps.some((p) => p.slug === list.default)) return list.default
+  return (ps.find((p) => !p.archived) ?? ps[0])?.slug ?? null
+}
+
 /** Pages that are not inside a project (no `/p/<slug>` prefix). */
-const UNSCOPED = /^\/(p|projects)(\/|\?|#|$)/
+const UNSCOPED = /^\/(p|projects|users|login|invite)(\/|\?|#|$)/
 
 /** *to* (an app path such as "/build?x=1") under project *slug*: "/p/<slug>/build?x=1".
     Paths that are already scoped, unscoped pages and relative paths stay as they are. */

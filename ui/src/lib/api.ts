@@ -29,7 +29,7 @@ export function projectApiBase(slug: string | null = currentProject): string {
 }
 
 /** Installation-wide routes: no project prefix. */
-const GLOBAL_PATH = /^\/(status|providers|settings|projects)(\/|\?|$)/
+const GLOBAL_PATH = /^\/(status|providers|settings|projects|auth|users|audit)(\/|\?|$)/
 
 /** The URL of an API *path*: project-scoped paths go under the current project's base. */
 export function apiUrl(path: string): string {
@@ -41,6 +41,8 @@ export class ApiError extends Error {
   code?: string
   /** the whole JSON error body: extra fields such as `conflicts` (409 sample_conflict) */
   body?: Record<string, unknown>
+  /** seconds from a `Retry-After` header (429 too_many_attempts) */
+  retryAfter?: number
   constructor(message: string, status: number, code?: string, body?: Record<string, unknown>) {
     super(message)
     this.name = "ApiError"
@@ -48,6 +50,30 @@ export class ApiError extends Error {
     this.code = code
     this.body = body
   }
+}
+
+/* --- sign-in state ------------------------------------------------------------------------ */
+
+/** Called for every 401 `login_required` (the session ended: back to the login page) and
+    403 `forbidden` (the role lacks a permission: a toast) answer; set by the auth gate. */
+type AuthErrorHandler = (err: ApiError) => void
+let authErrorHandler: AuthErrorHandler | null = null
+
+export function setAuthErrorHandler(fn: AuthErrorHandler | null) { authErrorHandler = fn }
+
+/** Whether *err* is 403 `forbidden` (the body names the missing `permission`). */
+export function isForbidden(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.status === 403 && err.code === "forbidden"
+}
+
+/** Whether *err* is 401 `login_required` (signed out in accounts mode). */
+export function isLoginRequired(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.status === 401 && err.code === "login_required"
+}
+
+function reportAuthError(err: ApiError): ApiError {
+  if (authErrorHandler && (isForbidden(err) || isLoginRequired(err))) authErrorHandler(err)
+  return err
 }
 
 export const NETWORK_HINT = "Cannot reach the AutoOntology service (uv run autoontology up)"
@@ -704,12 +730,14 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
   if (!resp.ok || !resp.body) {
     let detail = `HTTP ${resp.status}`
     let code: string | undefined
+    let body: Record<string, unknown> | undefined
     try {
       const obj = await resp.json() as { detail?: string; error?: string }
       if (typeof obj.detail === "string") detail = obj.detail
       code = obj.error
+      body = obj as Record<string, unknown>
     } catch { /* not JSON */ }
-    throw new ApiError(detail, resp.status, code)
+    throw reportAuthError(new ApiError(detail, resp.status, code, body))
   }
   const reader = resp.body.pipeThrough(new TextDecoderStream()).getReader()
   let buffer = ""
@@ -743,7 +771,10 @@ async function send(path: string, init: RequestInit, asText: boolean): Promise<u
   if (!resp.ok) {
     const obj = (body && typeof body === "object" ? body : {}) as { detail?: unknown; error?: string }
     const detail = typeof obj.detail === "string" ? obj.detail : `HTTP ${resp.status}`
-    throw new ApiError(detail, resp.status, obj.error, obj as Record<string, unknown>)
+    const err = new ApiError(detail, resp.status, obj.error, obj as Record<string, unknown>)
+    const retry = Number(resp.headers.get("retry-after"))
+    if (Number.isFinite(retry) && retry > 0) err.retryAfter = retry
+    throw reportAuthError(err)
   }
   return body
 }
@@ -763,6 +794,9 @@ const json = (method: string, body: unknown): RequestInit => ({
   headers: { "content-type": "application/json" },
   body: JSON.stringify(body),
 })
+
+/** A JSON request (`init` for `request`). */
+export const jsonInit = json
 
 const enc = encodeURIComponent
 /** An export file path keeps its "/" separators; every segment is encoded (Hangul names). */
@@ -800,6 +834,10 @@ export interface Project {
   last_run: RunBrief | null
   active: boolean
   api_base: string
+  /** the caller's role in it (accounts mode; admins are owners; off mode: owner) */
+  role?: "viewer" | "reviewer" | "editor" | "owner" | string
+  /** the caller's project permissions (`PROJECT_PERMISSIONS` in web/projects.py) */
+  permissions?: string[]
 }
 
 export interface ProjectList {
@@ -964,6 +1002,8 @@ export const api = {
 }
 
 export function errorMessage(err: unknown): string {
+  // a role without the permission: name it (the server stays the judge)
+  if (isForbidden(err)) return t("auth.forbidden", { permission: String(err.body?.permission ?? "") })
   // a write to an archived project: say so in the UI language
   if (err instanceof ApiError && err.code === "project_archived") return t("projects.error.project_archived")
   // a data question in a project without a built structured source

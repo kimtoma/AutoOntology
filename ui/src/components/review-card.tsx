@@ -12,6 +12,7 @@ import { DECISION_WORD, type AcceptRelation, type Decision, type ReviewItem } fr
 import { CKIND_LABEL } from "@/lib/labels"
 import { ago, freshnessText } from "@/lib/ops"
 import { cn } from "@/lib/utils"
+import { useCan } from "@/lib/auth"
 import { useArchived } from "@/lib/project"
 
 export function DecisionBadge({ decision }: { decision: Decision }) {
@@ -48,7 +49,11 @@ export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function Re
   { item, onDecide, onUndo, onBuild, busy, compact, selected, relation: relationProp, onRelation }, ref,
 ) {
   const t = useT()
-  const archived = useArchived()
+  const canReviewDecide = useCan("review.decide")
+  // read-only: archived, or a role without the permission (the server decides too)
+  const canBuild = useCan("runs.start")
+  const readOnly = useArchived()
+  const archived = readOnly || !canReviewDecide
   const [ownRelation, setOwnRelation] = useState<AcceptRelation>(suggestedRelation(item))
   const relation = relationProp ?? ownRelation
   const setRelation = onRelation ?? setOwnRelation
@@ -110,7 +115,7 @@ export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function Re
           </>
         ) : item.category === "stale_sources" ? (
           onBuild && (
-            <Button size="sm" variant="outline" data-action="build" disabled={archived} onClick={() => onBuild([name])}>
+            <Button size="sm" variant="outline" data-action="build" disabled={readOnly || !canBuild} onClick={() => onBuild([name])}>
               <Hammer aria-hidden /> {t("review.buildSource")}
             </Button>
           )

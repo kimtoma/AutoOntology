@@ -969,6 +969,14 @@ sessions). A sign-in link works in two steps: opening `/auth/magic/<token>` only
 the button posts the token to `POST /api/auth/magic`, which signs in. Single sign-on (OIDC)
 is planned; `AUTOONTOLOGY_OIDC_*` is reserved.
 
+In the web UI, a signed-out visitor lands on `/ui/login` (and returns to the page they asked
+for); invitation and reset links open `/ui/invite#token=...` to choose a password. The header's
+account menu changes the password and signs out. Owners manage members at
+`/ui/p/<project>/members` and read `/ui/p/<project>/audit`; admins have `/ui/users` (invite,
+disable, admin flag, sign-in and reset links to copy) and the whole audit log at
+`/ui/users/audit`. Buttons a role cannot use are disabled or hidden; the server still decides.
+With accounts off the UI is unchanged.
+
 #### Roles and permissions
 
 With accounts on, every route but sign-in, `/health`, the UI shell and the outside-agent

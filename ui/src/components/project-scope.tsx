@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useProjects } from "@/hooks/queries"
 import { useT } from "@/i18n"
 import { setCurrentProject, type Project } from "@/lib/api"
-import { lastProject, pagePathname, projectPath, ProjectContext, rememberProject } from "@/lib/project"
+import { homeSlug, lastProject, pagePathname, projectPath, ProjectContext, rememberProject } from "@/lib/project"
 import { legacyTarget } from "@/lib/routes"
 
 const Loading = () => <Skeleton className="m-6 h-[60svh]" id="project-loading" />
@@ -51,8 +51,9 @@ export function ProjectRoute() {
   if (projects.isError) return <Scoped slug={slug} project={null} remember={false} />
   const project = projects.data.projects.find((p) => p.slug === slug) ?? null
   if (!project) {
+    const home = homeSlug(projects.data)
     return <UnknownProject slug={slug}
-                           to={projectPath(projects.data.default, pagePathname(pathname)) + search + hash} />
+                           to={home ? projectPath(home, pagePathname(pathname)) + search + hash : "/projects"} />
   }
   return <Scoped slug={slug} project={project} remember />
 }
@@ -63,9 +64,11 @@ export function ProjectsRoute() {
   if (projects.isPending) return <Loading />
   if (projects.isError) return <div className="p-6"><ErrorState error={projects.error} onRetry={() => projects.refetch()} /></div>
   const last = lastProject()
+  const home = homeSlug(projects.data)
   const project = projects.data.projects.find((p) => p.slug === last)
-    ?? projects.data.projects.find((p) => p.slug === projects.data.default) ?? null
-  return <Scoped slug={project?.slug ?? projects.data.default} project={project} remember={false} />
+    ?? projects.data.projects.find((p) => p.slug === home) ?? null
+  // a user in no project yet: the shell without a project (the page says so)
+  return <Scoped slug={project?.slug ?? home ?? ""} project={project} remember={false} />
 }
 
 /** Any other path: the same page in the default project (`/` -> its home). */
@@ -75,5 +78,7 @@ export function DefaultProjectRedirect() {
   if (projects.isPending) return <Loading />
   if (projects.isError) return <div className="p-6"><ErrorState error={projects.error} onRetry={() => projects.refetch()} /></div>
   const page = legacyTarget(pathname, search) ?? `${pathname}${search}`
-  return <Navigate to={projectPath(projects.data.default, page) + hash} replace />
+  const home = homeSlug(projects.data)
+  if (!home) return <Navigate to="/projects" replace />
+  return <Navigate to={projectPath(home, page) + hash} replace />
 }

@@ -4,12 +4,12 @@
    service and the engine restart (a detached helper; this page waits for the new service). */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Loader2, Rocket, RotateCcw, Save, Zap } from "lucide-react"
+import { Loader2, Lock, Rocket, RotateCcw, Save, Zap } from "lucide-react"
 import { useId, useMemo, useState, type ReactNode } from "react"
 import { ProjectLink as Link } from "@/components/project-link"
 import { toast } from "sonner"
 
-import { ErrorState } from "@/components/empty-state"
+import { EmptyState, ErrorState } from "@/components/empty-state"
 import { keys } from "@/hooks/queries"
 import { PageHeader } from "@/components/page-header"
 import { Code } from "@/components/provider-card"
@@ -35,6 +35,7 @@ import {
   urlOrigin, usesOpenai,
   waitForRestart, type ProviderState, type SettingsForm,
 } from "@/lib/settings"
+import { useCan } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 import { tx, useT, type MessageKey } from "@/i18n"
 
@@ -293,7 +294,22 @@ type Phase =
   | { kind: "restarting"; id: string; elapsed: number }
   | { kind: "failed"; error: string; log?: string }
 
+/** Settings are admin-only with accounts on (`GET /api/settings` too): others get a note. */
 export default function SettingsPage() {
+  const t = useT()
+  const admin = useCan("settings.manage")
+  if (!admin) {
+    return (
+      <>
+        <PageHeader title={t("settings.title")} />
+        <EmptyState icon={Lock} title={t("settings.denied")} />
+      </>
+    )
+  }
+  return <SettingsBody />
+}
+
+function SettingsBody() {
   const t = useT()
   const qc = useQueryClient()
   const query = useQuery({ queryKey: keys.settings, queryFn: api.settings })

@@ -11,6 +11,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { invalidateAfterRun } from "@/hooks/queries"
 import { api, errorMessage, type Progress, type Run, type RunStatus, type Step } from "@/lib/api"
+import { useCan } from "@/lib/auth"
 import { Code } from "@/components/provider-card"
 import { useSamples, useSources, useStatus } from "@/hooks/queries"
 import { useNow } from "@/hooks/use-now"
@@ -295,7 +296,8 @@ function RunSheetBody({ runId }: { runId: string }) {
     }
   }
 
-  const canCancel = !!live && live.run.managed && live.status === "running" && !live.ended
+  const mayCancel = useCan("runs.start")
+  const canCancel = mayCancel && !!live && live.run.managed && live.status === "running" && !live.ended
   return (
     <>
       <SheetHeader className="border-b">

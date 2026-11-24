@@ -6,6 +6,7 @@ import { CheckChip } from "@/components/status-chip"
 import { Button } from "@/components/ui/button"
 import { keys } from "@/hooks/queries"
 import { api, ApiError, errorMessage, type ProviderTest, type ServiceStatus } from "@/lib/api"
+import { useCan } from "@/lib/auth"
 import { loginCommand, RESTART_COMMAND } from "@/lib/checklist"
 import { fmtSeconds, fmtTime } from "@/lib/labels"
 import { cn } from "@/lib/utils"
@@ -50,6 +51,7 @@ function TestResult({ result, fresh }: { result: ProviderTest; fresh: boolean })
 export function ProviderCard({ status, services = false }: { status: ServiceStatus; services?: boolean }) {
   const t = useT()
   const qc = useQueryClient()
+  const admin = useCan("settings.manage")
   const test = useMutation({
     mutationFn: api.testProvider,
     onSettled: () => qc.invalidateQueries({ queryKey: keys.status }),
@@ -106,17 +108,20 @@ export function ProviderCard({ status, services = false }: { status: ServiceStat
           <p>{t("provider.restart")} <Code>{RESTART_COMMAND}</Code></p>
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button size="sm" variant="outline" id="btn-provider-test" disabled={test.isPending}
-                onClick={() => test.mutate()}>
-          {test.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Zap aria-hidden />}
-          {test.isPending ? t("provider.testing") : t("provider.test")}
-        </Button>
-        <span className="text-xs text-muted-foreground">{t("provider.test.hint")}</span>
-        <Button size="sm" variant="link" asChild className="h-auto px-0">
-          <Link to="/settings" id="link-provider-settings"><Settings aria-hidden /> {t("settings.link")}</Link>
-        </Button>
-      </div>
+      {/* testing the provider and the settings are admin-only with accounts on */}
+      {admin && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="sm" variant="outline" id="btn-provider-test" disabled={test.isPending}
+                  onClick={() => test.mutate()}>
+            {test.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Zap aria-hidden />}
+            {test.isPending ? t("provider.testing") : t("provider.test")}
+          </Button>
+          <span className="text-xs text-muted-foreground">{t("provider.test.hint")}</span>
+          <Button size="sm" variant="link" asChild className="h-auto px-0">
+            <Link to="/settings" id="link-provider-settings"><Settings aria-hidden /> {t("settings.link")}</Link>
+          </Button>
+        </div>
+      )}
       {test.isError && (busy ? (
         <p className="text-xs text-muted-foreground" role="status" data-test-result="busy">
           {t("provider.test.busy")}

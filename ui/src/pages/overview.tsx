@@ -27,6 +27,7 @@ import { fmtSeconds, RUN_LABEL, runSeconds } from "@/lib/labels"
 import { ago, deltaSummary, freshnessText, opsNotices, staleSources, type Notice } from "@/lib/ops"
 import { cn } from "@/lib/utils"
 import HomePage from "@/pages/home"
+import { useCan } from "@/lib/auth"
 import { useArchived } from "@/lib/project"
 
 const POLL = REVIEW_POLL_MS
@@ -153,7 +154,9 @@ function SourcesCard({ onBuild, building, now, className }: {
   onBuild: (s: string[]) => void; building: boolean; now: number; className?: string
 }) {
   const t = useT()
-  const archived = useArchived()
+  const canRunsStart = useCan("runs.start")
+  // read-only: archived, or a role without the permission (the server decides too)
+  const archived = useArchived() || !canRunsStart
   const fresh = useQuery({ queryKey: keys.freshness, queryFn: () => api.freshness(), refetchInterval: POLL })
   const stale = staleSources(fresh.data?.sources)
   return (
@@ -236,7 +239,9 @@ function NoticesCard({ notices, onAction, busy, className }: {
   className?: string
 }) {
   const t = useT()
-  const archived = useArchived()
+  const canRunsStart = useCan("runs.start")
+  // read-only: archived, or a role without the permission (the server decides too)
+  const archived = useArchived() || !canRunsStart
   const actionLabel: Record<string, string> = {
     build: t("overview.sources.build"), export: t("overview.export"), "open-run": t("overview.openRun"),
   }
