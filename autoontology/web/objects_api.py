@@ -6,9 +6,11 @@ aliases), over :mod:`autoontology.objects.service`.
   latest snapshot; ``GET /objects/types/{type}`` one of them;
 * ``PUT /objects/types/{type}`` -- bind key / title columns by hand (``objects.manage``),
   verified on the source; the type becomes active;
-* ``GET /objects/{type}?q=&filter=col=value&limit=&offset=`` -- objects of a type;
+* ``GET /objects/{type}?q=&filter=col=value&limit=&offset=&computed=`` -- objects of a
+  type (``computed=1``: each with the values of the type's active functions);
 * ``GET /objects/{type}/{key}`` -- one object: values with the edit layer applied, the
-  edit marks (conflicts, operational properties), links and history;
+  edit marks (conflicts, operational properties), links, history and ``computed`` (the
+  active functions' values: ``{name: {value, type, error?}}``, ``functions.call``);
 * ``GET /objects/{type}/{key}/links/{link}?then=&limit=&offset=`` -- the objects a link
   reaches (``then``: one more hop).
 
@@ -23,6 +25,7 @@ import anyio
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from autoontology.logic import functions
 from autoontology.objects import service
 from autoontology.objects.reader import DEFAULT_PAGE, MAX_PAGE
 from autoontology.store.objects import STATUSES
@@ -99,10 +102,13 @@ def add_object_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         filter: list[str] = Query([], max_length=service.MAX_FILTERS),  # noqa: A002, B008
         limit: int = Query(DEFAULT_PAGE, ge=1, le=MAX_PAGE),
         offset: int = Query(0, ge=0, le=1_000_000),
+        computed: bool = Query(False),
         ctx: ProjectContext = Ctx,
     ) -> dict[str, Any]:
         ctx.require("objects.read")
-        return object_call(
+        if computed:
+            ctx.require("functions.call")
+        found = object_call(
             lambda: service.search(
                 api.settings,
                 ctx.store,
@@ -113,11 +119,25 @@ def add_object_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
                 offset=offset,
             )
         )
+        if computed:
+            object_call(
+                lambda: functions.attach_computed(
+                    api.settings, ctx.store, found["type"]["name"], found["items"]
+                )
+            )
+        return found
 
     @router.get("/objects/{type_name}/{key}")
     def object_detail(type_name: str, key: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
         ctx.require("objects.read")
-        return object_call(lambda: service.get_object(api.settings, ctx.store, type_name, key))
+        found = object_call(lambda: service.get_object(api.settings, ctx.store, type_name, key))
+        if ctx.can("functions.call"):
+            object_call(
+                lambda: functions.attach_computed(
+                    api.settings, ctx.store, found["type"]["name"], [found]
+                )
+            )
+        return found
 
     @router.get("/objects/{type_name}/{key}/links/{link}")
     def object_links(

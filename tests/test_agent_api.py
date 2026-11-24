@@ -110,6 +110,8 @@ def test_unauthorized_without_a_valid_token_even_from_localhost(agent, header):
         ("POST", f"{REST}/sparql"),
         ("GET", f"{REST}/exports/1.zip"),
         ("GET", f"{REST}/openapi.json"),
+        ("GET", f"{REST}/functions"),
+        ("POST", f"{REST}/functions/f/call"),
     ):
         for host in ("127.0.0.1:7800", "localhost"):
             resp = c.request(method, path, headers={**headers, "host": host}, json={})
@@ -200,6 +202,8 @@ def test_mcp_initialize_ping_and_tools_list(agent):
         "list_object_types",
         "search_objects",
         "get_object",
+        "list_functions",
+        "call_function",
     ]
     assert all(t["description"] and t["inputSchema"]["type"] == "object" for t in tools)
 
@@ -377,6 +381,8 @@ def test_openapi_lists_only_agent_routes(agent):
         f"{REST}/objects/types",
         f"{REST}/objects/{{type}}",
         f"{REST}/objects/{{type}}/{{key}}",
+        f"{REST}/functions",
+        f"{REST}/functions/{{name}}/call",
     }
     assert spec["components"]["securitySchemes"]["bearer"]["scheme"] == "bearer"
     # the agent routes stay out of the service's own schema

@@ -1,0 +1,52 @@
+# Functions for the quickstart demo (청구수납규정 제6조 연체 판정, 계약관리).
+# Apply with: uv run ao logic apply -f samples/quickstart/logic/functions.yaml
+#
+# Assumption: invoices.csv has no 지급기한 (due date) column. 제6조 counts overdue days
+# from the day after the due date, so these functions take the due date as
+# 청구일 + 30 days. Change the 30 if your billing terms differ.
+#
+# object_type names an object type by its label (or its class name, term-...): edit it
+# when your build labels the classes differently.
+
+- kind: function
+  name: 미수금
+  label: 미수금
+  description: 청구금액 중 아직 받지 못한 금액 (수납금액이 비어 있으면 0으로 본다).
+  object_type: 청구
+  returns: number
+  expr: 청구금액 - coalesce(수납금액, 0)
+
+- kind: function
+  name: 연체일수
+  label: 연체일수
+  description: >-
+    지급기한(청구일 + 30일, 가정) 다음 날부터 오늘까지의 일수. 완납이면 0,
+    기한 전이면 0.
+  object_type: 청구
+  returns: number
+  expr: |
+    if(수납상태 == "완납", 0, max(today() - (청구일 + 30), 0))
+
+- kind: function
+  name: 연체여부
+  label: 연체 여부
+  description: 지급기한이 지나도록 완납되지 않았는지 (제6조).
+  object_type: 청구
+  returns: bool
+  expr: 수납상태 != "완납" and 연체일수() > 0
+
+- kind: function
+  name: 남은일수
+  label: 계약 남은 일수
+  description: 계약 종료일까지 남은 일수 (지났으면 음수).
+  object_type: 계약
+  returns: number
+  expr: 종료일 - today()
+
+- kind: function
+  name: 미수청구건수
+  label: 미수 청구 건수
+  description: 이 계약의 청구서 중 완납되지 않은 건수.
+  object_type: 계약
+  returns: number
+  expr: count(청구 where 수납상태 != "완납")

@@ -377,12 +377,15 @@ def test_me_lists_memberships(env):
                 "exports.read",
                 "playground.ask",
                 "objects.read",
+                "logic.read",
+                "functions.call",
                 "review.decide",
                 "review.apply",
                 "sources.write",
                 "runs.start",
                 "agent.tokens",
                 "playground.manage",
+                "logic.edit",
             ],
         }
     ]

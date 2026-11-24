@@ -1230,6 +1230,11 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
 
     add_object_routes(router, api, ctx_dep)
 
+    # logic definitions and function evaluation (autoontology/web/logic_api.py) ----------
+    from autoontology.web.logic_api import add_logic_routes
+
+    add_logic_routes(router, api, ctx_dep)
+
     # outside-agent tokens and usage (the agent surface itself: agent_api.install) ---------
     from autoontology.web.agent_api import add_management_routes
 

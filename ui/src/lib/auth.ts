@@ -20,7 +20,7 @@ export type InstallationPermission = (typeof INSTALLATION_PERMISSIONS)[number]
 export type ProjectPermission =
   | "project.read" | "exports.read" | "playground.ask" | "playground.manage" | "review.decide" | "review.apply"
   | "sources.write" | "runs.start" | "agent.tokens" | "project.manage" | "members.manage" | "audit.read"
-  | "objects.read" | "objects.manage"
+  | "objects.read" | "objects.manage" | "logic.read" | "functions.call" | "logic.edit" | "logic.activate"
 
 export interface User {
   id: string

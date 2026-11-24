@@ -14,7 +14,8 @@ One tool layer (:data:`TOOLS`, :meth:`AgentService.run_tool`) behind two surface
 Every request needs ``Authorization: Bearer aok_...`` -- from localhost too -- and is
 answered 401 without a valid (unrevoked, unexpired) token. A token with a revision pin is
 served at that revision only (another explicit revision: ``revision_pinned``). The object
-tools (``list_object_types``, ``search_objects``, ``get_object``) read live source rows
+tools (``list_object_types``, ``search_objects``, ``get_object``, ``list_functions``,
+``call_function``) read live source rows
 through the object types bound to the latest snapshot -- objects have no revisions -- so a
 pinned token may use them only while its pin is the latest revision. Per token
 at most :func:`rate_per_min` requests a minute (429 + ``Retry-After``), request bodies up
@@ -140,6 +141,17 @@ class GetObjectArgs(_Args):
     key: str = Field(min_length=1, max_length=200)
 
 
+class ListFunctionsArgs(_Args):
+    type: str | None = Field(None, min_length=1, max_length=200)
+
+
+class CallFunctionArgs(_Args):
+    name: str = Field(min_length=1, max_length=200)
+    type: str | None = Field(None, min_length=1, max_length=200)
+    key: str = Field(min_length=1, max_length=200)
+    params: dict[str, Any] = Field(default_factory=dict, max_length=20)
+
+
 _REVISION = {
     "type": "integer",
     "minimum": 1,
@@ -250,12 +262,36 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], type[_Args]]] = [
     (
         "get_object",
         "One object by its key: values (with edits), the source values, edit marks, its "
-        "links to other object types and the edit history.",
+        "links to other object types, the edit history and the values of the type's "
+        "active functions (computed).",
         {
             "type": {"type": "string", "description": "Object type name."},
             "key": {"type": "string", "description": "The object's key value."},
         },
         GetObjectArgs,
+    ),
+    (
+        "list_functions",
+        "List the active functions: computed values and yes/no checks defined on an object "
+        "type (name, description, result type, parameters and the expression).",
+        {"type": {"type": "string", "description": "Only this object type (name or label)."}},
+        ListFunctionsArgs,
+    ),
+    (
+        "call_function",
+        "Evaluate an active function on one object (from list_functions): its value and "
+        "type, or an error. Read-only.",
+        {
+            "name": {"type": "string", "description": "Function name."},
+            "type": {"type": "string", "description": "Object type (optional check)."},
+            "key": {"type": "string", "description": "The object's key value."},
+            "params": {
+                "type": "object",
+                "maxProperties": 20,
+                "description": "Parameter values, when the function has parameters.",
+            },
+        },
+        CallFunctionArgs,
     ),
 ]
 
@@ -264,6 +300,7 @@ _REQUIRED = {
     "search_concepts": ["query"],
     "search_objects": ["type"],
     "get_object": ["type", "key"],
+    "call_function": ["name", "key"],
 }
 
 TOOLS: list[dict[str, Any]] = [
@@ -512,10 +549,30 @@ class AgentService:
         return {"revision": self._served(token), **found}
 
     def _tool_get_object(self, token: AgentToken, args: GetObjectArgs) -> dict[str, Any]:
+        from autoontology.logic import functions
         from autoontology.objects import service as objects
 
-        found = objects.get_object(
-            self.api.settings, self._objects_view(token), args.type, args.key
+        view = self._objects_view(token)
+        found = objects.get_object(self.api.settings, view, args.type, args.key)
+        functions.attach_computed(self.api.settings, view, found["type"]["name"], [found])
+        return {"revision": self._served(token), **found}
+
+    def _tool_list_functions(self, token: AgentToken, args: ListFunctionsArgs) -> dict[str, Any]:
+        from autoontology.logic import functions
+
+        found = functions.list_active(self._objects_view(token), args.type)
+        return {"revision": self._served(token), "functions": found}
+
+    def _tool_call_function(self, token: AgentToken, args: CallFunctionArgs) -> dict[str, Any]:
+        from autoontology.logic import functions
+
+        found = functions.call(
+            self.api.settings,
+            self._objects_view(token),
+            args.name,
+            args.key,
+            params=args.params,
+            type_name=args.type,
         )
         return {"revision": self._served(token), **found}
 
@@ -536,7 +593,8 @@ class AgentService:
             "All tools are read-only. Start with get_ontology_summary or search_concepts, "
             "then get_concept for definitions, relations and evidence; sparql_query runs "
             "SPARQL over the RDF/OWL graph. list_object_types, search_objects and get_object "
-            "read the business objects (source rows) of bound classes."
+            "read the business objects (source rows) of bound classes; list_functions and "
+            "call_function evaluate their defined functions."
         )
 
 
@@ -804,6 +862,30 @@ def build_router(service: AgentService) -> APIRouter:
     async def rest_object(request: Request, type_name: str, key: str) -> Response:
         return await rest(request, "get_object", lambda: {"type": type_name, "key": key})
 
+    @router.get(f"{REST_PREFIX}/functions", include_in_schema=False)
+    async def rest_functions(request: Request) -> Response:
+        return await rest(request, "list_functions", query(request))
+
+    @router.post(f"{REST_PREFIX}/functions/{{name}}/call", include_in_schema=False)
+    async def rest_call_function(request: Request, name: str) -> Response:
+        token = await gate(request)
+        if isinstance(token, Response):
+            return token
+        raw = await _read_body(request)
+        if raw is None:
+            return _too_large()
+        try:
+            body = json.loads(raw or b"{}")
+        except (ValueError, RecursionError):
+            return _error(400, "invalid_arguments", "the body must be a JSON object")
+        if not isinstance(body, dict):
+            return _error(400, "invalid_arguments", "the body must be a JSON object")
+        try:
+            data = await call(token, "rest", "call_function", {**body, "name": name})
+        except ToolError as exc:
+            return _error(exc.status, exc.code, exc.message)
+        return JSONResponse(data)
+
     @router.get(f"{REST_PREFIX}/exports", include_in_schema=False)
     async def rest_exports(request: Request) -> Response:
         return await rest(request, "list_exports", query(request))
@@ -947,6 +1029,36 @@ def openapi_schema() -> dict[str, Any]:
                     param("type", "path", {"type": "string"}, required=True),
                     param("key", "path", {"type": "string"}, required=True),
                 ],
+            )
+        },
+        f"{REST_PREFIX}/functions": {
+            "get": op(
+                tools["list_functions"]["description"],
+                [param("type", "query", {"type": "string"})],
+            )
+        },
+        f"{REST_PREFIX}/functions/{{name}}/call": {
+            "post": op(
+                tools["call_function"]["description"],
+                [param("name", "path", {"type": "string"}, required=True)],
+                requestBody={
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    k: v
+                                    for k, v in tools["call_function"]["inputSchema"][
+                                        "properties"
+                                    ].items()
+                                    if k != "name"
+                                },
+                                "required": ["key"],
+                            }
+                        }
+                    },
+                },
             )
         },
         f"{REST_PREFIX}/exports/{{rev}}.zip": {

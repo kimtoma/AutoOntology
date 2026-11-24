@@ -36,6 +36,7 @@ FOLDER_SUFFIXES = {
     "structured": formats.STRUCTURED_SUFFIXES,
     "documents": formats.DOCUMENT_NATIVE_SUFFIXES | formats.DOCUMENT_KORDOC_SUFFIXES,
     "images": formats.IMAGE_SUFFIXES,
+    "logic": {".yaml"},  # function / action / workflow specs (not a source)
 }
 NOT_INPUT = {"LICENSE"}
 
@@ -94,7 +95,8 @@ def test_every_file_has_a_supported_suffix_for_its_folder(root):
 
 def test_hanbit_layout():
     names = {
-        folder: sorted(p.name for p in (HANBIT / folder).iterdir()) for folder in FOLDER_SUFFIXES
+        folder: sorted(p.name for p in (HANBIT / folder).iterdir())
+        for folder in ("structured", "documents", "images")
     }
     assert names["structured"] == sorted(
         [

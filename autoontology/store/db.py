@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from autoontology.playground.store import PlaygroundStore
     from autoontology.store.agent_tokens import AgentTokens
     from autoontology.store.decisions import DecisionStore
+    from autoontology.store.logic import LogicDefs
     from autoontology.store.objects import ObjectEdits, ObjectTypes
 
 SourceKind = Literal["files", "database", "documents"]
@@ -2279,6 +2280,12 @@ class ProjectStore:
         from autoontology.store.objects import ObjectEdits
 
         return ObjectEdits(self.store, project_id=self.id)
+
+    def logic_defs(self) -> LogicDefs:
+        """The project's :class:`~autoontology.store.logic.LogicDefs`."""
+        from autoontology.store.logic import LogicDefs
+
+        return LogicDefs(self.store, project_id=self.id)
 
     def playground(self) -> PlaygroundStore:
         """The project's :class:`~autoontology.playground.store.PlaygroundStore`."""

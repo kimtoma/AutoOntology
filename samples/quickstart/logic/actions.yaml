@@ -1,0 +1,40 @@
+# Actions for the quickstart demo (청구수납규정 제7조 독촉 절차).
+# A draft fixture: the action runner arrives with the action layer. It validates against
+# the quickstart ontology now; apply after functions.yaml.
+
+- kind: action
+  name: 독촉단계기록
+  label: 독촉 단계 기록
+  description: >-
+    연체된 청구서에 독촉 단계를 기록한다 (1: 유선 안내, 2: 서면 독촉장, 3: 본부장 보고,
+    4: 해지 검토). 원천 데이터는 바꾸지 않고 운영 속성으로 남긴다.
+  object_type: 청구
+  params:
+    - name: 단계
+      type: number
+      label: 독촉 단계
+      enum: [1, 2, 3, 4]
+      default: 1
+    - name: 메모
+      type: text
+      required: false
+  preconditions:
+    - expr: 수납상태 != "완납"
+      message: 이미 완납된 청구서입니다.
+  effects:
+    - set: 독촉단계
+      value: param.단계
+      operational: true
+    - set: 독촉메모
+      value: coalesce(param.메모, "")
+      operational: true
+  notify:
+    - to: role:editor
+      subject: "[독촉 {{ param.단계 }}단계] {{ 청구ID }}"
+      body: "{{ 계약.계약명 }} 청구서 {{ 청구ID }}: 미수금 {{ 미수금() }}원, 연체 {{ 연체일수() }}일"
+  permission:
+    min_role: editor
+  approval:
+    role: owner
+    when: param.단계 >= 4
+  agent: propose

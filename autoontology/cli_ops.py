@@ -2316,6 +2316,228 @@ def object_get(
         )
 
 
+# --- logic --------------------------------------------------------------------------
+
+logic_app = typer.Typer(help=msg("help.logic"), no_args_is_help=True)
+_LOGIC_FILE = typer.Option(..., "-f", "--file", help=msg("help.logic.file"))
+
+
+def _logic_kind(kind: str) -> str:
+    if kind not in ("function", "action", "workflow"):
+        _error("invalid_kind", f"kind must be function, action or workflow, not {kind!r}", 2)
+    return kind
+
+
+def _logic_docs(path: Path) -> list[dict[str, Any]]:
+    """The spec mappings of a file (unreadable: exit 2)."""
+    from autoontology.logic.specs import SpecError, load_documents
+
+    try:
+        text = path.read_text("utf-8")
+    except OSError as exc:
+        _error("unreadable_file", f"cannot read {path}: {exc.strerror or exc}", 2)
+    try:
+        return load_documents(text)
+    except SpecError as exc:
+        _error("invalid_spec", str(exc), 2, extra={"errors": exc.errors})
+    return []  # pragma: no cover - _error exits
+
+
+def _spec_errors(errors: list[dict[str, Any]]) -> None:
+    for e in errors:
+        pos = f" (at {e['pos']})" if e.get("pos") is not None else ""
+        typer.echo(f"  {e.get('path') or '-'}: {e['message']}{pos} [{e['code']}]", err=True)
+
+
+def _def_rows(defs: list[dict[str, Any]]) -> str:
+    rows = [
+        (
+            d["kind"],
+            d["name"],
+            _short(d["label"] or "-", 24),
+            _short(d["object_type"] or "-", 20),
+            f"v{d['version']}",
+            d["status"] + (f" ({_short(d['broken_reason'], 40)})" if d["broken_reason"] else ""),
+        )
+        for d in defs
+    ]
+    return base._table(("KIND", "NAME", "LABEL", "OBJECT TYPE", "VER", "STATUS"), rows)
+
+
+@logic_app.command("list", help=msg("help.logic.list"))
+def logic_list(
+    kind: str = typer.Option(None, "--kind", help=msg("help.logic.kind")),
+    status: str = typer.Option(None, "--status", help=msg("help.logic.status")),
+    as_json: bool = _JSON,
+) -> None:
+    params = {k: v for k, v in (("kind", kind), ("status", status)) if v}
+    body = _guard(lambda: _local().call("GET", "/logic", params=params))
+    if as_json:
+        _json(body)
+        return
+    if not body["definitions"]:
+        typer.echo(msg("ops.logic_none"))
+        return
+    typer.echo(_def_rows(body["definitions"]))
+
+
+@logic_app.command("show", help=msg("help.logic.show"))
+def logic_show(
+    kind: str = typer.Argument(..., help=msg("help.logic.kind")),
+    name: str = typer.Argument(..., help=msg("help.logic.name")),
+    as_json: bool = _JSON,
+) -> None:
+    seg = f"/logic/{_logic_kind(kind)}/{quote(name, safe='')}"
+    body = _guard(lambda: _local().call("GET", seg))
+    if as_json:
+        _json(body)
+        return
+    typer.echo(_def_rows([body["definition"]]))
+    import yaml
+
+    typer.echo(yaml.safe_dump(body["definition"]["spec"], allow_unicode=True, sort_keys=False))
+    for h in body["history"][:20]:
+        typer.echo(
+            f"  v{h['version']} {h['status']:<8} {h['changed_at']} {h['changed_by']} {h['note']}"
+        )
+
+
+@logic_app.command("apply", help=msg("help.logic.apply"))
+def logic_apply(file: Path = _LOGIC_FILE, as_json: bool = _JSON) -> None:
+    docs = _logic_docs(file)
+    saved: list[dict[str, Any]] = []
+    for doc in docs:
+        body = _guard(lambda doc=doc: _local().call("POST", "/logic", json={"spec": doc}))
+        saved.append(body["definition"])
+        if not as_json:
+            d = body["definition"]
+            typer.echo(
+                msg(
+                    "ops.logic_saved",
+                    kind=d["kind"],
+                    name=d["name"],
+                    version=d["version"],
+                    status=d["status"],
+                )
+            )
+    if as_json:
+        _json({"definitions": saved})
+
+
+@logic_app.command("validate", help=msg("help.logic.validate"))
+def logic_validate(file: Path = _LOGIC_FILE, as_json: bool = _JSON) -> None:
+    docs = _logic_docs(file)
+    body = _guard(lambda: _local().call("POST", "/logic/validate", json={"specs": docs}))
+    if as_json:
+        _json(body)
+    else:
+        for doc, r in zip(docs, body["results"], strict=False):
+            kind, name = r["kind"] or doc.get("kind", "?"), r["name"] or doc.get("name", "?")
+            if r["valid"]:
+                typer.echo(msg("ops.logic_valid", kind=kind, name=name))
+            else:
+                typer.echo(msg("ops.logic_invalid", kind=kind, name=name, count=len(r["errors"])))
+                _spec_errors(r["errors"])
+    if not body["valid"]:
+        raise typer.Exit(1)
+
+
+def _params(pairs: list[str] | None) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for pair in pairs or []:
+        name, sep, value = pair.partition("=")
+        if not sep or not name:
+            _error("invalid_param", f"a parameter is name=value, got {pair!r}", 2)
+        out[name] = value
+    return out
+
+
+@logic_app.command("test", help=msg("help.logic.test"))
+def logic_test(
+    name: str = typer.Argument(None, help=msg("help.logic.test.name")),
+    file: Path = typer.Option(None, "-f", "--file", help=msg("help.logic.file")),
+    keys: list[str] = typer.Option(None, "--key", help=msg("help.logic.test.key")),
+    params: list[str] = typer.Option(None, "--param", help=msg("help.logic.test.param")),
+    as_json: bool = _JSON,
+) -> None:
+    if (name is None) == (file is None) or not keys:
+        _error("invalid_arguments", msg("ops.logic_test_args"), 2)
+    payload: dict[str, Any] = {"keys": keys, "params": _params(params)}
+    if file is not None:
+        docs = _logic_docs(file)
+        if len(docs) != 1:
+            _error("invalid_arguments", "-f must hold exactly one function spec", 2)
+        body = _guard(
+            lambda: _local().call("POST", "/logic/test", json={**payload, "spec": docs[0]})
+        )
+    else:
+        seg = f"/logic/functions/{quote(name, safe='')}/test"
+        body = _guard(lambda: _local().call("POST", seg, json=payload))
+    if as_json:
+        _json(body)
+    else:
+        if body["errors"]:
+            typer.echo(
+                msg(
+                    "ops.logic_invalid",
+                    kind="function",
+                    name=body["function"] or "?",
+                    count=len(body["errors"]),
+                )
+            )
+            _spec_errors(body["errors"])
+        rows = [
+            (
+                r["key"],
+                _short(r["title"], 40),
+                _jsonable(r["value"])
+                if not r.get("error")
+                else f"ERROR {r['error']['code']}: {_short(r['error']['message'], 50)}",
+            )
+            for r in body["results"]
+        ]
+        if rows:
+            typer.echo(base._table(("KEY", "TITLE", body.get("function") or "VALUE"), rows))
+    if body["errors"]:
+        raise typer.Exit(1)
+
+
+def _logic_status(kind: str, name: str, status: str, as_json: bool) -> None:
+    seg = f"/logic/{_logic_kind(kind)}/{quote(name, safe='')}/status"
+    body = _guard(lambda: _local().call("POST", seg, json={"status": status}))
+    if as_json:
+        _json(body)
+        return
+    d = body["definition"]
+    typer.echo(
+        msg(
+            "ops.logic_saved",
+            kind=d["kind"],
+            name=d["name"],
+            version=d["version"],
+            status=d["status"],
+        )
+    )
+
+
+@logic_app.command("activate", help=msg("help.logic.activate"))
+def logic_activate(
+    kind: str = typer.Argument(..., help=msg("help.logic.kind")),
+    name: str = typer.Argument(..., help=msg("help.logic.name")),
+    as_json: bool = _JSON,
+) -> None:
+    _logic_status(kind, name, "active", as_json)
+
+
+@logic_app.command("retire", help=msg("help.logic.retire"))
+def logic_retire(
+    kind: str = typer.Argument(..., help=msg("help.logic.kind")),
+    name: str = typer.Argument(..., help=msg("help.logic.name")),
+    as_json: bool = _JSON,
+) -> None:
+    _logic_status(kind, name, "retired", as_json)
+
+
 def register(app: typer.Typer, source_app: typer.Typer) -> None:
     """Add the parity commands to the CLI (called at the end of :mod:`autoontology.cli`)."""
     app.add_typer(ontology_app, name="ontology")
@@ -2329,6 +2551,7 @@ def register(app: typer.Typer, source_app: typer.Typer) -> None:
     app.add_typer(user_app, name="user")
     app.add_typer(member_app, name="member")
     app.add_typer(object_app, name="object")
+    app.add_typer(logic_app, name="logic")
     app.command("audit", help=msg("help.audit"))(audit_cmd)
     source_app.command("freshness", help=msg("help.sources.freshness"))(sources_freshness)
     # `sources freshness` (the UI's page name) is `source freshness`

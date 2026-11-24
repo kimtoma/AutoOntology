@@ -41,8 +41,9 @@ permission of :data:`PROJECT_PERMISSIONS` (403 ``forbidden``, the body's ``permi
 names it); installation-wide routes call :func:`require_installation` (admins only). The
 role table is :data:`PROJECT_PERMISSIONS`: viewer reads, downloads and asks the
 playground; reviewer also decides reviews and applies them; editor also changes sources,
-starts builds and exports and manages agent tokens; owner also manages the project and its
-members, reads its audit log and binds object types (key and title columns).
+starts builds and exports, manages agent tokens, saves logic drafts and activates
+functions; owner also manages the project and its members, reads its audit log, binds
+object types (key and title columns) and activates actions and workflows.
 
 Archived projects: playground questions (:func:`playground_question`) stay allowed unless
 ``AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`` (then 409 ``project_archived`` too).
@@ -82,16 +83,20 @@ PROJECT_PERMISSIONS: dict[str, str] = {
     "exports.read": "viewer",  # download exports
     "playground.ask": "viewer",  # chat / SQL / SPARQL, the index, reading conversations
     "objects.read": "viewer",  # object types, objects (source rows + edits) and their links
+    "logic.read": "viewer",  # function / action / workflow definitions, their history, validate
+    "functions.call": "viewer",  # evaluate functions (computed values, call, test)
     "review.decide": "reviewer",  # decide and undo review items
     "review.apply": "reviewer",  # apply runs (decisions -> a new revision)
     "sources.write": "editor",  # add / delete sources, load samples
     "runs.start": "editor",  # build and export runs (and cancelling runs)
     "agent.tokens": "editor",  # list / create / rotate / revoke agent tokens, their usage
     "playground.manage": "editor",  # delete playground conversations (no per-user owner yet)
+    "logic.edit": "editor",  # save drafts; activate / retire functions
     "project.manage": "owner",  # rename, archive, unarchive
     "members.manage": "owner",  # add / change / remove members
     "audit.read": "owner",  # the project's audit log
     "objects.manage": "owner",  # accept / reject object type proposals, bind key and title
+    "logic.activate": "owner",  # activate / retire actions and workflows
 }
 
 #: Installation-wide permissions (no project): admins only.

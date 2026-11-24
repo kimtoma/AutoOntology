@@ -95,6 +95,8 @@ def test_role_table_is_cumulative():
         "exports.read",
         "playground.ask",
         "objects.read",
+        "logic.read",
+        "functions.call",
     ]
     assert set(role_permissions("reviewer")) - set(role_permissions("viewer")) == {
         "review.decide",
@@ -105,17 +107,27 @@ def test_role_table_is_cumulative():
         "runs.start",
         "agent.tokens",
         "playground.manage",
+        "logic.edit",
     }
     assert set(role_permissions("owner")) - set(role_permissions("editor")) == {
         "project.manage",
         "members.manage",
         "audit.read",
         "objects.manage",
+        "logic.activate",
     }
     assert set(role_permissions("owner")) == set(PROJECT_PERMISSIONS)
     assert role_permissions(None) == role_permissions("god") == []
     assert not set(INSTALLATION_PERMISSIONS) & set(PROJECT_PERMISSIONS)
 
+
+LOGIC_SPEC = {
+    "kind": "function",
+    "name": "f1",
+    "object_type": "x",
+    "returns": "number",
+    "expr": "1",
+}
 
 #: (method, path, body, the permission the route needs). The archive pair runs last.
 ROUTES = [
@@ -139,6 +151,16 @@ ROUTES = [
     ("PUT", f"{BETA}/objects/types/term-x", {"key": "id"}, "objects.manage"),
     ("POST", f"{BETA}/review/ob:term-x/decision", {"decision": "accept"}, "objects.manage"),
     ("DELETE", f"{BETA}/review/ob:term-x/decision", None, "objects.manage"),
+    ("GET", f"{BETA}/logic", None, "logic.read"),
+    ("GET", f"{BETA}/logic/function/f1", None, "logic.read"),
+    ("POST", f"{BETA}/logic/validate", {"spec": LOGIC_SPEC}, "logic.read"),
+    ("POST", f"{BETA}/logic", {"spec": LOGIC_SPEC}, "logic.edit"),
+    ("POST", f"{BETA}/logic/function/f1/status", {"status": "retired"}, "logic.edit"),
+    ("POST", f"{BETA}/logic/action/a1/status", {"status": "retired"}, "logic.activate"),
+    ("POST", f"{BETA}/logic/workflow/w1/status", {"status": "retired"}, "logic.activate"),
+    ("POST", f"{BETA}/logic/test", {"spec": LOGIC_SPEC, "keys": ["k"]}, "functions.call"),
+    ("POST", f"{BETA}/logic/functions/f1/test", {"keys": ["k"]}, "functions.call"),
+    ("POST", f"{BETA}/logic/functions/f1/call", {"key": "k"}, "functions.call"),
     (
         "POST",
         f"{BETA}/sources",

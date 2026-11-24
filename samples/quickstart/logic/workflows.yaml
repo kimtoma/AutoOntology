@@ -1,0 +1,37 @@
+# Workflows for the quickstart demo: every day at 02:00 go through the unpaid invoices,
+# record a reminder stage by overdue days (청구수납규정 제7조).
+# A draft fixture: the scheduler arrives with the workflow layer. Apply after
+# functions.yaml and actions.yaml.
+
+- kind: workflow
+  name: 연체독촉
+  label: 연체 청구서 독촉
+  description: 매일 02:00 연체 청구서를 순회해 연체일수에 맞는 독촉 단계를 기록한다.
+  trigger:
+    schedule: daily 02:00
+  for_each:
+    object_type: 청구
+    where: 연체여부()
+  max_objects: 500
+  steps:
+    - if: 연체일수() >= 90
+      then:
+        - action: 독촉단계기록
+          params:
+            단계: "4"
+      else:
+        - if: 연체일수() >= 60
+          then:
+            - action: 독촉단계기록
+              params:
+                단계: "3"
+          else:
+            - if: 연체일수() >= 30
+              then:
+                - action: 독촉단계기록
+                  params:
+                    단계: "2"
+              else:
+                - action: 독촉단계기록
+                  params:
+                    단계: "1"
