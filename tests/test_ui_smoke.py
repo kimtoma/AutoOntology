@@ -23,6 +23,9 @@ from autoontology.config import Settings
 
 pytestmark = pytest.mark.integration
 
+#: A project API path in the browser: `/api/projects/<slug>/...` (or the `/api/...` alias).
+API = r".*/api(?:/projects/[a-z][a-z0-9-]+)?"
+
 #: Headless Chromium has no GPU: software WebGL (SwiftShader through ANGLE) for the 3D graph.
 GL_ARGS = ["--use-angle=swiftshader", "--use-gl=angle", "--enable-unsafe-swiftshader"]
 VIEWPORTS = {"mobile": (375, 812), "tablet": (768, 1024), "desktop": (1280, 800)}
@@ -117,7 +120,8 @@ def test_shell_sources_and_status(live, browser, name):
     url, sources, _ = live
     page = new_page(browser, VIEWPORTS[name])
     page.goto(f"{url}/")
-    page.wait_for_url("**/ui/")  # / -> /ui/ (server): the Overview once a snapshot exists
+    # / -> /ui/ (server) -> /ui/p/<default> (the UI): the Overview once a snapshot exists
+    page.wait_for_url(re.compile(r".*/ui/p/[a-z][a-z0-9-]+$"))
     page.locator("#overview #ops-ontology").wait_for()
     assert page.locator("#checklist").count() == 0
     page.goto(f"{url}/ui/sources")
@@ -279,7 +283,7 @@ def test_home_sample_dialog_lists_the_sets(live, browser):
                 ),
             )
 
-    page.route("**/api/samples/load", fake_load)
+    page.route(re.compile(rf"{API}/samples/load$"), fake_load)
     card = page.locator(f"[data-sample-set={first['set']}]")
     button = card.locator(f"[data-load-set={first['set']}]")
     button.click()
@@ -420,10 +424,10 @@ def test_review_accept_then_apply_flow(live, browser):
             },
         )
 
-    page.route(re.compile(r".*/api/review/.+/decision$"), decide)
-    page.route(re.compile(r".*/api/review/pending-count$"), count)
-    page.route(re.compile(r".*/api/runs$"), start)
-    page.route(re.compile(r".*/api/runs/apply-smoke$"), run)
+    page.route(re.compile(rf"{API}/review/.+/decision$"), decide)
+    page.route(re.compile(rf"{API}/review/pending-count$"), count)
+    page.route(re.compile(rf"{API}/runs$"), start)
+    page.route(re.compile(rf"{API}/runs/apply-smoke$"), run)
     page.goto(f"{url}/ui/review?category={first['category']}")
     card = page.locator(f"[data-review-item='{first['id']}']")
     card.wait_for()
@@ -531,11 +535,11 @@ def test_review_reject_fold_then_apply_shows_it_unfolded(live, browser):
         **real,
         "merges": {"added": [], "removed": [split], "totals": {"added": 0, "removed": 1}},
     }
-    page.route(re.compile(r".*/api/review/.+/decision$"), decide)
-    page.route(re.compile(r".*/api/review/pending-count$"), count)
-    page.route(re.compile(r".*/api/runs$"), start)
-    page.route(re.compile(r".*/api/runs/apply-fold$"), run)
-    page.route(re.compile(r".*/api/ontology/diff(\?.*)?$"), lambda r: _json(r, unfolded))
+    page.route(re.compile(rf"{API}/review/.+/decision$"), decide)
+    page.route(re.compile(rf"{API}/review/pending-count$"), count)
+    page.route(re.compile(rf"{API}/runs$"), start)
+    page.route(re.compile(rf"{API}/runs/apply-fold$"), run)
+    page.route(re.compile(rf"{API}/ontology/diff(\?.*)?$"), lambda r: _json(r, unfolded))
     page.goto(f"{url}/ui/review?category=folds")
     card = page.locator(f"[data-review-item='{fold['id']}']")
     card.wait_for()

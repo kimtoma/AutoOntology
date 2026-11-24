@@ -4,7 +4,7 @@
 
 import { Check, Copy, Download, Network } from "lucide-react"
 import { useContext, useState } from "react"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 
 import { ConceptOpener } from "@/components/playground/concept-opener"
 import { Button } from "@/components/ui/button"

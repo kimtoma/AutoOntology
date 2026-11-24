@@ -8,7 +8,9 @@ import {
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useSearchParams } from "react-router"
+import { useSearchParams } from "react-router"
+
+import { ProjectLink as Link } from "@/components/project-link"
 
 import { GraphDetail } from "@/components/graph/graph-detail"
 import type { GraphHandle } from "@/components/graph/types"

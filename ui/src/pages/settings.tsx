@@ -6,7 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2, Rocket, RotateCcw, Save, Zap } from "lucide-react"
 import { useId, useMemo, useState, type ReactNode } from "react"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 import { toast } from "sonner"
 
 import { ErrorState } from "@/components/empty-state"

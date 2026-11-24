@@ -10,6 +10,7 @@ import { api, ApiError, errorMessage, type Run } from "@/lib/api"
 import { isActiveRun } from "@/lib/checklist"
 import { humanStep } from "@/lib/labels"
 import { cn } from "@/lib/utils"
+import { useArchived } from "@/lib/project"
 
 /** The step an apply run is on, in plain words ("" before the first step). */
 function currentStep(run: Run | undefined): string {
@@ -21,6 +22,7 @@ function currentStep(run: Run | undefined): string {
     `apply` run and follows it to the new revision. Hidden while nothing waits. */
 export function ApplyBanner({ className }: { className?: string }) {
   const t = useT()
+  const archived = useArchived()
   const qc = useQueryClient()
   const pending = usePendingCount()
   const [runId, setRunId] = useState<string | null>(null)
@@ -71,7 +73,7 @@ export function ApplyBanner({ className }: { className?: string }) {
           {applying ? t("apply.running", { step: currentStep(run.data) }) : t("apply.banner.hint")}
         </p>
       </div>
-      <Button id="btn-apply" disabled={applying || !n} onClick={() => start.mutate()} className="shrink-0">
+      <Button id="btn-apply" disabled={applying || !n || archived} onClick={() => start.mutate()} className="shrink-0">
         {applying ? <Loader2 className="animate-spin" aria-hidden /> : <CheckCheck aria-hidden />} {t("apply.button")}
       </Button>
     </div>

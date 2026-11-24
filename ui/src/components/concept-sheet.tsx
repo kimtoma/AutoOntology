@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, Network } from "lucide-react"
 import type { ReactNode } from "react"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 
 import { ErrorState } from "@/components/empty-state"
 import { Badge } from "@/components/ui/badge"

@@ -9,6 +9,7 @@ import { ChipLink, CitedText } from "@/components/playground/shared"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { keys } from "@/hooks/queries"
 import {
   api, errorMessage, type ElementChip, type RetrievedElement, type SseEvent,
 } from "@/lib/api"
@@ -63,7 +64,7 @@ export function ChatTab() {
   const abort = useRef<AbortController | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
   const qc = useQueryClient()
-  const index = useQuery({ queryKey: ["playground-index"], queryFn: api.playground.index })
+  const index = useQuery({ queryKey: keys.playgroundIndex, queryFn: api.playground.index })
 
   useEffect(() => () => abort.current?.abort(), [])
   useEffect(() => { bottom.current?.scrollIntoView?.({ block: "end" }) }, [messages])
@@ -104,7 +105,7 @@ export function ChatTab() {
       patchLast((m) => ({ ...m, pending: false }))
       setBusy(false)
       abort.current = null
-      qc.invalidateQueries({ queryKey: ["playground-index"] })
+      qc.invalidateQueries({ queryKey: keys.playgroundIndex })
     }
   }
 

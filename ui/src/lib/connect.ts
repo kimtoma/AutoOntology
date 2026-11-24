@@ -8,13 +8,19 @@ export const TOKEN_PLACEHOLDER = "<TOKEN>"
 /** The server name agents see (`claude mcp add ... autoontology`). */
 export const SERVER_NAME = "autoontology"
 
-export interface Endpoints { mcp: string; rest: string; openapi: string }
+/** *server*: the MCP server name the snippets suggest (`autoontology-<project slug>`). */
+export interface Endpoints { mcp: string; rest: string; openapi: string; server?: string }
 
-/** Absolute URLs of the agent surfaces, from the page's own origin. */
-export function endpoints(origin: string, tools: Pick<AgentTools, "mcp_path" | "rest_base">): Endpoints {
+/** The suggested MCP server name of project *slug*: agents can add one per project. */
+export const serverName = (slug?: string | null) => (slug ? `${SERVER_NAME}-${slug}` : SERVER_NAME)
+
+/** Absolute URLs of the agent surfaces, from the page's own origin (the paths are the same for
+    every project: a token reads the project it was created in). */
+export function endpoints(origin: string, tools: Pick<AgentTools, "mcp_path" | "rest_base">,
+                          project?: string | null): Endpoints {
   const base = origin.replace(/\/+$/, "")
   const rest = base + tools.rest_base
-  return { mcp: base + tools.mcp_path, rest, openapi: `${rest}/openapi.json` }
+  return { mcp: base + tools.mcp_path, rest, openapi: `${rest}/openapi.json`, server: serverName(project) }
 }
 
 export type SnippetId = "claudeCode" | "desktop" | "curl"
@@ -25,12 +31,13 @@ const SPARQL_EXAMPLE = "SELECT ?class ?label WHERE { ?class a owl:Class ; rdfs:l
 /** The client setting *id* for *token* (*query*: the search word of the curl example). */
 export function snippet(id: SnippetId, ep: Endpoints, token: string, query = "contract"): string {
   const auth = `Authorization: Bearer ${token}`
+  const server = ep.server ?? SERVER_NAME
   if (id === "claudeCode") {
-    return `claude mcp add --transport http ${SERVER_NAME} ${ep.mcp} --header "${auth}"`
+    return `claude mcp add --transport http ${server} ${ep.mcp} --header "${auth}"`
   }
   if (id === "desktop") {
     return JSON.stringify(
-      { mcpServers: { [SERVER_NAME]: { type: "http", url: ep.mcp, headers: { Authorization: `Bearer ${token}` } } } },
+      { mcpServers: { [server]: { type: "http", url: ep.mcp, headers: { Authorization: `Bearer ${token}` } } } },
       null, 2)
   }
   const body = JSON.stringify({ query: SPARQL_EXAMPLE })

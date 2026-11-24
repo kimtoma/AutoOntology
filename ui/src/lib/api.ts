@@ -2,9 +2,32 @@
    `{error, detail}` with a matching HTTP status; they surface as ApiError. The payloads
    mirror autoontology/web/api.py, web/concepts.py, web/graph.py and web/playground_api.py. */
 
+import { t } from "@/i18n/core"
 import type { Formats } from "@/lib/formats"
 
 export const API = "/api"
+
+/* --- the current project ------------------------------------------------------------------ */
+
+/** The slug of the project the pages work on (set by the `/p/:project` route before its pages
+    render); null = the default project through the `/api/...` alias. */
+let currentProject: string | null = null
+
+export function setCurrentProject(slug: string | null) { currentProject = slug }
+export function getCurrentProject(): string | null { return currentProject }
+
+/** The API base of *slug* (default: the current project): `/api/projects/<slug>`. */
+export function projectApiBase(slug: string | null = currentProject): string {
+  return slug ? `${API}/projects/${encodeURIComponent(slug)}` : API
+}
+
+/** Installation-wide routes: no project prefix. */
+const GLOBAL_PATH = /^\/(status|providers|settings|projects)(\/|\?|$)/
+
+/** The URL of an API *path*: project-scoped paths go under the current project's base. */
+export function apiUrl(path: string): string {
+  return (GLOBAL_PATH.test(path) ? API : projectApiBase()) + path
+}
 
 export class ApiError extends Error {
   status: number
@@ -666,7 +689,7 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
                                 signal?: AbortSignal): Promise<void> {
   let resp: Response
   try {
-    resp = await fetch(API + path, { ...json("POST", body), signal })
+    resp = await fetch(apiUrl(path), { ...json("POST", body), signal })
   } catch (err) {
     if ((err as Error).name === "AbortError") throw err
     throw new ApiError(NETWORK_HINT, 0, "network")
@@ -704,7 +727,7 @@ export async function streamSse(path: string, body: unknown, onEvent: (ev: SseEv
 async function send(path: string, init: RequestInit, asText: boolean): Promise<unknown> {
   let resp: Response
   try {
-    resp = await fetch(API + path, init)
+    resp = await fetch(apiUrl(path), init)
   } catch {
     throw new ApiError(NETWORK_HINT, 0, "network")
   }
@@ -742,6 +765,42 @@ const encItem = (id: string) => {
   const i = id.indexOf(":")
   return i < 0 ? enc(id) : `${id.slice(0, i)}:${enc(id.slice(i + 1))}`
 }
+
+/* --- projects ---------------------------------------------------------------------------- */
+
+export interface RunBrief {
+  id: string
+  kind: string
+  status: RunStatus
+  started_at: string | null
+  finished_at: string | null
+}
+
+/** One row of `GET /api/projects` (autoontology/web/projects.py::project_dict). */
+export interface Project {
+  id: string
+  slug: string
+  name: string
+  description: string
+  created_at: string
+  archived_at: string | null
+  archived: boolean
+  default: boolean
+  latest_revision: number | null
+  latest_revision_at: string | null
+  sources: number
+  last_build: RunBrief | null
+  last_run: RunBrief | null
+  active: boolean
+  api_base: string
+}
+
+export interface ProjectList { projects: Project[]; default: string }
+
+export interface ProjectChange { name?: string; description?: string; slug?: string }
+
+/** A project slug: a lowercase letter, then 1-23 of a-z, 0-9, "-". */
+export const SLUG_RE = /^[a-z][a-z0-9-]{1,23}$/
 
 export interface ConceptQuery {
   q?: string
@@ -783,7 +842,7 @@ export const api = {
   startRun: (body: RunRequest) => request<{ run_id: string }>("/runs", json("POST", body)),
   cancelRun: (id: string) =>
     request<{ run_id: string; cancel_requested: boolean }>(`/runs/${enc(id)}/cancel`, { method: "POST" }),
-  runEventsUrl: (id: string) => `${API}/runs/${enc(id)}/events`,
+  runEventsUrl: (id: string) => `${projectApiBase()}/runs/${enc(id)}/events`,
   ontology: (revision?: number | null) =>
     request<OntologySummary>(`/ontology${revision ? `?revision=${revision}` : ""}`),
   revisions: (limit = 50) =>
@@ -822,9 +881,9 @@ export const api = {
   /** The whole unified graph with the evidence layer; the page filters layers client-side. */
   graph: () => request<GraphJson>("/ontology/graph?layer=all&evidence=true"),
   exports: () => request<{ exports: ExportEntry[] }>("/exports").then((r) => r.exports),
-  exportFileUrl: (dir: string, file: string) => `${API}/exports/${enc(dir)}/${encPath(file)}`,
+  exportFileUrl: (dir: string, file: string) => `${projectApiBase()}/exports/${enc(dir)}/${encPath(file)}`,
   /** The whole revision folder as one zip (exactly the listed files). */
-  exportZipUrl: (dir: string) => `${API}/exports/${enc(dir)}.zip`,
+  exportZipUrl: (dir: string) => `${projectApiBase()}/exports/${enc(dir)}.zip`,
   exportText: (dir: string, file: string) =>
     requestText(`/exports/${enc(dir)}/${encPath(file)}?inline=true`),
   agent: {
@@ -834,6 +893,14 @@ export const api = {
     revoke: (id: string) => request<AgentToken>(`/agent/tokens/${enc(id)}`, { method: "DELETE" }),
     usage: (days = 30) => request<AgentUsage>(`/agent/usage?days=${days}`),
     tools: () => request<AgentTools>("/agent/tools"),
+  },
+  projects: {
+    list: () => request<ProjectList>("/projects"),
+    create: (body: { slug: string; name?: string; description?: string }) =>
+      request<Project>("/projects", json("POST", body)),
+    update: (slug: string, body: ProjectChange) => request<Project>(`/projects/${enc(slug)}`, json("PATCH", body)),
+    archive: (slug: string) => request<Project>(`/projects/${enc(slug)}/archive`, { method: "POST" }),
+    unarchive: (slug: string) => request<Project>(`/projects/${enc(slug)}/unarchive`, { method: "POST" }),
   },
   playground: {
     index: () => request<IndexStatus>("/playground/index"),
@@ -851,7 +918,15 @@ export const api = {
 }
 
 export function errorMessage(err: unknown): string {
+  // a write to an archived project: say so in the UI language
+  if (err instanceof ApiError && err.code === "project_archived") return t("projects.error.project_archived")
   return err instanceof Error ? err.message : String(err)
+}
+
+/** Whether *err* says the project of the request is gone (renamed) or became read-only:
+    the project list is out of date. */
+export function isProjectStale(err: unknown): boolean {
+  return err instanceof ApiError && (err.code === "unknown_project" || err.code === "project_archived")
 }
 
 /** 404 `no_snapshot`: nothing built yet (the pages show "Build first" instead of an error). */

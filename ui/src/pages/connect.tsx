@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, Check, Copy, KeyRound, Loader2, Plus, Plug, RotateCw, Trash2 } from "lucide-react"
+import { AlertTriangle, Check, Copy, FolderOpen, KeyRound, Loader2, Plus, Plug, RotateCw, Trash2 } from "lucide-react"
 import { useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import { toast } from "sonner"
 
@@ -28,6 +28,7 @@ import {
 import {
   endpoints, snippet, SNIPPETS, TOKEN_PLACEHOLDER, toolParams, type Endpoints,
 } from "@/lib/connect"
+import { projectName, useArchived, useProject } from "@/lib/project"
 import { cn } from "@/lib/utils"
 
 const USAGE_DAYS = 30
@@ -128,6 +129,8 @@ function TokenRow({ token, calls, onAsk }: {
   token: AgentToken; calls: number; onAsk: (c: NonNullable<Confirm>) => void
 }) {
   const active = token.status === "active"
+  const archived = useArchived()
+  const ro = archived ? t("projects.readOnly") : undefined
   return (
     <li className="grid gap-2 rounded-lg border p-3 lg:grid-cols-[var(--token-cols)]
                    lg:items-center lg:gap-3 lg:rounded-none lg:border-0 lg:border-t lg:px-1 lg:py-2"
@@ -147,12 +150,12 @@ function TokenRow({ token, calls, onAsk }: {
         {active && (
           <>
             <Button size="sm" variant="outline" aria-label={t("connect.rotateLabel", { name: token.name })}
-                    data-action="rotate" onClick={() => onAsk({ kind: "rotate", token })}>
+                    data-action="rotate" disabled={archived} title={ro} onClick={() => onAsk({ kind: "rotate", token })}>
               <RotateCw aria-hidden /> {t("connect.rotate")}
             </Button>
             <Button size="sm" variant="outline" className="text-destructive hover:text-destructive"
                     aria-label={t("connect.revokeLabel", { name: token.name })}
-                    data-action="revoke" onClick={() => onAsk({ kind: "revoke", token })}>
+                    data-action="revoke" disabled={archived} title={ro} onClick={() => onAsk({ kind: "revoke", token })}>
               <Trash2 aria-hidden /> {t("connect.revoke")}
             </Button>
           </>
@@ -176,6 +179,8 @@ function TokensCard({ tokens, usage, onCreate, onAsk }: {
   tokens: AgentToken[]; usage: AgentUsage | undefined; onCreate: () => void; onAsk: (c: NonNullable<Confirm>) => void
 }) {
   const calls = new Map((usage?.by_token ?? []).map((u) => [u.token_id, u.calls]))
+  const archived = useArchived()
+  const ro = archived ? t("projects.readOnly") : undefined
   return (
     <Card className="gap-3 py-4" id="connect-tokens">
       <CardHeader className="flex flex-wrap items-start justify-between gap-2 px-4">
@@ -184,13 +189,13 @@ function TokensCard({ tokens, usage, onCreate, onAsk }: {
           <CardDescription>{t("connect.tokens.hint")}</CardDescription>
         </div>
         {tokens.length > 0 && (
-          <Button size="sm" onClick={onCreate} id="btn-token-create"><Plus aria-hidden /> {t("connect.create")}</Button>
+          <Button size="sm" onClick={onCreate} id="btn-token-create" disabled={archived} title={ro}><Plus aria-hidden /> {t("connect.create")}</Button>
         )}
       </CardHeader>
       <CardContent className="px-4">
         {!tokens.length ? (
           <EmptyState icon={KeyRound} title={t("connect.empty.title")} hint={t("connect.empty.hint")}
-                      action={<Button onClick={onCreate} id="btn-token-create"><Plus aria-hidden /> {t("connect.create")}</Button>} />
+                      action={<Button onClick={onCreate} id="btn-token-create" disabled={archived} title={ro}><Plus aria-hidden /> {t("connect.create")}</Button>} />
         ) : (
           <div style={TOKEN_COLS}>
             <div aria-hidden className="hidden gap-3 px-1 pb-2 text-xs text-muted-foreground
@@ -434,7 +439,8 @@ export default function ConnectPage() {
   const [dialog, setDialog] = useState<"closed" | "form" | Issued>("closed")
   const [confirm, setConfirm] = useState<Confirm>(null)
 
-  const ep = tools.data ? endpoints(window.location.origin, tools.data) : null
+  const scope = useProject()
+  const ep = tools.data ? endpoints(window.location.origin, tools.data, scope?.slug) : null
 
   const act = useMutation({
     mutationFn: async (c: NonNullable<Confirm>) =>
@@ -460,6 +466,12 @@ export default function ConnectPage() {
           <CardHeader className="px-4">
             <CardTitle className="flex items-center gap-2 text-base"><Plug className="size-4" aria-hidden /> {t("connect.endpoints")}</CardTitle>
             <CardDescription className="break-words">{t("connect.endpoints.hint")}</CardDescription>
+            {scope && (
+              <p className="flex items-center gap-1.5 text-sm font-medium" id="connect-project-scope">
+                <FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                {t("connect.project.scope", { name: projectName(scope.project, scope.slug) })}
+              </p>
+            )}
           </CardHeader>
           <CardContent className="grid gap-3 px-4">
             {tools.error ? <ErrorState error={tools.error} onRetry={() => tools.refetch()} />

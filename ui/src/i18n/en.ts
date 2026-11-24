@@ -4,6 +4,7 @@
 import { enConnect } from "@/i18n/en.connect"
 import { enExplore } from "@/i18n/en.explore"
 import { enOps } from "@/i18n/en.ops"
+import { enProjects } from "@/i18n/en.projects"
 
 const enCore = {
   // durations (fmtSecs)
@@ -534,4 +535,4 @@ const enCore = {
   "nav.settings.hint": "Models and API keys",
 } as const
 
-export const en = { ...enCore, ...enExplore, ...enOps, ...enConnect }
+export const en = { ...enCore, ...enExplore, ...enOps, ...enConnect, ...enProjects }

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Database, FileText, Hammer, Loader2, Plus, Trash2 } from "lucide-react"
 import { useState, type FormEvent } from "react"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 import { toast } from "sonner"
 
 import { EmptyState, ErrorState } from "@/components/empty-state"
@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils"
 import { t, tn, tx, useT } from "@/i18n"
 import { FilePreview, FolderCheck, type PickedName } from "@/components/file-preview"
 import { Code } from "@/components/provider-card"
+import { useArchived } from "@/lib/project"
 import {
   acceptList, classifyFile, extensionOf, extensionsByEngine, extLabel, isIgnoredName, KORDOC_INSTALL,
   type Family, type Formats,
@@ -71,6 +72,7 @@ function LastRun({ s }: { s: Source }) {
 
 export default function SourcesPage() {
   const t = useT()
+  const archived = useArchived()
   const { data: sources, isPending, error, refetch } = useSources()
   const [adding, setAdding] = useState(false)
   const [removing, setRemoving] = useState<Source | null>(null)
@@ -84,7 +86,7 @@ export default function SourcesPage() {
           documents: <b key="d">{t("sources.description.documents")}</b>,
           build: <Link key="b" to="/build" className="underline underline-offset-4">{t("sources.description.build")}</Link>,
         })}
-        actions={<Button onClick={() => setAdding(true)} id="btn-new-source">
+        actions={<Button onClick={() => setAdding(true)} id="btn-new-source" disabled={archived}>
           <Plus aria-hidden /> {t("sources.add")}</Button>}
       />
       {error ? <ErrorState error={error} onRetry={() => refetch()} />
@@ -92,7 +94,7 @@ export default function SourcesPage() {
         : !sources.length ? (
           <EmptyState icon={Database} title={t("sources.empty")}
                       hint={t("sources.empty.hint")}
-                      action={<Button onClick={() => setAdding(true)}><Plus aria-hidden /> {t("sources.add")}</Button>} />
+                      action={<Button onClick={() => setAdding(true)} disabled={archived}><Plus aria-hidden /> {t("sources.add")}</Button>} />
         ) : (
           <>
             <Card className="py-0">
@@ -131,7 +133,7 @@ export default function SourcesPage() {
                         <TableCell className="hidden sm:table-cell"><LastRun s={s} /></TableCell>
                         <TableCell className="pr-4 text-right">
                           <Button variant="ghost" size="icon" aria-label={t("sources.delete.aria", { name: s.name })}
-                                  data-delete={s.name} disabled={!!s.active_run}
+                                  data-delete={s.name} disabled={!!s.active_run || archived}
                                   onClick={() => setRemoving(s)}>
                             <Trash2 aria-hidden />
                           </Button>

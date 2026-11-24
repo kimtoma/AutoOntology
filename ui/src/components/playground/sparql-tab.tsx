@@ -11,6 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { keys } from "@/hooks/queries"
 import { fmtNumber, tx, useT } from "@/i18n"
 import { api, errorMessage } from "@/lib/api"
 
@@ -21,7 +22,7 @@ LIMIT 20`
 
 export function SparqlTab() {
   const t = useT()
-  const examples = useQuery({ queryKey: ["sparql-examples"], queryFn: api.playground.sparqlExamples,
+  const examples = useQuery({ queryKey: keys.sparqlExamples, queryFn: api.playground.sparqlExamples,
                               staleTime: Infinity })
   const [query, setQuery] = useState(DEFAULT)
   const [example, setExample] = useState("")

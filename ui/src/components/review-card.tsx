@@ -1,6 +1,6 @@
 import { Check, Hammer, Loader2, Undo2, X } from "lucide-react"
 import { forwardRef, useState } from "react"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 
 import { RelationChip } from "@/components/concept-sheet"
 import { Badge } from "@/components/ui/badge"
@@ -12,6 +12,7 @@ import { DECISION_WORD, type AcceptRelation, type Decision, type ReviewItem } fr
 import { CKIND_LABEL } from "@/lib/labels"
 import { ago, freshnessText } from "@/lib/ops"
 import { cn } from "@/lib/utils"
+import { useArchived } from "@/lib/project"
 
 export function DecisionBadge({ decision }: { decision: Decision }) {
   const t = useT()
@@ -47,6 +48,7 @@ export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function Re
   { item, onDecide, onUndo, onBuild, busy, compact, selected, relation: relationProp, onRelation }, ref,
 ) {
   const t = useT()
+  const archived = useArchived()
   const [ownRelation, setOwnRelation] = useState<AcceptRelation>(suggestedRelation(item))
   const relation = relationProp ?? ownRelation
   const setRelation = onRelation ?? setOwnRelation
@@ -102,18 +104,18 @@ export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function Re
         {decided ? (
           <>
             <DecisionBadge decision={decided} />
-            <Button size="sm" variant="ghost" disabled={busy} data-action="undo" onClick={() => onUndo(item)}>
+            <Button size="sm" variant="ghost" disabled={busy || archived} data-action="undo" onClick={() => onUndo(item)}>
               {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Undo2 aria-hidden />} {t("review.undo")}
             </Button>
           </>
         ) : item.category === "stale_sources" ? (
           onBuild && (
-            <Button size="sm" variant="outline" data-action="build" onClick={() => onBuild([name])}>
+            <Button size="sm" variant="outline" data-action="build" disabled={archived} onClick={() => onBuild([name])}>
               <Hammer aria-hidden /> {t("review.buildSource")}
             </Button>
           )
         ) : item.category === "unaligned" ? (
-          <Button size="sm" variant="outline" disabled={busy} data-action="acknowledge"
+          <Button size="sm" variant="outline" disabled={busy || archived} data-action="acknowledge"
                   onClick={() => onDecide({ item, decision: "acknowledge" })}>
             <Check aria-hidden /> {t("review.keepSeparate")}
           </Button>
@@ -129,12 +131,12 @@ export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function Re
                 </SelectContent>
               </Select>
             )}
-            <Button size="sm" disabled={busy} data-action="accept"
+            <Button size="sm" disabled={busy || archived} data-action="accept"
                     title={isAlignment(item) ? t("review.acceptAsRel", { relation: t(`review.rel.${relation}`) }) : undefined}
                     onClick={() => onDecide({ item, decision: "accept", relation: isAlignment(item) ? relation : undefined })}>
               {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Check aria-hidden />} {t("review.accept")}
             </Button>
-            <Button size="sm" variant="outline" disabled={busy} data-action="reject"
+            <Button size="sm" variant="outline" disabled={busy || archived} data-action="reject"
                     onClick={() => onDecide({ item, decision: "reject" })}>
               <X aria-hidden /> {t("review.reject")}
             </Button>

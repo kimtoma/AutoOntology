@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight, Download, Eye, FolderOpen, Hammer, Loader2 } from "lucide-react"
 import { useState } from "react"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 import { toast } from "sonner"
 
 import { EmptyState, ErrorState } from "@/components/empty-state"
@@ -75,7 +75,7 @@ function ValidationBadge({ name, v }: { name: string; v: Validation | null | und
 function useValidation(entry: ExportEntry, sub: "ossie" | "okf") {
   const has = entry.files.some((f) => f.name === `${sub}/validation.json`)
   const q = useQuery({
-    queryKey: ["validation", entry.dir, entry.created_at, sub],
+    queryKey: [...keys.scope, "validation", entry.dir, entry.created_at, sub],
     queryFn: async () => {
       const text = await api.exportText(entry.dir, `${sub}/validation.json`)
       const record = JSON.parse(text) as unknown

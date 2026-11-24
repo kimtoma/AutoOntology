@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { ExternalLink, Focus, X } from "lucide-react"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 
 import { Chips, ConceptBody, OriginBadge, Section } from "@/components/concept-sheet"
 import { ErrorState } from "@/components/empty-state"

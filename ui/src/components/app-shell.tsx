@@ -1,4 +1,9 @@
-import { Link, NavLink, Outlet, useLocation } from "react-router"
+import { Outlet, useLocation } from "react-router"
+
+import { ArchivedBanner } from "@/components/archived-banner"
+import { CommandMenu } from "@/components/command-menu"
+import { ProjectLink as Link, ProjectNavLink as NavLink } from "@/components/project-link"
+import { ProjectSwitcher } from "@/components/project-switcher"
 
 import { LangToggle } from "@/components/lang-toggle"
 import { ThemeToggle } from "@/components/theme"
@@ -13,6 +18,7 @@ import {
 } from "@/components/ui/sidebar"
 import { isCurrent, NAV, SETUP } from "@/components/nav"
 import { usePendingCount, useStatus } from "@/hooks/queries"
+import { pagePathname, projectName, useProject } from "@/lib/project"
 import { cn } from "@/lib/utils"
 import { useT } from "@/i18n"
 
@@ -76,7 +82,7 @@ function ReviewBadge({ sr = false }: { sr?: boolean }) {
 }
 
 function AppSidebar() {
-  const { pathname } = useLocation()
+  const pathname = pagePathname(useLocation().pathname)
   const { setOpenMobile, isMobile } = useSidebar()
   const t = useT()
   return (
@@ -100,6 +106,7 @@ function AppSidebar() {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        <ProjectSwitcher />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -132,9 +139,12 @@ function AppSidebar() {
 }
 
 function Crumbs() {
-  const { pathname } = useLocation()
+  const pathname = pagePathname(useLocation().pathname)
   const item = [...NAV, SETUP].find((n) => isCurrent(n, pathname))
   const t = useT()
+  const scope = useProject()
+  const onProjects = pathname.startsWith("/projects")
+  const name = projectName(scope?.project, scope?.slug)
   return (
     <Breadcrumb>
       <BreadcrumbList>
@@ -142,8 +152,16 @@ function Crumbs() {
           <Link to="/" className="hover:text-foreground">AutoOntology</Link>
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden sm:inline-flex" />
+        {!onProjects && name && (
+          <>
+            <BreadcrumbItem className="hidden min-w-0 md:inline-flex">
+              <Link to="/" className="max-w-48 truncate hover:text-foreground" id="crumb-project">{name}</Link>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator className="hidden md:inline-flex" />
+          </>
+        )}
         <BreadcrumbItem>
-          <BreadcrumbPage>{item?.label ?? t("shell.notFound")}</BreadcrumbPage>
+          <BreadcrumbPage>{onProjects ? t("projects.title") : item?.label ?? t("shell.notFound")}</BreadcrumbPage>
         </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>
@@ -151,7 +169,8 @@ function Crumbs() {
 }
 
 export function AppShell() {
-  const { pathname } = useLocation()
+  const pathname = pagePathname(useLocation().pathname)
+  const slug = useProject()?.slug
   const fullBleed = pathname.startsWith("/graph")  // the graph canvas fills the area under the header
   const wide = typeof window === "undefined" || window.innerWidth >= 1024
   const t = useT()
@@ -172,9 +191,12 @@ export function AppShell() {
         </header>
         <main id="main" className={cn("mx-auto w-full min-w-0 flex-1",
                                       fullBleed ? "p-0" : "max-w-6xl px-4 py-6 sm:px-6")}>
-          <Outlet />
+          <div className={cn(fullBleed && "[&>#archived-banner]:m-4")}><ArchivedBanner /></div>
+          {/* a new project remounts the page: no state of the previous project's page stays */}
+          <Outlet key={slug} />
         </main>
       </SidebarInset>
+      <CommandMenu />
     </SidebarProvider>
   )
 }

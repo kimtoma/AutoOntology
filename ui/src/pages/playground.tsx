@@ -4,7 +4,9 @@
 
 import { Bot, Database, FlaskConical, Hammer, MessagesSquare, Sparkles } from "lucide-react"
 import { useCallback } from "react"
-import { Link, useSearchParams } from "react-router"
+import { useSearchParams } from "react-router"
+
+import { ProjectLink as Link } from "@/components/project-link"
 
 import { ConceptSheet } from "@/components/concept-sheet"
 import { EmptyState, ErrorState } from "@/components/empty-state"

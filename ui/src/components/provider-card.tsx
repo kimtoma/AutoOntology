@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Loader2, Settings, Zap } from "lucide-react"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 
 import { CheckChip } from "@/components/status-chip"
 import { Button } from "@/components/ui/button"

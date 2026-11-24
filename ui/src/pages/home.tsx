@@ -5,7 +5,7 @@ import {
 } from "lucide-react"
 import { useEffect, useState, type ReactNode } from "react"
 import type { QueryClient } from "@tanstack/react-query"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 import { toast } from "sonner"
 
 import { PageHeader } from "@/components/page-header"
@@ -33,6 +33,7 @@ import {
 import { fmtSeconds, fmtTime, progressText, RUN_LABEL, runSeconds } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { NewSourceDialog } from "@/pages/sources"
+import { useArchived } from "@/lib/project"
 
 /** Poll while a step is incomplete (the runs' SSE stream also refreshes on every step). */
 const POLL_MS = 5000
@@ -143,6 +144,7 @@ function Counts({ ontology }: { ontology: OntologySummary }) {
 
 export default function HomePage() {
   const t = useT()
+  const archived = useArchived()
   const qc = useQueryClient()
   const interval = () => (allDone(cachedStates(qc)) ? false : POLL_MS)
   const status = useQuery({ queryKey: keys.status, queryFn: api.status, refetchInterval: interval })
@@ -211,11 +213,11 @@ export default function HomePage() {
               </p>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button variant={states.sources === "active" ? "default" : "outline"} id="btn-load-samples"
+              <Button variant={states.sources === "active" ? "default" : "outline"} id="btn-load-samples" disabled={archived}
                       onClick={() => setSamplesOpen(true)}>
                 <PackageOpen aria-hidden /> {t("home.sources.loadSamples")}
               </Button>
-              <Button variant="outline" id="btn-add-own" onClick={() => setAdding(true)}>
+              <Button variant="outline" id="btn-add-own" disabled={archived} onClick={() => setAdding(true)}>
                 <Plus aria-hidden /> {t("home.sources.addOwn")}
               </Button>
             </div>
@@ -263,7 +265,7 @@ export default function HomePage() {
             <div className="flex flex-wrap gap-2">
               <span title={!modelsOk ? t("home.build.needsModels.short") : !names.length ? t("home.build.needsSource") : undefined}
                     className="inline-flex">
-              <Button id="btn-home-build" disabled={busy || !names.length || !modelsOk}
+              <Button id="btn-home-build" disabled={busy || !names.length || !modelsOk || archived}
                       variant={states.build === "active" ? "default" : "outline"}
                       onClick={() => start.mutate({ kind: "build" })}>
                 {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />}
@@ -302,7 +304,7 @@ export default function HomePage() {
             </p>
             <div className="flex flex-wrap gap-2">
               <Button id="btn-home-export" variant={states.export === "active" ? "default" : "outline"}
-                      disabled={busy || !ontologyValue} onClick={() => start.mutate({ kind: "export" })}>
+                      disabled={busy || !ontologyValue || archived} onClick={() => start.mutate({ kind: "export" })}>
                 {active?.kind === "export" ? <Loader2 className="animate-spin" aria-hidden /> : <Download aria-hidden />} {t("home.export.button")}
               </Button>
               <Button variant="ghost" asChild><Link to="/exports">{t("home.export.open")}</Link></Button>

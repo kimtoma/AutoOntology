@@ -1,7 +1,9 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { BookOpen, ChevronLeft, ChevronRight, GitCompare, Hammer, History, Search } from "lucide-react"
 import { useEffect, useState } from "react"
-import { Link, useSearchParams } from "react-router"
+import { useSearchParams } from "react-router"
+
+import { ProjectLink as Link } from "@/components/project-link"
 
 import { ConceptSheet, OriginBadge, RelationChip } from "@/components/concept-sheet"
 import { EmptyState, ErrorState } from "@/components/empty-state"

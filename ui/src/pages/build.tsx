@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Download, Hammer, History, Loader2, Play, SlidersHorizontal } from "lucide-react"
 import { useState } from "react"
-import { Link, useSearchParams } from "react-router"
+import { useSearchParams } from "react-router"
+
+import { ProjectLink as Link } from "@/components/project-link"
 import { toast } from "sonner"
 
 import { EmptyState, ErrorState } from "@/components/empty-state"
@@ -24,6 +26,7 @@ import { api, errorMessage, isNoSnapshot, type RunRequest, type Source } from "@
 import { fmtSeconds, fmtTime, groupSteps, progressText, RUN_LABEL, runSeconds, sourceState } from "@/lib/labels"
 import { KindBadge } from "@/pages/sources"
 import { t, tn, tx, useT } from "@/i18n"
+import { useArchived } from "@/lib/project"
 
 function useStartRun(onStarted: (runId: string) => void) {
   const qc = useQueryClient()
@@ -109,6 +112,7 @@ function Pipeline({ sources, onStarted, busy }: {
   busy: boolean
 }) {
   const t = useT()
+  const archived = useArchived()
   const start = useStartRun(onStarted)
   const [options, setOptions] = useState(false)
   const ontology = useOntology()
@@ -125,12 +129,12 @@ function Pipeline({ sources, onStarted, busy }: {
           </CardDescription>
         </CardHeader>
         <CardFooter className="flex flex-wrap gap-2">
-          <Button id="btn-build" disabled={busy || start.isPending}
+          <Button id="btn-build" disabled={busy || start.isPending || archived}
                   onClick={() => start.mutate({ kind: "build" })}>
             {start.isPending && start.variables?.kind === "build"
               ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />} {t("build.card.button")}
           </Button>
-          <Button variant="outline" id="btn-build-options" disabled={busy} onClick={() => setOptions(true)}>
+          <Button variant="outline" id="btn-build-options" disabled={busy || archived} onClick={() => setOptions(true)}>
             <SlidersHorizontal aria-hidden /> {t("build.options")}
           </Button>
         </CardFooter>
@@ -146,7 +150,7 @@ function Pipeline({ sources, onStarted, busy }: {
           </CardDescription>
         </CardHeader>
         <CardFooter className="flex flex-wrap gap-2">
-          <Button variant="secondary" id="btn-export" disabled={busy || start.isPending || !ontology.data}
+          <Button variant="secondary" id="btn-export" disabled={busy || start.isPending || !ontology.data || archived}
                   onClick={() => start.mutate({ kind: "export" })}>
             {start.isPending && start.variables?.kind === "export"
               ? <Loader2 className="animate-spin" aria-hidden /> : <Download aria-hidden />} {t("build.export.button")}

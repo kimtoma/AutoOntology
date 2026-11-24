@@ -3,7 +3,7 @@ import {
   AlertTriangle, ArrowRight, BookOpen, CheckCircle2, Download, Hammer, Info, Loader2, XCircle,
 } from "lucide-react"
 import { useState, type ReactNode } from "react"
-import { Link } from "react-router"
+import { ProjectLink as Link } from "@/components/project-link"
 import { toast } from "sonner"
 
 import { ApplyBanner } from "@/components/apply-banner"
@@ -27,6 +27,7 @@ import { fmtSeconds, RUN_LABEL, runSeconds } from "@/lib/labels"
 import { ago, deltaSummary, freshnessText, opsNotices, staleSources, type Notice } from "@/lib/ops"
 import { cn } from "@/lib/utils"
 import HomePage from "@/pages/home"
+import { useArchived } from "@/lib/project"
 
 const POLL = REVIEW_POLL_MS
 
@@ -152,6 +153,7 @@ function SourcesCard({ onBuild, building, now, className }: {
   onBuild: (s: string[]) => void; building: boolean; now: number; className?: string
 }) {
   const t = useT()
+  const archived = useArchived()
   const fresh = useQuery({ queryKey: keys.freshness, queryFn: () => api.freshness(), refetchInterval: POLL })
   const stale = staleSources(fresh.data?.sources)
   return (
@@ -178,7 +180,7 @@ function SourcesCard({ onBuild, building, now, className }: {
             </ul>
             {stale.length ? (
               <div>
-                <Button size="sm" id="btn-build-changed" disabled={building} onClick={() => onBuild(stale)}>
+                <Button size="sm" id="btn-build-changed" disabled={building || archived} onClick={() => onBuild(stale)}>
                   {building ? <Loader2 className="animate-spin" aria-hidden /> : <Hammer aria-hidden />}
                   {building ? t("overview.sources.building") : t("overview.sources.build")}
                 </Button>
@@ -234,6 +236,7 @@ function NoticesCard({ notices, onAction, busy, className }: {
   className?: string
 }) {
   const t = useT()
+  const archived = useArchived()
   const actionLabel: Record<string, string> = {
     build: t("overview.sources.build"), export: t("overview.export"), "open-run": t("overview.openRun"),
   }
@@ -267,7 +270,7 @@ function NoticesCard({ notices, onAction, busy, className }: {
                     <Link to="/build"><Hammer aria-hidden /> {t("overview.openBuild")}</Link>
                   </Button>
                 ) : n.action && n.action !== "apply" && (
-                  <Button size="sm" variant="outline" disabled={busy && n.action !== "open-run"} data-notice-action={n.action}
+                  <Button size="sm" variant="outline" disabled={(busy || archived) && n.action !== "open-run"} data-notice-action={n.action}
                           onClick={() => onAction(n)}>
                     {n.action === "export" ? <Download aria-hidden /> : n.action === "build" ? <Hammer aria-hidden /> : null}
                     {actionLabel[n.action]}

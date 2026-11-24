@@ -5,6 +5,7 @@ import type { en } from "@/i18n/en"
 import { koConnect } from "@/i18n/ko.connect"
 import { koExplore } from "@/i18n/ko.explore"
 import { koOps } from "@/i18n/ko.ops"
+import { koProjects } from "@/i18n/ko.projects"
 
 const koCore = {
   "dur.s": "{s}초",
@@ -522,4 +523,4 @@ const koCore = {
   "nav.settings.hint": "모델과 API 키",
 } as const
 
-export const ko: Record<keyof typeof en, string> = { ...koCore, ...koExplore, ...koOps, ...koConnect }
+export const ko: Record<keyof typeof en, string> = { ...koCore, ...koExplore, ...koOps, ...koConnect, ...koProjects }
