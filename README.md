@@ -962,9 +962,70 @@ The answer never tells whether an address has an account. Without SMTP the butto
 Sign-in API (`/api/auth/*`, reachable without a session; the host and cross-origin checks
 still apply): `POST login {email, password}` (401 `invalid_credentials` for every failure,
 429 after 5 failures a minute per IP or email), `POST logout`, `GET me`,
-`POST magic-link {email}` (always 202), `GET /auth/magic/<token>`,
+`POST magic-link {email}` (always 202), `POST magic {token}`,
 `POST accept-invite {token, password}`, `POST password {current, new}` (ends the other
-sessions). Single sign-on (OIDC) is planned; `AUTOONTOLOGY_OIDC_*` is reserved.
+sessions). A sign-in link works in two steps: opening `/auth/magic/<token>` only shows a
+"Continue to sign in" button (a mail scanner that prefetches the link does not use it up);
+the button posts the token to `POST /api/auth/magic`, which signs in. Single sign-on (OIDC)
+is planned; `AUTOONTOLOGY_OIDC_*` is reserved.
+
+#### Roles and permissions
+
+With accounts on, every route but sign-in, `/health`, the UI shell and the outside-agent
+surfaces (`/mcp`, `/agent/v1`, bearer tokens) needs a signed-in user (401
+`login_required`). Each user has a role per project; a project you are not a member of
+answers 404 `unknown_project`, as if it did not exist, and `GET /api/projects` lists only
+your projects. A missing permission is 403 `forbidden` with the permission named in the
+body. Admins are owners of every project.
+
+| Role | May |
+|---|---|
+| viewer | read everything in the project, download exports, ask the playground (chat, SQL, SPARQL, conversations) |
+| reviewer | + decide and undo review items, apply decisions (a new revision) |
+| editor | + add and remove sources, load samples, start builds and exports, manage agent tokens |
+| owner | + rename, archive and unarchive the project, manage its members, read its audit log |
+| admin | + create projects, settings and restart, provider test, users, the whole audit log |
+
+`GET /api/auth/me` lists the caller's `permissions` per project slug and
+`installation_permissions`. The table lives in `autoontology/web/projects.py`
+(`PROJECT_PERMISSIONS`). A project's creator becomes its owner. On an archived project the
+playground still answers unless `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`.
+
+Agent tokens remember who created (or last rotated) them: a token stops working once its
+creator is disabled or is no longer a member of the token's project. Tokens from before
+accounts keep working.
+
+#### Members, users and the audit log
+
+- Members (owners): `GET|POST /api/projects/<p>/members` (`{email, role}`; an unknown email
+  becomes a new user and the answer carries an `invite_link`), `PATCH|DELETE
+  /api/projects/<p>/members/<user_id>` (a project keeps at least one owner: 409
+  `last_owner`). CLI: `ao -p <p> member list|add <email> --role R|role <email> R|remove <email>`.
+- Users (admins): `GET|POST /api/users` (`{email, name?, is_admin?}` -> `{user,
+  invite_link, mail_sent}`), `PATCH /api/users/<id>` (`{name?, is_admin?, disabled?}`; the
+  last active admin stays: 409 `last_admin`), `POST /api/users/<id>/link {purpose}` (a fresh
+  magic, reset or invite link).
+- Audit log: `GET /api/audit?project=&user=&action=&before_id=&limit=` (admins: all;
+  owners: their projects, `project` required). It records sign-ins, users, members, agent
+  tokens, build/export/apply starts, review decisions, settings changes and restarts and
+  project changes, with the user, project and client address. CLI: `ao audit [--project P]
+  [--user E] [--action A] [--json]`. The CLI acts as a trusted admin; `ao --as <email> ...`
+  attributes its entries to that user.
+
+#### The engine's routes (`/v1`, `/ingest`)
+
+The chat router `/v1` spends the configured chat provider (your Claude or ChatGPT
+subscription) and `/ingest/delete` drops data, so with accounts on they are not open to
+anonymous callers. A request through a local reverse proxy arrives from 127.0.0.1 with
+`Host: 127.0.0.1` exactly like the engine's own, so no address or Host is trusted. Instead
+the service keeps a random secret in `<home>/run/internal.key` (0600) and derives keys
+from it: the engine sends one as its OpenAI API key to `/v1`, it reaches `/ingest` through
+`INGESTION_SERVICE_URL=http://127.0.0.1:<port>/internal/<key>`, and the CLI, the provider
+probe and the playground send `X-AutoOntology-Internal`. Everyone else needs an admin
+session for these routes. After switching `AUTOONTOLOGY_AUTH`, restart everything
+(`ao down && ao up`) so the engine gets the new keys. A gateway in front of the service must
+never forward `X-AutoOntology-Internal`, `X-AutoOntology-As` or, outside `/mcp` and
+`/agent/v1`, `Authorization`.
 
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 

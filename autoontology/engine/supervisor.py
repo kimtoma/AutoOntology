@@ -31,6 +31,7 @@ from autoontology.config import (
     Settings,
     env_file_path,
     expand_model_profile,
+    ingestion_service_url,
     postgres_env,
     shell_value,
     user_env,
@@ -118,7 +119,7 @@ def child_env(settings: Settings, base: dict[str, str] | None = None) -> dict[st
                 env[key] = value
                 copied.add(key)
     env.update(postgres_env(settings))
-    env["INGESTION_SERVICE_URL"] = settings.service_url
+    env["INGESTION_SERVICE_URL"] = ingestion_service_url(settings)
     models = expand_model_profile(settings)
     derived = sorted(copied | {k for k, v in models.items() if env.get(k) != v})
     env.update(models)

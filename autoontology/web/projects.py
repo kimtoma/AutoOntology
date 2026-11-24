@@ -27,20 +27,25 @@ conversation, a review item) goes through ``ctx.store`` (a
 project's object -- the route answers 404, never 403, so a project cannot probe another
 project's ids.
 
-The permission hook
--------------------
-There are no accounts yet. The service listens on 127.0.0.1 or a tailnet, and it may
-also be served behind a public, password-gated gateway: in v1 anyone past that gate (or
-on the tailnet) can read, change and manage every project, and change the installation's
-settings. The dependency is where accounts go: :attr:`ProjectContext.actor` is the
-caller's identity today (the tailnet login ``tailscale serve`` adds, else ``"local"``), and
-:meth:`ProjectContext.require` is the single check a route will call -- e.g.
-``ctx.require("review.decide")`` -- once memberships exist. :func:`resolve` already asks
-for ``project.read`` on every request, so read access can be enforced in one place; the
-installation-wide routes (settings, provider test, creating a project) call
-:func:`require_installation`. In v1 both allow everything;
-adding accounts means resolving the actor to a user in :func:`resolve` and making
-``require`` consult the user's role in ``ctx.project``, without changing route URLs.
+Permissions
+-----------
+With ``AUTOONTOLOGY_AUTH=off`` (the default) every caller past the host guard may do
+everything; :attr:`ProjectContext.actor` is the tailnet login or ``"local"``.
+
+With ``AUTOONTOLOGY_AUTH=accounts`` :func:`resolve` takes the signed-in user (401
+``login_required`` without one), their membership in the project (404 ``unknown_project``
+for a non-member: a project's existence is not revealed; admins are owners of every
+project) and puts the role on the context; ``ctx.actor`` is the user's email (what
+``decided_by`` and the audit log record). Routes call :meth:`ProjectContext.require` with a
+permission of :data:`PROJECT_PERMISSIONS` (403 ``forbidden``, the body's ``permission``
+names it); installation-wide routes call :func:`require_installation` (admins only). The
+role table is :data:`PROJECT_PERMISSIONS`: viewer reads, downloads and asks the
+playground; reviewer also decides reviews and applies them; editor also changes sources,
+starts builds and exports and manages agent tokens; owner also manages the project and its
+members and reads its audit log.
+
+Archived projects: playground questions (:func:`playground_question`) stay allowed unless
+``AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`` (then 409 ``project_archived`` too).
 """
 
 from __future__ import annotations
@@ -61,21 +66,64 @@ if TYPE_CHECKING:  # pragma: no cover - api imports this module
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 #: Attribute :func:`allowed_when_archived` sets on a route handler.
 ARCHIVED_OK_ATTR = "_autoontology_allowed_when_archived"
+#: Attribute :func:`playground_question` sets on a route handler.
+PLAYGROUND_ATTR = "_autoontology_playground_question"
 
-#: Permissions a route may ask :meth:`ProjectContext.require` for (documentation; v1
-#: grants all of them).
-PERMISSIONS = (
+# --- roles and permissions ----------------------------------------------------------------
+
+#: Project roles, weakest first (a role has every permission of the roles before it).
+ROLE_ORDER = ("viewer", "reviewer", "editor", "owner")
+
+#: The permission table: each project permission and the weakest role that has it. The one
+#: place roles are defined -- :meth:`ProjectContext.require`, ``/api/auth/me`` and the tests
+#: read it. Admins are owners of every project.
+PROJECT_PERMISSIONS: dict[str, str] = {
+    "project.read": "viewer",  # every GET of the project: sources, runs, ontology, review list
+    "exports.read": "viewer",  # download exports
+    "playground.ask": "viewer",  # chat / SQL / SPARQL, the index, conversations (incl. delete)
+    "review.decide": "reviewer",  # decide and undo review items
+    "review.apply": "reviewer",  # apply runs (decisions -> a new revision)
+    "sources.write": "editor",  # add / delete sources, load samples
+    "runs.start": "editor",  # build and export runs (and cancelling runs)
+    "agent.tokens": "editor",  # create / rotate / revoke outside-agent tokens
+    "project.manage": "owner",  # rename, archive, unarchive
+    "members.manage": "owner",  # add / change / remove members
+    "audit.read": "owner",  # the project's audit log
+}
+
+#: Installation-wide permissions (no project): admins only.
+INSTALLATION_PERMISSIONS = (
     "project.create",
-    "project.read",
-    "project.manage",
-    "sources.write",
-    "runs.start",
-    "review.decide",
-    "exports.read",
-    "playground.ask",
-    "agent.tokens",
-    "settings.manage",
+    "settings.manage",  # settings, provider test, restart
+    "users.manage",  # /api/users
+    "audit.read_all",  # the whole audit log
 )
+
+#: Every permission (documentation and tests).
+PERMISSIONS = (*PROJECT_PERMISSIONS, *INSTALLATION_PERMISSIONS)
+
+
+def role_permissions(role: str | None) -> list[str]:
+    """The project permissions of *role* (None = no access), in table order."""
+    if role not in ROLE_ORDER:
+        return []
+    rank = ROLE_ORDER.index(role)
+    return [p for p, least in PROJECT_PERMISSIONS.items() if ROLE_ORDER.index(least) <= rank]
+
+
+def role_allows(role: str | None, permission: str) -> bool:
+    least = PROJECT_PERMISSIONS.get(permission)
+    if least is None or role not in ROLE_ORDER:
+        return False
+    return ROLE_ORDER.index(role) >= ROLE_ORDER.index(least)
+
+
+def _forbidden(permission: str) -> Exception:
+    from autoontology.web.api import ApiError
+
+    return ApiError(
+        403, "forbidden", f"this needs the {permission!r} permission", permission=permission
+    )
 
 
 @dataclass(frozen=True)
@@ -83,12 +131,20 @@ class ProjectContext:
     """The project a request works on, and who asks.
 
     ``store`` is the project's :class:`ProjectStore` (every read and write limited to
-    it); ``actor`` the caller (tailnet login or ``"local"``); ``alias`` True when the
-    request came through an ``/api/...`` alias of the default project."""
+    it); ``actor`` the caller's name (the user's email with accounts on; else the tailnet
+    login or ``"local"``) -- it is what ``decided_by`` and the audit log record; ``alias``
+    True when the request came through an ``/api/...`` alias of the default project;
+    ``role`` the caller's role in the project (admins and accounts-off callers: ``owner``);
+    ``user_id`` the signed-in user (None: accounts off, the CLI); ``ip`` the client."""
 
     store: ProjectStore
     actor: str = "local"
     alias: bool = False
+    role: str = "owner"
+    is_admin: bool = True
+    user_id: str | None = None
+    ip: str = ""
+    via: str = ""
 
     @property
     def project(self) -> Project:
@@ -102,16 +158,94 @@ class ProjectContext:
     def slug(self) -> str:
         return self.store.slug
 
+    def can(self, permission: str) -> bool:
+        if self.is_admin:
+            return True
+        return role_allows(self.role, permission)
+
     def require(self, permission: str) -> None:
-        """Raise when :attr:`actor` lacks *permission* in this project (the hook for
-        accounts; v1 has none and allows everything)."""
-        del permission
+        """403 ``forbidden`` (``permission`` names what was missing) unless the caller's
+        role has *permission* in this project (see :data:`PROJECT_PERMISSIONS`)."""
+        if not self.can(permission):
+            raise _forbidden(permission)
+
+    @property
+    def permissions(self) -> list[str]:
+        return list(PROJECT_PERMISSIONS) if self.is_admin else role_permissions(self.role)
+
+    def audit(self, action: str, target: str = "", detail: dict[str, Any] | None = None) -> None:
+        """Record *action* on this project in the audit log (never a secret in *detail*)."""
+
+        audit(
+            self.store.store,
+            action,
+            self.actor,
+            self.user_id,
+            self.via,
+            self.ip,
+            project_id=self.id,
+            target=target,
+            detail=detail,
+        )
 
 
-def require_installation(actor: str, permission: str) -> None:
-    """The installation-wide counterpart of :meth:`ProjectContext.require` (creating a
-    project; later the settings and user management): v1 allows everything."""
-    del actor, permission
+def audit(
+    store: Any,
+    action: str,
+    actor: str,
+    user_id: str | None,
+    via: str = "",
+    ip: str = "",
+    *,
+    project_id: str | None = None,
+    target: str = "",
+    detail: dict[str, Any] | None = None,
+) -> None:
+    """Append to the audit log: a user's entry carries its ``user_id``; any other caller
+    (accounts off, the CLI) its name as ``actor``. The CLI's entries say ``via: cli``."""
+    from autoontology.store.accounts import Accounts
+
+    body = dict(detail or {})
+    if via in ("cli", "internal"):
+        body["via"] = "cli"
+    Accounts(store).record(
+        action,
+        user_id=user_id,
+        actor=None if user_id else actor,
+        project_id=project_id,
+        target=target,
+        detail=body,
+        ip=ip,
+    )
+
+
+def request_actor(api: Api, request: Request) -> Any:
+    """The caller of *request* as an :class:`~autoontology.web.auth.Actor` (None: signed out
+    with accounts on). Without the service's sign-in state (the CLI's in-process app) the
+    caller is the trusted CLI: an admin named ``cli`` (or ``X-AutoOntology-As``)."""
+    from autoontology.web.auth import Actor, cli_actor, current_user
+
+    if getattr(request.app.state, "auth", None) is None:
+        if not api.settings.accounts_enabled:
+            return Actor(name=api.decided_by(request), is_admin=True, via="off")
+        return cli_actor(api, request)
+    return current_user(request)
+
+
+def require_installation(actor: Any, permission: str) -> None:
+    """The installation-wide counterpart of :meth:`ProjectContext.require`: *actor* is the
+    request (or an :class:`~autoontology.web.auth.Actor`); 401 ``login_required`` when
+    signed out, 403 ``forbidden`` unless an admin (accounts off: everyone is)."""
+    from autoontology.web.api import ApiError
+    from autoontology.web.auth import Actor
+
+    if isinstance(actor, Request):
+        api = actor.app.state.api
+        actor = request_actor(api, actor)
+        if actor is None:
+            raise ApiError(401, "login_required", "sign in first")
+    if isinstance(actor, Actor) and not actor.is_admin:
+        raise _forbidden(permission)
 
 
 def allowed_when_archived(handler: Callable[..., Any]) -> Callable[..., Any]:
@@ -120,6 +254,13 @@ def allowed_when_archived(handler: Callable[..., Any]) -> Callable[..., Any]:
     decorator, so the marked function is the one registered."""
     setattr(handler, ARCHIVED_OK_ATTR, True)
     return handler
+
+
+def playground_question(handler: Callable[..., Any]) -> Callable[..., Any]:
+    """Mark a playground question route (chat, SQL, SPARQL): allowed on an archived project
+    unless ``AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny``."""
+    setattr(handler, PLAYGROUND_ATTR, True)
+    return allowed_when_archived(handler)
 
 
 def is_write(request: Request) -> bool:
@@ -131,23 +272,62 @@ def is_write(request: Request) -> bool:
     return not getattr(request.scope.get("endpoint"), ARCHIVED_OK_ATTR, False)
 
 
+def _archived_refused(api: Api, request: Request) -> bool:
+    if is_write(request):
+        return True
+    return api.settings.archived_playground == "deny" and bool(
+        getattr(request.scope.get("endpoint"), PLAYGROUND_ATTR, False)
+    )
+
+
+def member_role(api: Api, project_id: str, user: Any) -> str | None:
+    """*user*'s role in the project: ``owner`` for an admin, None for a non-member."""
+    from autoontology.store.accounts import Accounts
+
+    if user is None or not user.active:
+        return None
+    if user.is_admin:
+        return "owner"
+    return Accounts(api.store).role_of(project_id, user.id)
+
+
 def resolve(api: Api, ref: str | None, request: Request, *, alias: bool = False) -> ProjectContext:
     """The :class:`ProjectContext` of *ref* (a slug or id; None = the default project)
-    for *request*: 404 ``unknown_project``, 409 ``project_archived`` for a write."""
+    for *request*: 401 ``login_required`` (accounts on, signed out), 404
+    ``unknown_project`` (also for a project the user is not a member of), 409
+    ``project_archived`` for a write."""
     from autoontology.web.api import ApiError
+    from autoontology.web.auth import client_ip
 
+    actor = request_actor(api, request)
+    if actor is None:
+        raise ApiError(401, "login_required", "sign in first")
     try:
         view = api.store.project(ref)
     except ProjectNotFound as exc:
         raise ApiError(404, "unknown_project", f"unknown project {str(ref)[:80]!r}") from exc
-    if view.project.archived and is_write(request):
+    role = "owner"
+    if not actor.is_admin:
+        role = member_role(api, view.id, actor.user) or ""
+        if not role:  # hide the project's existence
+            raise ApiError(404, "unknown_project", f"unknown project {str(ref)[:80]!r}")
+    if view.project.archived and _archived_refused(api, request):
         raise ApiError(
             409,
             "project_archived",
             f"project {view.slug!r} is archived: unarchive it to change it",
         )
-    ctx = ProjectContext(store=view, actor=api.decided_by(request), alias=alias)
-    ctx.require("project.read")  # every request: the place to enforce read access later
+    ctx = ProjectContext(
+        store=view,
+        actor=actor.name,
+        alias=alias,
+        role=role,
+        is_admin=actor.is_admin,
+        user_id=actor.user_id,
+        ip=client_ip(request),
+        via=actor.via,
+    )
+    ctx.require("project.read")  # every request
     return ctx
 
 
@@ -311,6 +491,10 @@ def _rename_held(api: Api, ctx: ProjectContext, patch: ProjectPatch, new_slug: s
         raise
 
 
+def _perms(actor: Any, role: str) -> list[str]:
+    return list(PROJECT_PERMISSIONS) if actor.is_admin else role_permissions(role)
+
+
 def build_router(api: Api, prefix: str) -> APIRouter:
     """``/api/projects`` (list, create) and ``/api/projects/{project}`` (show, patch,
     archive, unarchive). No delete in v1: archive keeps everything."""
@@ -320,12 +504,22 @@ def build_router(api: Api, prefix: str) -> APIRouter:
     ctx_dep = path_project(api)
 
     @router.get("")
-    def list_projects(include_archived: bool = True) -> dict[str, Any]:
+    def list_projects(request: Request, include_archived: bool = True) -> dict[str, Any]:
+        actor = request_actor(api, request)
+        if actor is None:
+            raise ApiError(401, "login_required", "sign in first")
         projects = api.store.list_projects(include_archived=include_archived)
-        return {
-            "projects": [project_dict(api, p) for p in projects],
-            "default": api.store.default_project().slug,
-        }
+        roles: dict[str, str] = {}
+        if not actor.is_admin:
+            from autoontology.store.accounts import Accounts
+
+            roles = dict(Accounts(api.store).projects_of(actor.user_id)) if actor.user else {}
+            projects = [p for p in projects if p.id in roles]
+        rows = []
+        for p in projects:
+            role = "owner" if actor.is_admin else roles[p.id]
+            rows.append({**project_dict(api, p), "role": role, "permissions": _perms(actor, role)})
+        return {"projects": rows, "default": api.store.default_project().slug}
 
     @router.post("", status_code=201)
     def create_project(body: dict[str, Any], request: Request) -> dict[str, Any]:
@@ -333,7 +527,7 @@ def build_router(api: Api, prefix: str) -> APIRouter:
             req = ProjectIn.model_validate(body)
         except ValidationError as exc:
             raise _validation(exc) from exc
-        require_installation(api.decided_by(request), "project.create")
+        require_installation(request, "project.create")
         slug = _slug(req.slug)
         try:
             view = api.store.create_project(
@@ -341,11 +535,29 @@ def build_router(api: Api, prefix: str) -> APIRouter:
             )
         except ValueError as exc:
             raise ApiError(409, "project_exists", str(exc)) from exc
+        actor = request_actor(api, request)
+        if actor is not None and actor.user is not None:  # the creator owns it
+            from autoontology.store.accounts import Accounts
+
+            Accounts(api.store).add_member(view.id, actor.user.id, "owner")
+        if actor is not None:
+            from autoontology.web.auth import client_ip
+
+            audit(
+                api.store,
+                "project.create",
+                actor.name,
+                actor.user_id,
+                actor.via,
+                client_ip(request),
+                project_id=view.id,
+                target=view.slug,
+            )
         return project_dict(api, view.project)
 
     @router.get("/{project}")
     def show_project(ctx: ProjectContext = Depends(ctx_dep)) -> dict[str, Any]:  # noqa: B008
-        return project_dict(api, ctx.project)
+        return {**project_dict(api, ctx.project), "role": ctx.role, "permissions": ctx.permissions}
 
     @router.patch("/{project}")
     def patch_project(
@@ -357,21 +569,36 @@ def build_router(api: Api, prefix: str) -> APIRouter:
             patch = ProjectPatch.model_validate(body)
         except ValidationError as exc:
             raise _validation(exc) from exc
-        return project_dict(api, rename_project(api, ctx, patch))
+        before = ctx.slug
+        project = rename_project(api, ctx, patch)
+        ctx.audit(
+            "project.rename",
+            target=project.slug,
+            detail={k: v for k, v in patch.model_dump().items() if v is not None}
+            | ({"old_slug": before} if before != project.slug else {}),
+        )
+        return project_dict(api, project)
 
     @router.post("/{project}/archive")
     @allowed_when_archived
     def archive_project(ctx: ProjectContext = Depends(ctx_dep)) -> dict[str, Any]:  # noqa: B008
         ctx.require("project.manage")
         try:
-            return project_dict(api, api.store.archive_project(ctx.id))
+            project = api.store.archive_project(ctx.id)
         except ValueError as exc:
             raise ApiError(409, "default_project", str(exc)) from exc
+        ctx.audit("project.archive", target=ctx.slug)
+        return project_dict(api, project)
 
     @router.post("/{project}/unarchive")
     @allowed_when_archived
     def unarchive_project(ctx: ProjectContext = Depends(ctx_dep)) -> dict[str, Any]:  # noqa: B008
         ctx.require("project.manage")
-        return project_dict(api, api.store.unarchive_project(ctx.id))
+        project = api.store.unarchive_project(ctx.id)
+        ctx.audit("project.unarchive", target=ctx.slug)
+        return project_dict(api, project)
 
+    from autoontology.web.accounts_api import add_member_routes
+
+    add_member_routes(router, api, ctx_dep)
     return router

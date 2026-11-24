@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from autoontology.config import CHAT_PROVIDERS, Settings
+from autoontology.config import CHAT_PROVIDERS, Settings, internal_headers
 from autoontology.web.providers.base import parse_json_answer, schema_problem
 from autoontology.web.providers.ollama import proxy_timeout_s
 from autoontology.web.providers.openai_compat import ProviderError
@@ -76,8 +76,11 @@ class RouterLLM:
         model: str,
         timeout: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        #: the service's local key with accounts on (``config.internal_headers``)
+        self.headers = dict(headers or {})
         self.model_name = model_name
         self.provider = provider
         self.model = model
@@ -87,7 +90,9 @@ class RouterLLM:
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
-            timeout=httpx.Timeout(self.timeout, connect=5.0), transport=self.transport
+            timeout=httpx.Timeout(self.timeout, connect=5.0),
+            transport=self.transport,
+            headers=self.headers,
         )
 
     async def stream(
@@ -229,4 +234,5 @@ def llm_for(settings: Settings, *, transport: httpx.AsyncBaseTransport | None = 
         provider=settings.chat_provider,
         model=settings.effective_chat_model,
         transport=transport,
+        headers=internal_headers(settings),
     )

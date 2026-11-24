@@ -250,7 +250,23 @@ def test_me_lists_memberships(env):
     _login(client)
     me = client.get("/api/auth/me").json()
     assert me["memberships"] == [
-        {"project_id": beta.id, "slug": "beta", "name": "Beta", "archived": False, "role": "editor"}
+        {
+            "project_id": beta.id,
+            "slug": "beta",
+            "name": "Beta",
+            "archived": False,
+            "role": "editor",
+            "permissions": [
+                "project.read",
+                "exports.read",
+                "playground.ask",
+                "review.decide",
+                "review.apply",
+                "sources.write",
+                "runs.start",
+                "agent.tokens",
+            ],
+        }
     ]
     assert me["magic_link_enabled"] is False
 
@@ -298,8 +314,11 @@ def test_magic_link_mail_and_single_use_redeem(isolated_env, monkeypatch, caplog
     assert link, message.get_content()
     token = link.group(1)
     assert "smtp-secret-value" not in caplog.text and token not in caplog.text
-    resp = client.get(f"/auth/magic/{token}", follow_redirects=False)
-    assert resp.status_code == 303 and resp.headers["location"] == "/ui/"
+    page = client.get(f"/auth/magic/{token}", follow_redirects=False)
+    assert page.status_code == 200 and "set-cookie" not in page.headers  # GET never signs in
+    assert page.headers["referrer-policy"] == "no-referrer"
+    resp = client.post("/api/auth/magic", json={"token": token})
+    assert resp.status_code == 200 and resp.json()["user"]["email"] == "kim@example.com"
     assert "secure" in _set_cookie(resp).lower()  # https public URL
     assert resp.headers["referrer-policy"] == "no-referrer"
     assert accounts.lookup_session(resp.cookies["ao_session"])[1].email == "kim@example.com"
@@ -472,9 +491,12 @@ def test_off_mode_is_unchanged(isolated_env, monkeypatch):
     assert client.get("/api/projects").status_code == 200
 
 
-def test_accounts_mode_leaves_other_routes_open_in_t1(env):
-    """Enforcement comes with the permission step; sign-in alone changes no other route."""
+def test_accounts_mode_requires_a_session_elsewhere(env):
+    """The other routes need a signed-in user (tests/test_permissions.py has the matrix)."""
     client, *_ = env
+    assert client.get("/api/projects").status_code == 401
+    assert client.get("/api/status").status_code == 401
+    _login(client)
     assert client.get("/api/projects").status_code == 200
     assert client.get("/api/status").status_code == 200
 

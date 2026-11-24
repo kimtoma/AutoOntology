@@ -736,8 +736,14 @@ class Api:
         if not self._provider_test_lock.acquire(blocking=False):
             raise ApiError(409, "test_in_progress", "a provider test is already running")
         try:
+            from autoontology.config import internal_headers
+
             transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://127.0.0.1",
+                headers=internal_headers(self.settings),
+            ) as c:
                 result = await probe.run_test_async(self.settings, client=c, via="service")
         finally:
             self._provider_test_lock.release()
@@ -778,6 +784,10 @@ def build_router(api: Api) -> APIRouter:
     )
     router.include_router(project_routes(api, default_project(api)), prefix=PREFIX)
     router.include_router(installation_routes(api), prefix=PREFIX)
+    from autoontology.web import accounts_api
+
+    router.include_router(accounts_api.users_router(api, PREFIX))
+    router.include_router(accounts_api.audit_router(api, PREFIX))
     return router
 
 
@@ -791,7 +801,7 @@ def installation_routes(api: Api) -> APIRouter:
 
     @router.post("/providers/test")
     async def test_provider(request: Request) -> dict[str, Any]:
-        require_installation(api.decided_by(request), "settings.manage")
+        require_installation(request, "settings.manage")
         return await api.test_provider(request.app)
 
     return router
@@ -829,14 +839,22 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
                 )
             form = await request.form()
             try:
-                return await _add_upload(api, form, ctx.store)
+                added = await _add_upload(api, form, ctx.store)
             finally:
                 await form.close()
-        try:
-            body = SourceIn.model_validate(await request.json())
-        except (ValidationError, ValueError) as exc:
-            raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
-        return await anyio.to_thread.run_sync(_add_locator, api, body, ctx.store)
+        else:
+            try:
+                body = SourceIn.model_validate(await request.json())
+            except (ValidationError, ValueError) as exc:
+                raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
+            added = await anyio.to_thread.run_sync(_add_locator, api, body, ctx.store)
+        name = added.get("name") if isinstance(added, dict) else None
+        await anyio.to_thread.run_sync(
+            lambda: ctx.audit(
+                "source.add", target=str(name or ""), detail={"kind": added.get("kind")}
+            )
+        )
+        return added
 
     @router.delete("/sources/{name}")
     def delete_source(
@@ -865,13 +883,15 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
         if api._is_upload(source, view) and upload.is_dir():
             shutil.rmtree(upload, ignore_errors=True)
             messages.append("deleted the uploaded files")
+        ctx.audit("source.delete", target=source.name, detail={"drop_db": drop_db})
         return {"removed": source.name, "messages": messages}
 
     # runs ---------------------------------------------------------------------------
 
     @router.post("/runs", status_code=202)
     def start_run(body: dict[str, Any], ctx: ProjectContext = Ctx) -> dict[str, Any]:
-        ctx.require("runs.start")
+        kind = body.get("kind") if isinstance(body, dict) else None
+        ctx.require("review.apply" if kind == "apply" else "runs.start")
         try:
             req = RunIn.model_validate(body)
         except ValidationError as exc:
@@ -884,6 +904,16 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
                 exc.status, "run_not_started"
             )
             raise ApiError(exc.status, code, mask(str(exc))) from exc
+        ctx.audit(
+            "run.start",
+            target=run_id,
+            detail={
+                k: v
+                for k, v in req.model_dump().items()
+                if v not in (None, False) and k != "sources"
+            }
+            | ({"sources": req.sources} if req.sources else {}),
+        )
         return {"run_id": run_id}
 
     @router.get("/runs")
@@ -909,14 +939,15 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
 
     @router.post("/runs/{run_id}/cancel", status_code=202)
     def cancel_run(run_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
-        ctx.require("runs.start")
         run = _run(run_id, ctx.store)
+        ctx.require("review.apply" if run.kind == "apply" else "runs.start")
         if run.status not in ACTIVE_RUN_STATUSES or not api.runs.cancel(run_id):
             raise ApiError(
                 409,
                 "not_cancellable",
                 f"run {run_id} is not running in this service ({run.status})",
             )
+        ctx.audit("run.cancel", target=run_id, detail={"kind": run.kind})
         return {"run_id": run_id, "cancel_requested": True}
 
     @router.get("/runs/{run_id}/events")
@@ -992,6 +1023,14 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
             )
         )
         item = {**inbox.items[item_id], "decision": decision.to_dict()}
+        ctx.audit(
+            "review.decide",
+            target=item_id[:300],
+            detail={
+                "decision": req.decision,
+                **({"relation": req.relation} if req.relation else {}),
+            },
+        )
         return {"item": item, "decision": decision.to_dict()}
 
     @router.delete("/review/{item_id:path}/decision")
@@ -1000,6 +1039,7 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
         inbox = api.inbox(project=ctx.store)
         if not _review(lambda: inbox.undo(item_id)):
             raise ApiError(404, "no_decision", f"no decision on {item_id[:80]!r}")
+        ctx.audit("review.undo", target=item_id[:300])
         return {"removed": item_id}
 
     @router.get("/ontology/revisions")
@@ -1115,12 +1155,14 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
     def download_export_zip(rev: str, ctx: ProjectContext = Ctx) -> Response:
         """The whole revision folder as one zip (:func:`export_zip_response`). Sync, so
         the zipping runs in the threadpool."""
+        ctx.require("exports.read")
         return export_zip_response(api.settings, rev, ctx.store)
 
     @router.get("/exports/{rev}/{file_path:path}")
     def download_export(
         rev: str, file_path: str, inline: bool = False, ctx: ProjectContext = Ctx
     ) -> Response:
+        ctx.require("exports.read")
         rev = _export_dir(rev)
         if not _export_path_ok(file_path):
             raise ApiError(400, "invalid_path", "invalid export path")
@@ -1154,7 +1196,11 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
             raise ApiError(400, "invalid_body", "the body must be a JSON object") from exc
         if not isinstance(body, dict):
             raise ApiError(400, "invalid_body", "the body must be a JSON object")
-        return await anyio.to_thread.run_sync(_load_samples, api, body, ctx.store)
+        loaded = await anyio.to_thread.run_sync(_load_samples, api, body, ctx.store)
+        await anyio.to_thread.run_sync(
+            lambda: ctx.audit("samples.load", target=str(body.get("set") or "")[:100])
+        )
+        return loaded
 
     # outside-agent tokens and usage (the agent surface itself: agent_api.install) ---------
     from autoontology.web.agent_api import add_management_routes
@@ -1747,6 +1793,12 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
                         {"error": "cross_origin", "detail": "cross-origin requests are refused"},
                         status_code=403,
                     )
+        # accounts on: sign-in required everywhere but the public paths; /v1 and /ingest
+        # only for the local engine, the CLI or an admin (auth.engine_refusal)
+        if settings.accounts_enabled:
+            refused = await anyio.to_thread.run_sync(auth.engine_refusal, api, request)
+            if refused is not None:
+                return refused
         return await call_next(request)
 
     @app.exception_handler(ApiError)

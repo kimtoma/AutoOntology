@@ -51,6 +51,8 @@ class AgentToken:
     last_used_at: str | None
     revoked_at: str | None
     project_id: str = ""
+    #: the user who created (or last rotated) it; None = before accounts / the CLI
+    created_by: str | None = None
 
     @property
     def expired(self) -> bool:
@@ -74,10 +76,14 @@ class AgentToken:
             "last_used_at": self.last_used_at,
             "revoked_at": self.revoked_at,
             "status": self.status,
+            "created_by": self.created_by,
         }
 
 
-_COLUMNS = "id, name, revision_pin, expires_at, created_at, last_used_at, revoked_at, project_id"
+_COLUMNS = (
+    "id, name, revision_pin, expires_at, created_at, last_used_at, revoked_at, project_id, "
+    "created_by"
+)
 
 
 def _token(row: Any) -> AgentToken:
@@ -101,7 +107,12 @@ class AgentTokens:
     # --- tokens -------------------------------------------------------------------------
 
     def create(
-        self, name: str, *, revision_pin: int | None = None, expires_days: int | None = None
+        self,
+        name: str,
+        *,
+        revision_pin: int | None = None,
+        expires_days: int | None = None,
+        created_by: str | None = None,
     ) -> tuple[str, AgentToken]:
         """``(raw token, record)``; the raw token is not kept anywhere."""
         raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
@@ -115,7 +126,7 @@ class AgentTokens:
         with self.store._conn() as conn:
             conn.execute(
                 "INSERT INTO agent_tokens (id, name, token_hash, revision_pin, expires_at, "
-                "created_at, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "created_at, project_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     token_id,
                     name,
@@ -124,6 +135,7 @@ class AgentTokens:
                     expires,
                     created.isoformat(timespec="milliseconds"),
                     self.project_id,
+                    created_by,
                 ),
             )
         found = self.get(token_id)
@@ -153,8 +165,10 @@ class AgentTokens:
             raise TokenError(404, "unknown_token", f"unknown token {token_id[:80]!r}")
         return found
 
-    def rotate(self, token_id: str) -> tuple[str, AgentToken]:
-        """A new raw token for *token_id* (same id, pin and expiry); the old one dies."""
+    def rotate(self, token_id: str, *, created_by: str | None = None) -> tuple[str, AgentToken]:
+        """A new raw token for *token_id* (same id, pin and expiry); the old one dies. With
+        *created_by* the rotating user becomes the token's creator (it lives on their
+        access)."""
         current = self._require(token_id)
         if current.revoked_at:
             raise TokenError(409, "token_revoked", "a revoked token cannot be rotated")
@@ -163,9 +177,9 @@ class AgentTokens:
         raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
         with self.store._conn() as conn:
             conn.execute(
-                "UPDATE agent_tokens SET token_hash = ? WHERE id = ? AND project_id = ? "
-                "AND revoked_at IS NULL",
-                (token_hash(raw), token_id, self.project_id),
+                "UPDATE agent_tokens SET token_hash = ?, created_by = COALESCE(?, created_by) "
+                "WHERE id = ? AND project_id = ? AND revoked_at IS NULL",
+                (token_hash(raw), created_by, token_id, self.project_id),
             )
         return raw, self._require(token_id)
 

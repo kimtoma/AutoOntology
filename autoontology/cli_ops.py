@@ -182,10 +182,16 @@ class ServiceClient(_Caller):
     """Calls to the running service (local only: ``127.0.0.1:<port>``, no proxy)."""
 
     def __init__(self, settings: Any, project: str | None = None) -> None:
+        from autoontology.config import internal_headers
+
         self.settings = settings
         self.url = settings.service_url
         self.project = project
         self.client = http_client(settings)
+        # accounts on: the service trusts this installation's local key (admin, ``cli``)
+        headers = getattr(self.client, "headers", None)
+        if headers is not None:
+            headers.update(internal_headers(settings, base._as_user()))
 
 
 def local_app(settings: Any) -> Any:
@@ -222,9 +228,13 @@ class LocalApi(_Caller):
     def __init__(self, settings: Any, project: str | None = None) -> None:
         from fastapi.testclient import TestClient
 
+        from autoontology.config import INTERNAL_AS_HEADER
+
         self.url = "local"
         self.project = project
         self.client = TestClient(local_app(settings), base_url="http://127.0.0.1")
+        if base._as_user():
+            self.client.headers[INTERNAL_AS_HEADER] = base._as_user()
 
 
 # --- shared helpers -----------------------------------------------------------------
@@ -1830,6 +1840,19 @@ def _accounts(settings: Any) -> Any:
     return Accounts(Store.for_home(settings.home, default_project_slug=settings.workspace))
 
 
+def _cli_record(accounts: Any, action: str, **kw: Any) -> None:
+    """An audit entry by the CLI (``actor: cli``, ``via: cli``); ``--as <email>`` attributes
+    it to that user."""
+    detail = dict(kw.pop("detail", None) or {})
+    detail["via"] = "cli"
+    email = base._as_user()
+    user = accounts.by_email(email) if email else None
+    if user is not None:
+        accounts.record(action, user_id=user.id, detail=detail, **kw)
+    else:
+        accounts.record(action, actor="cli", detail=detail, **kw)
+
+
 def _account_error(exc: Any) -> None:
     code = 2 if exc.code in ("invalid_email", "weak_password", "invalid_purpose") else 1
     _error(exc.code, str(exc), code)
@@ -1899,7 +1922,7 @@ def user_create(
         user = accounts.create_user(email, name=name, is_admin=admin, password=password)
     except AccountError as exc:
         _account_error(exc)
-    accounts.record("user.create", actor="cli", target=user.email, detail={"admin": user.is_admin})
+    _cli_record(accounts, "user.create", target=user.email, detail={"admin": user.is_admin})
     issued = None if password_stdin else _issue_link(settings, accounts, user, "invite")
     if as_json:
         _json({"user": user.to_dict(), **({"invite": issued} if issued else {})})
@@ -1926,7 +1949,7 @@ def _set_active(email: str, active: bool, as_json: bool) -> None:
     accounts = _accounts(base._settings())
     user = _user_by_email(accounts, email)
     user = accounts.enable(user.id) if active else accounts.disable(user.id)
-    accounts.record("user.enable" if active else "user.disable", actor="cli", target=user.email)
+    _cli_record(accounts, "user.enable" if active else "user.disable", target=user.email)
     if as_json:
         _json(user.to_dict())
         return
@@ -1962,11 +1985,202 @@ def user_link(
     if not user.active:
         _error("user_disabled", msg("ops.user_is_disabled", email=user.email), 1)
     issued = _issue_link(settings, accounts, user, purpose)
-    accounts.record("user.link", actor="cli", target=user.email, detail={"purpose": purpose})
+    _cli_record(accounts, "user.link", target=user.email, detail={"purpose": purpose})
     if as_json:
         _json(issued)
         return
     _print_link(settings, issued)
+
+
+# --- members and audit (server-side admin) ---------------------------------------------
+
+member_app = typer.Typer(help=msg("help.member"), no_args_is_help=True)
+MEMBER_ROLES = ("owner", "editor", "reviewer", "viewer")
+
+
+def _member_project(accounts: Any) -> Any:
+    from autoontology.store.db import ProjectNotFound
+
+    try:
+        return accounts.store.project(base._project())
+    except ProjectNotFound:
+        _error("unknown_project", msg("ops.member_unknown_project", ref=base._project()), 1)
+
+
+def _member_role_arg(role: str) -> str:
+    if role not in MEMBER_ROLES:
+        _error("invalid_role", msg("ops.member_bad_role", role=role), 2)
+    return role
+
+
+def _member_rows(rows: list[dict[str, Any]]) -> str:
+    table = [
+        (
+            r["email"],
+            r["name"] or "-",
+            r["role"],
+            "active" if r["active"] else "disabled",
+            (r["member_since"] or "-")[:19],
+        )
+        for r in rows
+    ]
+    return base._table(("EMAIL", "NAME", "ROLE", "STATE", "SINCE"), table)
+
+
+@member_app.command("list", help=msg("help.member.list"))
+def member_list(as_json: bool = _JSON) -> None:
+    accounts = _accounts(base._settings())
+    view = _member_project(accounts)
+    rows = accounts.list_members(view.id)
+    if as_json:
+        _json({"project": view.slug, "members": rows})
+        return
+    if not rows:
+        typer.echo(msg("ops.member_none", slug=view.slug))
+        return
+    typer.echo(_member_rows(rows))
+
+
+@member_app.command("add", help=msg("help.member.add"))
+def member_add(
+    email: str = typer.Argument(..., help=msg("help.user.email")),
+    role: str = typer.Option("viewer", "--role", help=msg("help.member.role")),
+    as_json: bool = _JSON,
+) -> None:
+    from autoontology.store.accounts import AccountError
+
+    settings = base._settings()
+    accounts = _accounts(settings)
+    view = _member_project(accounts)
+    role = _member_role_arg(role)
+    user = accounts.by_email(email)
+    issued = None
+    try:
+        if user is None:
+            user = accounts.create_user(email)
+            _cli_record(accounts, "user.invite", target=user.email, project_id=view.id)
+            issued = _issue_link(settings, accounts, user, "invite")
+        accounts.add_member(view.id, user.id, role)
+    except AccountError as exc:
+        _account_error(exc)
+    _cli_record(
+        accounts, "member.add", target=user.email, project_id=view.id, detail={"role": role}
+    )
+    if as_json:
+        _json(
+            {
+                "project": view.slug,
+                "email": user.email,
+                "role": role,
+                **({"invite": issued} if issued else {}),
+            }
+        )
+        return
+    typer.echo(msg("ops.member_added", email=user.email, slug=view.slug, role=role))
+    if issued:
+        typer.echo(msg("ops.user_invite_hint"))
+        _print_link(settings, issued)
+
+
+@member_app.command("role", help=msg("help.member.set_role"))
+def member_role(
+    email: str = typer.Argument(..., help=msg("help.user.email")),
+    role: str = typer.Argument(..., help=msg("help.member.role")),
+    as_json: bool = _JSON,
+) -> None:
+    from autoontology.store.accounts import AccountError
+
+    accounts = _accounts(base._settings())
+    view = _member_project(accounts)
+    role = _member_role_arg(role)
+    user = _user_by_email(accounts, email)
+    before = accounts.role_of(view.id, user.id)
+    try:
+        accounts.set_role(view.id, user.id, role)
+    except AccountError as exc:
+        _account_error(exc)
+    if before != role:
+        _cli_record(
+            accounts,
+            "member.role",
+            target=user.email,
+            project_id=view.id,
+            detail={"from": before, "to": role},
+        )
+    if as_json:
+        _json({"project": view.slug, "email": user.email, "role": role})
+        return
+    typer.echo(msg("ops.member_role_set", email=user.email, slug=view.slug, role=role))
+
+
+@member_app.command("remove", help=msg("help.member.remove"))
+def member_remove(
+    email: str = typer.Argument(..., help=msg("help.user.email")), as_json: bool = _JSON
+) -> None:
+    from autoontology.store.accounts import AccountError
+
+    accounts = _accounts(base._settings())
+    view = _member_project(accounts)
+    user = _user_by_email(accounts, email)
+    before = accounts.role_of(view.id, user.id)
+    try:
+        accounts.remove_member(view.id, user.id)
+    except AccountError as exc:
+        _account_error(exc)
+    _cli_record(
+        accounts, "member.remove", target=user.email, project_id=view.id, detail={"role": before}
+    )
+    if as_json:
+        _json({"project": view.slug, "removed": user.email})
+        return
+    typer.echo(msg("ops.member_removed", email=user.email, slug=view.slug))
+
+
+def audit_cmd(
+    project: str = typer.Option(None, "--project", help=msg("help.audit.project")),
+    user: str = typer.Option(None, "--user", help=msg("help.audit.user")),
+    action: str = typer.Option(None, "--action", help=msg("help.audit.action")),
+    limit: int = typer.Option(50, "--limit", min=1, max=500, help=msg("help.audit.limit")),
+    as_json: bool = _JSON,
+) -> None:
+    from autoontology.store.db import ProjectNotFound
+
+    accounts = _accounts(base._settings())
+    store = accounts.store
+    project_id = None
+    ref = project or base._project()
+    if ref:
+        try:
+            project_id = store.project(ref).id
+        except ProjectNotFound:
+            _error("unknown_project", msg("ops.member_unknown_project", ref=ref), 1)
+    user_id = None
+    if user:
+        user_id = _user_by_email(accounts, user).id
+    entries = accounts.list_audit(
+        project_id=project_id, user_id=user_id, action=action or None, limit=limit
+    )
+    slugs = {p.id: p.slug for p in store.list_projects(include_archived=True)}
+    for entry in entries:
+        entry["project"] = slugs.get(entry["project_id"]) if entry["project_id"] else None
+    if as_json:
+        _json({"entries": entries})
+        return
+    if not entries:
+        typer.echo(msg("ops.audit_none"))
+        return
+    rows = [
+        (
+            e["at"][:19].replace("T", " "),
+            _short(e["actor"], 32),
+            e["action"],
+            e["project"] or "-",
+            _short(e["target"] or "-", 40),
+            e["ip"] or "-",
+        )
+        for e in entries
+    ]
+    typer.echo(base._table(("AT (UTC)", "ACTOR", "ACTION", "PROJECT", "TARGET", "IP"), rows))
 
 
 # --- registration -------------------------------------------------------------------
@@ -1983,6 +2197,8 @@ def register(app: typer.Typer, source_app: typer.Typer) -> None:
     app.add_typer(agent_app, name="agent")
     app.add_typer(project_app, name="project")
     app.add_typer(user_app, name="user")
+    app.add_typer(member_app, name="member")
+    app.command("audit", help=msg("help.audit"))(audit_cmd)
     source_app.command("freshness", help=msg("help.sources.freshness"))(sources_freshness)
     # `sources freshness` (the UI's page name) is `source freshness`
     app.add_typer(source_app, name="sources", hidden=True)

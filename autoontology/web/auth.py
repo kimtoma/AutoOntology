@@ -34,8 +34,13 @@ cross-origin checks (``web/api.py``), which is what stops login CSRF.
     ``{email}`` -> always 202 ``{"ok": true}``; a link is mailed only when the user exists,
     is active, SMTP is configured and the per-IP/per-email limit allows it.
 ``GET /auth/magic/{token}``
-    a valid magic token -> session cookie + 303 ``/ui/``; anything else -> 303
-    ``/ui/login?error=link``.
+    never signs in (mail scanners prefetch links): a valid magic token gets a small confirm
+    page whose button POSTs it to ``/api/auth/magic`` (``no-store``, no framing); anything
+    else -> 303 ``/ui/login?error=link``.
+``POST /api/auth/magic``
+    ``{token}`` (JSON) -> uses the token, 200 the :func:`me` body + cookie; 400
+    ``invalid_token``. The confirm page's form post (urlencoded) gets 303 ``/ui/`` (or
+    ``/ui/login?error=link``) instead.
 ``POST /api/auth/accept-invite``
     ``{token, password}`` (an invite or reset token) -> sets the password, uses the token,
     ends the user's other sessions, signs in: 200 the :func:`me` body + cookie; 400
@@ -45,6 +50,14 @@ cross-origin checks (``web/api.py``), which is what stops login CSRF.
     -> 200 ``{"ok": true, "revoked_sessions": n}``, every other session ends; 401
     ``login_required``, 403 ``wrong_password``, 400 ``weak_password``.
 
+``GET /api/auth/me`` also lists ``permissions`` (``{slug: [permission, ...]}``, admins:
+every project) and ``installation_permissions`` (see ``web/projects.py``).
+
+Enforcement (:func:`engine_refusal`, run by the service middleware with accounts on): every
+path but the public ones (:data:`PUBLIC_PREFIXES`) needs a signed-in user; ``/v1`` and
+``/ingest`` take the engine's keys (``config.py``, "local trust"), the CLI's local key or an
+admin.
+
 With ``AUTOONTOLOGY_AUTH=off`` the sign-in routes answer 409 ``accounts_off`` (``me`` and
 ``logout`` still answer, ``/auth/magic/...`` redirects to ``/ui/``).
 """
@@ -52,6 +65,7 @@ With ``AUTOONTOLOGY_AUTH=off`` the sign-in routes answer 409 ``accounts_off`` (`
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import re
 import threading
@@ -62,9 +76,17 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from autoontology.config import LOCAL_HOSTS, host_name
+from autoontology.config import (
+    INTERNAL_AS_HEADER,
+    INTERNAL_HEADER,
+    INTERNAL_INGEST_PREFIX,
+    LOCAL_HOSTS,
+    derived_key,
+    engine_api_key,
+    host_name,
+)
 from autoontology.store.accounts import PASSWORD_MAX, AccountError, Accounts, User
 from autoontology.web.mailer import Mailer
 
@@ -90,7 +112,14 @@ UI_LOGIN_ERROR = "/ui/login?error=link"
 #: The UI page an invitation / password-reset link opens; the token is in the fragment
 #: (never sent to a server, never in a Referer): ``/ui/invite#token=...&purpose=invite``.
 UI_INVITE = "/ui/invite"
-MAGIC_PATH_RE = re.compile(r"(/auth/magic/)[^\s?\"]+")
+MAGIC_PATH_RE = re.compile(r"(/auth/magic/|/internal/)[^\s?\"/]+")
+#: ``/internal/<ingest key>/ingest[/delete]``: the engine's ingestion callbacks.
+INTERNAL_INGEST_RE = re.compile(r"^/internal/([A-Za-z0-9_-]{1,128})(/ingest(?:/delete)?)$")
+#: Paths anyone may reach with accounts on (each checks what it needs itself): sign-in,
+#: magic links, health probes, the outside-agent surfaces (bearer tokens) and the UI shell.
+PUBLIC_PREFIXES = ("/api/auth", "/auth/magic", "/health", "/mcp", "/agent/v1", "/ui")
+#: Paths only the local engine (its keys), the CLI or an admin may reach with accounts on.
+ENGINE_PREFIXES = ("/v1", "/ingest")
 
 
 # --- who asks ---------------------------------------------------------------------------
@@ -111,6 +140,85 @@ class Actor:
     @property
     def user_id(self) -> str | None:
         return self.user.id if self.user else None
+
+
+def _under(path: str, prefixes: tuple[str, ...]) -> bool:
+    return any(path == p or path.startswith(p + "/") for p in prefixes)
+
+
+def internal_caller(api: Api, request: Request) -> bool:
+    """Whether *request* carries this installation's local key (``X-AutoOntology-Internal``:
+    the CLI, the provider probe, the playground)."""
+    sent = request.headers.get(INTERNAL_HEADER) or ""
+    if not sent or len(sent) > 200:
+        return False
+    return hmac.compare_digest(sent.encode(), derived_key(api.settings, "local").encode())
+
+
+def cli_actor(api: Api, request: Request) -> Actor:
+    """The trusted CLI: an admin named ``cli``; ``X-AutoOntology-As`` (``ao --as``) names an
+    existing user the audit entries are attributed to."""
+    name = (request.headers.get(INTERNAL_AS_HEADER) or "").strip().lower()
+    if name:
+        user = Accounts(api.store).by_email(name)
+        if user is not None:
+            return Actor(name=user.email, is_admin=True, user=user, via="cli")
+    return Actor(name="cli", is_admin=True, via="cli")
+
+
+def engine_refusal(api: Api, request: Request) -> Response | None:
+    """With accounts on: the answer to a request the gate refuses, else None (and the
+    engine's ``/internal/<key>/ingest*`` path is rewritten to ``/ingest*``).
+
+    * ``/v1/*`` (the chat router -- it spends the chat provider): the engine's key
+      (``Authorization: Bearer``, :func:`~autoontology.config.engine_api_key`), the local
+      key, or a signed-in admin;
+    * ``/ingest*`` (the engine's callbacks; ``/ingest/delete`` drops data): reached by the
+      engine through ``/internal/<ingest key>/...``; else the local key or a signed-in
+      admin;
+    * every other path but :data:`PUBLIC_PREFIXES` (and ``/``): a signed-in user (the
+      routes check roles); 401 ``login_required`` otherwise.
+
+    No header, address or Host is trusted for this: behind the local gateway every request
+    comes from 127.0.0.1 with ``Host: 127.0.0.1`` just like the engine's."""
+    settings = api.settings
+    if not settings.accounts_enabled:
+        return None
+    path = request.scope.get("path") or ""
+    found = INTERNAL_INGEST_RE.match(path)
+    if found:
+        if hmac.compare_digest(found.group(1).encode(), derived_key(settings, "ingest").encode()):
+            request.scope["path"] = found.group(2)
+            request.scope["raw_path"] = found.group(2).encode()
+            return None
+        return JSONResponse({"error": "not_found", "detail": "Not Found"}, status_code=404)
+    if path.startswith(INTERNAL_INGEST_PREFIX + "/"):
+        return JSONResponse({"error": "not_found", "detail": "Not Found"}, status_code=404)
+    if path in ("", "/") or _under(path, PUBLIC_PREFIXES):
+        return None
+    if internal_caller(api, request):
+        return None
+    if _under(path, ENGINE_PREFIXES):
+        if path.startswith("/v1"):
+            scheme, _, raw = (request.headers.get("authorization") or "").partition(" ")
+            if scheme.lower() == "bearer" and hmac.compare_digest(
+                raw.strip().encode(), engine_api_key(settings).encode()
+            ):
+                return None
+        actor = current_user(request)
+        if actor is None:
+            return JSONResponse(
+                {"error": "login_required", "detail": "sign in first"}, status_code=401
+            )
+        if not actor.is_admin:
+            return JSONResponse(
+                {"error": "forbidden", "detail": "the engine's routes are for admins only"},
+                status_code=403,
+            )
+        return None
+    if current_user(request) is None:
+        return JSONResponse({"error": "login_required", "detail": "sign in first"}, status_code=401)
+    return None
 
 
 class RateLimiter:
@@ -318,6 +426,8 @@ class AuthService:
         if not settings.accounts_enabled:
             name = self.api.decided_by(request)
             return Actor(name=name, is_admin=True, via="off")
+        if internal_caller(self.api, request):
+            return cli_actor(self.api, request)
         found = self.accounts.lookup_session(request.cookies.get(COOKIE))
         if found is not None:
             session, user = found
@@ -348,8 +458,14 @@ class AuthService:
             "magic_link_enabled": self.magic_link_enabled,
             "session_expires_at": actor.session_expires_at if actor else None,
         }
+        from autoontology.web.projects import (
+            INSTALLATION_PERMISSIONS,
+            PROJECT_PERMISSIONS,
+            role_permissions,
+        )
+
+        projects = {p.id: p for p in self.api.store.list_projects(include_archived=True)}
         if actor is not None and actor.user is not None:
-            projects = {p.id: p for p in self.api.store.list_projects(include_archived=True)}
             body["memberships"] = [
                 {
                     "project_id": pid,
@@ -357,10 +473,21 @@ class AuthService:
                     "name": projects[pid].name,
                     "archived": projects[pid].archived,
                     "role": role,
+                    "permissions": role_permissions(role),
                 }
                 for pid, role in self.accounts.projects_of(actor.user.id)
                 if pid in projects
             ]
+        # what the caller may do, per project slug (admins: owner of every project) and
+        # installation-wide -- the UI hides what is not allowed; the routes decide
+        if actor is None:
+            body["permissions"], body["installation_permissions"] = {}, []
+        elif actor.is_admin:
+            body["permissions"] = {p.slug: list(PROJECT_PERMISSIONS) for p in projects.values()}
+            body["installation_permissions"] = list(INSTALLATION_PERMISSIONS)
+        else:
+            body["permissions"] = {m["slug"]: m["permissions"] for m in body["memberships"]}
+            body["installation_permissions"] = []
         return body
 
 
@@ -387,6 +514,31 @@ def require_user(request: Request) -> Actor:
 
 
 # --- routes -----------------------------------------------------------------------------
+
+_MAGIC_TEXT = {
+    "en": ("Sign in to AutoOntology", "Continue to sign in", "This link works once."),
+    "ko": ("AutoOntology 로그인", "로그인 계속", "이 링크는 한 번만 쓸 수 있습니다."),
+}
+
+
+def magic_confirm_page(token: str, lang: str) -> str:
+    """The page ``GET /auth/magic/<token>`` serves: one button that POSTs the token."""
+    import html
+
+    title, button, note = _MAGIC_TEXT.get(lang, _MAGIC_TEXT["en"])
+    return (
+        '<!doctype html><html lang="' + lang + '"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{title}</title><style>body{{font-family:system-ui,sans-serif;display:grid;"
+        "place-items:center;min-height:90vh;margin:0 16px}main{max-width:360px;text-align:"
+        "center}button{font-size:1rem;padding:.6rem 1.4rem;cursor:pointer}p{color:#666}"
+        "</style></head><body><main>"
+        f"<h1>{title}</h1>"
+        '<form method="post" action="/api/auth/magic">'
+        f'<input type="hidden" name="token" value="{html.escape(token, quote=True)}">'
+        f'<button type="submit">{button}</button></form><p>{note}</p>'
+        "</main></body></html>"
+    )
 
 
 def _str_field(body: dict[str, Any], name: str, limit: int) -> str:
@@ -510,18 +662,77 @@ def build_router(api: Api) -> APIRouter:
         return answer
 
     @router.get("/auth/magic/{token}", include_in_schema=False)
-    def redeem_magic(token: str, request: Request) -> Response:
+    def magic_page(token: str, request: Request) -> Response:
+        # Never signs in by itself (a mail scanner may prefetch the link): a valid token
+        # gets a page whose button POSTs it to /api/auth/magic; anything else the login page.
         auth = service(request)
         if not auth.enabled:
             return RedirectResponse(UI_HOME, status_code=303)
-        user = auth.magic.redeem(auth.accounts, token)
-        if user is None:
+        if auth.accounts.peek_token(token, ("magic",)) is None:
             return RedirectResponse(UI_LOGIN_ERROR, status_code=303)
+        return HTMLResponse(
+            magic_confirm_page(token, _lang(request)),
+            headers={
+                "Cache-Control": "no-store",
+                "Referrer-Policy": "no-referrer",
+                "X-Frame-Options": "DENY",
+                "Content-Security-Policy": (
+                    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+                    "frame-ancestors 'none'; base-uri 'none'"
+                ),
+            },
+        )
+
+    @router.post("/api/auth/magic")
+    async def redeem_magic(request: Request) -> Response:
+        auth = service(request)
+        _accounts_on(auth)
+        form = (request.headers.get("content-type") or "").startswith(
+            "application/x-www-form-urlencoded"
+        )
+        if form:  # the confirm page's button: answer with redirects
+            data = await request.form()
+            token = data.get("token")
+            token = token if isinstance(token, str) and len(token) <= 200 else ""
+        else:
+            try:
+                body = await request.json()
+            except ValueError:
+                body = None
+            if not isinstance(body, dict):
+                return JSONResponse(
+                    {"error": "invalid_request", "detail": "a JSON object {token}"},
+                    status_code=400,
+                )
+            token = _str_field(body, "token", 200)
+        user = await run_in_threadpool(auth.magic.redeem, auth.accounts, token)
+        if user is None:
+            if form:
+                return RedirectResponse(UI_LOGIN_ERROR, status_code=303)
+            return JSONResponse(
+                {"error": "invalid_token", "detail": "this link is invalid, used or expired"},
+                status_code=400,
+            )
         raw = auth.start_session(request, user)
-        auth.accounts.record(
+        accounts = auth.accounts
+        accounts.record(
             "login_ok", user_id=user.id, detail={"method": "magic_link"}, ip=client_ip(request)
         )
-        response = RedirectResponse(UI_HOME, status_code=303)
+        if form:
+            response: Response = RedirectResponse(UI_HOME, status_code=303)
+        else:
+            found = accounts.lookup_session(raw)
+            response = JSONResponse(
+                auth.me(
+                    Actor(
+                        name=user.email,
+                        is_admin=user.is_admin,
+                        user=found[1] if found else user,
+                        via="session",
+                        session_expires_at=found[0].expires_at if found else None,
+                    )
+                )
+            )
         response.headers["Referrer-Policy"] = "no-referrer"
         auth.set_cookie(response, request, raw)
         return response

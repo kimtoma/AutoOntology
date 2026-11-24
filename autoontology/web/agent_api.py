@@ -251,7 +251,22 @@ class AgentService:
         scheme, _, raw = header.partition(" ")
         if scheme.lower() != "bearer" or not raw.strip():
             return None
-        return self.tokens.lookup(raw.strip())
+        token = self.tokens.lookup(raw.strip())
+        if token is None or not self.creator_allows(token):
+            return None
+        return token
+
+    def creator_allows(self, token: AgentToken) -> bool:
+        """With accounts on, a token lives on its creator's access: refused once the
+        creator is disabled, gone or no longer at least a viewer of the token's project.
+        Tokens without a creator (from before accounts, or the CLI's) keep working."""
+        if not self.api.settings.accounts_enabled or not token.created_by:
+            return True
+        from autoontology.store.accounts import Accounts
+        from autoontology.web.projects import member_role
+
+        user = Accounts(self.api.store).get(token.created_by)
+        return member_role(self.api, token.project_id, user) is not None
 
     def retry_after(self, token_id: str) -> int | None:
         """None when *token_id* may make another request now (it is counted), else the
@@ -843,7 +858,19 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
         ):
             raise ApiError(404, "unknown_revision", f"unknown revision {req.revision_pin}")
         raw, record = ctx.store.agent_tokens().create(
-            name, revision_pin=req.revision_pin, expires_days=req.expires_days
+            name,
+            revision_pin=req.revision_pin,
+            expires_days=req.expires_days,
+            created_by=ctx.user_id,
+        )
+        ctx.audit(
+            "token.create",
+            target=record.id,
+            detail={
+                "name": name,
+                "revision_pin": req.revision_pin,
+                "expires_days": req.expires_days,
+            },
         )
         return {"token": raw, "record": record.to_dict(), "note": ONCE_NOTE}
 
@@ -857,8 +884,11 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
         token_id: str, request: Request, ctx: ProjectContext = Ctx
     ) -> dict[str, Any]:
         ctx.require("agent.tokens")
-        raw, record = guard(lambda: ctx.store.agent_tokens().rotate(token_id))
+        raw, record = guard(
+            lambda: ctx.store.agent_tokens().rotate(token_id, created_by=ctx.user_id)
+        )
         forget(request, token_id)
+        ctx.audit("token.rotate", target=token_id)
         return {"token": raw, "record": record.to_dict(), "note": ONCE_NOTE}
 
     @router.delete("/agent/tokens/{token_id}")
@@ -868,6 +898,7 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
         ctx.require("agent.tokens")
         record = guard(lambda: ctx.store.agent_tokens().revoke(token_id)).to_dict()
         forget(request, token_id)
+        ctx.audit("token.revoke", target=token_id)
         return record
 
     @router.get("/agent/usage")
@@ -877,7 +908,7 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
         return ctx.store.agent_tokens().usage(days)
 
     @router.get("/agent/tools")
-    def agent_tools() -> dict[str, Any]:
+    def agent_tools(ctx: ProjectContext = Ctx) -> dict[str, Any]:  # noqa: ARG001 - access
         return {
             "tools": TOOLS,
             "protocol": PROTOCOL,

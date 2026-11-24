@@ -108,3 +108,61 @@ def test_link_warns_when_accounts_are_off(accounts):
     runner.invoke(app, ["user", "create", "a@example.com"])
     out = runner.invoke(app, ["user", "link", "a@example.com"])
     assert out.exit_code == 0 and "AUTOONTOLOGY_AUTH=accounts" in out.output
+
+
+# --- members and audit -----------------------------------------------------------------
+
+
+def test_member_commands(accounts):
+    store = Store.for_home(Settings.from_env().home)
+    beta = store.create_project("beta").project
+    accounts().create_user("own@example.com")
+    result = runner.invoke(
+        app, ["-p", "beta", "member", "add", "own@example.com", "--role", "owner"]
+    )
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(
+        app, ["-p", "beta", "member", "add", "new@example.com", "--role", "viewer"]
+    )
+    assert result.exit_code == 0 and "/ui/invite#token=" in result.output, result.output
+    result = runner.invoke(app, ["-p", "beta", "member", "role", "new@example.com", "editor"])
+    assert result.exit_code == 0, result.output
+    assert accounts().role_of(beta.id, accounts().by_email("new@example.com").id) == "editor"
+    result = runner.invoke(app, ["-p", "beta", "member", "list", "--json"])
+    rows = json.loads(result.output)["members"]
+    assert {r["email"]: r["role"] for r in rows} == {
+        "own@example.com": "owner",
+        "new@example.com": "editor",
+    }
+    result = runner.invoke(app, ["-p", "beta", "member", "role", "new@example.com", "boss"])
+    assert result.exit_code == 2
+    result = runner.invoke(app, ["-p", "beta", "member", "remove", "own@example.com"])
+    assert result.exit_code == 1 and "last_owner" in result.output
+    result = runner.invoke(
+        app, ["--as", "own@example.com", "-p", "beta", "member", "remove", "new@example.com"]
+    )
+    assert result.exit_code == 0, result.output
+    assert runner.invoke(app, ["-p", "nope", "member", "list"]).exit_code == 1
+    result = runner.invoke(app, ["audit", "--project", "beta", "--json"])
+    entries = json.loads(result.output)["entries"]
+    assert entries[0]["action"] == "member.remove"
+    assert entries[0]["actor"] == "own@example.com" and entries[0]["detail"]["via"] == "cli"
+    assert {"member.add", "member.role", "user.invite"} <= {e["action"] for e in entries}
+    assert all(e["project"] == "beta" for e in entries)
+    result = runner.invoke(app, ["audit"])
+    assert result.exit_code == 0 and "member.remove" in result.output
+
+
+def test_service_client_sends_the_local_key_with_accounts_on(isolated_env, monkeypatch):
+    from autoontology import cli_ops
+    from autoontology.config import INTERNAL_AS_HEADER, INTERNAL_HEADER
+
+    off = cli_ops.ServiceClient(Settings.from_env())
+    assert INTERNAL_HEADER not in off.client.headers
+    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    from autoontology import cli
+
+    monkeypatch.setattr(cli, "_as_ref", "a@example.com")
+    on = cli_ops.ServiceClient(Settings.from_env())
+    assert len(on.client.headers[INTERNAL_HEADER]) == 48
+    assert on.client.headers[INTERNAL_AS_HEADER] == "a@example.com"

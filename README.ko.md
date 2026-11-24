@@ -902,10 +902,62 @@ CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩�
 
 로그인 API(`/api/auth/*`, 세션 없이 접근 가능, 호스트·교차 출처 검사는 그대로): `POST login
 {email, password}`(실패는 모두 401 `invalid_credentials`, IP나 이메일별 분당 5회 실패 뒤
-429), `POST logout`, `GET me`, `POST magic-link {email}`(항상 202),
-`GET /auth/magic/<token>`, `POST accept-invite {token, password}`,
-`POST password {current, new}`(다른 세션 종료). SSO(OIDC)는 예정이며 `AUTOONTOLOGY_OIDC_*`는
-예약되어 있습니다.
+429), `POST logout`, `GET me`, `POST magic-link {email}`(항상 202), `POST magic {token}`,
+`POST accept-invite {token, password}`, `POST password {current, new}`(다른 세션 종료).
+로그인 링크는 두 단계입니다. `/auth/magic/<token>`을 열면 "로그인 계속" 버튼만 보이고(링크를
+미리 여는 메일 검사기가 링크를 써 버리지 않음), 버튼이 토큰을 `POST /api/auth/magic`으로 보내야
+로그인됩니다. SSO(OIDC)는 예정이며 `AUTOONTOLOGY_OIDC_*`는 예약되어 있습니다.
+
+#### 역할과 권한
+
+계정 모드에서는 로그인·`/health`·UI 화면·외부 에이전트 경로(`/mcp`, `/agent/v1`, 베어러 토큰)를
+뺀 모든 경로에 로그인이 필요합니다(401 `login_required`). 사용자는 프로젝트마다 역할을 가집니다.
+멤버가 아닌 프로젝트는 없는 것처럼 404 `unknown_project`로 답하고, `GET /api/projects`는 내
+프로젝트만 보여 줍니다. 권한이 없으면 403 `forbidden`이며 본문에 필요한 권한 이름이 있습니다.
+관리자는 모든 프로젝트의 owner입니다.
+
+| 역할 | 할 수 있는 일 |
+|---|---|
+| viewer | 프로젝트 전체 읽기, 내보내기 내려받기, 플레이그라운드 질문(채팅, SQL, SPARQL, 대화) |
+| reviewer | + 검토 항목 결정·취소, 결정 적용(새 리비전) |
+| editor | + 소스 추가·삭제, 샘플 불러오기, 빌드·내보내기 시작, 연결 토큰 관리 |
+| owner | + 프로젝트 이름 변경·보관·보관 해제, 멤버 관리, 프로젝트 감사 로그 |
+| admin | + 프로젝트 생성, 설정·재시작, 공급자 테스트, 사용자, 전체 감사 로그 |
+
+`GET /api/auth/me`는 프로젝트 슬러그별 `permissions`와 `installation_permissions`를 알려
+줍니다. 표는 `autoontology/web/projects.py`(`PROJECT_PERMISSIONS`)에 있습니다. 프로젝트를 만든
+사람이 owner가 됩니다. 보관된 프로젝트의 플레이그라운드는 `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`가
+아니면 계속 답합니다.
+
+연결 토큰은 만든(또는 마지막으로 교체한) 사람을 기억합니다. 그 사람이 비활성화되거나 토큰의
+프로젝트 멤버가 아니게 되면 토큰도 멈춥니다. 계정 기능 이전의 토큰은 계속 동작합니다.
+
+#### 멤버, 사용자, 감사 로그
+
+- 멤버(owner): `GET|POST /api/projects/<p>/members`(`{email, role}`, 없는 이메일은 새 사용자가
+  되고 응답에 `invite_link`), `PATCH|DELETE /api/projects/<p>/members/<user_id>`(owner는 한 명
+  이상 남아야 함: 409 `last_owner`). CLI: `ao -p <p> member list|add <email> --role R|role <email> R|remove <email>`.
+- 사용자(관리자): `GET|POST /api/users`(`{email, name?, is_admin?}` -> `{user, invite_link,
+  mail_sent}`), `PATCH /api/users/<id>`(`{name?, is_admin?, disabled?}`, 마지막 활성 관리자는
+  유지: 409 `last_admin`), `POST /api/users/<id>/link {purpose}`(새 magic/reset/invite 링크).
+- 감사 로그: `GET /api/audit?project=&user=&action=&before_id=&limit=`(관리자: 전체, owner: 자기
+  프로젝트이며 `project` 필수). 로그인, 사용자, 멤버, 연결 토큰, 빌드·내보내기·적용 시작, 검토
+  결정, 설정 변경·재시작, 프로젝트 변경을 사용자·프로젝트·클라이언트 주소와 함께 기록합니다.
+  CLI: `ao audit [--project P] [--user E] [--action A] [--json]`. CLI는 신뢰된 관리자로
+  동작하며 `ao --as <email> ...`이면 그 사용자 이름으로 기록합니다.
+
+#### 엔진 경로(`/v1`, `/ingest`)
+
+채팅 라우터 `/v1`은 설정된 채팅 공급자(Claude·ChatGPT 구독)를 쓰고 `/ingest/delete`는 데이터를
+지우므로, 계정 모드에서는 익명으로 열지 않습니다. 로컬 리버스 프록시를 거친 요청은 엔진과 똑같이
+127.0.0.1에서 `Host: 127.0.0.1`로 오므로 주소나 Host는 믿지 않습니다. 대신 서비스는
+`<home>/run/internal.key`(0600)에 무작위 비밀을 두고 거기서 키를 만듭니다. 엔진은 그 키를
+`/v1`에 OpenAI API 키로 보내고, `/ingest`에는
+`INGESTION_SERVICE_URL=http://127.0.0.1:<port>/internal/<key>`로 접근하며, CLI·공급자
+테스트·플레이그라운드는 `X-AutoOntology-Internal`을 보냅니다. 그 밖에는 관리자 세션이 있어야
+합니다. `AUTOONTOLOGY_AUTH`를 바꾼 뒤에는 엔진이 새 키를 받도록 전부 다시 시작하세요
+(`ao down && ao up`). 서비스 앞의 게이트웨이는 `X-AutoOntology-Internal`, `X-AutoOntology-As`,
+그리고 `/mcp`·`/agent/v1` 밖의 `Authorization`을 절대 전달하면 안 됩니다.
 
 취약점 신고 방법은 [SECURITY.md](SECURITY.md)를 보세요.
 

@@ -28,6 +28,8 @@ app.add_typer(review_app, name="review")
 #: The project the commands work on (``--project``/``-p`` or ``AUTOONTOLOGY_PROJECT``; None
 #: = the default project), set by :func:`main` for each invocation.
 _project_ref: str | None = None
+#: ``--as`` / ``AUTOONTOLOGY_AS``: whom the audit log attributes the command to.
+_as_ref: str | None = None
 
 
 @app.callback()
@@ -40,14 +42,27 @@ def main(
         metavar="SLUG",
         help=msg("help.opt.project"),
     ),
+    as_user: str = typer.Option(
+        None,
+        "--as",
+        envvar="AUTOONTOLOGY_AS",
+        metavar="EMAIL",
+        help=msg("help.opt.as"),
+    ),
 ) -> None:
-    global _project_ref
+    global _project_ref, _as_ref
     _project_ref = (project or "").strip() or None
+    _as_ref = (as_user or "").strip().lower() or None
 
 
 def _project() -> str | None:
     """The project the command works on (a slug or id; None = the default project)."""
     return _project_ref
+
+
+def _as_user() -> str | None:
+    """``--as``: the user (email) the CLI's audit entries are attributed to (None = ``cli``)."""
+    return _as_ref
 
 
 def _settings():

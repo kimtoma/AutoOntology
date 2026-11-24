@@ -787,6 +787,8 @@ def expand_model_profile(settings: Settings) -> dict[str, str]:
     (``TEXT_TO_SQL_REACT_MAX_TOOL_CALLS`` = ``sql_max_tool_calls``) unless the user set it.
     """
     key = OLLAMA_API_KEY if settings.chat_provider == "ollama" else ROUTER_API_KEY
+    if settings.accounts_enabled:  # /v1 then requires this installation's engine key
+        key = engine_api_key(settings)
     env: dict[str, str] = {}
     for prefix in (*CHAT_TRIPLET_PREFIXES, "RERANK"):
         env[f"{prefix}_ENDPOINT"] = settings.llm_proxy_endpoint
@@ -812,6 +814,101 @@ def expand_model_profile(settings: Settings) -> dict[str, str]:
     if not settings.sql_tool_calls_user:
         env[SQL_REACT_TOOL_CALLS_VAR] = str(settings.sql_max_tool_calls)
     return env
+
+
+# --- local trust (AUTOONTOLOGY_AUTH=accounts) -----------------------------------------
+#
+# With accounts on, the service answers anonymous callers only on its public sign-in
+# routes. Its own local callers prove themselves with keys derived from one random secret
+# in ``<home>/run/internal.key`` (0600, created on first use; only processes that can read
+# the installation's files have it):
+#
+# * the CLI, the provider probe and the playground send ``X-AutoOntology-Internal`` (a
+#   trusted admin, actor ``cli``; ``X-AutoOntology-As`` names a user to attribute audit
+#   entries to);
+# * the engine sends :func:`engine_api_key` as its OpenAI API key (``Authorization:
+#   Bearer``) to ``/v1``, the only route that key opens;
+# * the engine calls ``INGESTION_SERVICE_URL`` + ``/ingest`` (no header can be added
+#   there), so with accounts on that URL is :func:`ingestion_service_url` --
+#   ``/internal/<ingest key>``, which opens ``/ingest`` and ``/ingest/delete`` only.
+#
+# A gateway in front of the service must never forward ``X-AutoOntology-Internal`` /
+# ``X-AutoOntology-As`` (nor ``Authorization`` outside ``/mcp`` and ``/agent/v1``).
+
+INTERNAL_KEY_FILE = "internal.key"
+INTERNAL_HEADER = "X-AutoOntology-Internal"
+INTERNAL_AS_HEADER = "X-AutoOntology-As"
+INTERNAL_INGEST_PREFIX = "/internal"
+
+
+_SECRETS: dict[str, bytes] = {}
+
+
+def internal_secret(settings: Settings) -> bytes:
+    """The installation's local-trust secret (created 0600 on first use; cached per file
+    for the life of the process -- replacing the file needs a restart)."""
+    path = settings.run_dir / INTERNAL_KEY_FILE
+    cached = _SECRETS.get(str(path))
+    if cached is None:
+        cached = _SECRETS[str(path)] = _read_or_create_secret(path)
+    return cached
+
+
+def _read_or_create_secret(path: Path) -> bytes:
+    import secrets as _secrets
+
+    try:
+        raw = path.read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        raw = ""
+    if len(raw) >= 32:
+        return raw.encode("ascii")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    value = _secrets.token_urlsafe(48)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:  # another process won the race (or an empty file)
+        raw = path.read_text(encoding="ascii").strip()
+        if len(raw) >= 32:
+            return raw.encode("ascii")
+        fd = os.open(path, os.O_WRONLY | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="ascii") as fh:
+        fh.write(value + "\n")
+    return value.encode("ascii")
+
+
+def derived_key(settings: Settings, purpose: str) -> str:
+    """A key for one *purpose* (``local``, ``engine``, ``ingest``) derived from the
+    installation's secret: leaking one opens only what that purpose opens."""
+    import hashlib
+    import hmac as _hmac
+
+    digest = _hmac.new(internal_secret(settings), purpose.encode(), hashlib.sha256).hexdigest()
+    return digest[:48]
+
+
+def engine_api_key(settings: Settings) -> str:
+    """The OpenAI API key the engine sends to the service's ``/v1`` router (accounts on)."""
+    return "aoe-" + derived_key(settings, "engine")
+
+
+def ingestion_service_url(settings: Settings) -> str:
+    """``INGESTION_SERVICE_URL`` for the engine: the service itself; with accounts on, under
+    the ``/internal/<ingest key>`` prefix that opens ``/ingest*`` for it."""
+    if not settings.accounts_enabled:
+        return settings.service_url
+    return f"{settings.service_url}{INTERNAL_INGEST_PREFIX}/{derived_key(settings, 'ingest')}"
+
+
+def internal_headers(settings: Settings, as_user: str | None = None) -> dict[str, str]:
+    """Headers a local AutoOntology process sends to the service (none with accounts
+    off)."""
+    if not settings.accounts_enabled:
+        return {}
+    headers = {INTERNAL_HEADER: derived_key(settings, "local")}
+    if as_user:
+        headers[INTERNAL_AS_HEADER] = as_user.strip()[:320]
+    return headers
 
 
 def _is_placeholder(value: str) -> bool:

@@ -28,7 +28,7 @@ from typing import Any
 
 import httpx
 
-from autoontology.config import CHAT_PROVIDERS, Settings
+from autoontology.config import CHAT_PROVIDERS, Settings, internal_headers
 
 PING_SCHEMA = {
     "type": "object",
@@ -130,7 +130,11 @@ def service_up(settings: Settings) -> bool:
 def service_provider(settings: Settings) -> str | None:
     """The chat provider the running service serves (None if down/unknown)."""
     try:
-        resp = httpx.get(f"{settings.service_url}/api/status", timeout=30.0)
+        resp = httpx.get(
+            f"{settings.service_url}/api/status",
+            timeout=30.0,
+            headers=internal_headers(settings),
+        )
         return str(resp.json()["providers"]["chat_provider"])
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return None
@@ -185,7 +189,9 @@ def run_test(
     with ctx as url:
 
         async def go() -> dict[str, Any]:
-            async with httpx.AsyncClient(base_url=url) as client:
+            async with httpx.AsyncClient(
+                base_url=url, headers=internal_headers(settings)
+            ) as client:
                 return await run_test_async(settings, client=client, via=via, timeout=timeout)
 
         return asyncio.run(go())

@@ -85,12 +85,12 @@ _APPLIED_ENV: dict[str, str] | None = None
 
 def upstream_env(settings: Settings) -> dict[str, str]:
     """What :func:`prepare_upstream_env` puts into ``os.environ`` (beyond ``.env``)."""
-    from autoontology.config import expand_model_profile
+    from autoontology.config import expand_model_profile, ingestion_service_url
 
     return {
         **expand_model_profile(settings),
         **postgres_env(settings),
-        "INGESTION_SERVICE_URL": settings.service_url,
+        "INGESTION_SERVICE_URL": ingestion_service_url(settings),
     }
 
 

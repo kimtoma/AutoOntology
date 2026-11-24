@@ -634,12 +634,29 @@ def supervised(settings: Settings) -> bool:
 def build_router(state: SettingsApi) -> APIRouter:
     router = APIRouter(prefix=f"{PREFIX}/settings")
 
-    @router.get("")
-    def get_settings() -> dict[str, Any]:
-        return state.get()
-
     def manage(request: Request) -> None:
-        require_installation(state.api.decided_by(request), "settings.manage")
+        require_installation(request, "settings.manage")
+
+    def record(request: Request, action: str, detail: dict[str, Any] | None = None) -> None:
+        from autoontology.web.auth import client_ip
+        from autoontology.web.projects import audit, request_actor
+
+        actor = request_actor(state.api, request)
+        if actor is not None:
+            audit(
+                state.api.store,
+                action,
+                actor.name,
+                actor.user_id,
+                actor.via,
+                client_ip(request),
+                detail=detail,
+            )
+
+    @router.get("")
+    def get_settings(request: Request) -> dict[str, Any]:
+        manage(request)
+        return state.get()
 
     @router.post("/test")
     async def test_settings(body: SettingsIn, request: Request) -> dict[str, Any]:
@@ -649,15 +666,22 @@ def build_router(state: SettingsApi) -> APIRouter:
     @router.put("")
     def put_settings(body: SettingsIn, request: Request) -> dict[str, Any]:
         manage(request)
-        return state.put(body)
+        result = state.put(body)
+        # what changed, never a value that could be a key
+        changed = sorted(k for k, v in body.model_dump().items() if v is not None)
+        record(request, "settings.update", {"fields": changed})
+        return result
 
     @router.post("/restart", status_code=202)
     def restart(request: Request) -> JSONResponse:
         manage(request)
-        return JSONResponse(state.restart(), status_code=202)
+        result = state.restart()
+        record(request, "settings.restart")
+        return JSONResponse(result, status_code=202)
 
     @router.get("/restart/{restart_id}")
-    def restart_status(restart_id: str) -> dict[str, Any]:
+    def restart_status(restart_id: str, request: Request) -> dict[str, Any]:
+        manage(request)
         return state.restart_status(restart_id)
 
     return router

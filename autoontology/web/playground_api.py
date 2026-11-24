@@ -71,9 +71,9 @@ from autoontology.store.db import ProjectStore
 from autoontology.web.api import PREFIX, Api, ApiError, mask
 from autoontology.web.projects import (
     ProjectContext,
-    allowed_when_archived,
     default_project,
     path_project,
+    playground_question,
 )
 
 logger = logging.getLogger("autoontology.web")
@@ -353,7 +353,7 @@ def _routes(
         return pg().index_status(s)
 
     @router.post("/chat")
-    @allowed_when_archived
+    @playground_question
     async def chat(body: ChatIn, ctx: ProjectContext = Ctx) -> EventSourceResponse:
         ctx.require("playground.ask")
         s = scope(ctx.store)
@@ -411,7 +411,7 @@ def _routes(
     # --- NL -> SQL (upstream) -----------------------------------------------------------
 
     @router.post("/sql")
-    @allowed_when_archived
+    @playground_question
     async def sql(body: SqlIn, ctx: ProjectContext = Ctx) -> EventSourceResponse:
         ctx.require("playground.ask")
         target_db = sql_target(ctx.store, body.source)
@@ -624,7 +624,7 @@ def _routes(
         return {"examples": EXAMPLES}
 
     @router.post("/sparql")
-    @allowed_when_archived
+    @playground_question
     async def run_sparql(body: SparqlIn, ctx: ProjectContext = Ctx) -> dict[str, Any]:
         ctx.require("playground.ask")
         try:

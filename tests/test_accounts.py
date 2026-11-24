@@ -49,7 +49,12 @@ def _v8_store(tmp_path, monkeypatch) -> Store:
         store = Store(tmp_path / "v8.db")
         assert store.schema_version() == 8
         store.create_project("beta", name="Beta")
-        AgentTokens(store).create("old-token")
+        with sqlite3.connect(store.path) as conn:  # a v8 row (no created_by column yet)
+            conn.execute(
+                "INSERT INTO agent_tokens (id, name, token_hash, created_at, project_id) "
+                "VALUES ('tok_old', 'old-token', 'x', '2026-01-01T00:00:00.000+00:00', ?)",
+                (store.default_project_id,),
+            )
     return store
 
 

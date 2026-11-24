@@ -24,7 +24,37 @@ behaviour).
   SMTP (`AUTOONTOLOGY_SMTP_*`, Korean/English) or from the CLI: `user create [--admin]
   [--password-stdin]` (prints an invitation link), `user list|disable|enable|link`.
   `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=allow|deny` is read (enforced with permissions);
-  `AUTOONTOLOGY_OIDC_*` is reserved. Other routes are not gated yet.
+  `AUTOONTOLOGY_OIDC_*` is reserved.
+- **Permissions** (accounts mode only; off mode is unchanged). Every route but sign-in,
+  `/health`, the UI shell, `/mcp` and `/agent/v1` needs a signed-in user (401
+  `login_required`). Project roles viewer < reviewer < editor < owner from one table
+  (`PROJECT_PERMISSIONS` in `autoontology/web/projects.py`); admins own every project and
+  alone create projects, change settings, restart, test providers, manage users and read
+  the whole audit log. Non-members get 404 `unknown_project`; a missing permission is 403
+  `forbidden` naming it. `GET /api/projects` lists the caller's projects with their role
+  and permissions; `GET /api/auth/me` adds `permissions` per project and
+  `installation_permissions`. A project's creator becomes its owner. `decided_by` is the
+  user's email. Archived projects answer playground questions unless
+  `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`. `GET /api/settings` and the restart status are
+  admin-only too.
+- **Management API**: `/api/users` (list, invite with a link, `PATCH {name, is_admin,
+  disabled}` keeping one active admin, `POST /{id}/link`), `/api/projects/{p}/members`
+  (list, add or invite, change role, remove; last-owner protection), `/api/audit` (filters,
+  `before_id` paging; owners see their projects). CLI: `ao -p <p> member
+  list|add|role|remove`, `ao audit`, global `--as <email>` (`AUTOONTOLOGY_AS`) to attribute
+  the CLI's audit entries.
+- **Audit log entries** for users, members, agent tokens, run starts and cancels, review
+  decisions and undos, sources, samples, settings changes and restarts, and project
+  create/rename/archive/unarchive.
+- **Agent tokens** record `created_by` (creator or last rotator); with accounts on a token
+  stops working when its creator is disabled or no longer a member of its project (tokens
+  without a creator keep working).
+- **Local trust keys** (`<home>/run/internal.key`, 0600): with accounts on, `/v1` accepts
+  only the engine's derived API key, the CLI's `X-AutoOntology-Internal` key or an admin
+  session; `/ingest*` is reached by the engine through `INGESTION_SERVICE_URL=.../internal/
+  <key>`. A request through a local proxy can no longer spend the chat subscription or drop
+  data anonymously.
+
 - **Projects** (schema v8; `autoontology/web/projects.py`): one installation holds several
   projects, each with its own sources (the same name may exist in two projects), runs,
   revisions (r1, r2, ... per project), review decisions, exports
@@ -151,6 +181,9 @@ behaviour).
 
 ### Changed
 
+- **Magic links take two steps**: `GET /auth/magic/<token>` no longer signs in (mail
+  scanners prefetch links); it shows a confirm button that posts the token to the new
+  `POST /api/auth/magic {token}`.
 - **Engine updated to NVIDIA auto-ontology c96048c4 (1.3.x)**, from `eb8dd062` (1.1.0),
   89 upstream commits. `pyproject.toml` now needs `auto-ontology-server>=1.3.0`.
   - Key upstream improvements: text-to-SQL is a ReAct agent (`react_sql_agent`,
