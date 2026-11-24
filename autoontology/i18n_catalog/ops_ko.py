@@ -48,7 +48,7 @@ MESSAGES: dict[str, str] = {
     ),
     "help.samples.load.set": "샘플 세트: quickstart | hanbit.",
     "help.samples.load.replace": "같은 이름으로 등록된 소스를 교체합니다.",
-    "help.exports": "내보내기 폴더 (exports/r<rev>/): 목록, 파일 보기, 파일 저장.",
+    "help.exports": "내보내기 폴더 (exports/r<rev>/): 목록, 파일 보기, 파일·zip 저장.",
     "help.exports.list": "내보내기 폴더와 파일 목록.",
     "help.exports.show": (
         "리비전의 파일 목록, 또는 텍스트 파일 하나 출력 (예: ossie/validation.json)."
@@ -57,6 +57,8 @@ MESSAGES: dict[str, str] = {
     "help.exports.path": "폴더 안의 파일, 예: report.md 또는 okf/validation.json.",
     "help.exports.get": "내보내기 파일 하나를 저장합니다.",
     "help.exports.out": "저장할 파일 (또는 디렉터리).",
+    "help.exports.zip": "내보내기 폴더 전체를 zip 하나로 저장합니다.",
+    "help.exports.zip.out": "저장할 .zip 파일 (또는 디렉터리: autoontology-r<rev>.zip).",
     "help.playground": (
         "실행 중인 서비스의 플레이그라운드: chat (인용이 있는 RAG), sql, sparql, index."
     ),

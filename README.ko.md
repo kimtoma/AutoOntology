@@ -478,7 +478,7 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `autoontology runs show <id>` / `logs <id> [--follow]` / `cancel <id>` | 실행 하나의 단계와 진행 상황, 로그(비밀 마스킹; `--follow`는 실행이 끝날 때까지 실시간 이벤트를 받음), 취소. `show`, `logs --follow`, `cancel`은 서비스(`up`)가 필요하며, 없으면 종료 코드 2로 끝납니다. |
 | `autoontology source freshness` | 마지막 빌드 이후 바뀐 소스와 그 이유(`sources freshness`도 가능). |
 | `autoontology samples list` / `load <set> [--replace]` | 샘플 세트 목록; 빌드 없이 세트의 소스를 등록(같은 이름에 다른 데이터를 가진 소스는 `--replace`일 때만 교체). |
-| `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` | 내보내기 폴더 목록; 리비전의 파일 목록 또는 텍스트 파일 출력(예: `ossie/validation.json`, `okf/validation.json`); 파일 저장. |
+| `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` / `zip <rev> --out FILE` | 내보내기 폴더 목록; 리비전의 파일 목록 또는 텍스트 파일 출력(예: `ossie/validation.json`, `okf/validation.json`); 파일 저장; 리비전 폴더 전체를 zip 하나로 저장(`--out`이 디렉터리면 `autoontology-r0003.zip`). |
 | `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F\|--examples [--limit N]` / `index [--rebuild]` | 실행 중인 서비스로 플레이그라운드 사용: 인용과 함께 스트리밍되는 RAG 답변, 자연어 SQL 에이전트, 최신 스냅샷에 대한 SPARQL, 채팅 인덱스. |
 | `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | 설정 페이지: 현재 선택과 각 값의 출처(키는 표시 안 함), 후보 테스트(채팅 pong과 임베딩 차원), `.env` 저장(`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; 키는 표준 입력으로만), 서비스 자체 재시작. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |

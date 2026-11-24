@@ -58,7 +58,7 @@ MESSAGES: dict[str, str] = {
     ),
     "help.samples.load.set": "Sample set: quickstart | hanbit.",
     "help.samples.load.replace": "Replace registered sources of the same name.",
-    "help.exports": "The export folders (exports/r<rev>/): list, show a file, save a file.",
+    "help.exports": "The export folders (exports/r<rev>/): list, show, save a file or a zip.",
     "help.exports.list": "List the export folders and their files.",
     "help.exports.show": (
         "List a revision's files, or print one text file (e.g. ossie/validation.json)."
@@ -67,6 +67,8 @@ MESSAGES: dict[str, str] = {
     "help.exports.path": "File inside the folder, e.g. report.md or okf/validation.json.",
     "help.exports.get": "Save one export file.",
     "help.exports.out": "Target file (or directory).",
+    "help.exports.zip": "Save the whole export folder as one zip.",
+    "help.exports.zip.out": "Target .zip file (or directory: autoontology-r<rev>.zip).",
     "help.playground": (
         "The Playground over the running service: chat (RAG with citations), sql, sparql, index."
     ),

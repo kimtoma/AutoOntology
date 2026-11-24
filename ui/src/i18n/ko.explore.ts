@@ -227,6 +227,8 @@ export const koExplore: Record<keyof typeof enExplore, string> = {
   "exports.empty.hint": "온톨로지를 빌드한 뒤 빌드 페이지에서 내보내기를 누르세요.",
   "exports.more": "더 보기(이전 {n}개)",
   "exports.download": "내려받기",
+  "exports.zip": "전체 내려받기 (zip)",
+  "exports.zipTitle": "exports/{dir}/ 전체를 zip 하나로: {files}",
   "exports.previewCut": "… (처음 {n}자만 표시)",
 
   // Status

@@ -15,9 +15,11 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import threading
 import time
 import unicodedata
+import zipfile
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -26,9 +28,10 @@ import anyio
 import httpx
 from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sse_starlette.sse import EventSourceResponse
+from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 
 from autoontology import __version__
@@ -56,6 +59,8 @@ FILE_NAME_RE = re.compile(r"^[^/\\\x00]{1,200}$")
 EXPORT_FILE_RE = re.compile(r"^[^\W_][\w.-]{0,200}$")
 #: deepest export file: ``okf/concepts/<slug>.md``
 EXPORT_PATH_DEPTH = 3
+#: a revision zip stays in memory up to this size, then spills to a temporary file
+EXPORT_ZIP_SPOOL_BYTES = 32 * 1024 * 1024
 # Masking is the only barrier between log records (ours and upstream's) and the SSE stream.
 _URL_PASSWORD_RE = re.compile(r"(://[^:/@\s]*:)[^@\s]+@")  # user may be empty
 #: KEY=value / KEY: value / "key": "value" / 'key': 'value' for any name ending in a secret
@@ -1002,14 +1007,7 @@ def build_router(api: Api) -> APIRouter:
         )
         out = []
         for folder in folders:
-            files = sorted(
-                (
-                    {"name": f.relative_to(folder).as_posix(), "bytes": f.stat().st_size}
-                    for f in folder.rglob("*")
-                    if f.is_file() and _export_path_ok(f.relative_to(folder).as_posix())
-                ),
-                key=lambda f: f["name"],
-            )
+            files = [{"name": n, "bytes": f.stat().st_size} for n, f in _export_files(folder)]
             dirs: dict[str, dict[str, Any]] = {}
             for f in files:
                 head, sep, rest = f["name"].partition("/")
@@ -1029,13 +1027,48 @@ def build_router(api: Api) -> APIRouter:
             )
         return {"exports": out}
 
+    # no collision with the route below: ``{rev}`` never holds a ``/``
+    @router.get("/exports/{rev}.zip")
+    def download_export_zip(rev: str) -> Response:
+        """The whole revision folder as one zip: exactly the files ``GET /exports``
+        lists, under ``r0003/``. Sync, so the zipping runs in the threadpool."""
+        rev = _export_dir(rev)
+        folder = Path(api.settings.exports_dir).resolve() / rev
+        if not folder.is_dir() or folder.is_symlink():
+            raise ApiError(404, "unknown_export", f"no export {rev}")
+        spool = tempfile.SpooledTemporaryFile(max_size=EXPORT_ZIP_SPOOL_BYTES)
+        try:
+            with zipfile.ZipFile(spool, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as zf:
+                for name, path in _export_files(folder):
+                    zf.write(path, f"{rev}/{unicodedata.normalize('NFC', name)}")
+            size = spool.tell()
+            spool.seek(0)
+        except BaseException:
+            spool.close()
+            raise
+
+        def chunks():
+            try:
+                while block := spool.read(1024 * 1024):
+                    yield block
+            finally:
+                spool.close()
+
+        return StreamingResponse(
+            chunks(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="autoontology-{rev}.zip"',
+                "Content-Length": str(size),
+            },
+            # a client that hangs up mid-stream never finishes the generator
+            background=BackgroundTask(spool.close),
+        )
+
     @router.get("/exports/{rev}/{file_path:path}")
     def download_export(rev: str, file_path: str, inline: bool = False) -> Response:
-        if rev.isdigit():
-            from autoontology.engine.export_job import revision_dir_name
-
-            rev = revision_dir_name(int(rev))
-        if not EXPORT_DIR_RE.fullmatch(rev) or not _export_path_ok(file_path):
+        rev = _export_dir(rev)
+        if not _export_path_ok(file_path):
             raise ApiError(400, "invalid_path", "invalid export path")
         root = Path(api.settings.exports_dir).resolve()
         candidate = (root / rev / unicodedata.normalize("NFC", file_path)).resolve()
@@ -1270,6 +1303,30 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
         shutil.rmtree(target, ignore_errors=True)
         raise
     return {**api.source_dict(source), "files": names}
+
+
+def _export_dir(rev: str) -> str:
+    """``3`` or ``r0003`` -> the export folder name ``r0003``; else 400 ``invalid_path``."""
+    if rev.isdigit():
+        from autoontology.engine.export_job import revision_dir_name
+
+        rev = revision_dir_name(int(rev))
+    if not EXPORT_DIR_RE.fullmatch(rev):
+        raise ApiError(400, "invalid_path", "invalid export path")
+    return rev
+
+
+def _export_files(folder: Path) -> list[tuple[str, Path]]:
+    """``(relative name, path)`` of the files in an export folder, sorted by name: plain
+    paths (:func:`_export_path_ok`) whose target stays inside the folder, so a symlink
+    pointing elsewhere is neither listed nor zipped (the download refuses it as well)."""
+    real = folder.resolve()
+    found = []
+    for f in folder.rglob("*"):
+        name = f.relative_to(folder).as_posix()
+        if f.is_file() and _export_path_ok(name) and f.resolve().is_relative_to(real):
+            found.append((name, f))
+    return sorted(found, key=lambda item: item[0])
 
 
 def _export_path_ok(path: str) -> bool:

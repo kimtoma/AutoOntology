@@ -9,6 +9,12 @@ behaviour).
 
 ### Added
 
+- **Download a whole export revision as one zip**: `GET /api/exports/{rev}.zip` (`3` or
+  `r0003`) packs exactly the files `GET /api/exports` lists under `r0003/`, as
+  `autoontology-r0003.zip`; the Exports page has a **Download all (zip)** button on every
+  revision card and the CLI has `exports zip <rev> --out FILE|DIR`. Files whose symlink
+  points outside the revision folder are no longer listed (the download already refused
+  them).
 - **Every web UI function from the CLI** (`autoontology/cli_ops.py`), each with `--json`
   and English/Korean help: `ontology revisions|diff|concepts|concept|graph` (and
   `ontology --revision R`), `runs show|logs [--follow]|cancel`, `source freshness` (alias

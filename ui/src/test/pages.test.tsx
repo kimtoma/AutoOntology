@@ -294,6 +294,23 @@ describe("Exports page", () => {
     expect(await screen.findByText(/type: Business Concept/)).toBeInTheDocument()
   })
 
+  it("offers every revision folder as one zip", async () => {
+    const entry = (n: number) => ({ revision: n, dir: `r${String(n).padStart(4, "0")}`,
+                                    created_at: "2026-10-28T12:06:24+00:00",
+                                    files: [{ name: "report.md", bytes: 2048 }], dirs: [] })
+    mockFetch({ "GET /exports": { exports: [entry(3), entry(2)] } })
+    renderPage(<ExportsPage />)
+    await screen.findByText("exports/r0003/")
+    for (const dir of ["r0003", "r0002"]) {
+      const root = document.querySelector(`[data-export=${dir}]`) as HTMLElement
+      const link = within(root).getByRole("link", { name: "Download all (zip)" })
+      expect(link).toHaveAttribute("href", `/api/exports/${dir}.zip`)
+      expect(link).toHaveAttribute("download")
+      expect(link).toHaveAttribute("data-export-zip", dir)
+      expect(link.getAttribute("title")).toContain("1 files")
+    }
+  })
+
   it("previews markup as text and shows failed validations", async () => {
     const user = userEvent.setup()
     mockFetch({

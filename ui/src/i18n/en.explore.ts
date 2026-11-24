@@ -225,6 +225,8 @@ export const enExplore = {
   "exports.empty.hint": "Build the ontology, then press Export on the Build page.",
   "exports.more": "Show more ({n} older)",
   "exports.download": "Download",
+  "exports.zip": "Download all (zip)",
+  "exports.zipTitle": "exports/{dir}/ as one zip: {files}",
   "exports.previewCut": "… (first {n} characters shown)",
 
   // Status

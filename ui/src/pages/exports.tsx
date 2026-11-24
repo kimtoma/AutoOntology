@@ -144,9 +144,17 @@ function ExportCard({ entry, latest, onPreview, loading }: {
           {latest && <Badge variant="outline" className="font-normal">{t("exports.latest")}</Badge>}
           <span className="text-xs font-normal text-muted-foreground">{fmtDate(entry.created_at)} · {t("exports.filesSize", { n: entry.files.length, size: fmtBytes(total) })}</span>
         </CardTitle>
-        <div className="flex flex-wrap gap-1.5" id={latest ? "export-validation" : undefined}>
-          {entry.dirs.some((d) => d.name === "ossie") && <ValidationBadge name="Ossie" v={ossie} />}
-          {entry.dirs.some((d) => d.name === "okf") && <ValidationBadge name="OKF" v={okf} />}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap gap-1.5" id={latest ? "export-validation" : undefined}>
+            {entry.dirs.some((d) => d.name === "ossie") && <ValidationBadge name="Ossie" v={ossie} />}
+            {entry.dirs.some((d) => d.name === "okf") && <ValidationBadge name="OKF" v={okf} />}
+          </div>
+          <Button variant="outline" size="sm" className="ml-auto" asChild>
+            <a href={api.exportZipUrl(entry.dir)} download data-export-zip={entry.dir}
+               title={t("exports.zipTitle", { dir: entry.dir, files: t("exports.filesSize", { n: entry.files.length, size: fmtBytes(total) }) })}>
+              <Download aria-hidden /> {t("exports.zip")}
+            </a>
+          </Button>
         </div>
       </CardHeader>
       <CardContent className="grid gap-3 px-4">

@@ -775,6 +775,8 @@ export const api = {
   graph: () => request<GraphJson>("/ontology/graph?layer=all&evidence=true"),
   exports: () => request<{ exports: ExportEntry[] }>("/exports").then((r) => r.exports),
   exportFileUrl: (dir: string, file: string) => `${API}/exports/${enc(dir)}/${encPath(file)}`,
+  /** The whole revision folder as one zip (exactly the listed files). */
+  exportZipUrl: (dir: string) => `${API}/exports/${enc(dir)}.zip`,
   exportText: (dir: string, file: string) =>
     requestText(`/exports/${enc(dir)}/${encPath(file)}?inline=true`),
   playground: {

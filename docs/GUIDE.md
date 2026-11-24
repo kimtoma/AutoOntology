@@ -421,7 +421,8 @@ Each export is a folder `exports/r<revision>/`. Who uses which file:
 | `upstream/` | The engine's own exports per table source | NVIDIA Auto Ontology users |
 
 `validation.json` says `"ok": true` when the bundle passed its checks. The **Exports**
-page previews every file and downloads it.
+page previews every file and downloads it; **Download all (zip)** on a revision saves its
+whole folder as one `autoontology-r<revision>.zip`.
 
 ![Exports page](screenshots/exports.png)
 
@@ -521,7 +522,7 @@ need `uv run autoontology up`; the others read the local data and work with it d
 | Ontology | `uv run autoontology ontology revisions`, `ontology concepts [-q TEXT]`, `ontology concept <id>`, `ontology diff --from R --to R` |
 | Graph | `uv run autoontology ontology graph [--layer L] [--out graph.json]` |
 | Playground *(service)* | `uv run autoontology playground chat "질문"`, `playground sql "질문" --source S`, `playground sparql --file q.rq` (`--examples` lists the page's examples), `playground index --rebuild` |
-| Exports | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F` |
+| Exports | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F`, `exports zip <rev> --out F` |
 | Status | `uv run autoontology status`, `doctor`, `provider status` |
 | Settings | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(service)* |
 

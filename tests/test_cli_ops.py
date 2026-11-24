@@ -690,6 +690,7 @@ NEW_COMMANDS = [
     ["exports", "list"],
     ["exports", "show"],
     ["exports", "get"],
+    ["exports", "zip"],
     ["playground"],
     ["playground", "chat"],
     ["playground", "sql"],
@@ -817,6 +818,36 @@ def test_exports_get_into_a_directory(exports, tmp_path):
     assert (existing / "report.md").read_text("utf-8") == "# 보고서\n"
     _ok(["exports", "get", "2", "report.md", "--out", str(tmp_path / "new" / "r.md")])
     assert (tmp_path / "new" / "r.md").is_file()
+
+
+def test_exports_zip_to_a_file_or_a_directory(exports, tmp_path):
+    import zipfile
+
+    target = tmp_path / "all.zip"
+    assert "saved" in _ok(["exports", "zip", "2", "--out", str(target)]).output
+    with zipfile.ZipFile(target) as zf:
+        assert zf.namelist() == [
+            "r0002/okf/validation.json",
+            "r0002/ossie/validation.json",
+            "r0002/report.md",
+        ]
+        assert zf.read("r0002/report.md").decode("utf-8") == "# 보고서\n"
+    existing = tmp_path / "dl"
+    existing.mkdir()
+    _ok(["exports", "zip", "r0002", "--out", str(existing)])
+    assert zipfile.is_zipfile(existing / "autoontology-r0002.zip")
+    missing = tmp_path / "nope"
+    res = runner.invoke(app, ["exports", "zip", "2", "--out", f"{missing}/"])
+    assert res.exit_code == 2 and not missing.exists()
+
+
+def test_exports_zip_of_an_unknown_revision(exports, tmp_path):
+    target = tmp_path / "x.zip"
+    res = runner.invoke(app, ["exports", "zip", "9", "--out", str(target)])
+    assert res.exit_code == 1 and "unknown_export: no export r0009" in res.output
+    assert not target.exists()
+    res = runner.invoke(app, ["exports", "zip", "x9", "--out", str(target)])
+    assert res.exit_code == 2 and "invalid_revision" in res.output
 
 
 @pytest.mark.parametrize(

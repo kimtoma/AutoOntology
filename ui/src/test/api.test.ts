@@ -59,6 +59,7 @@ describe("api client", () => {
     // every segment encoded, the separators kept (Hangul OKF file names)
     expect(api.exportFileUrl("r0002", "okf/concepts/계약상태.md"))
       .toBe(`/api/exports/r0002/okf/concepts/${encodeURIComponent("계약상태.md")}`)
+    expect(api.exportZipUrl("r0002")).toBe("/api/exports/r0002.zip")
   })
 
   it("maps a network failure to the start-the-service hint", async () => {

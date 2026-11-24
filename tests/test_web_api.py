@@ -835,6 +835,50 @@ def test_exports_list_and_path_safe_download(env):
     assert c.get(f"{API}/exports/r0003/missing.ttl").status_code == 404
 
 
+def test_export_zip_holds_exactly_the_listed_files(env):
+    import io
+    import os
+    import zipfile
+
+    c, settings, _, _ = env
+    exports = Path(settings.exports_dir)
+    rev_dir = exports / "r0003"
+    (rev_dir / "okf" / "concepts").mkdir(parents=True)
+    (rev_dir / "ontology.ttl").write_text("@prefix ao: <x#> .\n", encoding="utf-8")
+    (rev_dir / "okf" / "concepts" / "계약.md").write_text("# 계약\n", encoding="utf-8")
+    (rev_dir / ".hidden").write_text("no")
+    (rev_dir / "okf" / "_draft.md").write_text("no")
+    (rev_dir / "a" / "b" / "c").mkdir(parents=True)
+    (rev_dir / "a" / "b" / "c" / "deep.txt").write_text("too deep")
+    (exports / "secret.txt").write_text("top secret")
+    os.symlink(exports / "secret.txt", rev_dir / "escape.txt")  # points outside: excluded
+    os.symlink(rev_dir / "ontology.ttl", rev_dir / "alias.ttl")  # stays inside: kept
+
+    listed = c.get(f"{API}/exports").json()["exports"][0]["files"]
+    names = [f["name"] for f in listed]
+    assert names == ["alias.ttl", "okf/concepts/계약.md", "ontology.ttl"]
+
+    resp = c.get(f"{API}/exports/r0003.zip")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    assert resp.headers["content-disposition"] == 'attachment; filename="autoontology-r0003.zip"'
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        assert zf.namelist() == [f"r0003/{n}" for n in names]
+        assert zf.read("r0003/okf/concepts/계약.md").decode("utf-8") == "# 계약\n"
+        assert all(b"top secret" not in zf.read(n) for n in zf.namelist())
+    alias = c.get(f"{API}/exports/3.zip")  # bare revision number
+    assert alias.status_code == 200 and alias.content[:2] == b"PK"
+
+    for bad in ["x", "r12", "..", "r0003%2F..", "-1"]:
+        resp = c.get(f"{API}/exports/{bad}.zip")
+        assert resp.status_code == 400 and resp.json()["error"] == "invalid_path", bad
+    missing = c.get(f"{API}/exports/r0009.zip")
+    assert missing.status_code == 404 and missing.json()["error"] == "unknown_export"
+    # a file named like a zip inside the folder still goes to the single-file route
+    (rev_dir / "bundle.zip").write_bytes(b"PK")
+    assert c.get(f"{API}/exports/r0003/bundle.zip").content == b"PK"
+
+
 def test_status_reports_backend_postgres_ollama_kordoc_and_providers(env, monkeypatch):
     c, settings, _, _ = env
     import httpx

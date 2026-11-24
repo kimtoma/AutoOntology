@@ -398,7 +398,8 @@ Markdown, TXT, HTML. 제목이 분명할수록 좋습니다. 리더가 제목을
 | `upstream/` | 표 소스별 엔진 자체 내보내기 | NVIDIA Auto Ontology 사용자 |
 
 번들이 검사를 통과하면 `validation.json`에 `"ok": true`가 적힙니다. **내보내기** 페이지에서 모든
-파일을 미리 보고 내려받을 수 있습니다.
+파일을 미리 보고 내려받을 수 있고, 리비전마다 있는 **전체 내려받기 (zip)** 버튼은 폴더 전체를
+`autoontology-r<리비전>.zip` 하나로 내려받습니다.
 
 ![내보내기 페이지](screenshots/exports.ko.png)
 
@@ -491,7 +492,7 @@ quickstart 샘플에서 1초 미만입니다(큰 온톨로지에서는 약 1분,
 | 온톨로지 | `uv run autoontology ontology revisions`, `ontology concepts [-q TEXT]`, `ontology concept <id>`, `ontology diff --from R --to R` |
 | 그래프 | `uv run autoontology ontology graph [--layer L] [--out graph.json]` |
 | 플레이그라운드 *(서비스)* | `uv run autoontology playground chat "질문"`, `playground sql "질문" --source S`, `playground sparql --file q.rq`(`--examples`는 페이지의 예제 목록), `playground index --rebuild` |
-| 내보내기 | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F` |
+| 내보내기 | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F`, `exports zip <rev> --out F` |
 | 상태 | `uv run autoontology status`, `doctor`, `provider status` |
 | 설정 | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(서비스)* |
 

@@ -898,6 +898,25 @@ def exports_get(
     typer.echo(msg("ops.saved", path=target, bytes=len(data)))
 
 
+@exports_app.command("zip", help=msg("help.exports.zip"))
+def exports_zip(
+    rev: str = typer.Argument(..., help=msg("help.exports.rev")),
+    out: str = typer.Option(..., "--out", help=msg("help.exports.zip.out")),
+) -> None:
+    import os
+
+    folder = _rev_dir(rev)
+    target = Path(out).expanduser()
+    if target.is_dir():
+        target = target / f"autoontology-{folder}.zip"
+    elif out.endswith(("/", os.sep)):
+        _error("no_such_directory", msg("ops.no_such_dir", path=target), 2)
+    data = _guard(lambda: _local().raw("GET", f"/exports/{folder}.zip")).content
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    typer.echo(msg("ops.saved", path=target, bytes=len(data)))
+
+
 # --- playground ---------------------------------------------------------------------
 
 playground_app = typer.Typer(help=msg("help.playground"), no_args_is_help=True)
