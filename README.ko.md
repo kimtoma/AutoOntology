@@ -819,8 +819,8 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 ## 보안 참고
 
 - 서비스와 엔진 백엔드는 `127.0.0.1`에 바인딩됩니다. 로컬이 아닌 `Host`나 교차 사이트
-  `Origin`을 가진 요청은 거부합니다. **인증은 없습니다.** 두 포트 모두 외부에 노출하지 말고,
-  공개 프록시 뒤에 두지 마세요.
+  `Origin`을 가진 요청은 거부합니다. **`AUTOONTOLOGY_AUTH=accounts`가 아니면 인증이
+  없습니다**([계정](#계정) 참고). 두 포트 모두 외부에 노출하지 말고, 공개 프록시 뒤에 두지 마세요.
 - 문서 텍스트는 신뢰하지 않는 입력으로 다룹니다. 구분된 프롬프트 블록 안에 인용하고, 모델 출력은
   스키마로 검증하며(fail-closed), OKF 번들은 추출한 텍스트의 Markdown과 HTML을 이스케이프합니다.
   `.md` 파일을 다른 곳에서 HTML로 렌더링한다면 직접 정화(sanitize)하세요.
@@ -873,6 +873,39 @@ ACL 태그로 로그인한 서버)는 신원 헤더가 없으므로 같은 방�
 기기에서 UI를 여세요. 그 호스트 이름에서도 교차 출처 쓰기는 계속 거부됩니다.
 `/api/status`의 `remote`에 호스트 이름이 나옵니다(로그인은 나오지 않습니다).
 **AutoOntology에는 `tailscale funnel`을 절대 쓰지 마세요.** 자체 인증이 없습니다.
+
+### 계정
+
+기본값(`AUTOONTOLOGY_AUTH=off`)에서는 계정이 없습니다. 서비스에 닿는 사람은 누구나 모든 것을 할
+수 있습니다. `AUTOONTOLOGY_AUTH=accounts`로 켜면 이메일과 비밀번호(12자 이상) 또는 1회용 링크로
+로그인하고 세션 쿠키(`ao_session`: HttpOnly, SameSite=Strict, 로컬이 아닌 호스트나 https
+`AUTOONTOLOGY_PUBLIC_URL`이면 Secure, 유효 시간 `AUTOONTOLOGY_SESSION_HOURS` 기본 12시간)를
+받습니다. 설정된 tailnet 호스트에서는 Tailscale 로그인과 이메일이 같은 사용자로 로그인됩니다.
+
+계정 기능을 켜기 전에 서버에서 첫 관리자를 만드세요. 비밀번호 없이 만들면 관리자가 비밀번호를
+정할 1회용 초대 링크(7일 유효)를 출력합니다.
+
+```bash
+uv run ao user create you@example.com --name "You" --admin
+# 또는: printf '%s\n' "$PASSWORD" | uv run ao user create you@example.com --admin --password-stdin
+```
+
+그다음 `AUTOONTOLOGY_AUTH=accounts`(공개 주소로 접속한다면 링크가 그 주소를 가리키도록
+`AUTOONTOLOGY_PUBLIC_URL`도)를 설정하고 다시 시작합니다. 다른 명령: `ao user list [--json]`,
+`ao user disable|enable <email>`(비활성화하면 바로 로그아웃), `ao user link <email>
+[--purpose magic|reset|invite]`(메일이 없을 때 전달할 로그인 또는 비밀번호 재설정 링크).
+CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩니다.
+
+메일: `AUTOONTOLOGY_SMTP_HOST`, `_PORT`(587 STARTTLS, 465 TLS), `_USER`, `_PASSWORD`,
+`_FROM`을 설정하면 로그인 화면에서 로그인 링크(15분, 1회용)를 메일로 보낼 수 있습니다. 응답은
+주소에 계정이 있는지 알려 주지 않습니다. SMTP가 없으면 버튼이 숨겨집니다.
+
+로그인 API(`/api/auth/*`, 세션 없이 접근 가능, 호스트·교차 출처 검사는 그대로): `POST login
+{email, password}`(실패는 모두 401 `invalid_credentials`, IP나 이메일별 분당 5회 실패 뒤
+429), `POST logout`, `GET me`, `POST magic-link {email}`(항상 202),
+`GET /auth/magic/<token>`, `POST accept-invite {token, password}`,
+`POST password {current, new}`(다른 세션 종료). SSO(OIDC)는 예정이며 `AUTOONTOLOGY_OIDC_*`는
+예약되어 있습니다.
 
 취약점 신고 방법은 [SECURITY.md](SECURITY.md)를 보세요.
 

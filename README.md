@@ -871,8 +871,9 @@ are overridden.
 ## Security notes
 
 - The service and the engine backend bind to `127.0.0.1`. Requests with a non-local
-  `Host` or a cross-site `Origin` are rejected. **There is no authentication:** do not
-  expose either port, and do not put them behind a public proxy.
+  `Host` or a cross-site `Origin` are rejected. **Without `AUTOONTOLOGY_AUTH=accounts`
+  there is no authentication** (see [Accounts](#accounts)): do not expose either port, and
+  do not put them behind a public proxy.
 - Document text is treated as untrusted. It is quoted inside delimited prompt blocks,
   model output is validated against schemas (fail-closed), and the OKF bundle escapes
   Markdown and HTML in extracted text. If you render the `.md` files as HTML elsewhere,
@@ -929,6 +930,41 @@ from a device logged in as a user. Cross-origin writes stay
 refused on that hostname too. `/api/status` lists the hostnames under `remote` (never the
 logins). **Never use `tailscale funnel`** for AutoOntology: it has no authentication of
 its own.
+
+### Accounts
+
+By default (`AUTOONTOLOGY_AUTH=off`) there are no accounts: everyone who reaches the
+service may do everything. With `AUTOONTOLOGY_AUTH=accounts` people sign in with an email
+and a password (at least 12 characters), or with a one-time link, and get a session cookie
+(`ao_session`: HttpOnly, SameSite=Strict, Secure on a non-local host or with an https
+`AUTOONTOLOGY_PUBLIC_URL`, valid `AUTOONTOLOGY_SESSION_HOURS`, default 12). On a configured
+tailnet hostname, a Tailscale login signs in the user with the same email.
+
+Create the first admin on the server before switching accounts on. Without a password the
+command prints a one-time invitation link (valid 7 days) where the admin chooses one:
+
+```bash
+uv run ao user create you@example.com --name "You" --admin
+# or: printf '%s\n' "$PASSWORD" | uv run ao user create you@example.com --admin --password-stdin
+```
+
+Then set `AUTOONTOLOGY_AUTH=accounts` (and `AUTOONTOLOGY_PUBLIC_URL` if the service is
+reached through a public address, so links point there) and restart. Other commands:
+`ao user list [--json]`, `ao user disable|enable <email>` (disabling signs the user out),
+`ao user link <email> [--purpose magic|reset|invite]` (a sign-in or password-reset link to
+pass on when mail is not configured). The CLI acts as an admin and its changes are recorded
+in the audit log as `cli`.
+
+Mail: set `AUTOONTOLOGY_SMTP_HOST`, `_PORT` (587 STARTTLS, 465 TLS), `_USER`,
+`_PASSWORD` and `_FROM` to let the login page email sign-in links (15 minutes, single use).
+The answer never tells whether an address has an account. Without SMTP the button is hidden.
+
+Sign-in API (`/api/auth/*`, reachable without a session; the host and cross-origin checks
+still apply): `POST login {email, password}` (401 `invalid_credentials` for every failure,
+429 after 5 failures a minute per IP or email), `POST logout`, `GET me`,
+`POST magic-link {email}` (always 202), `GET /auth/magic/<token>`,
+`POST accept-invite {token, password}`, `POST password {current, new}` (ends the other
+sessions). Single sign-on (OIDC) is planned; `AUTOONTOLOGY_OIDC_*` is reserved.
 
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 

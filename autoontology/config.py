@@ -12,6 +12,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv
 
@@ -476,6 +477,48 @@ def _tailscale_hosts(raw: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+#: AUTOONTOLOGY_AUTH values (the first is the default).
+AUTH_MODES = ("off", "accounts")
+#: AUTOONTOLOGY_ARCHIVED_PLAYGROUND values (the first is the default).
+ARCHIVED_PLAYGROUND_MODES = ("allow", "deny")
+#: Reserved for single sign-on (not read yet): AUTOONTOLOGY_OIDC_ISSUER,
+#: AUTOONTOLOGY_OIDC_CLIENT_ID, AUTOONTOLOGY_OIDC_CLIENT_SECRET, AUTOONTOLOGY_OIDC_SCOPES
+#: (see ``autoontology/web/auth.py``, ``OIDCProvider``).
+OIDC_RESERVED_VARS = (
+    "AUTOONTOLOGY_OIDC_ISSUER",
+    "AUTOONTOLOGY_OIDC_CLIENT_ID",
+    "AUTOONTOLOGY_OIDC_CLIENT_SECRET",
+    "AUTOONTOLOGY_OIDC_SCOPES",
+)
+SESSION_HOURS_MAX = 24 * 30
+
+
+def _choice_env(env: dict[str, str], name: str, choices: tuple[str, ...]) -> str:
+    raw = env.get(name, "").strip().lower()
+    if not raw:
+        return choices[0]
+    if raw not in choices:
+        raise ValueError(f"{name} must be one of {', '.join(choices)}, got {raw!r}")
+    return raw
+
+
+def _session_hours() -> int:
+    hours = _int_env("AUTOONTOLOGY_SESSION_HOURS", 12)
+    if not 1 <= hours <= SESSION_HOURS_MAX:
+        raise ValueError(f"AUTOONTOLOGY_SESSION_HOURS must be 1..{SESSION_HOURS_MAX}, got {hours}")
+    return hours
+
+
+def _public_url(raw: str) -> str:
+    value = raw.strip().rstrip("/")
+    if not value:
+        return ""
+    parts = urlsplit(value)
+    if parts.scheme not in ("http", "https") or not parts.netloc or parts.query or parts.fragment:
+        raise ValueError(f"AUTOONTOLOGY_PUBLIC_URL must be an http(s) base URL, got {raw!r}")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     home: Path
@@ -539,6 +582,24 @@ class Settings:
     tailscale_hosts: tuple[str, ...] = ()
     #: Tailnet logins allowed on those hostnames (AUTOONTOLOGY_TAILSCALE_LOGINS; empty = any).
     tailscale_logins: tuple[str, ...] = field(default=(), repr=False)
+    #: Sign-in (AUTOONTOLOGY_AUTH): ``off`` (no accounts; everyone past the host guard may
+    #: do everything) or ``accounts`` (users, sessions, project memberships).
+    auth_mode: str = "off"
+    #: Session lifetime in hours (AUTOONTOLOGY_SESSION_HOURS).
+    session_hours: int = 12
+    #: The public base URL login links point at (AUTOONTOLOGY_PUBLIC_URL; empty = the
+    #: request's own base URL), e.g. ``https://autoontology.example.com``.
+    public_url: str = ""
+    #: Outgoing mail for login links (AUTOONTOLOGY_SMTP_*); empty host = no mail.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = field(default="", repr=False)
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    #: Playground questions on archived projects (AUTOONTOLOGY_ARCHIVED_PLAYGROUND):
+    #: ``allow`` or ``deny``.
+    archived_playground: str = "allow"
 
     def __post_init__(self) -> None:
         validate_catalog_database_name(self.postgres_database)
@@ -602,7 +663,28 @@ class Settings:
             else REPO_ROOT / "samples",
             tailscale_hosts=_tailscale_hosts(env.get("AUTOONTOLOGY_TAILSCALE_HOSTS", "")),
             tailscale_logins=_csv_env(env.get("AUTOONTOLOGY_TAILSCALE_LOGINS", "")),
+            auth_mode=_choice_env(env, "AUTOONTOLOGY_AUTH", AUTH_MODES),
+            session_hours=_session_hours(),
+            public_url=_public_url(env.get("AUTOONTOLOGY_PUBLIC_URL", "")),
+            smtp_host=env.get("AUTOONTOLOGY_SMTP_HOST", "").strip(),
+            smtp_port=_int_env("AUTOONTOLOGY_SMTP_PORT", 587),
+            smtp_user=env.get("AUTOONTOLOGY_SMTP_USER", "").strip(),
+            smtp_password=env.get("AUTOONTOLOGY_SMTP_PASSWORD", ""),
+            smtp_from=env.get("AUTOONTOLOGY_SMTP_FROM", "").strip(),
+            smtp_starttls=_bool_env("AUTOONTOLOGY_SMTP_STARTTLS", True),
+            archived_playground=_choice_env(
+                env, "AUTOONTOLOGY_ARCHIVED_PLAYGROUND", ARCHIVED_PLAYGROUND_MODES
+            ),
         )
+
+    @property
+    def accounts_enabled(self) -> bool:
+        return self.auth_mode == "accounts"
+
+    @property
+    def smtp_enabled(self) -> bool:
+        """Mail can be sent (a host and a sender address are set)."""
+        return bool(self.smtp_host and (self.smtp_from or self.smtp_user))
 
     @property
     def model_profile(self) -> str:

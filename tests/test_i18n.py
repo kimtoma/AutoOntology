@@ -277,6 +277,21 @@ HELP_SCREENS = {
         "help.project.description",
     ),
     ("project", "rename"): ("help.project.ref", "help.project.new_slug"),
+    ("user",): (
+        "help.user",
+        "help.user.create",
+        "help.user.list",
+        "help.user.disable",
+        "help.user.enable",
+        "help.user.link",
+    ),
+    ("user", "create"): (
+        "help.user.email",
+        "help.user.name",
+        "help.user.admin",
+        "help.user.password_stdin",
+    ),
+    ("user", "link"): ("help.user.purpose",),
 }
 
 

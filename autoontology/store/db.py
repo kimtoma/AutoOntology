@@ -465,6 +465,8 @@ MIGRATIONS: list[tuple[int, Migration]] = [
     ),
     # Schema v8: projects (:func:`_migrate_v8`, a Python migration: it rebuilds tables).
     (8, lambda conn: _migrate_v8(conn)),
+    # Schema v9: accounts (:func:`_migrate_v9`; ``autoontology/store/accounts.py``).
+    (9, lambda conn: _migrate_v9(conn)),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
@@ -791,6 +793,78 @@ def _migrate_v8(conn: sqlite3.Connection) -> None:
         bad = conn.execute(f"PRAGMA foreign_key_check({table})").fetchall()
         if bad:
             raise RuntimeError(f"migration v8: {table} has dangling references: {bad[:3]}")
+
+
+#: Schema v9 tables (every statement is idempotent: a downgraded ``schema_version`` re-runs
+#: the migration without touching rows).
+_V9_STATEMENTS = (
+    # users: email is unique without regard to case (stored lower-cased); pw_hash NULL =
+    # no password yet (invited, or magic links only); disabled_at set = refused everywhere.
+    """CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        name TEXT NOT NULL DEFAULT '',
+        pw_hash TEXT,
+        is_admin INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        disabled_at TEXT,
+        last_login_at TEXT
+    )""",
+    # sessions: the cookie holds a random id, the row only its SHA-256 (hex).
+    """CREATE TABLE IF NOT EXISTS sessions (
+        id_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        ip TEXT NOT NULL DEFAULT '',
+        user_agent TEXT NOT NULL DEFAULT ''
+    )""",
+    "CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id)",
+    "CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions (expires_at)",
+    # login_tokens: single-use links (magic login, invitation, password reset), SHA-256 only.
+    """CREATE TABLE IF NOT EXISTS login_tokens (
+        id_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        purpose TEXT NOT NULL CHECK (purpose IN ('magic', 'invite', 'reset')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS login_tokens_user_idx ON login_tokens (user_id, purpose)",
+    """CREATE TABLE IF NOT EXISTS memberships (
+        project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'reviewer', 'viewer')),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, user_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS memberships_user_idx ON memberships (user_id)",
+    # audit_log: no foreign keys -- the history outlives the users and projects it names.
+    """CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        user_id TEXT,
+        project_id TEXT,
+        action TEXT NOT NULL,
+        target TEXT NOT NULL DEFAULT '',
+        detail_json TEXT NOT NULL DEFAULT '{}',
+        ip TEXT NOT NULL DEFAULT ''
+    )""",
+    "CREATE INDEX IF NOT EXISTS audit_log_project_idx ON audit_log (project_id, id)",
+    "CREATE INDEX IF NOT EXISTS audit_log_user_idx ON audit_log (user_id, id)",
+)
+
+
+def _migrate_v9(conn: sqlite3.Connection) -> None:
+    """Schema v9: accounts. ``users``, ``sessions``, ``login_tokens``, ``memberships``
+    (a user's role in a project), ``audit_log``, and ``agent_tokens.created_by`` (the user
+    who issued a token; NULL for the tokens from before accounts). Existing rows are not
+    touched; safe to re-run."""
+    for statement in _V9_STATEMENTS:
+        conn.execute(statement)
+    if "created_by" not in _columns(conn, "agent_tokens"):
+        conn.execute("ALTER TABLE agent_tokens ADD COLUMN created_by TEXT")
 
 
 def _ensure_indexes(conn: sqlite3.Connection, version: int) -> None:

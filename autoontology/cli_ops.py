@@ -1814,6 +1814,161 @@ def project_unarchive(
     typer.echo(msg("ops.project_unarchived", slug=body["slug"]))
 
 
+# --- users (server-side admin) --------------------------------------------------------
+
+user_app = typer.Typer(help=msg("help.user"), no_args_is_help=True)
+#: Link purposes ``ao user link`` issues.
+LINK_PURPOSES = ("magic", "reset", "invite")
+
+
+def _accounts(settings: Any) -> Any:
+    """The store's accounts. The CLI runs on the server: it is trusted as an admin and
+    writes the store directly (the service need not run)."""
+    from autoontology.store.accounts import Accounts
+    from autoontology.store.db import Store
+
+    return Accounts(Store.for_home(settings.home, default_project_slug=settings.workspace))
+
+
+def _account_error(exc: Any) -> None:
+    code = 2 if exc.code in ("invalid_email", "weak_password", "invalid_purpose") else 1
+    _error(exc.code, str(exc), code)
+
+
+def _user_by_email(accounts: Any, email: str) -> Any:
+    user = accounts.by_email(email)
+    if user is None:
+        _error("unknown_user", msg("ops.user_unknown", email=email.strip()), 1)
+    return user
+
+
+def _issue_link(settings: Any, accounts: Any, user: Any, purpose: str) -> dict[str, Any]:
+    from autoontology.web.auth import MagicLinkProvider
+
+    provider = MagicLinkProvider()
+    raw, expires = provider.issue(accounts, user, purpose)
+    base_url = settings.public_url or settings.service_url
+    return {
+        "email": user.email,
+        "purpose": purpose,
+        "link": provider.link(base_url, raw, purpose),
+        "expires_at": expires,
+    }
+
+
+def _print_link(settings: Any, issued: dict[str, Any]) -> None:
+    typer.echo("")
+    typer.echo(issued["link"])
+    typer.echo("")
+    typer.echo(msg("ops.user_link_once", expires=issued["expires_at"][:16].replace("T", " ")))
+    if not settings.accounts_enabled:
+        typer.echo(msg("ops.user_accounts_off"), err=True)
+
+
+def _user_rows(users: list[Any]) -> str:
+    rows = [
+        (
+            u.email,
+            u.name or "-",
+            "admin" if u.is_admin else "-",
+            "active" if u.active else "disabled",
+            "yes" if u.has_password else "no",
+            (u.last_login_at or "-")[:19],
+        )
+        for u in users
+    ]
+    return base._table(("EMAIL", "NAME", "ADMIN", "STATE", "PASSWORD", "LAST LOGIN"), rows)
+
+
+@user_app.command("create", help=msg("help.user.create"))
+def user_create(
+    email: str = typer.Argument(..., help=msg("help.user.email")),
+    name: str = typer.Option("", "--name", help=msg("help.user.name")),
+    admin: bool = typer.Option(False, "--admin", help=msg("help.user.admin")),
+    password_stdin: bool = typer.Option(
+        False, "--password-stdin", help=msg("help.user.password_stdin")
+    ),
+    as_json: bool = _JSON,
+) -> None:
+    from autoontology.store.accounts import AccountError
+
+    settings = base._settings()
+    accounts = _accounts(settings)
+    password = sys.stdin.readline().rstrip("\r\n") if password_stdin else None
+    try:
+        user = accounts.create_user(email, name=name, is_admin=admin, password=password)
+    except AccountError as exc:
+        _account_error(exc)
+    accounts.record("user.create", actor="cli", target=user.email, detail={"admin": user.is_admin})
+    issued = None if password_stdin else _issue_link(settings, accounts, user, "invite")
+    if as_json:
+        _json({"user": user.to_dict(), **({"invite": issued} if issued else {})})
+        return
+    typer.echo(msg("ops.user_created", email=user.email, admin=" (admin)" if user.is_admin else ""))
+    if issued:
+        typer.echo(msg("ops.user_invite_hint"))
+        _print_link(settings, issued)
+
+
+@user_app.command("list", help=msg("help.user.list"))
+def user_list(as_json: bool = _JSON) -> None:
+    users = _accounts(base._settings()).list_users()
+    if as_json:
+        _json({"users": [u.to_dict() for u in users]})
+        return
+    if not users:
+        typer.echo(msg("ops.user_none"))
+        return
+    typer.echo(_user_rows(users))
+
+
+def _set_active(email: str, active: bool, as_json: bool) -> None:
+    accounts = _accounts(base._settings())
+    user = _user_by_email(accounts, email)
+    user = accounts.enable(user.id) if active else accounts.disable(user.id)
+    accounts.record("user.enable" if active else "user.disable", actor="cli", target=user.email)
+    if as_json:
+        _json(user.to_dict())
+        return
+    key = "ops.user_enabled" if active else "ops.user_disabled"
+    typer.echo(msg(key, email=user.email))
+
+
+@user_app.command("disable", help=msg("help.user.disable"))
+def user_disable(
+    email: str = typer.Argument(..., help=msg("help.user.email")), as_json: bool = _JSON
+) -> None:
+    _set_active(email, False, as_json)
+
+
+@user_app.command("enable", help=msg("help.user.enable"))
+def user_enable(
+    email: str = typer.Argument(..., help=msg("help.user.email")), as_json: bool = _JSON
+) -> None:
+    _set_active(email, True, as_json)
+
+
+@user_app.command("link", help=msg("help.user.link"))
+def user_link(
+    email: str = typer.Argument(..., help=msg("help.user.email")),
+    purpose: str = typer.Option("magic", "--purpose", help=msg("help.user.purpose")),
+    as_json: bool = _JSON,
+) -> None:
+    if purpose not in LINK_PURPOSES:
+        _error("invalid_purpose", msg("ops.user_bad_purpose", purpose=purpose), 2)
+    settings = base._settings()
+    accounts = _accounts(settings)
+    user = _user_by_email(accounts, email)
+    if not user.active:
+        _error("user_disabled", msg("ops.user_is_disabled", email=user.email), 1)
+    issued = _issue_link(settings, accounts, user, purpose)
+    accounts.record("user.link", actor="cli", target=user.email, detail={"purpose": purpose})
+    if as_json:
+        _json(issued)
+        return
+    _print_link(settings, issued)
+
+
 # --- registration -------------------------------------------------------------------
 
 
@@ -1827,6 +1982,7 @@ def register(app: typer.Typer, source_app: typer.Typer) -> None:
     app.add_typer(settings_app, name="settings")
     app.add_typer(agent_app, name="agent")
     app.add_typer(project_app, name="project")
+    app.add_typer(user_app, name="user")
     source_app.command("freshness", help=msg("help.sources.freshness"))(sources_freshness)
     # `sources freshness` (the UI's page name) is `source freshness`
     app.add_typer(source_app, name="sources", hidden=True)

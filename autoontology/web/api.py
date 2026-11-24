@@ -1698,6 +1698,11 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
     from autoontology.web import agent_api
 
     agent_api.install(app, api)
+    from autoontology.web import auth
+
+    # /api/auth/* and /auth/magic/*: behind the same host and cross-origin checks below
+    # (they are what stops login CSRF)
+    auth.install(app, api)
 
     @app.middleware("http")
     async def _local_only(request: Request, call_next):

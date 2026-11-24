@@ -9,6 +9,22 @@ behaviour).
 
 ### Added
 
+- **Accounts and sign-in** (schema v9; `autoontology/store/accounts.py`,
+  `autoontology/web/auth.py`, `autoontology/web/mailer.py`), off by default
+  (`AUTOONTOLOGY_AUTH=off|accounts`). Tables `users`, `sessions`, `login_tokens`,
+  `memberships`, `audit_log`, and `agent_tokens.created_by`. Passwords are PBKDF2-SHA256
+  (240k rounds, at least 12 characters, constant-time check that also spends a hash for
+  unknown accounts); sessions and login tokens are stored as SHA-256 only. Session cookie
+  `ao_session` (HttpOnly, SameSite=Strict, Secure on non-local hosts or an https
+  `AUTOONTOLOGY_PUBLIC_URL`, `AUTOONTOLOGY_SESSION_HOURS`). Routes `POST /api/auth/login`
+  (uniform `invalid_credentials`, 5 failures a minute per IP and per email, exponential
+  delay), `logout`, `GET me`, `POST magic-link` (always 202), `GET /auth/magic/{token}`,
+  `POST accept-invite`, `POST password` (ends the other sessions); every sign-in event is in
+  the audit log. Tailscale logins map to the user with the same email. Login links by
+  SMTP (`AUTOONTOLOGY_SMTP_*`, Korean/English) or from the CLI: `user create [--admin]
+  [--password-stdin]` (prints an invitation link), `user list|disable|enable|link`.
+  `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=allow|deny` is read (enforced with permissions);
+  `AUTOONTOLOGY_OIDC_*` is reserved. Other routes are not gated yet.
 - **Projects** (schema v8; `autoontology/web/projects.py`): one installation holds several
   projects, each with its own sources (the same name may exist in two projects), runs,
   revisions (r1, r2, ... per project), review decisions, exports
