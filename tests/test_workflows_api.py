@@ -78,11 +78,12 @@ def test_workflow_routes_off_mode(client):
     assert resp.status_code == 200 and resp.json()["run"]["status"] == "applied"
     workflows.wait()
     assert c.get(f"{API}/workflows/runs/{run_id}").json()["run"]["status"] == "succeeded"
-    # wait: true answers with the run as it ended or paused (stage 4 needs an owner again)
+    # wait: true answers with the run as it ended (every stage is recorded already: the
+    # guards of the sample submit nothing new)
     waited = c.post(f"{API}/workflows/{WORKFLOW}/run", json={"wait": True})
-    assert waited.status_code == 200 and waited.json()["run"]["status"] == "paused"
-    assert waited.json()["run"]["summary"]["actions_applied"] == 3
-    assert len(waited.json()["run"]["action_runs"]) == 4
+    assert waited.status_code == 200 and waited.json()["run"]["status"] == "succeeded"
+    assert waited.json()["run"]["summary"]["actions_applied"] == 0
+    assert len(waited.json()["run"]["action_runs"]) == 0
     listed = c.get(f"{API}/workflows/runs?workflow={WORKFLOW}").json()["runs"]
     assert [r["id"] for r in listed] == [waited.json()["run"]["id"], run_id]
     assert "objects" not in listed[0]

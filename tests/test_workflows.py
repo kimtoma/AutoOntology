@@ -126,7 +126,7 @@ def test_sample_workflow_records_stages_and_pauses_for_stage_four(env):
     assert by_key["INV-2"]["steps"][0] == {"path": "steps[0]", "kind": "if", "value": False}
     paused = run.to_dict()["paused"]
     assert [p["key"] for p in paused] == ["INV-6"]
-    assert paused[0]["path"] == [["steps", 0], ["then", 0]]
+    assert paused[0]["path"] == [["steps", 0], ["then", 0], ["then", 0]]
     # the action runs: requested by the workflow, linked to the run
     linked = view.action_runs().list(workflow_run_id=run.id)
     assert len(linked) == 4 and {a.via for a in linked} == {"workflow"}
@@ -148,6 +148,12 @@ def test_sample_workflow_records_stages_and_pauses_for_stage_four(env):
     assert _audit(view) == ["workflow.run", "workflow.finish"]
     # the sources were never written
     assert all("독촉단계" not in r for r in backend.tables["public.invoices"]["rows"])
+    # the next day: every stage is recorded already, so nothing new is submitted
+    again = _run(settings, view, slot="manual:2")
+    assert again.status == "succeeded"
+    assert (again.summary["matched"], again.summary["completed"]) == (4, 4)
+    assert again.summary["actions_applied"] == 0 and again.summary["pending_approval"] == 0
+    assert view.action_runs().list(workflow_run_id=again.id) == []
 
 
 def test_rejected_approval_skips_the_object(env):
@@ -198,7 +204,9 @@ def test_retry_never_applies_an_action_twice(env):
     run = _run(settings, view)
     before = len(view.action_runs().list())
     # the same object through the same step of the same run: the same idempotency key
-    key = workflows.idempotency_key(run.id, [["steps", 0], ["else", 0], ["then", 0]], "INV-5")
+    key = workflows.idempotency_key(
+        run.id, [["steps", 0], ["else", 0], ["then", 0], ["then", 0]], "INV-5"
+    )
     found, created = actions.submit(
         settings,
         view,
@@ -537,7 +545,8 @@ def test_activator_role_is_checked_at_run_time(isolated_env, monkeypatch):
     accounts.disable(owner.id)
     assert "not an active user" in _run(settings, view, slot="s3").error
     _activate(view, {**sample_workflow(), "max_objects": 10}, actor="cli")
-    assert _run(settings, view, slot="s4").status == "paused"
+    # (INV-6 got its stage 4 from the approval above: nothing waits any more)
+    assert _run(settings, view, slot="s4").status == "succeeded"
 
 
 def test_accounts_off_acts_as_owner(env):

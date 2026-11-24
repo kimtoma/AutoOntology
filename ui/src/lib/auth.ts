@@ -262,7 +262,7 @@ export const AUDIT_ACTIONS = [
   "token.create", "token.rotate", "token.revoke", "run.start", "run.cancel", "review.decide", "review.undo",
   "source.add", "source.delete", "samples.load", "settings.update", "settings.restart",
   "project.create", "project.rename", "project.archive", "project.unarchive",
-  "object.bind", "logic.save", "logic.status",
+  "object.bind", "logic.save", "logic.status", "logic.accept", "logic.reject",
   "action.submit", "action.approve", "action.reject", "action.apply", "action.revert", "action.fail",
   "workflow.run", "workflow.finish", "workflow.cancel",
 ]

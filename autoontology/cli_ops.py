@@ -2551,6 +2551,179 @@ def logic_retire(
     _logic_status(kind, name, "retired", as_json)
 
 
+#: Seconds between two polls of `logic extract --wait` against the service.
+LOGIC_POLL_S = 1.0
+_CANDIDATE_RE = re.compile(r"^(?:lg:)?(lc_[0-9a-f]{1,32})$")
+
+
+def _candidate_seg(ref: str) -> str:
+    m = _CANDIDATE_RE.fullmatch(ref or "")
+    if m is None:
+        _error("unknown_candidate", f"no logic candidate {ref[:80]!r}", 2)
+    return "lg:" + m.group(1)
+
+
+def _logic_counts(counts: dict[str, Any]) -> str:
+    keys = ("concepts", "calls", "failed_calls", "candidates", "needs_edit", "stored", "ready")
+    text = " ".join(f"{k}={counts.get(k, 0)}" for k in keys)
+    dropped = counts.get("dropped") or {}
+    if dropped:
+        text += " dropped=" + ",".join(f"{k}:{v}" for k, v in sorted(dropped.items()))
+    return text
+
+
+def _logic_local_run() -> dict[str, Any]:
+    """`logic extract` without a service: the job in this process (it waits)."""
+    from autoontology.engine import jobs
+    from autoontology.logic.extract import run_logic
+
+    settings = base._settings()
+    view = base._store(settings, write=True)
+    jobs.setup_job_logging(settings, console=not _json_mode())
+    try:
+        result = run_logic(view, settings)
+    except jobs.JobError as exc:
+        _error("run_not_started", str(exc), 1)
+    run = view.get_run(result.run_id)
+    return {
+        "id": result.run_id,
+        "kind": "logic",
+        "status": result.status,
+        "error": result.error,
+        "params": {k: v for k, v in (run.params if run else {}).items() if k != "pid"},
+    }
+
+
+@logic_app.command("extract", help=msg("help.logic.extract"))
+def logic_extract(
+    wait: bool = typer.Option(False, "--wait", help=msg("help.logic.extract.wait")),
+    as_json: bool = _JSON,
+) -> None:
+    from autoontology.store.db import ACTIVE_RUN_STATUSES
+
+    run: dict[str, Any] | None = None
+    try:  # the running service holds the run manager (one run per project, cancel)
+        client = _service()
+        run_id = client.call("POST", "/runs", json={"kind": "logic"})["run_id"]
+        run = {"id": run_id, "kind": "logic", "status": "running"}
+        while wait:
+            run = client.call("GET", f"/runs/{_run_seg(run_id)}")
+            if run["status"] not in ACTIVE_RUN_STATUSES:
+                break
+            time.sleep(LOGIC_POLL_S)
+    except ServiceDown:
+        run = None
+    except CallError as exc:
+        _call_error(exc)
+    if run is None:
+        run = _logic_local_run()
+    if as_json:
+        _json({"run": run})
+    else:
+        typer.echo(msg("ops.logic_run", id=run["id"], status=run["status"]))
+        counts = (run.get("params") or {}).get("counts")
+        if counts:
+            typer.echo("  " + _logic_counts(counts))
+        if run.get("error"):
+            typer.echo(f"  {run['error']}")
+        if run["status"] == "succeeded":
+            typer.echo(msg("ops.logic_run_next"))
+    if run["status"] == "failed":
+        raise typer.Exit(1)
+
+
+@logic_app.command("candidates", help=msg("help.logic.candidates"))
+def logic_candidates(
+    ready: bool = typer.Option(False, "--ready", help=msg("help.logic.candidates.ready")),
+    status: str = typer.Option("pending", "--status", help=msg("help.logic.candidates.status")),
+    as_json: bool = _JSON,
+) -> None:
+    params: dict[str, Any] = {"status": status}
+    if ready:
+        params["ready"] = "true"
+    body = _guard(lambda: _local().call("GET", "/logic/candidates", params=params))
+    if as_json:
+        _json(body)
+        return
+    if not body["candidates"]:
+        typer.echo(msg("ops.logic_no_candidates"))
+        return
+    rows = []
+    for item in body["candidates"]:
+        lg = item["logic"]
+        decision = (item.get("decision") or {}).get("decision") or "pending"
+        conf = item.get("confidence")
+        rows.append(
+            (
+                lg["candidate_id"],
+                lg["kind"],
+                _short(lg["name"], 24),
+                _short(lg["label"] or "-", 24),
+                "ready" if lg["ready"] else f"{len(lg['errors'])} error(s)",
+                "-" if conf is None else f"{conf:.2f}",
+                decision,
+                _short(lg["document"] or "-", 24),
+            )
+        )
+    typer.echo(
+        base._table(("ID", "KIND", "NAME", "LABEL", "STATE", "CONF", "DECISION", "DOCUMENT"), rows)
+    )
+
+
+def _candidate_decision(ref: str, payload: dict[str, Any], as_json: bool) -> None:
+    item_id = _candidate_seg(ref)
+    try:
+        body = _local().call("POST", f"/review/{quote(item_id, safe=':')}/decision", json=payload)
+    except CallError as exc:
+        if not as_json and exc.body.get("errors"):
+            _spec_errors(exc.body["errors"])
+        _call_error(exc)
+    except ServiceDown as exc:  # pragma: no cover - local calls need no service
+        _service_down(exc)
+    if as_json:
+        _json(body)
+        return
+    d = body["decision"]
+    typer.echo(msg("ops.logic_decided", id=item_id[3:], decision=d["decision"]))
+    if d["decision"] == "accept":
+        p = d["payload"]
+        typer.echo(
+            "  "
+            + msg(
+                "ops.logic_saved",
+                kind=p.get("kind"),
+                name=p.get("def_name"),
+                version=p.get("version"),
+                status="draft",
+            )
+        )
+
+
+@logic_app.command("accept", help=msg("help.logic.accept"))
+def logic_accept(
+    candidate: str = typer.Argument(..., help=msg("help.logic.candidate")),
+    file: Path = typer.Option(None, "-f", "--file", help=msg("help.logic.accept.file")),
+    note: str = typer.Option("", "--note", help=msg("help.logic.note")),
+    as_json: bool = _JSON,
+) -> None:
+    payload: dict[str, Any] = {"decision": "accept", "note": note}
+    if file is not None:
+        docs = _logic_docs(file)
+        if len(docs) != 1:
+            _error("invalid_spec", "give one spec in the file", 2)
+        payload["spec"] = docs[0]
+    _candidate_decision(candidate, payload, as_json)
+
+
+@logic_app.command("reject", help=msg("help.logic.reject"))
+def logic_reject(
+    candidate: str = typer.Argument(..., help=msg("help.logic.candidate")),
+    note: str = typer.Option("", "--note", help=msg("help.logic.note")),
+    as_json: bool = _JSON,
+) -> None:
+    _candidate_decision(candidate, {"decision": "reject", "note": note}, as_json)
+
+
 # --- actions ------------------------------------------------------------------------
 
 action_app = typer.Typer(help=msg("help.action"), no_args_is_help=True)

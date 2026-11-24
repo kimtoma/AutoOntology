@@ -16,7 +16,11 @@ aliases), over :mod:`autoontology.logic.registry` and :mod:`autoontology.logic.f
   ``{spec, keys, params?}`` -- evaluate a stored (draft or active) or unsaved function on
   chosen objects (``functions.call``);
 * ``POST /logic/functions/{name}/call`` ``{key, params?}`` -- an active function on one
-  object (``functions.call``).
+  object (``functions.call``);
+* ``GET /logic/candidates?ready=&status=`` -- the candidates a ``logic`` run proposed, as
+  review inbox items (``logic.read``; ``status`` pending (default) | decided | all,
+  ``ready`` true: only valid ones, false: only those that need an edit). They are decided
+  through the review routes (``POST /review/lg:<id>/decision``, ``logic.edit``).
 
 ``spec`` is a mapping or YAML/JSON text. Writes are audited (``logic.save``,
 ``logic.status``).
@@ -105,6 +109,22 @@ def add_logic_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         object_call(lambda: registry.ensure_validated(ctx.store))
         defs = ctx.store.logic_defs().list(kind, status)
         return {"definitions": [d.to_dict() for d in defs]}
+
+    @router.get("/logic/candidates")
+    def logic_candidates(
+        ready: bool | None = None,
+        status: str = Query("pending", max_length=20),
+        ctx: ProjectContext = Ctx,
+    ) -> dict[str, Any]:
+        from autoontology.logic import candidates
+
+        ctx.require("logic.read")
+        if status not in ("pending", "decided", "all"):
+            raise ApiError(400, "invalid_status", "status must be one of pending, decided, all")
+        items = candidates.listing(ctx.store, ready=ready)
+        if status != "all":
+            items = [i for i in items if (i["decision"] is None) == (status == "pending")]
+        return {"candidates": items}
 
     def result(spec: Any, errors: list[dict[str, Any]]) -> dict[str, Any]:
         return {

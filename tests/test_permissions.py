@@ -164,6 +164,10 @@ ROUTES = [
     ("POST", f"{BETA}/logic/test", {"spec": LOGIC_SPEC, "keys": ["k"]}, "functions.call"),
     ("POST", f"{BETA}/logic/functions/f1/test", {"keys": ["k"]}, "functions.call"),
     ("POST", f"{BETA}/logic/functions/f1/call", {"key": "k"}, "functions.call"),
+    ("GET", f"{BETA}/logic/candidates", None, "logic.read"),
+    ("POST", f"{BETA}/review/lg:lc_x/decision", {"decision": "accept"}, "logic.edit"),
+    ("DELETE", f"{BETA}/review/lg:lc_x/decision", None, "logic.edit"),
+    ("POST", f"{BETA}/runs", {"kind": "logic"}, "logic.edit"),
     # actions: the routes need objects.read; the runner checks each action's roles
     ("GET", f"{BETA}/actions", None, "objects.read"),
     ("GET", f"{BETA}/actions/runs", None, "objects.read"),

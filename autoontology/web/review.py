@@ -16,6 +16,9 @@ Categories, in this order:
   class backed by one table, its key and title columns, :mod:`autoontology.objects`);
   accepting verifies the key on the source and makes the type active at once (no apply
   run), rejecting retires it;
+* ``logic`` (``lg:<candidate id>``): function / action / workflow definitions a ``logic``
+  run proposed from the documents (:mod:`autoontology.logic.candidates`); accepting saves
+  the spec (or an edited one, ``spec``) as a draft definition at once, rejecting hides it;
 * ``stale_sources`` (``src:<source name>``): sources whose inputs changed since the last
   build (``web/freshness.py``); the action is a build, not a decision.
 * ``folds`` (``fold:<concept id>``), listed only when asked for (``category=folds``): the
@@ -45,6 +48,7 @@ CATEGORIES: tuple[str, ...] = (
     "unaligned",
     "aliases",
     "objects",
+    "logic",
     "stale_sources",
     "folds",
 )
@@ -57,6 +61,7 @@ PREFIX_OF: dict[str, str] = {
     "unaligned": "un",
     "aliases": "alias",
     "objects": "ob",
+    "logic": "lg",
     "stale_sources": "src",
 }
 CATEGORY_OF: dict[str, str] = {v: k for k, v in PREFIX_OF.items()}
@@ -68,6 +73,7 @@ KIND_OF: dict[str, str] = {
     "unaligned": "concept",
     "aliases": "alias",
     "objects": "object",
+    "logic": "logic",
 }
 AXIOM_RELATIONS: tuple[str, ...] = ("related", "narrower", "broader")
 AXIOM_MIN_CONFIDENCE = 0.6
@@ -76,9 +82,11 @@ STATUSES: tuple[str, ...] = ("pending", "decided", "all")
 
 
 class ReviewError(ValueError):
-    def __init__(self, status: int, error: str, detail: str) -> None:
+    def __init__(self, status: int, error: str, detail: str, **extra: Any) -> None:
         super().__init__(detail)
         self.status, self.error, self.detail = status, error, detail
+        #: additional top-level fields of the error body (``errors`` of an invalid spec)
+        self.extra = extra
 
 
 def parse_item_id(item_id: str) -> tuple[str, str]:
@@ -289,6 +297,7 @@ class Inbox:
                 )
         for otype in scoped(self.store).object_types().list("proposed"):
             self._add_object(otype)
+        self._add_logic()
         for f in self.freshness:
             if f.get("stale"):
                 self.items[f"src:{f['name']}"] = {
@@ -331,6 +340,16 @@ class Inbox:
             "object_type": otype.to_dict(),
             "decision": decision.to_dict() if decision else None,
         }
+
+    def _add_logic(self) -> None:
+        from autoontology.logic import candidates
+
+        view = scoped(self.store)
+        defs = {(d.kind, d.name): d for d in view.logic_defs().list()}
+        for c in view.logic_candidates().list():
+            self.items[f"lg:{c.id}"] = candidates.item(
+                c, self._decided.get(("logic", c.id)), defs.get((c.kind, c.name))
+            )
 
     def _add(
         self,
@@ -452,7 +471,10 @@ class Inbox:
         term_id: str | None,
         note: str,
         decided_by: str,
+        spec: Any = None,
     ) -> Decision:
+        """Record a decision on *item_id*. A ``logic`` item takes effect at once (accept:
+        a draft definition from the candidate's spec, or from *spec* when given)."""
         category, subject = parse_item_id(item_id)
         if category == "stale_sources":
             raise ReviewError(
@@ -463,6 +485,12 @@ class Inbox:
             )
         item = self.item(item_id)
         kind = KIND_OF[category]
+        if kind == "logic":
+            return self._decide_logic(
+                item, subject, decision, relation, term_id, note, decided_by, spec
+            )
+        if spec is not None:
+            raise ReviewError(400, "invalid_request", "spec is for logic items")
         allowed = {
             "alignment": ("accept", "reject"),
             "alias": ("accept", "reject"),
@@ -515,8 +543,46 @@ class Inbox:
             Decision(kind, subject, decision, payload, note=note, decided_by=decided_by)
         )
 
-    def undo(self, item_id: str) -> bool:
+    def _decide_logic(
+        self,
+        item: dict[str, Any],
+        subject: str,
+        decision: str,
+        relation: str | None,
+        term_id: str | None,
+        note: str,
+        decided_by: str,
+        spec: Any,
+    ) -> Decision:
+        from autoontology.logic import candidates
+        from autoontology.objects.reader import ObjectError
+
+        if relation or term_id:
+            raise ReviewError(400, "invalid_request", "relation/term_id are for alignment items")
+        if decision not in ("accept", "reject"):
+            raise ReviewError(400, "invalid_decision", "a logic item takes accept or reject")
+        snapshot = {k: v for k, v in item.items() if k != "decision"}
+        try:
+            recorded, _ = candidates.decide(
+                scoped(self.store),
+                subject,
+                decision,
+                actor=decided_by,
+                spec=spec,
+                note=note,
+                payload={"item": snapshot},
+            )
+        except ObjectError as exc:
+            raise ReviewError(exc.status, exc.code, exc.message, **exc.extra) from exc
+        self._decided[("logic", subject)] = recorded
+        return recorded
+
+    def undo(self, item_id: str, *, actor: str = "local") -> bool:
         category, subject = parse_item_id(item_id)
         if category == "stale_sources":
             raise ReviewError(400, "not_decidable", "a stale source takes no decision")
+        if category == "logic":
+            from autoontology.logic import candidates
+
+            return candidates.undo(scoped(self.store), subject, actor=actor)
         return self.decisions.delete(KIND_OF[category], subject)

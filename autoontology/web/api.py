@@ -152,12 +152,17 @@ class DecisionIn(BaseModel):
     #: alignment accept: the item's Term (default) or one of its candidates
     term_id: str | None = Field(default=None, max_length=200)
     note: str = Field(default="", max_length=2000)
+    #: logic accept: an edited spec (a mapping, or its YAML / JSON text) saved instead of
+    #: the candidate's
+    spec: dict[str, Any] | str | None = None
 
 
 class RunIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     #: apply: the review decisions -> a new snapshot, no model call (takes only `force`)
-    kind: Literal["build", "export", "apply"]
+    #: logic: propose function / action / workflow definitions from the documents (takes
+    #: nothing; uses the chat model)
+    kind: Literal["build", "export", "apply", "logic"]
     #: apply: write a new revision even with no pending decision
     force: bool = False
     #: build: rebuild only these sources (align/merge/snapshot still cover everything)
@@ -900,7 +905,7 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
     @router.post("/runs", status_code=202)
     def start_run(body: dict[str, Any], ctx: ProjectContext = Ctx) -> dict[str, Any]:
         kind = body.get("kind") if isinstance(body, dict) else None
-        ctx.require("review.apply" if kind == "apply" else "runs.start")
+        ctx.require(run_permission(kind))
         try:
             req = RunIn.model_validate(body)
         except ValidationError as exc:
@@ -949,7 +954,7 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
     @router.post("/runs/{run_id}/cancel", status_code=202)
     def cancel_run(run_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
         run = _run(run_id, ctx.store)
-        ctx.require("review.apply" if run.kind == "apply" else "runs.start")
+        ctx.require(run_permission(run.kind))
         if run.status not in ACTIVE_RUN_STATUSES or not api.runs.cancel(run_id):
             raise ApiError(
                 409,
@@ -974,7 +979,14 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
         try:
             return call()
         except ReviewError as exc:
-            raise ApiError(exc.status, exc.error, exc.detail) from exc
+            raise ApiError(exc.status, exc.error, exc.detail, **exc.extra) from exc
+
+    def _decision_permission(item_id: str) -> str:
+        if item_id.startswith("ob:"):  # an object type proposal binds the type: the owner's
+            return "objects.manage"
+        if item_id.startswith("lg:"):  # a logic candidate becomes a draft definition
+            return "logic.edit"
+        return "review.decide"
 
     @router.get("/review")
     def review(
@@ -1022,8 +1034,7 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
     def review_decide(
         item_id: str, body: dict[str, Any], ctx: ProjectContext = Ctx
     ) -> dict[str, Any]:
-        # an object type proposal binds the type: the owner's (objects.manage)
-        ctx.require("objects.manage" if item_id.startswith("ob:") else "review.decide")
+        ctx.require(_decision_permission(item_id))
         try:
             req = DecisionIn.model_validate(body)
         except ValidationError as exc:
@@ -1051,8 +1062,28 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
                 term_id=req.term_id,
                 note=req.note.strip(),
                 decided_by=ctx.actor,
+                spec=req.spec,
             )
         )
+        if item_id.startswith("lg:"):  # the item as it is now (its definition saved)
+            inbox = api.inbox(project=ctx.store)
+            payload = decision.payload
+            ctx.audit(
+                f"logic.{req.decision}",
+                target=f"{payload.get('kind')}:{payload.get('def_name') or payload.get('name')}"[
+                    :300
+                ],
+                detail={
+                    "candidate": item_id[3:],
+                    **(
+                        {"version": payload.get("version"), "edited": payload.get("edited")}
+                        if req.decision == "accept"
+                        else {}
+                    ),
+                },
+            )
+            item = {**inbox.items[item_id], "decision": decision.to_dict()}
+            return {"item": item, "decision": decision.to_dict()}
         item = {**inbox.items[item_id], "decision": decision.to_dict()}
         ctx.audit(
             "review.decide",
@@ -1066,9 +1097,9 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
 
     @router.delete("/review/{item_id:path}/decision")
     def review_undo(item_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
-        ctx.require("objects.manage" if item_id.startswith("ob:") else "review.decide")
+        ctx.require(_decision_permission(item_id))
         inbox = api.inbox(project=ctx.store)
-        if not _review(lambda: inbox.undo(item_id)):
+        if not _review(lambda: inbox.undo(item_id, actor=ctx.actor)):
             raise ApiError(404, "no_decision", f"no decision on {item_id[:80]!r}")
         if item_id.startswith("ob:"):
             from autoontology.objects import service as objects
@@ -1672,6 +1703,11 @@ def _export_path_ok(path: str) -> bool:
     return 1 <= len(parts) <= EXPORT_PATH_DEPTH and all(EXPORT_FILE_RE.fullmatch(p) for p in parts)
 
 
+def run_permission(kind: Any) -> str:
+    """The project permission starting or cancelling a run of *kind* needs."""
+    return {"apply": "review.apply", "logic": "logic.edit"}.get(kind, "runs.start")
+
+
 def _job_call(api: Api, req: RunIn, view: ProjectStore):
     """``call(job_fn, store)`` for the run manager, after validating the request: the job
     gets project *view* over the manager's (tracking) store."""
@@ -1679,6 +1715,10 @@ def _job_call(api: Api, req: RunIn, view: ProjectStore):
     pid = view.id
     if req.force and req.kind != "apply":
         raise ApiError(400, "invalid_request", "`force` is for apply runs only")
+    if req.kind == "logic":
+        if req.sources or req.resume or req.revision or req.format:
+            raise ApiError(400, "invalid_request", "a logic run takes no options")
+        return lambda fn, store: fn(store.project(pid), settings)
     if req.kind == "build":
         sources = [api.source(n, project=view).name for n in req.sources] if req.sources else None
         if not view.list_sources():

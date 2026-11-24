@@ -1,12 +1,15 @@
 # Workflows for the quickstart demo: every day at 02:00 go through the unpaid invoices,
 # record a reminder stage by overdue days (청구수납규정 제7조).
-# A draft fixture: the scheduler arrives with the workflow layer. Apply after
-# functions.yaml and actions.yaml.
+# Apply after functions.yaml and actions.yaml, then activate (owner).
+#
+# Each branch records its stage only when the invoice has not reached it yet
+# (coalesce(독촉단계, 0) < N), so the daily run records a stage once instead of
+# submitting it again every day.
 
 - kind: workflow
   name: 연체독촉
   label: 연체 청구서 독촉
-  description: 매일 02:00 연체 청구서를 순회해 연체일수에 맞는 독촉 단계를 기록한다.
+  description: 매일 02:00 연체 청구서를 순회해 연체일수에 맞는 독촉 단계를 한 번씩 기록한다.
   trigger:
     schedule: daily 02:00
   for_each:
@@ -16,22 +19,30 @@
   steps:
     - if: 연체일수() >= 90
       then:
-        - action: 독촉단계기록
-          params:
-            단계: "4"
-      else:
-        - if: 연체일수() >= 60
+        - if: coalesce(독촉단계, 0) < 4
           then:
             - action: 독촉단계기록
               params:
-                단계: "3"
-          else:
-            - if: 연체일수() >= 30
+                단계: "4"
+      else:
+        - if: 연체일수() >= 60
+          then:
+            - if: coalesce(독촉단계, 0) < 3
               then:
                 - action: 독촉단계기록
                   params:
-                    단계: "2"
+                    단계: "3"
+          else:
+            - if: 연체일수() >= 30
+              then:
+                - if: coalesce(독촉단계, 0) < 2
+                  then:
+                    - action: 독촉단계기록
+                      params:
+                        단계: "2"
               else:
-                - action: 독촉단계기록
-                  params:
-                    단계: "1"
+                - if: coalesce(독촉단계, 0) < 1
+                  then:
+                    - action: 독촉단계기록
+                      params:
+                        단계: "1"

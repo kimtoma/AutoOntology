@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from autoontology.store.agent_tokens import AgentTokens
     from autoontology.store.decisions import DecisionStore
     from autoontology.store.logic import LogicDefs
+    from autoontology.store.logic_candidates import LogicCandidates
     from autoontology.store.objects import ObjectEdits, ObjectTypes
     from autoontology.store.workflows import WorkflowRuns
 
@@ -474,6 +475,9 @@ MIGRATIONS: list[tuple[int, Migration]] = [
     # Schema v10: the actionable ontology (:func:`_migrate_v10`; ``autoontology/objects/``,
     # ``autoontology/store/objects.py``).
     (10, lambda conn: _migrate_v10(conn)),
+    # Schema v11: what a `logic` run stores per candidate besides v10's columns
+    # (:func:`_migrate_v11`; ``autoontology/store/logic_candidates.py``).
+    (11, lambda conn: _migrate_v11(conn)),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
@@ -1069,6 +1073,25 @@ def _migrate_v10(conn: sqlite3.Connection) -> None:
             _V10_REVIEW_DECISIONS,
             project_expr=repr(DEFAULT_PROJECT_ID),
         )
+
+
+#: v11 columns of ``logic_candidates``: the model's rationale, the hash of the normalized
+#: spec (dedupe), whether any evidence quote was verified, the document it came from.
+_V11_CANDIDATE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("rationale", "TEXT NOT NULL DEFAULT ''"),
+    ("spec_hash", "TEXT NOT NULL DEFAULT ''"),
+    ("evidence_verified", "INTEGER NOT NULL DEFAULT 0"),
+    ("document", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
+def _migrate_v11(conn: sqlite3.Connection) -> None:
+    """Schema v11: ``logic_candidates`` gets :data:`_V11_CANDIDATE_COLUMNS`. Safe to
+    re-run."""
+    have = set(_columns(conn, "logic_candidates"))
+    for name, decl in _V11_CANDIDATE_COLUMNS:
+        if name not in have:
+            conn.execute(f"ALTER TABLE logic_candidates ADD COLUMN {name} {decl}")
 
 
 def _ensure_indexes(conn: sqlite3.Connection, version: int) -> None:
@@ -2300,6 +2323,12 @@ class ProjectStore:
         from autoontology.store.logic import LogicDefs
 
         return LogicDefs(self.store, project_id=self.id)
+
+    def logic_candidates(self) -> LogicCandidates:
+        """The project's :class:`~autoontology.store.logic_candidates.LogicCandidates`."""
+        from autoontology.store.logic_candidates import LogicCandidates
+
+        return LogicCandidates(self.store, project_id=self.id)
 
     def playground(self) -> PlaygroundStore:
         """The project's :class:`~autoontology.playground.store.PlaygroundStore`."""

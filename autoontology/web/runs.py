@@ -2,7 +2,8 @@
 """Background run manager for the web API (``POST /api/runs``).
 
 Each run executes one of the CLI job functions (``build.run_build``,
-``export_job.run_export``, ``apply.run_apply``) in its own thread, so runs started from the UI persist exactly
+``export_job.run_export``, ``apply.run_apply``, ``logic.extract.run_logic``) in its own
+thread, so runs started from the UI persist exactly
 like CLI runs (``runs``/``steps`` rows, ``<home>/logs/jobs.log``).
 
 - One active run per project: an in-process lock on the project's key (``(project id,
@@ -40,12 +41,13 @@ from autoontology.store.db import DEFAULT_PROJECT_ID, Run, Store
 
 logger = logging.getLogger("autoontology.web.runs")
 
-RUN_KINDS: tuple[str, ...] = ("build", "export", "apply")
+RUN_KINDS: tuple[str, ...] = ("build", "export", "apply", "logic")
 #: The run manager's key for project-wide runs (build, export, apply), per project.
 WORKSPACE = "*workspace*"
 #: The "project" of an installation-wide :meth:`RunManager.claim_idle`.
 ALL_PROJECTS = "*"
-#: The run kinds behind the global build gate (every run kind of the manager).
+#: The run kinds behind the global build gate (every run kind of the manager; a logic run
+#: uses the chat model the builds use).
 GATED_KINDS: frozenset[str] = frozenset(RUN_KINDS)
 RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{6}$")
 #: How long ``start`` waits for the job to create its run row.
@@ -183,8 +185,14 @@ JobFn = Callable[..., Any]
 def default_jobs() -> dict[str, JobFn]:
     """The job entry points by run kind, looked up at call time (tests monkeypatch them)."""
     from autoontology.engine import apply, build, export_job
+    from autoontology.logic import extract
 
-    return {"build": build.run_build, "export": export_job.run_export, "apply": apply.run_apply}
+    return {
+        "build": build.run_build,
+        "export": export_job.run_export,
+        "apply": apply.run_apply,
+        "logic": extract.run_logic,
+    }
 
 
 #: Fixed top-level steps per kind (a build's steps depend on its sources).
@@ -192,6 +200,7 @@ TOP_STEPS: dict[str, tuple[str, ...]] = {
     "build": (),
     "export": ("collect", "serialize", "upstream", "ossie", "okf", "report"),
     "apply": ("decisions", "merge", "snapshot"),
+    "logic": ("collect", "extract", "validate", "store"),
 }
 
 

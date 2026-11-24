@@ -374,3 +374,21 @@ def validate_verdict(verdict: AlignmentVerdict, candidates: dict[str, str]) -> V
     return ValidatedVerdict(
         term_id, relation, clamped, collapse_ws(verdict.rationale or "")[:500], notes
     )
+
+
+# --- logic extraction (the `logic` run) ---------------------------------------------------
+
+#: candidates one logic call may return (more are dropped and counted)
+MAX_LOGIC_CANDIDATES_PER_CALL = 30
+
+
+class LogicExtraction(BaseModel):
+    """One logic call's answer. Each candidate stays loose (``Any``) on purpose: a bad
+    candidate is dropped and counted on its own (:mod:`autoontology.logic.extract`), it
+    never makes the whole answer invalid."""
+
+    candidates: list[Any] = Field(
+        default_factory=list,
+        description="Each: {kind: function|action|workflow, spec: {...}, evidence: "
+        "[{document, quote}], confidence: 0..1, rationale}",
+    )
