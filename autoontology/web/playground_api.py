@@ -351,23 +351,37 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
 
     @router.post("/sparql")
     async def run_sparql(body: SparqlIn) -> dict[str, Any]:
-        head, model = api.snapshot()
-
-        def work() -> dict[str, Any]:
-            path = snapshot_ttl(api.settings, head, model)
-            key = snapshot_key(api.settings, head)
-            return {
-                **sparql.run_file(key, path, body.query, limit=body.limit),
-                "revision": head.revision,
-                "ttl": path.name,
-            }
-
         try:
-            return mask(await anyio.to_thread.run_sync(work))
+            return await anyio.to_thread.run_sync(
+                lambda: sparql_answer(api, sparql, body.query, limit=body.limit)
+            )
         except SparqlError as exc:
             raise _api_error(exc) from exc
 
     return router
+
+
+def sparql_answer(
+    api: Api,
+    runner: SparqlRunner,
+    query: str,
+    *,
+    limit: int = DEFAULT_LIMIT,
+    revision: int | None = None,
+) -> dict[str, Any]:
+    """*query* over snapshot *revision* (default: the latest) in *runner*'s workers, with
+    its read-only checks, deadline and row cap; masked. Blocking (a worker thread).
+    Raises :class:`SparqlError` and, for an unknown revision, :class:`ApiError`."""
+    head, model = api.snapshot(revision)
+    path = snapshot_ttl(api.settings, head, model)
+    key = snapshot_key(api.settings, head)
+    return mask(
+        {
+            **runner.run_file(key, path, query, limit=limit),
+            "revision": head.revision,
+            "ttl": path.name,
+        }
+    )
 
 
 def snapshot_key(settings: Any, head: Any) -> str:

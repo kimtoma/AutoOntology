@@ -911,17 +911,7 @@ def build_router(api: Api) -> APIRouter:
 
     @router.get("/ontology")
     def ontology(revision: int | None = Query(None, ge=1)) -> dict[str, Any]:
-        head, model = api.snapshot(revision)
-        return {
-            "revision": head.revision,
-            "created_at": head.created_at,
-            "run_id": head.run_id,
-            "workspace": model.name,
-            "base_iri": model.base,
-            "sources": head.sources,
-            "counts": head.counts,
-            "alignment": model.alignment_counts,
-        }
+        return ontology_summary(api, revision)
 
     @router.get("/ontology/graph")
     def ontology_graph(
@@ -950,138 +940,35 @@ def build_router(api: Api) -> APIRouter:
         size: int = Query(50, ge=1, le=200),
         revision: int | None = Query(None, ge=1),
     ) -> dict[str, Any]:
-        if origin and origin not in ORIGINS:
-            raise ApiError(400, "invalid_origin", f"origin must be one of {', '.join(ORIGINS)}")
-        head, _, index = api.concepts(revision)
-        items = index.items
-        needle = q.strip().casefold()
-        if needle:
-            items = [i for i in items if needle in i["_text"]]
-        if kind:
-            items = [i for i in items if i["kind"] == kind]
-        if origin:
-            items = [i for i in items if i["origin"] == origin]
-        if source:
-            items = [i for i in items if i["source"] == source]
-        total = len(items)
-        chunk = items[(page - 1) * size : page * size]
-        return {
-            "revision": head.revision,
-            "items": [{k: v for k, v in i.items() if not k.startswith("_")} for i in chunk],
-            "total": total,
-            "page": page,
-            "size": size,
-            "pages": max(1, -(-total // size)),
-        }
+        return concept_listing(
+            api,
+            q=q,
+            kind=kind,
+            origin=origin,
+            source=source,
+            page=page,
+            size=size,
+            revision=revision,
+        )
 
     @router.get("/ontology/concepts/{concept_id}")
     def ontology_concept(
         concept_id: str, revision: int | None = Query(None, ge=1)
     ) -> dict[str, Any]:
-        from autoontology.web.concepts import concept_detail
-
-        if not CONCEPT_ID_RE.fullmatch(concept_id):
-            raise ApiError(400, "invalid_concept_id", f"invalid concept id {concept_id!r}")
-        head, model, index = api.concepts(revision)
-        detail = concept_detail(model, concept_id, index)
-        if detail is None:
-            raise ApiError(404, "unknown_concept", f"unknown concept {concept_id!r}")
-        from autoontology.web.concept_decisions import concept_decisions
-
-        decisions = concept_decisions(api.store, concept_id)
-        return {"revision": head.revision, **detail, "decisions": decisions}
+        return concept_body(api, concept_id, revision)
 
     # exports ----------------------------------------------------------------------------
 
     @router.get("/exports")
     def list_exports() -> dict[str, Any]:
-        root = Path(api.settings.exports_dir)
-        folders = (
-            sorted(
-                (
-                    p
-                    for p in root.iterdir()
-                    # a symlinked folder is refused by the downloads, so it is not listed
-                    if p.is_dir() and not p.is_symlink() and EXPORT_DIR_RE.fullmatch(p.name)
-                ),
-                key=lambda p: int(p.name[1:]),
-                reverse=True,
-            )
-            if root.is_dir()
-            else []
-        )
-        out = []
-        for folder in folders:
-            files = [{"name": n, "bytes": f.stat().st_size} for n, f in _export_files(folder)]
-            dirs: dict[str, dict[str, Any]] = {}
-            for f in files:
-                head, sep, rest = f["name"].partition("/")
-                if sep:
-                    entry = dirs.setdefault(head, {"name": head, "files": [], "bytes": 0})
-                    entry["files"].append(rest)
-                    entry["bytes"] += f["bytes"]
-            out.append(
-                {
-                    "revision": int(folder.name[1:]),
-                    "dir": folder.name,
-                    "created_at": _iso(folder.stat().st_mtime),
-                    "files": files,
-                    #: the sub-folders (upstream/, ossie/, okf/) with their files
-                    "dirs": [dirs[k] for k in sorted(dirs)],
-                }
-            )
-        return {"exports": out}
+        return {"exports": export_listing(api.settings)}
 
     # no collision with the route below: ``{rev}`` never holds a ``/``
     @router.get("/exports/{rev}.zip")
     def download_export_zip(rev: str) -> Response:
-        """The whole revision folder as one zip: exactly the files ``GET /exports``
-        lists, under ``r0003/``. Sync, so the zipping runs in the threadpool."""
-        rev = _export_dir(rev)
-        folder = Path(api.settings.exports_dir).resolve() / rev
-        if not folder.is_dir() or folder.is_symlink():
-            raise ApiError(404, "unknown_export", f"no export {rev}")
-        # A re-export of the same revision swaps the folder by rename (export_job._install):
-        # a zip that straddles the swap would mix old and new files, so it is built again.
-        for _attempt in range(2):
-            spool = tempfile.SpooledTemporaryFile(max_size=EXPORT_ZIP_SPOOL_BYTES)
-            try:
-                before = folder.stat().st_ino
-                with zipfile.ZipFile(
-                    spool, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False
-                ) as zf:
-                    for name, path in _export_files(folder):
-                        zf.write(path, f"{rev}/{unicodedata.normalize('NFC', name)}")
-                if folder.stat().st_ino == before:
-                    break
-            except FileNotFoundError:
-                pass
-            except BaseException:
-                spool.close()
-                raise
-            spool.close()
-        else:
-            raise ApiError(409, "export_changed", f"export {rev} changed while zipping: retry")
-        size = spool.tell()
-        spool.seek(0)
-
-        def chunks():
-            try:
-                while block := spool.read(1024 * 1024):
-                    yield block
-            finally:
-                spool.close()
-
-        return StreamingResponse(
-            chunks(),
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": f'attachment; filename="autoontology-{rev}.zip"',
-                "Content-Length": str(size),
-            },
-            # a client that hangs up mid-stream never finishes the generator
-            background=BackgroundTask(spool.close),
-        )
+        """The whole revision folder as one zip (:func:`export_zip_response`). Sync, so
+        the zipping runs in the threadpool."""
+        return export_zip_response(api.settings, rev)
 
     @router.get("/exports/{rev}/{file_path:path}")
     def download_export(rev: str, file_path: str, inline: bool = False) -> Response:
@@ -1129,7 +1016,170 @@ def build_router(api: Api) -> APIRouter:
             raise ApiError(400, "invalid_body", "the body must be a JSON object")
         return await anyio.to_thread.run_sync(_load_samples, api, body)
 
+    # outside-agent tokens and usage (the agent surface itself: agent_api.install) ---------
+    from autoontology.web.agent_api import add_management_routes
+
+    add_management_routes(router, api)
     return router
+
+
+# --- route bodies shared with the agent API (autoontology/web/agent_api.py) -------------
+
+
+def ontology_summary(api: Api, revision: int | None = None) -> dict[str, Any]:
+    """``GET /api/ontology``: the snapshot's header, counts and alignment counts."""
+    head, model = api.snapshot(revision)
+    return {
+        "revision": head.revision,
+        "created_at": head.created_at,
+        "run_id": head.run_id,
+        "workspace": model.name,
+        "base_iri": model.base,
+        "sources": head.sources,
+        "counts": head.counts,
+        "alignment": model.alignment_counts,
+    }
+
+
+def concept_listing(
+    api: Api,
+    *,
+    q: str = "",
+    kind: str = "",
+    origin: str = "",
+    source: str = "",
+    page: int = 1,
+    size: int = 50,
+    revision: int | None = None,
+) -> dict[str, Any]:
+    """``GET /api/ontology/concepts``: the concept index filtered and paged."""
+    if origin and origin not in ORIGINS:
+        raise ApiError(400, "invalid_origin", f"origin must be one of {', '.join(ORIGINS)}")
+    head, _, index = api.concepts(revision)
+    items = index.items
+    needle = q.strip().casefold()
+    if needle:
+        items = [i for i in items if needle in i["_text"]]
+    if kind:
+        items = [i for i in items if i["kind"] == kind]
+    if origin:
+        items = [i for i in items if i["origin"] == origin]
+    if source:
+        items = [i for i in items if i["source"] == source]
+    total = len(items)
+    chunk = items[(page - 1) * size : page * size]
+    return {
+        "revision": head.revision,
+        "items": [{k: v for k, v in i.items() if not k.startswith("_")} for i in chunk],
+        "total": total,
+        "page": page,
+        "size": size,
+        "pages": max(1, -(-total // size)),
+    }
+
+
+def concept_body(api: Api, concept_id: str, revision: int | None = None) -> dict[str, Any]:
+    """``GET /api/ontology/concepts/{id}``: relations, evidence, alignments, decisions."""
+    from autoontology.web.concept_decisions import concept_decisions
+    from autoontology.web.concepts import concept_detail
+
+    if not CONCEPT_ID_RE.fullmatch(concept_id):
+        raise ApiError(400, "invalid_concept_id", f"invalid concept id {concept_id!r}")
+    head, model, index = api.concepts(revision)
+    detail = concept_detail(model, concept_id, index)
+    if detail is None:
+        raise ApiError(404, "unknown_concept", f"unknown concept {concept_id!r}")
+    decisions = concept_decisions(api.store, concept_id)
+    return {"revision": head.revision, **detail, "decisions": decisions}
+
+
+def export_listing(settings: Settings) -> list[dict[str, Any]]:
+    """``GET /api/exports``: the revision folders, newest first, with their files."""
+    root = Path(settings.exports_dir)
+    folders = (
+        sorted(
+            (
+                p
+                for p in root.iterdir()
+                # a symlinked folder is refused by the downloads, so it is not listed
+                if p.is_dir() and not p.is_symlink() and EXPORT_DIR_RE.fullmatch(p.name)
+            ),
+            key=lambda p: int(p.name[1:]),
+            reverse=True,
+        )
+        if root.is_dir()
+        else []
+    )
+    out = []
+    for folder in folders:
+        files = [{"name": n, "bytes": f.stat().st_size} for n, f in _export_files(folder)]
+        dirs: dict[str, dict[str, Any]] = {}
+        for f in files:
+            head, sep, rest = f["name"].partition("/")
+            if sep:
+                entry = dirs.setdefault(head, {"name": head, "files": [], "bytes": 0})
+                entry["files"].append(rest)
+                entry["bytes"] += f["bytes"]
+        out.append(
+            {
+                "revision": int(folder.name[1:]),
+                "dir": folder.name,
+                "created_at": _iso(folder.stat().st_mtime),
+                "files": files,
+                #: the sub-folders (upstream/, ossie/, okf/) with their files
+                "dirs": [dirs[k] for k in sorted(dirs)],
+            }
+        )
+    return out
+
+
+def export_zip_response(settings: Settings, rev: str) -> Response:
+    """``GET /api/exports/{rev}.zip``: the whole revision folder as one zip, exactly the
+    files :func:`export_listing` lists, under ``r0003/``. Blocking: call it from a sync
+    route or a worker thread."""
+    rev = _export_dir(rev)
+    folder = Path(settings.exports_dir).resolve() / rev
+    if not folder.is_dir() or folder.is_symlink():
+        raise ApiError(404, "unknown_export", f"no export {rev}")
+    # A re-export of the same revision swaps the folder by rename (export_job._install):
+    # a zip that straddles the swap would mix old and new files, so it is built again.
+    for _attempt in range(2):
+        spool = tempfile.SpooledTemporaryFile(max_size=EXPORT_ZIP_SPOOL_BYTES)
+        try:
+            before = folder.stat().st_ino
+            with zipfile.ZipFile(spool, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as zf:
+                for name, path in _export_files(folder):
+                    zf.write(path, f"{rev}/{unicodedata.normalize('NFC', name)}")
+            if folder.stat().st_ino == before:
+                break
+        except FileNotFoundError:
+            pass
+        except BaseException:
+            spool.close()
+            raise
+        spool.close()
+    else:
+        raise ApiError(409, "export_changed", f"export {rev} changed while zipping: retry")
+    size = spool.tell()
+    spool.seek(0)
+
+    def chunks():
+        try:
+            while block := spool.read(1024 * 1024):
+                yield block
+        finally:
+            spool.close()
+
+    return StreamingResponse(
+        chunks(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="autoontology-{rev}.zip"',
+            "Content-Length": str(size),
+        },
+        # a client that hangs up mid-stream never finishes the generator
+        background=BackgroundTask(spool.close),
+    )
 
 
 def _load_samples(api: Api, body: dict[str, Any]) -> dict[str, Any]:
@@ -1484,6 +1534,9 @@ def install(app: FastAPI, settings: Settings, runs: RunManager | None = None) ->
     from autoontology.web import settings_api
 
     settings_api.install(app, api)
+    from autoontology.web import agent_api
+
+    agent_api.install(app, api)
 
     @app.middleware("http")
     async def _local_only(request: Request, call_next):

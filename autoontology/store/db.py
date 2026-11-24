@@ -420,6 +420,36 @@ MIGRATIONS: list[tuple[int, str]] = [
             WHERE judged_json != '{}' OR applied_json != '{}'
         """,
     ),
+    (
+        7,
+        # Schema v7: outside-agent access (``autoontology/store/agent_tokens.py``).
+        # agent_tokens = bearer tokens for MCP and /agent/v1: only the SHA-256 of the token
+        # is kept (NULL once revoked: the row stays for the history); revision_pin NULL =
+        # follow the latest snapshot. agent_calls = one row per tool call (pruned to the
+        # newest rows), surface 'mcp' or 'rest'.
+        """
+        CREATE TABLE IF NOT EXISTS agent_tokens (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            token_hash TEXT UNIQUE,
+            revision_pin INTEGER,
+            expires_at TEXT,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT,
+            revoked_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS agent_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            token_id TEXT NOT NULL,
+            surface TEXT NOT NULL CHECK (surface IN ('mcp', 'rest')),
+            tool TEXT NOT NULL,
+            ok INTEGER NOT NULL,
+            ms INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS agent_calls_token_idx ON agent_calls (token_id)
+        """,
+    ),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
