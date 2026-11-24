@@ -39,7 +39,12 @@ from autoontology import __version__
 from autoontology.config import LOCAL_HOSTS, Settings, host_name
 from autoontology.engine.export_job import project_exports_dir
 from autoontology.store.db import ACTIVE_RUN_STATUSES, ProjectStore, Run, Source, Store
-from autoontology.web.projects import ProjectContext, default_project, path_project
+from autoontology.web.projects import (
+    ProjectContext,
+    default_project,
+    path_project,
+    require_installation,
+)
 from autoontology.web.runs import (
     RUN_ID_RE,
     TOP_STEPS,
@@ -786,6 +791,7 @@ def installation_routes(api: Api) -> APIRouter:
 
     @router.post("/providers/test")
     async def test_provider(request: Request) -> dict[str, Any]:
+        require_installation(api.decided_by(request), "settings.manage")
         return await api.test_provider(request.app)
 
     return router
@@ -1373,7 +1379,7 @@ def _load_samples(api: Api, body: dict[str, Any], view: ProjectStore) -> dict[st
         except (RemoveError, LoadError, JobError, ValueError) as exc:
             raise ApiError(409, "samples_not_loaded", mask(str(exc))) from exc
     finally:
-        api.runs.release(WORKSPACE)
+        api.runs.release_idle(WORKSPACE)
     return {
         "set": name,
         "sources": [

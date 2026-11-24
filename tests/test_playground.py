@@ -850,7 +850,8 @@ def test_chat_streams_cites_and_persists(client):
 def test_one_llm_call_per_workspace(client):
     c, settings, app, llm, _ = client
     pg = app.state.playground
-    with pg.slot((pg.store.default_project_id, settings.workspace)):  # (project, scope)
+    pid = pg.store.default_project_id
+    with pg.slot((pid, pid)):  # (project, scope = the project id)
         resp = c.post(f"{API}/chat", json={"question": "x"})
         assert resp.status_code == 409 and resp.json()["error"] == "playground_busy"
         old = c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "x"})
@@ -965,7 +966,10 @@ def test_sql_passthrough_relays_events_and_handles_storage_and_409(client, monke
     assert events[2][1]["answer_kind"] == "sql"
     headers, body = seen[0]
     assert headers["x-auto-ontology-user-id"] == "autoontology"
-    assert body["conversation_id"] == conv and body["target_db"] == "db1"
+    # project-qualified: the upstream user is shared by every project
+    pid = c.app.state.api.store.default_project_id
+    assert body["conversation_id"] == playground_api.upstream_conversation_id(pid, conv)
+    assert body["conversation_id"] != conv and body["target_db"] == "db1"
     assert "conversation_id" not in seen[1][1]
     busy = c.post(f"{API}/sql", json={"question": "busy"})
     assert busy.status_code == 409 and busy.json()["error"] == "sql_unavailable"

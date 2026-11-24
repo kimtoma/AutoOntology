@@ -141,6 +141,11 @@ MESSAGES: dict[str, str] = {
     "ops.bad_revision": "revision must be a number like 3 or r0003, got {value!r}",
     "ops.no_exports": "no exports yet: run `uv run autoontology export`",
     "ops.conversation": "conversation {id} (continue with --conversation {id})",
+    "ops.error.no_structured_source": (
+        "no_structured_source: this project has no built structured source (CSV, Excel, "
+        "Parquet or a database); add one and run `uv run autoontology build` to ask "
+        "questions about data"
+    ),
     "ops.notice.conversation_store_missing": (
         "asked without the earlier turns: the upstream conversation store "
         "(frontend schema) is missing"

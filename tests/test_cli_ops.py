@@ -443,6 +443,18 @@ def test_playground_sql_relays_steps_and_result(isolated_env, monkeypatch):
     )
 
 
+def test_playground_sql_without_a_structured_source_says_why(isolated_env, monkeypatch):
+    body = {"error": "no_structured_source", "detail": "this project has no built source"}
+    _mock(monkeypatch, lambda r: httpx.Response(400, json=body))
+    res = runner.invoke(app, ["playground", "sql", "몇 개?"])
+    assert res.exit_code == 1 and "add one and run `uv run autoontology build`" in res.output
+    monkeypatch.setenv("AUTOONTOLOGY_LANG", "ko")
+    res = runner.invoke(app, ["playground", "sql", "몇 개?"])
+    assert res.exit_code == 1 and "빌드된 정형 데이터 소스" in res.output
+    res = runner.invoke(app, ["playground", "sql", "몇 개?", "--json"])
+    assert json.loads(res.stdout)["error"] == "no_structured_source"
+
+
 def test_playground_sql_prints_an_informational_answer_without_sql(isolated_env, monkeypatch):
     # engine 1.3's ReAct agent answers questions that need no query with sql_code "" and
     # sql_response_from_db None (text_to_sql/react/agent.py "information_answer")

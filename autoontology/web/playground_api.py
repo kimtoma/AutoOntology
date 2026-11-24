@@ -12,6 +12,12 @@
   masked). ``AUTOONTOLOGY_SQL_TRANSLATE=0`` turns this off. The relayed ``result`` gets one
   top-level field of ours, ``answer_kind`` (``sql`` | ``information`` | ``unconstructable``,
   :func:`answer_kind`); its ``answer`` is untouched.
+  Every question names its ``target_db`` (the given source's, else the project's first
+  built structured source): without one the agent would search every database of the
+  shared catalog, other projects' included, so a project without a built structured
+  source gets 400 ``no_structured_source``. The client's ``conversation_id`` goes upstream
+  project-qualified (:func:`upstream_conversation_id`): all projects share one upstream
+  user.
 * ``POST /sparql``, ``GET /sparql/examples``: the SPARQL console over the latest snapshot
   (its export's ``ontology.ttl`` when that export's ``export.json`` names this very
   snapshot, else a Turtle file written on demand to
@@ -47,6 +53,7 @@ from starlette.background import BackgroundTask
 from autoontology.playground.index import DEFAULT_TOP_K
 from autoontology.playground.llm import LLMError, llm_for
 from autoontology.playground.service import (
+    STRUCTURED_KINDS,
     EmbedderCache,
     Playground,
     PlaygroundError,
@@ -62,7 +69,12 @@ from autoontology.playground.sparql import (
 )
 from autoontology.store.db import ProjectStore
 from autoontology.web.api import PREFIX, Api, ApiError, mask
-from autoontology.web.projects import ProjectContext, default_project, path_project
+from autoontology.web.projects import (
+    ProjectContext,
+    allowed_when_archived,
+    default_project,
+    path_project,
+)
 
 logger = logging.getLogger("autoontology.web")
 
@@ -159,6 +171,18 @@ async def translate_to_korean(llm: Any, text: str) -> str:
     return out
 
 
+#: Namespace of :func:`upstream_conversation_id` (a fixed, random UUID).
+UPSTREAM_CONVERSATION_NS = uuid.UUID("0b6f2a52-6c1e-4d5e-9f3a-7c2d8e41a9b0")
+
+
+def upstream_conversation_id(project_id: str, conversation_id: uuid.UUID | str) -> str:
+    """The conversation id sent upstream for a project's SQL conversation: a UUID derived
+    from the project id and the client's id. Every project's questions go to upstream as
+    the same user (:data:`UPSTREAM_USER`), so the client's id is never forwarded as is: the
+    same id sent from another project names another upstream conversation."""
+    return str(uuid.uuid5(UPSTREAM_CONVERSATION_NS, f"{project_id}:{conversation_id}"))
+
+
 class _In(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -176,7 +200,8 @@ class ChatIn(_In):
 
 
 class SqlIn(_In):
-    #: the structured source whose database the query targets (default: upstream picks)
+    #: the structured source whose database the query targets (default: the project's first
+    #: built structured source; none is 400 ``no_structured_source``)
     source: str | None = Field(None, max_length=80)
     question: str = Field(min_length=1, max_length=2000)
     conversation_id: uuid.UUID | None = None
@@ -328,6 +353,7 @@ def _routes(
         return pg().index_status(s)
 
     @router.post("/chat")
+    @allowed_when_archived
     async def chat(body: ChatIn, ctx: ProjectContext = Ctx) -> EventSourceResponse:
         ctx.require("playground.ask")
         s = scope(ctx.store)
@@ -337,7 +363,7 @@ def _routes(
                 raise ApiError(
                     404,
                     "unknown_conversation",
-                    f"no conversation {body.conversation_id!r} for {s.key!r}",
+                    f"no conversation {body.conversation_id!r} in this project",
                 )
         try:
             llm = pg().llm_factory()
@@ -377,6 +403,7 @@ def _routes(
 
     @router.delete("/conversations/{conversation_id}")
     def delete_conversation(conversation_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("playground.ask")
         if not pg().pg_for(ctx.store).delete_conversation(conversation_id):
             raise ApiError(404, "unknown_conversation", f"no conversation {conversation_id!r}")
         return {"deleted": conversation_id}
@@ -384,33 +411,59 @@ def _routes(
     # --- NL -> SQL (upstream) -----------------------------------------------------------
 
     @router.post("/sql")
+    @allowed_when_archived
     async def sql(body: SqlIn, ctx: ProjectContext = Ctx) -> EventSourceResponse:
         ctx.require("playground.ask")
-        target_db = None
-        if body.source:  # a structured source of this project only
-            src = api.source(body.source, project=ctx.store)
-            if src.kind not in ("files", "database"):
-                raise ApiError(400, "not_structured", f"source {src.name!r} is a {src.kind} source")
-            target_db = src.catalog_database_id
-        else:  # the snapshot's first built structured source (none: upstream picks)
-            try:
-                structured = scope(ctx.store).structured
-            except ApiError:
-                structured = []
-            target_db = next((x.catalog_database_id for x in structured), None)
-        payload: dict[str, Any] = {"question": body.question}
-        if target_db:
-            payload["target_db"] = target_db
+        target_db = sql_target(ctx.store, body.source)
+        payload: dict[str, Any] = {"question": body.question, "target_db": target_db}
         # held until the stream ends or the client leaves (cleanup), or released below
         release = sql_slots.take(api.settings.sql_concurrency)
         try:
-            return await _sql_stream(body, payload, target_db, release)
+            return await _sql_stream(body, payload, target_db, release, ctx.id)
         except BaseException:
             release()
             raise
 
+    def sql_target(view: ProjectStore, name: str | None) -> str:
+        """The catalog database the question targets: *name*'s (a built structured source
+        of this project), else the snapshot's first built structured source, else the
+        project's first. Never None: without a target the upstream agent would pick any
+        database of the shared catalog, another project's included (400
+        ``no_structured_source``)."""
+        if name:  # a structured source of this project only (another project's: 404)
+            src = api.source(name, project=view)
+            if src.kind not in STRUCTURED_KINDS:
+                raise ApiError(400, "not_structured", f"source {src.name!r} is a {src.kind} source")
+            if not src.catalog_database_id:
+                raise ApiError(
+                    400,
+                    "no_structured_source",
+                    f"source {src.name!r} is not built yet: build the project first",
+                )
+            return src.catalog_database_id
+        try:
+            structured = scope(view).structured
+        except ApiError:  # no snapshot yet
+            structured = []
+        structured = structured or [
+            s for s in view.list_sources() if s.kind in STRUCTURED_KINDS and s.catalog_database_id
+        ]
+        target = next((x.catalog_database_id for x in structured if x.project_id == view.id), None)
+        if not target:
+            raise ApiError(
+                400,
+                "no_structured_source",
+                "this project has no built structured source (a CSV, Excel, Parquet or "
+                "database source): add one and build the project to ask questions about data",
+            )
+        return target
+
     async def _sql_stream(
-        body: SqlIn, payload: dict[str, Any], target_db: str | None, release: Callable[[], None]
+        body: SqlIn,
+        payload: dict[str, Any],
+        target_db: str,
+        release: Callable[[], None],
+        project_id: str,
     ) -> EventSourceResponse:
         http = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, read=UPSTREAM_READ_TIMEOUT_S), transport=UPSTREAM_TRANSPORT
@@ -426,7 +479,7 @@ def _routes(
         async def open_stream(with_conversation: bool) -> httpx.Response:
             data = dict(payload)
             if with_conversation and body.conversation_id:
-                data["conversation_id"] = str(body.conversation_id)
+                data["conversation_id"] = upstream_conversation_id(project_id, body.conversation_id)
             req = http.build_request("POST", url, json=data, headers=headers)
             return await http.send(req, stream=True)
 
@@ -571,6 +624,7 @@ def _routes(
         return {"examples": EXAMPLES}
 
     @router.post("/sparql")
+    @allowed_when_archived
     async def run_sparql(body: SparqlIn, ctx: ProjectContext = Ctx) -> dict[str, Any]:
         ctx.require("playground.ask")
         try:

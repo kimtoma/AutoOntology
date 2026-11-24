@@ -261,7 +261,9 @@ def _error(
 
 def _call_error(exc: CallError) -> None:
     extra = {k: v for k, v in exc.body.items() if k not in ("error", "detail")}
-    _error(exc.error, exc.detail, 1, extra={**extra, "status": exc.status})
+    key = f"ops.error.{exc.error}"  # an error with a message of its own (ko/en)
+    text = msg(key) if msg(key) != key else ""
+    _error(exc.error, exc.detail, 1, extra={**extra, "status": exc.status}, text=text)
 
 
 def _service_down(exc: ServiceDown) -> None:

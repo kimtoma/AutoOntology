@@ -353,7 +353,7 @@ def test_restart_waits_for_running_work(envfile, stubs, spawned, monkeypatch):
         lock.release()
     assert spawned == []
     assert c.post(f"{API}/restart").status_code == 202
-    runs.release(WORKSPACE)
+    runs.release_idle(WORKSPACE)
 
 
 # --- the helper ----------------------------------------------------------------------

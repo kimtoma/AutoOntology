@@ -123,6 +123,11 @@ MESSAGES: dict[str, str] = {
     "ops.bad_revision": "리비전은 3 또는 r0003 같은 숫자여야 합니다 (받은 값 {value!r})",
     "ops.no_exports": "아직 내보내기가 없습니다: `uv run autoontology export`를 실행하세요",
     "ops.conversation": "대화 {id} (이어 가려면 --conversation {id})",
+    "ops.error.no_structured_source": (
+        "no_structured_source: 이 프로젝트에 빌드된 정형 데이터 소스(CSV, Excel, Parquet, "
+        "데이터베이스)가 없습니다. 소스를 추가하고 `uv run autoontology build`를 실행한 뒤 "
+        "데이터 질문을 하세요"
+    ),
     "ops.notice.conversation_store_missing": (
         "업스트림에 대화 기록 저장소(frontend 스키마)가 없어 이전 대화 없이 질문했습니다"
     ),

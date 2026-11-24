@@ -16,8 +16,10 @@ Installation-wide routes have no project: ``/api/status``, ``/api/providers/test
 outside-agent surfaces (``/mcp``, ``/agent/v1``) take the project from the bearer token.
 
 Archived projects are read-only: a write (any method but GET/HEAD/OPTIONS) is 409
-``project_archived``, except ``.../archive`` / ``.../unarchive`` and the playground's
-questions (chat, SQL, SPARQL), which read the ontology.
+``project_archived``, except the routes whose handler is marked
+:func:`allowed_when_archived` (matched by the route's endpoint, never by path suffix):
+``POST .../archive`` / ``.../unarchive`` and the playground's questions
+(``POST .../playground/chat|sql|sparql``), which read the ontology.
 
 Ownership: a route that looks an object up by a store-wide id (a run, a source, a token, a
 conversation, a review item) goes through ``ctx.store`` (a
@@ -27,11 +29,16 @@ project's ids.
 
 The permission hook
 -------------------
-There are no accounts yet (the service listens on 127.0.0.1 or a tailnet only). The
-dependency is where they go: :attr:`ProjectContext.actor` is the caller's identity today
-(the tailnet login ``tailscale serve`` adds, else ``"local"``), and
+There are no accounts yet. The service listens on 127.0.0.1 or a tailnet, and it may
+also be served behind a public, password-gated gateway: in v1 anyone past that gate (or
+on the tailnet) can read, change and manage every project, and change the installation's
+settings. The dependency is where accounts go: :attr:`ProjectContext.actor` is the
+caller's identity today (the tailnet login ``tailscale serve`` adds, else ``"local"``), and
 :meth:`ProjectContext.require` is the single check a route will call -- e.g.
-``ctx.require("review.decide")`` -- once memberships exist. In v1 it allows everything;
+``ctx.require("review.decide")`` -- once memberships exist. :func:`resolve` already asks
+for ``project.read`` on every request, so read access can be enforced in one place; the
+installation-wide routes (settings, provider test, creating a project) call
+:func:`require_installation`. In v1 both allow everything;
 adding accounts means resolving the actor to a user in :func:`resolve` and making
 ``require`` consult the user's role in ``ctx.project``, without changing route URLs.
 """
@@ -39,6 +46,7 @@ adding accounts means resolving the actor to a user in :func:`resolve` and makin
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -51,14 +59,9 @@ if TYPE_CHECKING:  # pragma: no cover - api imports this module
     from autoontology.web.api import Api
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-#: Non-GET routes allowed on an archived project (path suffixes).
-ARCHIVED_ALLOWED_SUFFIXES = (
-    "/archive",
-    "/unarchive",
-    "/playground/chat",
-    "/playground/sql",
-    "/playground/sparql",
-)
+#: Attribute :func:`allowed_when_archived` sets on a route handler.
+ARCHIVED_OK_ATTR = "_autoontology_allowed_when_archived"
+
 #: Permissions a route may ask :meth:`ProjectContext.require` for (documentation; v1
 #: grants all of them).
 PERMISSIONS = (
@@ -71,6 +74,7 @@ PERMISSIONS = (
     "exports.read",
     "playground.ask",
     "agent.tokens",
+    "settings.manage",
 )
 
 
@@ -110,12 +114,21 @@ def require_installation(actor: str, permission: str) -> None:
     del actor, permission
 
 
+def allowed_when_archived(handler: Callable[..., Any]) -> Callable[..., Any]:
+    """Mark a non-GET route *handler* as allowed on an archived project (it reads only:
+    the archive/unarchive routes, the playground's questions). Put it under the route
+    decorator, so the marked function is the one registered."""
+    setattr(handler, ARCHIVED_OK_ATTR, True)
+    return handler
+
+
 def is_write(request: Request) -> bool:
-    """Whether *request* changes the project (refused on an archived one)."""
+    """Whether *request* changes the project (refused on an archived one): every method
+    but GET/HEAD/OPTIONS, unless the matched route's handler is
+    :func:`allowed_when_archived`."""
     if request.method.upper() in SAFE_METHODS:
         return False
-    path = request.url.path.rstrip("/")
-    return not path.endswith(ARCHIVED_ALLOWED_SUFFIXES)
+    return not getattr(request.scope.get("endpoint"), ARCHIVED_OK_ATTR, False)
 
 
 def resolve(api: Api, ref: str | None, request: Request, *, alias: bool = False) -> ProjectContext:
@@ -133,7 +146,9 @@ def resolve(api: Api, ref: str | None, request: Request, *, alias: bool = False)
             "project_archived",
             f"project {view.slug!r} is archived: unarchive it to change it",
         )
-    return ProjectContext(store=view, actor=api.decided_by(request), alias=alias)
+    ctx = ProjectContext(store=view, actor=api.decided_by(request), alias=alias)
+    ctx.require("project.read")  # every request: the place to enforce read access later
+    return ctx
 
 
 def path_project(api: Api) -> Callable[..., ProjectContext]:
@@ -225,9 +240,13 @@ def _slug(slug: str) -> str:
 
 def rename_project(api: Api, ctx: ProjectContext, patch: ProjectPatch) -> Project:
     """Apply *patch*; a slug change also renames ``exports/<old>/`` to ``exports/<new>/``,
-    both or neither, and is refused (409 ``run_active``) while a run of the project is
-    active (the run manager's project claim keeps one from starting meanwhile)."""
-    from autoontology.engine.export_job import project_exports_dir, rename_project_exports
+    both or neither. A slug change is refused (409 ``run_active``) while anything else
+    uses the project: it takes the run manager's project claim (this service), then the
+    global build gate (``hold_engine``) and the project's ``WORKSPACE_LEASE`` lease (every
+    process: a CLI build, export or apply holds them), and checks for active runs."""
+    from autoontology.engine.build import WORKSPACE_LEASE
+    from autoontology.engine.jobs import JobError, hold_engine
+    from autoontology.store.db import SourceBusy
     from autoontology.web.api import ApiError
     from autoontology.web.runs import WORKSPACE, RunStartError
 
@@ -249,31 +268,47 @@ def rename_project(api: Api, ctx: ProjectContext, patch: ProjectPatch) -> Projec
             409, "run_active", f"{exc}; rename the project when it has finished"
         ) from exc
     try:
-        if ctx.store.active_runs():  # a CLI run of this project
-            raise ApiError(409, "run_active", "a run of this project is active: try again later")
-        old_dir = project_exports_dir(api.settings, ctx.slug)
-        new_dir = project_exports_dir(api.settings, new_slug)
-        if new_dir.exists() or new_dir.is_symlink():
-            raise ApiError(
-                409, "exports_conflict", f"the exports folder {new_dir.name!r} already exists"
-            )
-        moved = old_dir.is_dir() and rename_project_exports(api.settings, ctx.slug, new_slug)
-        try:
-            renamed = store.rename_project(
-                ctx.id, name=patch.name, slug=new_slug, description=patch.description
-            )
-        except ValueError as exc:
-            if moved:  # put the folder back: both or neither
-                rename_project_exports(api.settings, new_slug, ctx.slug)
-            code = "project_exists" if "already exists" in str(exc) else "invalid_request"
-            raise ApiError(409 if code == "project_exists" else 400, code, str(exc)) from exc
-        except BaseException:
-            if moved:
-                rename_project_exports(api.settings, new_slug, ctx.slug)
-            raise
-        return renamed
+        with ExitStack() as held:
+            try:
+                held.enter_context(hold_engine(ctx.store, "rename"))
+                held.enter_context(ctx.store.lease([WORKSPACE_LEASE], "rename"))
+            except (JobError, SourceBusy) as exc:
+                raise ApiError(
+                    409, "run_active", f"{exc}; rename the project when it has finished"
+                ) from exc
+            return _rename_held(api, ctx, patch, new_slug)
     finally:
         api.runs.release(WORKSPACE, project=ctx.id)
+
+
+def _rename_held(api: Api, ctx: ProjectContext, patch: ProjectPatch, new_slug: str) -> Project:
+    """The slug change itself, with every claim and lease of :func:`rename_project` held."""
+    from autoontology.engine.export_job import project_exports_dir, rename_project_exports
+    from autoontology.web.api import ApiError
+
+    store = api.store
+    if ctx.store.active_runs():  # a CLI run of this project
+        raise ApiError(409, "run_active", "a run of this project is active: try again later")
+    old_dir = project_exports_dir(api.settings, ctx.slug)
+    new_dir = project_exports_dir(api.settings, new_slug)
+    if new_dir.exists() or new_dir.is_symlink():
+        raise ApiError(
+            409, "exports_conflict", f"the exports folder {new_dir.name!r} already exists"
+        )
+    moved = old_dir.is_dir() and rename_project_exports(api.settings, ctx.slug, new_slug)
+    try:
+        return store.rename_project(
+            ctx.id, name=patch.name, slug=new_slug, description=patch.description
+        )
+    except ValueError as exc:
+        if moved:  # put the folder back: both or neither
+            rename_project_exports(api.settings, new_slug, ctx.slug)
+        code = "project_exists" if "already exists" in str(exc) else "invalid_request"
+        raise ApiError(409 if code == "project_exists" else 400, code, str(exc)) from exc
+    except BaseException:
+        if moved:
+            rename_project_exports(api.settings, new_slug, ctx.slug)
+        raise
 
 
 def build_router(api: Api, prefix: str) -> APIRouter:
@@ -325,6 +360,7 @@ def build_router(api: Api, prefix: str) -> APIRouter:
         return project_dict(api, rename_project(api, ctx, patch))
 
     @router.post("/{project}/archive")
+    @allowed_when_archived
     def archive_project(ctx: ProjectContext = Depends(ctx_dep)) -> dict[str, Any]:  # noqa: B008
         ctx.require("project.manage")
         try:
@@ -333,6 +369,7 @@ def build_router(api: Api, prefix: str) -> APIRouter:
             raise ApiError(409, "default_project", str(exc)) from exc
 
     @router.post("/{project}/unarchive")
+    @allowed_when_archived
     def unarchive_project(ctx: ProjectContext = Depends(ctx_dep)) -> dict[str, Any]:  # noqa: B008
         ctx.require("project.manage")
         return project_dict(api, api.store.unarchive_project(ctx.id))

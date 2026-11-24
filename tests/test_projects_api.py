@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 
 import httpx
@@ -112,6 +113,9 @@ def test_archived_projects_are_read_only(web_env, isolated_env):
     for method, path, body in (
         ("POST", f"{BETA}/sources", {"name": "x", "kind": "documents", "locator": str(docs)}),
         ("DELETE", f"{BETA}/sources/docs", None),
+        # a source named like an allowed route: matched by route template, not suffix
+        ("DELETE", f"{BETA}/sources/archive", None),
+        ("DELETE", f"{BETA}/playground/conversations/{'0' * 32}", None),
         ("POST", f"{BETA}/runs", {"kind": "build"}),
         ("POST", f"{BETA}/agent/tokens", {"name": "a"}),
         ("POST", f"{BETA}/samples/load", {"set": "quickstart"}),
@@ -133,6 +137,45 @@ def test_archived_projects_are_read_only(web_env, isolated_env):
     # the default project cannot be archived
     resp = c.post(f"{API}/projects/default/archive")
     assert resp.status_code == 409 and resp.json()["error"] == "default_project"
+
+
+def test_permission_hooks_cover_reads_settings_and_conversations(web_env, monkeypatch):
+    """Every project request asks for project.read; deleting a conversation asks for
+    playground.ask; the settings and provider-test routes ask installation-wide."""
+    from autoontology.web import projects, settings_api
+    from autoontology.web.api import ApiError
+
+    c = web_env["c"]
+    asked: list[str] = []
+
+    def require(self, permission):
+        asked.append(permission)
+        if permission == "playground.ask":
+            raise ApiError(403, "forbidden", permission)
+
+    def installation(actor, permission):
+        asked.append(f"installation:{permission}")
+        raise ApiError(403, "forbidden", permission)
+
+    monkeypatch.setattr(projects.ProjectContext, "require", require)
+    monkeypatch.setattr(web_api, "require_installation", installation)
+    monkeypatch.setattr(settings_api, "require_installation", installation)
+    assert c.get(f"{BETA}/sources").status_code == 200
+    assert c.get(f"{API}/sources").status_code == 200
+    assert asked == ["project.read", "project.read"]
+    asked.clear()
+    resp = c.delete(f"{BETA}/playground/conversations/{'0' * 32}")
+    assert resp.status_code == 403 and asked == ["project.read", "playground.ask"]
+    for method, path in (
+        ("POST", f"{API}/providers/test"),
+        ("PUT", f"{API}/settings"),
+        ("POST", f"{API}/settings/test"),
+        ("POST", f"{API}/settings/restart"),
+    ):
+        asked.clear()
+        resp = c.request(method, path, json={})
+        assert resp.status_code == 403, (path, resp.text)
+        assert asked == ["installation:settings.manage"], path
 
 
 # --- isolation -------------------------------------------------------------------------------
@@ -357,6 +400,100 @@ def test_slug_rename_moves_exports_and_keeps_tokens_and_decisions(web_env):
     assert store.project("gamma").id == beta.id
 
 
+def test_slug_rename_waits_for_leases_held_by_other_processes(web_env):
+    """The project's workspace lease or the global build gate held (a CLI build, export
+    or apply in any process): a slug change is 409, nothing moves."""
+    c, settings, store = web_env["c"], web_env["settings"], web_env["store"]
+    beta = store.project("beta")
+    (Path(settings.exports_dir) / "beta").mkdir(parents=True)
+    token = beta.acquire_leases(["*workspace*"], "build")
+    try:
+        resp = c.patch(BETA, json={"slug": "gamma"})
+        assert resp.status_code == 409 and resp.json()["error"] == "run_active", resp.text
+    finally:
+        store.release_lease(token)
+    token = store.acquire_leases(["*engine*"], "export", project_id=store.default_project_id)
+    try:
+        resp = c.patch(BETA, json={"slug": "gamma"})
+        assert resp.status_code == 409 and resp.json()["error"] == "run_active", resp.text
+    finally:
+        store.release_lease(token)
+    assert (Path(settings.exports_dir) / "beta").is_dir()
+    assert store.project("beta").slug == "beta"
+    assert web_env["runs"].busy() is None  # the claim was released
+    resp = c.patch(BETA, json={"slug": "gamma"})
+    assert resp.status_code == 200, resp.text
+    assert (Path(settings.exports_dir) / "gamma").is_dir()
+    # the rename's own leases are gone too
+    assert store.project("gamma").lease_holder("*workspace*") is None
+
+
+def test_playground_conversations_survive_a_project_rename(web_env):
+    """The playground keys conversations by the project id: a rename and the next build
+    (whose ontology takes the new name) keep them; rows of the old name-keyed scope are
+    adopted, with their element index."""
+    from autoontology.playground.store import IndexRow
+
+    c, store = web_env["c"], web_env["store"]
+    beta = store.project("beta")
+    _snapshot(beta, "Beta")
+    pgs = beta.playground()
+    old = pgs.create_conversation("Beta", "이전 질문")  # a v8 row: scope = the old name
+    pgs.replace_index("Older", [IndexRow("e2", "class", "sha", None, "m")], revision=0, model="m")
+    time.sleep(0.01)  # built_at has millisecond precision: the latest built index moves
+    pgs.replace_index("Beta", [IndexRow("e1", "class", "sha", None, "m")], revision=1, model="m")
+    listed = c.get(f"{BETA}/playground/conversations").json()["conversations"]
+    assert [x["id"] for x in listed] == [old]
+    assert pgs.index_meta(beta.id)["revision"] == 1 and set(pgs.index_rows(beta.id)) == {"e1"}
+    assert pgs.index_meta("Beta") is None and pgs.index_meta("Older") is None
+    new = pgs.create_conversation(beta.id, "새 질문")
+    resp = c.patch(BETA, json={"slug": "gamma", "name": "Gamma"})
+    assert resp.status_code == 200, resp.text
+    _snapshot(store.project("gamma"), "Gamma")  # the next build: the ontology's new name
+    gamma = f"{API}/projects/gamma"
+    listed = c.get(f"{gamma}/playground/conversations").json()["conversations"]
+    assert {x["id"] for x in listed} == {old, new}
+    assert c.get(f"{gamma}/playground/conversations/{old}").status_code == 200
+
+
+def test_playground_sql_targets_only_the_projects_databases(web_env, isolated_env, monkeypatch):
+    """No built structured source: 400 before anything goes upstream (the agent would pick
+    any database of the shared catalog). Another project's source is unknown; the client's
+    conversation id is never forwarded as is."""
+    from autoontology.web import playground_api
+
+    c, store = web_env["c"], web_env["store"]
+    seen: list[dict] = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        text = 'data: {"type": "result", "answer": {"response": "ok"}}\n\ndata: [DONE]\n\n'
+        return httpx.Response(200, text=text, headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(playground_api, "UPSTREAM_TRANSPORT", httpx.MockTransport(handler))
+    csv = _folder(isolated_env, "csv", {"a.csv": "x\n1\n"})
+    _add(c, API, "shop", "files", csv)  # the default project's, built
+    default = store.project()
+    default.set_catalog_database_id(default.get_source("shop").id, "db-default")
+    resp = c.post(f"{BETA}/playground/sql", json={"question": "몇 개?"})
+    assert resp.status_code == 400 and resp.json()["error"] == "no_structured_source"
+    resp = c.post(f"{BETA}/playground/sql", json={"question": "몇 개?", "source": "shop"})
+    assert resp.status_code == 404 and resp.json()["error"] == "unknown_source"
+    _add(c, BETA, "orders", "files", csv)  # registered, not built yet
+    resp = c.post(f"{BETA}/playground/sql", json={"question": "q", "source": "orders"})
+    assert resp.status_code == 400 and resp.json()["error"] == "no_structured_source"
+    assert seen == []
+    beta = store.project("beta")
+    beta.set_catalog_database_id(beta.get_source("orders").id, "db-beta")
+    conv = "7f1c2b8e-0000-4000-8000-000000000001"
+    for base in (BETA, API):
+        resp = c.post(f"{base}/playground/sql", json={"question": "q", "conversation_id": conv})
+        assert resp.status_code == 200, resp.text
+    assert [b["target_db"] for b in seen] == ["db-beta", "db-default"]
+    ids = {b["conversation_id"] for b in seen}
+    assert len(ids) == 2 and conv not in ids
+
+
 def test_review_decisions_are_per_project(ops):  # noqa: F811
     settings = Settings.from_env()
     c = TestClient(web.create_app(settings, runs=RunManager(settings, jobs=dict)))
@@ -476,6 +613,20 @@ def test_cli_project_option_scopes_store_and_api_calls(cli_env, isolated_env, mo
     assert gone.exit_code == 2 and "unknown project 'nope'" in gone.output
     gone = runner.invoke(cli_app, ["-p", "nope", "ontology", "revisions", "--json"])
     assert gone.exit_code == 1 and json.loads(gone.stdout)["error"] == "unknown_project"
+
+
+def test_cli_without_project_option_means_the_default_project(cli_env):
+    """`runs` and `runs logs` without -p list the default project only, never all."""
+    store = cli_env["store"]
+    beta = store.create_project("beta", name="Beta")
+    mine = store.project().create_run(kind="build", source_id=None, status="succeeded")
+    theirs = beta.create_run(kind="export", source_id=None, status="succeeded")
+    out = _ok(["runs"]).output
+    assert mine.id in out and theirs.id not in out
+    out = _ok(["-p", "beta", "runs"]).output
+    assert theirs.id in out and mine.id not in out
+    gone = runner.invoke(cli_app, ["runs", "logs", theirs.id])
+    assert gone.exit_code == 1 and "unknown run" in gone.output
 
 
 def test_cli_project_option_routes_service_calls(cli_env, monkeypatch):

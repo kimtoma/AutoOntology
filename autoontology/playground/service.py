@@ -3,7 +3,8 @@
 
 One :class:`Playground` per service process (``web/playground_api.py``), serving every
 project. A scope is one project's latest ontology snapshot; the element index, the
-conversations and the slot are keyed by the project (its id, plus the scope key inside it)
+conversations and the slot are keyed by the project (its id; the scope key inside it is the
+project id too, so a project rename never hides its conversations)
 and the index is rebuilt when the project's snapshot revision changes. Every LLM call holds
 its project's slot, so one runs at a time per project (409 ``playground_busy`` otherwise);
 projects never wait for each other here (the SQL relay's slots stay installation-wide,
@@ -44,8 +45,8 @@ class PlaygroundError(Exception):
 
 @dataclass
 class Scope:
-    #: the scope key inside the project (the ontology's name: the project's name when the
-    #: snapshot was built; conversations keep it)
+    #: the scope key inside the project: the project's id (stable across renames; rows of
+    #: an earlier key, the ontology's name, are adopted, ``PlaygroundStore.adopt_scope``)
     key: str
     #: the snapshot revision the scope was taken from
     revision: int
@@ -59,6 +60,8 @@ class Scope:
     project_id: str = DEFAULT_PROJECT_ID
     #: the project's playground tables (:class:`PlaygroundStore` of ``project_id``)
     pg: Any = None
+    #: the ontology's name (the project's display name when the snapshot was built)
+    name: str = ""
 
     @property
     def slot_key(self) -> tuple[str, str]:
@@ -144,6 +147,8 @@ class Playground:
         self._index_lock = threading.Lock()
         self._busy: set[tuple[str, str]] = set()
         self._busy_lock = threading.Lock()
+        #: projects whose earlier scope rows were adopted by this process
+        self._adopted: set[str] = set()
 
     def view(self, project: ProjectStore | str | None = None) -> ProjectStore:
         """The project view of *project* (a view, an id or slug; None = the default)."""
@@ -170,8 +175,14 @@ class Playground:
                 structured.append(s)
             else:
                 warnings.append(f"structured source {name!r} is no longer registered")
+        if view.id not in self._adopted:
+            moved = PlaygroundStore(view).adopt_scope(view.id)
+            if moved:
+                logger.info("playground: %d conversation(s) of %s re-keyed", moved, view.slug)
+            self._adopted.add(view.id)
         return Scope(
-            key=model.name,
+            key=view.id,
+            name=model.name,
             revision=revision,
             model=model,
             names=[*model.structured_sources, *model.documents_sources],
@@ -188,8 +199,7 @@ class Playground:
                 raise PlaygroundError(
                     409,
                     "playground_busy",
-                    f"another playground call for {key[-1] if isinstance(key, tuple) else key!r} "
-                    "is running; wait for it to finish",
+                    "another playground call of this project is running; wait for it to finish",
                 )
             self._busy.add(key)
         try:
@@ -245,7 +255,7 @@ class Playground:
         meta = self._pg(scope).index_meta(scope.key)
         revision = scope.revision
         return {
-            "workspace": scope.key,
+            "workspace": scope.name or scope.key,
             "project": scope.project_id,
             "scope": scope.names,
             "warnings": scope.warnings,
@@ -278,7 +288,7 @@ class Playground:
                 raise PlaygroundError(
                     404,
                     "unknown_conversation",
-                    f"no conversation {conversation_id!r} for {scope.key!r}",
+                    f"no conversation {conversation_id!r} in this project",
                 )
             # an incomplete (truncated) answer is not context for the next turn
             return conversation_id, [

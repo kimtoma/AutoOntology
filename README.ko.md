@@ -429,7 +429,7 @@ r2, ...), 검토 결정, 내보내기(`exports/<slug>/r<rev>/`), 플레이그라
 동작합니다.
 
 ```bash
-uv run ao project create contracts --name "계약"        # 슬러그: a-z, 0-9, '-', 2-24자
+uv run ao project create contracts --name "계약"        # 슬러그: a-z, 0-9, '-', 2-24자 (r+숫자 불가)
 uv run ao -p contracts source add ./data/contracts --name contracts
 uv run ao -p contracts build && uv run ao -p contracts export
 uv run ao project list                                  # 리비전, 소스 수, 마지막 빌드

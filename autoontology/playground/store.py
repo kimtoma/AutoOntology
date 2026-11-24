@@ -112,6 +112,45 @@ class PlaygroundStore:
                 (self.project_id, scope, revision, model, len(rows), now_iso()),
             )
 
+    def adopt_scope(self, key: str) -> int:
+        """Make *key* the project's only scope (the playground keys its scope by the
+        project id; earlier rows carry the ontology's name, which a project rename
+        changes): every conversation of the project moves to *key*; the element index of
+        the most recently built other scope moves too when *key* has none, the rest of the
+        index is dropped (a cache, rebuilt on demand). One transaction; returns how many
+        conversations moved."""
+        with self.store._immediate() as conn:
+            moved = conn.execute(
+                "UPDATE playground_conversations SET scope = ? WHERE project_id = ? AND scope != ?",
+                (key, self.project_id, key),
+            ).rowcount
+            has_index = conn.execute(
+                "SELECT 1 FROM playground_index_meta WHERE project_id = ? AND scope = ?",
+                (self.project_id, key),
+            ).fetchone()
+            if not has_index:
+                latest = conn.execute(
+                    "SELECT scope FROM playground_index_meta WHERE project_id = ? AND scope != ? "
+                    "ORDER BY built_at DESC LIMIT 1",
+                    (self.project_id, key),
+                ).fetchone()
+                if latest is not None:
+                    conn.execute(
+                        "DELETE FROM playground_index WHERE project_id = ? AND scope = ?",
+                        (self.project_id, key),
+                    )
+                    for table in ("playground_index", "playground_index_meta"):
+                        conn.execute(
+                            f"UPDATE {table} SET scope = ? WHERE project_id = ? AND scope = ?",
+                            (key, self.project_id, latest[0]),
+                        )
+            for table in ("playground_index", "playground_index_meta"):
+                conn.execute(
+                    f"DELETE FROM {table} WHERE project_id = ? AND scope != ?",
+                    (self.project_id, key),
+                )
+        return moved
+
     # --- conversations ------------------------------------------------------------------
 
     def create_conversation(self, scope: str, title: str) -> str:

@@ -399,16 +399,15 @@ def _root_store(settings):
 
 
 def _store(settings, *, write: bool = False):
-    """The store of the selected project (``--project``): a project view that limits
-    every read and write to it; without ``--project`` the whole store (whose
-    project-less calls mean the default project, as before projects). *write*: the
-    command changes the project, refused (exit 2) for an archived one."""
+    """The store of the selected project (``--project``; the default project without
+    it): a project view that limits every read and write to that project, so listings
+    (``runs``, ``source list``) never mix projects. Installation-wide commands (doctor,
+    ``tools prune-connections``, project management) use :func:`_root_store` instead.
+    *write*: the command changes the project, refused (exit 2) for an archived one."""
     from autoontology.store.db import ProjectNotFound
 
     store = _root_store(settings)
     ref = _project()
-    if ref is None:
-        return store
     try:
         view = store.project(ref)
     except ProjectNotFound:
@@ -842,7 +841,7 @@ def ontology_summary(revision: int | None = None) -> None:
         _fail("no ontology snapshot yet: run `uv run autoontology build`")
     c = snap.counts
     typer.echo(f"revision {snap.revision}  ({snap.created_at}, run {snap.run_id})")
-    typer.echo(f"project {store.project().name}  base IRI {settings.base_iri}")
+    typer.echo(f"project {store.name}  base IRI {settings.base_iri}")
     typer.echo(
         _table(
             ("SOURCE", "KIND", "INCLUDED", "COUNTS"),

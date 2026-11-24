@@ -14,7 +14,8 @@ like CLI runs (``runs``/``steps`` rows, ``<home>/logs/jobs.log``).
   refused (409), never queued; the jobs hold the same gate across processes
   (``jobs.hold_engine``).
 - :meth:`RunManager.claim_idle` (a restart, a sample load) is installation-wide: it
-  needs nothing at all active and holds every project until released.
+  needs nothing at all active and holds every project until
+  :meth:`RunManager.release_idle`.
 - The run id is known only once the job has created (or resumed) its run row, so the job
   gets a :class:`TrackingStore` that reports it; :meth:`RunManager.start` waits for that
   (or for the job failing its pre-checks, which is returned as an error).
@@ -415,7 +416,7 @@ class RunManager:
 
     def claim_idle(self, source: str, kind: str) -> None:
         """Like :meth:`claim`, but only when nothing at all (no run, no other claim, in
-        any project) is active: the whole installation is held until :meth:`release`."""
+        any project) is active: the whole installation is held until :meth:`release_idle`."""
         with self._lock:
             busy = next(iter(self._by_source.values()), None)
             if busy is not None:
@@ -424,15 +425,21 @@ class RunManager:
                 source=source, kind=kind, thread_name="", project=ALL_PROJECTS
             )
 
-    def release(self, source: str, *, project: str | None = None) -> None:
-        """Release a claim on *source* of *project*, or the installation-wide claim of
-        that name (:meth:`claim_idle`)."""
+    def _release_key(self, key: tuple[str, str]) -> None:
         with self._lock:
-            for key in ((self._pid(project), source), (ALL_PROJECTS, source)):
-                active = self._by_source.get(key)
-                if active is not None and active.run_id is None and not active.thread_name:
-                    self._by_source.pop(key, None)
-                    return
+            active = self._by_source.get(key)
+            if active is not None and active.run_id is None and not active.thread_name:
+                self._by_source.pop(key, None)
+
+    def release(self, source: str, *, project: str | None = None) -> None:
+        """Release a :meth:`claim` on *source* of *project* (None = the default project).
+        Never touches an installation-wide claim (:meth:`release_idle`)."""
+        self._release_key((self._pid(project), source))
+
+    def release_idle(self, source: str) -> None:
+        """Release the installation-wide claim of that name (:meth:`claim_idle`) only: a
+        project's claim of the same name (a rename) stays held."""
+        self._release_key((ALL_PROJECTS, source))
 
     def cancel(self, run_id: str) -> bool:
         """Flag a managed run for cancellation; False when it is not running here."""

@@ -482,6 +482,9 @@ ENSURED_INDEXES: list[tuple[int, str]] = [
 #: workspace's slug the first time the app opens the store, see :meth:`Store.__init__`).
 DEFAULT_PROJECT_ID = "prj_default"
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{1,23}$")
+#: Slugs a project may not take: ``r<4+ digits>`` is the name of a legacy (pre-projects)
+#: revision folder in the exports root (``export_job.LEGACY_ENTRY``).
+RESERVED_SLUG_RE = re.compile(r"r\d{4,}")
 SLUG_MAX = 24
 #: store_meta keys: the default project's id; set while the default project still waits for
 #: its workspace slug (removed once it got one).
@@ -496,12 +499,30 @@ def project_slug_from_workspace(workspace: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", (workspace or "").strip().lower()).strip("-")
     if slug and not slug[0].isalpha():
         slug = "p-" + slug
+    if RESERVED_SLUG_RE.fullmatch(slug):
+        slug = "p-" + slug
     slug = slug[:SLUG_MAX].rstrip("-")
-    return slug if SLUG_RE.fullmatch(slug) else "default"
+    return slug if slug_allowed(slug) else "default"
+
+
+def slug_allowed(slug: str) -> bool:
+    """True for a valid, unreserved project slug."""
+    return bool(SLUG_RE.fullmatch(slug)) and not RESERVED_SLUG_RE.fullmatch(slug)
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
     return [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def _sequence(conn: sqlite3.Connection, table: str) -> int | None:
+    """The AUTOINCREMENT sequence of *table* (None: no AUTOINCREMENT table has one yet)."""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'"
+    ).fetchone()
+    if not exists:
+        return None
+    row = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = ?", (table,)).fetchone()
+    return int(row[0]) if row else None
 
 
 def _rebuild(
@@ -541,8 +562,17 @@ def _rebuild(
     after = conn.execute(f"SELECT count(*) FROM {tmp}").fetchone()[0]
     if after != before:
         raise RuntimeError(f"migration v8: {table} kept {after} of {before} rows")
+    # AUTOINCREMENT: never hand out an id again that the old table already used (its
+    # highest row may have been deleted, so max(id) of the copy can be below its sequence)
+    old_seq = _sequence(conn, table)
     conn.execute(f"DROP TABLE {table}")
     conn.execute(f"ALTER TABLE {tmp} RENAME TO {table}")
+    if old_seq is not None and old_seq > (_sequence(conn, table) or 0):
+        updated = conn.execute(
+            "UPDATE sqlite_sequence SET seq = ? WHERE name = ?", (old_seq, table)
+        ).rowcount
+        if not updated:
+            conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", (table, old_seq))
     for statement in indexes:
         conn.execute(statement)
 
@@ -903,6 +933,11 @@ class ProjectNotFound(LookupError):
 
 
 def validate_slug(slug: str) -> str:
+    if isinstance(slug, str) and SLUG_RE.fullmatch(slug) and RESERVED_SLUG_RE.fullmatch(slug):
+        raise ValueError(
+            f"project slug {slug!r} is reserved: 'r' followed by digits names a legacy "
+            "export folder; choose another slug"
+        )
     if not isinstance(slug, str) or not SLUG_RE.fullmatch(slug):
         raise ValueError(
             f"invalid project slug {str(slug)[:40]!r}: 2-24 characters, lower-case letters, "

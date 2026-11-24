@@ -222,6 +222,36 @@ def test_migrated_default_project_keeps_revisions_and_references(v7):
     assert p.latest_revision() == 4
 
 
+def test_migration_keeps_autoincrement_sequences_past_deleted_rows(v7):
+    """An id the v7 table handed out is never reused, even when its row was deleted."""
+    with sqlite3.connect(v7) as conn:
+        conn.execute(
+            "INSERT INTO ontology_snapshots (created_at, run_id, sources_json, counts_json, "
+            "model_json) VALUES ('x', 'run-b2', '[]', '{}', '{}')"
+        )  # revision 4, then deleted
+        conn.execute("DELETE FROM ontology_snapshots WHERE revision = 4")
+        conn.execute("DELETE FROM review_decisions WHERE subject_key = 'c2'")  # id 2
+        seqs = dict(conn.execute("SELECT name, seq FROM sqlite_sequence"))
+    assert seqs["ontology_snapshots"] == 4 and seqs["review_decisions"] == 2
+    Store(v7, default_project_slug="ops-ui")
+    with sqlite3.connect(v7) as conn:
+        after = dict(conn.execute("SELECT name, seq FROM sqlite_sequence"))
+        assert after["ontology_snapshots"] >= 4 and after["review_decisions"] >= 2
+        conn.execute(
+            "INSERT INTO review_decisions (kind, subject_key, decision, decided_at, project_id) "
+            "VALUES ('concept', 'c9', 'acknowledge', 'z', 'prj_default')"
+        )
+        assert (
+            conn.execute("SELECT id FROM review_decisions WHERE subject_key = 'c9'").fetchone()[0]
+            == 3
+        )
+        new_id = conn.execute(
+            "INSERT INTO ontology_snapshots (project_id, revision, created_at, model_json) "
+            "VALUES ('prj_default', 99, 'x', '{}')"
+        ).lastrowid
+        assert new_id == 5
+
+
 def test_migration_rerun_is_a_noop(v7):
     Store(v7, default_project_slug="ops-ui")
     after = _counts(v7)
@@ -264,10 +294,28 @@ def test_v8_reapplied_over_v8_shaped_tables_keeps_rows(v7):
         ("2026", "p-2026"),
         ("x", "default"),
         ("a" * 40, "a" * 24),
+        ("r0003", "p-r0003"),
+        ("R2026", "p-r2026"),
+        ("r12", "r12"),
     ],
 )
 def test_project_slug_from_workspace(workspace, slug):
     assert project_slug_from_workspace(workspace) == slug
+
+
+@pytest.mark.parametrize("slug", ["r0001", "r2026", "r123456"])
+def test_legacy_export_folder_names_are_reserved_slugs(tmp_path, slug):
+    from autoontology.store.db import validate_slug
+
+    with pytest.raises(ValueError, match="reserved"):
+        validate_slug(slug)
+    store = Store(tmp_path / "autoontology.db")
+    with pytest.raises(ValueError, match="reserved"):
+        store.create_project(slug)
+    beta = store.create_project("beta")
+    with pytest.raises(ValueError, match="reserved"):
+        store.rename_project(beta.id, slug=slug)
+    assert validate_slug("r123") == "r123" and validate_slug("rx2026") == "rx2026"
 
 
 def test_default_slug_is_set_once_from_the_workspace(tmp_path):

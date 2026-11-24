@@ -33,7 +33,7 @@ from typing import Any, Literal
 
 import anyio
 import httpx
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -56,6 +56,7 @@ from autoontology.config import (
     validate_model_profile,
 )
 from autoontology.web.api import PREFIX, Api, ApiError, mask
+from autoontology.web.projects import require_installation
 from autoontology.web.runs import WORKSPACE, RunStartError
 
 logger = logging.getLogger("autoontology.web")
@@ -584,9 +585,9 @@ class SettingsApi:
         try:
             record = restart.spawn(self.running, previous_pid=os.getpid())
         except Exception as exc:
-            self.api.runs.release(WORKSPACE)
+            self.api.runs.release_idle(WORKSPACE)
             raise ApiError(500, "restart_failed", mask(f"{type(exc).__name__}: {exc}")) from exc
-        timer = threading.Timer(RESTART_CLAIM_S, self.api.runs.release, args=(WORKSPACE,))
+        timer = threading.Timer(RESTART_CLAIM_S, self.api.runs.release_idle, args=(WORKSPACE,))
         timer.daemon = True
         timer.start()
         self._restart_claim = timer
@@ -599,7 +600,7 @@ class SettingsApi:
             self._restart_claim.cancel()
             self._restart_claim = None
         self._restart_id = None
-        self.api.runs.release(WORKSPACE)
+        self.api.runs.release_idle(WORKSPACE)
 
     def restart_status(self, restart_id: str) -> dict[str, Any]:
         from autoontology.engine import restart
@@ -637,16 +638,22 @@ def build_router(state: SettingsApi) -> APIRouter:
     def get_settings() -> dict[str, Any]:
         return state.get()
 
+    def manage(request: Request) -> None:
+        require_installation(state.api.decided_by(request), "settings.manage")
+
     @router.post("/test")
-    async def test_settings(body: SettingsIn) -> dict[str, Any]:
+    async def test_settings(body: SettingsIn, request: Request) -> dict[str, Any]:
+        manage(request)
         return await state.test(body)
 
     @router.put("")
-    def put_settings(body: SettingsIn) -> dict[str, Any]:
+    def put_settings(body: SettingsIn, request: Request) -> dict[str, Any]:
+        manage(request)
         return state.put(body)
 
     @router.post("/restart", status_code=202)
-    def restart() -> JSONResponse:
+    def restart(request: Request) -> JSONResponse:
+        manage(request)
         return JSONResponse(state.restart(), status_code=202)
 
     @router.get("/restart/{restart_id}")

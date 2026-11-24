@@ -468,7 +468,7 @@ another project's sources. Everything from before projects is the **default proj
 working unchanged.
 
 ```bash
-uv run ao project create contracts --name "Contracts"   # a slug: a-z, 0-9, '-', 2-24 chars
+uv run ao project create contracts --name "Contracts"   # a slug: a-z, 0-9, '-', 2-24 chars (not r<digits>)
 uv run ao -p contracts source add ./data/contracts --name contracts
 uv run ao -p contracts build && uv run ao -p contracts export
 uv run ao project list                                  # revision, sources, last build

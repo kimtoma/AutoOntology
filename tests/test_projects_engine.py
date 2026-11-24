@@ -184,7 +184,26 @@ def test_the_run_manager_gates_builds_across_projects(isolated_env):
     manager.claim_idle("*workspace*", "restart")
     with pytest.raises(RunStartError):
         manager.claim("orders", "upload", project=beta.id)
-    manager.release("*workspace*")
+    manager.release_idle("*workspace*")
+    assert manager.busy() is None
+
+
+def test_release_never_frees_the_other_kind_of_claim(isolated_env):
+    """A project's claim (a rename) and an installation-wide claim (a restart) of the same
+    name are released by their own method only."""
+    from autoontology.web.runs import WORKSPACE, RunManager
+
+    settings = Settings.from_env()
+    manager = RunManager(settings, jobs=lambda: {})
+    manager.claim(WORKSPACE, "rename")  # the default project's rename
+    manager.release_idle(WORKSPACE)  # the restart timer firing late
+    assert manager.busy().kind == "rename"
+    manager.release(WORKSPACE)
+    assert manager.busy() is None
+    manager.claim_idle(WORKSPACE, "restart")
+    manager.release(WORKSPACE)  # a default-project release leaves the restart claim
+    assert manager.busy().kind == "restart"
+    manager.release_idle(WORKSPACE)
     assert manager.busy() is None
 
 
@@ -426,7 +445,8 @@ def test_playground_scopes_are_per_project(store):
     pg = Playground(store, model_for=model_for, llm_factory=None, embedder_factory=None)
     mine, theirs = pg.scope(), pg.scope("beta")
     assert (mine.project_id, mine.revision) == (store.default_project_id, 2)
-    assert (theirs.project_id, theirs.revision, theirs.key) == (beta.id, 1, "Beta")
+    assert (theirs.project_id, theirs.revision, theirs.key) == (beta.id, 1, beta.id)
+    assert theirs.name == "Beta"
     # one call per project at a time; projects do not wait for each other
     with pg.acquire(mine), pg.acquire(theirs):
         with pytest.raises(PlaygroundError, match="playground call"):
