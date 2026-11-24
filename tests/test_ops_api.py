@@ -254,7 +254,7 @@ def test_cli_review_and_apply(ops, monkeypatch):  # noqa: F811
     # apply, with the fake upstream and no model
     _no_models(monkeypatch)
     monkeypatch.setattr(apply_job, "BackendClient", lambda url: ops["client"])
-    monkeypatch.setattr(align_job, "UpstreamTermWriter", lambda s, c: ClientWriter(c))
+    monkeypatch.setattr(align_job, "UpstreamTermWriter", lambda s, c, *_a, **_k: ClientWriter(c))
     res = runner.invoke(cli.app, ["apply"])
     assert res.exit_code == 0, res.output
     assert "revision 2" in res.output and "2 decision(s) applied" in res.output

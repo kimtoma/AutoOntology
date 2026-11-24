@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""``autoontology build``: one run over every registered source -> one ontology snapshot.
+"""``autoontology build``: one run over every source of a project -> one ontology snapshot.
+
+A build covers one project (:class:`~autoontology.store.db.ProjectStore`; a plain store
+means the default project): "every source" below is every source *of that project*, and
+the snapshot is the project's next revision. The ontology is named after the project.
 
 Steps, in order (each persisted as a ``steps`` row of the single ``build`` run):
 
@@ -24,8 +28,11 @@ again when the upstream Terms moved since it ran (:data:`TERMS_KEY`). Unchanged 
 inside the steps too (file manifests, document hashes, the consolidation fingerprint, the
 judge cache), so a plain re-run does no LLM work for what did not change.
 
-The run holds the store lease of the workspace and of every source for its whole life:
-it refuses to start while another build or export (or a source operation) is active.
+The run holds the global build gate (:func:`autoontology.engine.jobs.hold_engine`: one
+build, export or apply at a time across all projects -- the installation has a single
+engine backend), then the store lease of the project itself and of every one of its
+sources, for its whole life: it refuses to start while another build, export or apply (of
+any project) or a source operation of this project is active.
 """
 
 from __future__ import annotations
@@ -46,7 +53,16 @@ from autoontology.engine import extract as extract_job
 from autoontology.engine import jobs
 from autoontology.engine.client import BackendClient
 from autoontology.engine.jobs import JobError, check_leases, hold_sources, short_error
-from autoontology.store.db import LeaseLost, Run, Source, Store, now_iso
+from autoontology.store.db import (
+    LeaseLost,
+    ProjectStore,
+    Run,
+    Source,
+    Store,
+    now_iso,
+    root_store,
+    scoped,
+)
 from autoontology.store.documents import DocumentStore
 from autoontology.structured import pipeline
 
@@ -56,8 +72,10 @@ BUILD_KIND = "build"
 EXPORT_KIND = "export"
 #: ``autoontology apply`` (``engine/apply.py``): decisions -> merge -> snapshot, no model call
 APPLY_KIND = "apply"
-#: Lease name of the workspace itself (never a valid source name): build and export hold it.
+#: Lease name of the project itself (never a valid source name), in the project's lease
+#: namespace: build, export and apply hold it.
 WORKSPACE_LEASE = "*workspace*"
+PROJECT_LEASE = WORKSPACE_LEASE
 STRUCTURED_KINDS = ("files", "database")
 STRUCTURED_STEPS: tuple[str, ...] = ("load", "register", "ingest", "compile")
 DOCUMENTS_STEPS: tuple[str, ...] = ("read", "extract", "consolidate")
@@ -214,8 +232,10 @@ def source_set(sources: list[Source]) -> list[dict[str, str]]:
     return out
 
 
-def registration_order(store: Store) -> list[Source]:
-    return sorted(store.list_sources(), key=lambda s: (s.created_at, s.name))
+def registration_order(store: Store | ProjectStore) -> list[Source]:
+    """The sources of *store*'s project (a plain store: the default project) in the order
+    they were registered."""
+    return sorted(scoped(store).list_sources(), key=lambda s: (s.created_at, s.name))
 
 
 class _Build:
@@ -226,7 +246,7 @@ class _Build:
         self,
         *,
         settings: Settings,
-        store: Store,
+        store: ProjectStore,
         run: Run,
         sources: list[Source],
         client: BackendClient,
@@ -402,7 +422,7 @@ class _Build:
 
         self.decisions = DecisionStore(self.store).list()
         self.model = merged.build(
-            self.settings.workspace,
+            self.store.name,  # the project's name names its ontology
             structured=snapshots,
             documents=inputs,
             base=self.settings.base_iri,
@@ -502,22 +522,29 @@ def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[di
     return out
 
 
-def _previous_build(store: Store) -> Run | None:
-    return store.latest_workspace_run(BUILD_KIND)
+def _previous_build(store: ProjectStore) -> Run | None:
+    return store.latest_project_run(BUILD_KIND)
 
 
-def refuse_if_active(store: Store, *, log_path: Path | None = None) -> None:
-    """A :class:`JobError` while another build or export run is really active (runs left
-    'running' by a dead process are reaped first)."""
-    for run in store.active_runs():
+def refuse_if_active(store: Store | ProjectStore, *, log_path: Path | None = None) -> None:
+    """A :class:`JobError` while another build, export or apply run -- of any project: the
+    v1 global build gate -- is really active (runs left 'running' by a dead process are
+    reaped first)."""
+    root = root_store(store)
+    for run in root.active_runs():
         if run.kind not in (BUILD_KIND, EXPORT_KIND, APPLY_KIND):
             continue
-        reason = jobs.stale_reason(store, run)
+        reason = jobs.stale_reason(root, run)
         if reason is not None:
-            jobs.reap_run(store, run, reason)
+            jobs.reap_run(root, run, reason)
             continue
+        where = ""
+        if isinstance(store, ProjectStore) and run.project_id != store.id:
+            owner = root.get_project(run.project_id)
+            where = f" in project {owner.slug if owner else run.project_id!r}"
         raise JobError(
-            f"another {run.kind} run {run.id} is active; wait for it to finish",
+            f"another {run.kind} run {run.id} is active{where}; one build, export or apply "
+            "runs at a time: wait for it to finish",
             log_path=log_path,
         )
 
@@ -632,12 +659,16 @@ def run_build(
     align_backends: align_job.AlignBackends | None = None,
     writer: Any = None,
     check_service: bool = True,
+    project: str | None = None,
 ) -> BuildResult:
-    """Build every registered source into one snapshot (module docstring).
+    """Build every source of the project into one snapshot (module docstring). *store* is
+    the project's :class:`ProjectStore`, or a plain store with *project* (an id or slug;
+    None = the default project).
 
     *log* receives one line per step outcome (the CLI prints them); everything also goes
     to ``<home>/logs/jobs.log``."""
     log_path = jobs.setup_job_logging(settings)
+    store = scoped(store, project)
     registered = registration_order(store)
     if not registered:
         raise JobError(
@@ -651,7 +682,10 @@ def run_build(
             f"unknown source {unknown[0]!r} (see `autoontology source list`)", log_path=log_path
         )
     names = [WORKSPACE_LEASE, *(s.name for s in registered)]
-    with hold_sources(store, names, BUILD_KIND, log_path=log_path):
+    with (
+        jobs.hold_engine(store, BUILD_KIND, log_path=log_path),
+        hold_sources(store, names, BUILD_KIND, log_path=log_path),
+    ):
         registered = jobs.verify_sources(store, registered, log_path=log_path)
         refuse_if_active(store, log_path=log_path)
         return _run_held(
@@ -671,7 +705,7 @@ def run_build(
 
 
 def _run_held(
-    store: Store,
+    store: ProjectStore,
     settings: Settings,
     *,
     registered: list[Source],

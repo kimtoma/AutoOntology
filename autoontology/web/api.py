@@ -36,7 +36,8 @@ from starlette.datastructures import UploadFile
 
 from autoontology import __version__
 from autoontology.config import LOCAL_HOSTS, Settings, host_name
-from autoontology.store.db import ACTIVE_RUN_STATUSES, Run, Source, Store
+from autoontology.engine.export_job import project_exports_dir
+from autoontology.store.db import ACTIVE_RUN_STATUSES, ProjectStore, Run, Source, Store
 from autoontology.web.runs import (
     RUN_ID_RE,
     TOP_STEPS,
@@ -262,12 +263,20 @@ class Api:
             )
         return self._store
 
+    def project(self, ref: str | None = None) -> ProjectStore:
+        """The project view of *ref* (an id or slug; None = the default project)."""
+        return self.store.project(ref)
+
+    def _view(self, project: ProjectStore | None) -> ProjectStore:
+        return project if project is not None else self.store.project()
+
     @property
     def uploads_dir(self) -> Path:
         return Path(self.settings.home) / "uploads"
 
-    def source(self, name: str) -> Source:
-        source = self.store.get_source(_any_name(name))
+    def source(self, name: str, *, project: ProjectStore | None = None) -> Source:
+        """The source *name* of *project* (None = the default project); 404 otherwise."""
+        source = self._view(project).get_source(_any_name(name))
         if source is None:
             raise ApiError(404, "unknown_source", f"unknown source {name!r}")
         return source
@@ -371,15 +380,19 @@ class Api:
 
     # --- ontology snapshot ---------------------------------------------------------------
 
-    def snapshot(self, revision: int | None = None) -> tuple[Any, Any]:
-        """``(Snapshot without model, MergedOntology)`` of *revision* (default: the latest),
-        parsed once per revision; 404 ``no_snapshot`` before the first build."""
+    def snapshot(
+        self, revision: int | None = None, *, project: ProjectStore | None = None
+    ) -> tuple[Any, Any]:
+        """``(Snapshot without model, MergedOntology)`` of the project's *revision*
+        (default: its latest; *project* None = the default project), parsed once per
+        snapshot; 404 ``no_snapshot`` before the first build."""
         from autoontology.ontology.model import MergedOntology
 
+        view = self._view(project)
         head = (
-            self.store.latest_snapshot(with_model=False)
+            view.latest_snapshot(with_model=False)
             if revision is None
-            else self.store.get_snapshot(revision, with_model=False)
+            else view.get_snapshot(revision, with_model=False)
         )
         if head is None:
             if revision is None:
@@ -391,7 +404,7 @@ class Api:
         with self._model_lock:
             model = self._models.get(key)
         if model is None:
-            full = self.store.get_snapshot(head.revision)
+            full = view.get_snapshot(head.revision)
             assert full is not None and full.model is not None
             model = MergedOntology.from_dict(full.model)
             with self._model_lock:
@@ -400,12 +413,14 @@ class Api:
                 self._models[key] = model
         return head, model
 
-    def concepts(self, revision: int | None = None) -> tuple[Any, Any, Any]:
-        """``(head, model, ConceptIndex)`` of *revision* (default: the latest); the index
-        is computed once per snapshot."""
+    def concepts(
+        self, revision: int | None = None, *, project: ProjectStore | None = None
+    ) -> tuple[Any, Any, Any]:
+        """``(head, model, ConceptIndex)`` of the project's *revision* (default: its
+        latest); the index is computed once per snapshot."""
         from autoontology.web.concepts import concept_index
 
-        head, model = self.snapshot(revision)
+        head, model = self.snapshot(revision, project=project)
         key = (head.revision, head.run_id)
         with self._model_lock:
             index = self._concepts.get(key)
@@ -493,9 +508,10 @@ class Api:
             return login[:200]
         return "local"
 
-    def latest_model(self) -> tuple[int, Any]:
-        """``(revision, model)`` of the latest snapshot (the playground's scope)."""
-        head, model = self.snapshot()
+    def latest_model(self, project: ProjectStore | None = None) -> tuple[int, Any]:
+        """``(revision, model)`` of the project's latest snapshot (the playground's scope;
+        *project* None = the default project)."""
+        head, model = self.snapshot(project=project)
         return head.revision, model
 
     # --- status ------------------------------------------------------------------------
@@ -963,21 +979,21 @@ def build_router(api: Api) -> APIRouter:
 
     @router.get("/exports")
     def list_exports() -> dict[str, Any]:
-        return {"exports": export_listing(api.settings)}
+        return {"exports": export_listing(api.settings, api.project())}
 
     # no collision with the route below: ``{rev}`` never holds a ``/``
     @router.get("/exports/{rev}.zip")
     def download_export_zip(rev: str) -> Response:
         """The whole revision folder as one zip (:func:`export_zip_response`). Sync, so
         the zipping runs in the threadpool."""
-        return export_zip_response(api.settings, rev)
+        return export_zip_response(api.settings, rev, api.project())
 
     @router.get("/exports/{rev}/{file_path:path}")
     def download_export(rev: str, file_path: str, inline: bool = False) -> Response:
         rev = _export_dir(rev)
         if not _export_path_ok(file_path):
             raise ApiError(400, "invalid_path", "invalid export path")
-        root = Path(api.settings.exports_dir).resolve()
+        root = project_exports_dir(api.settings, api.project()).resolve()
         candidate = (root / rev / unicodedata.normalize("NFC", file_path)).resolve()
         if candidate.is_file() and candidate.is_relative_to(root / rev):
             if inline:
@@ -1028,9 +1044,11 @@ def build_router(api: Api) -> APIRouter:
 # --- route bodies shared with the agent API (autoontology/web/agent_api.py) -------------
 
 
-def ontology_summary(api: Api, revision: int | None = None) -> dict[str, Any]:
+def ontology_summary(
+    api: Api, revision: int | None = None, *, project: ProjectStore | None = None
+) -> dict[str, Any]:
     """``GET /api/ontology``: the snapshot's header, counts and alignment counts."""
-    head, model = api.snapshot(revision)
+    head, model = api.snapshot(revision, project=project)
     return {
         "revision": head.revision,
         "created_at": head.created_at,
@@ -1053,11 +1071,12 @@ def concept_listing(
     page: int = 1,
     size: int = 50,
     revision: int | None = None,
+    project: ProjectStore | None = None,
 ) -> dict[str, Any]:
     """``GET /api/ontology/concepts``: the concept index filtered and paged."""
     if origin and origin not in ORIGINS:
         raise ApiError(400, "invalid_origin", f"origin must be one of {', '.join(ORIGINS)}")
-    head, _, index = api.concepts(revision)
+    head, _, index = api.concepts(revision, project=project)
     items = index.items
     needle = q.strip().casefold()
     if needle:
@@ -1080,24 +1099,31 @@ def concept_listing(
     }
 
 
-def concept_body(api: Api, concept_id: str, revision: int | None = None) -> dict[str, Any]:
+def concept_body(
+    api: Api,
+    concept_id: str,
+    revision: int | None = None,
+    *,
+    project: ProjectStore | None = None,
+) -> dict[str, Any]:
     """``GET /api/ontology/concepts/{id}``: relations, evidence, alignments, decisions."""
     from autoontology.web.concept_decisions import concept_decisions
     from autoontology.web.concepts import concept_detail
 
     if not CONCEPT_ID_RE.fullmatch(concept_id):
         raise ApiError(400, "invalid_concept_id", f"invalid concept id {concept_id!r}")
-    head, model, index = api.concepts(revision)
+    head, model, index = api.concepts(revision, project=project)
     detail = concept_detail(model, concept_id, index)
     if detail is None:
         raise ApiError(404, "unknown_concept", f"unknown concept {concept_id!r}")
-    decisions = concept_decisions(api.store, concept_id)
+    decisions = concept_decisions(api._view(project), concept_id)
     return {"revision": head.revision, **detail, "decisions": decisions}
 
 
-def export_listing(settings: Settings) -> list[dict[str, Any]]:
-    """``GET /api/exports``: the revision folders, newest first, with their files."""
-    root = Path(settings.exports_dir)
+def export_listing(settings: Settings, project: Any) -> list[dict[str, Any]]:
+    """``GET /api/exports``: the revision folders of *project* (a project view, row or
+    slug: ``exports/<slug>/``), newest first, with their files."""
+    root = project_exports_dir(settings, project)
     folders = (
         sorted(
             (
@@ -1135,12 +1161,12 @@ def export_listing(settings: Settings) -> list[dict[str, Any]]:
     return out
 
 
-def export_zip_response(settings: Settings, rev: str) -> Response:
+def export_zip_response(settings: Settings, rev: str, project: Any) -> Response:
     """``GET /api/exports/{rev}.zip``: the whole revision folder as one zip, exactly the
     files :func:`export_listing` lists, under ``r0003/``. Blocking: call it from a sync
     route or a worker thread."""
     rev = _export_dir(rev)
-    folder = Path(settings.exports_dir).resolve() / rev
+    folder = project_exports_dir(settings, project).resolve() / rev
     if not folder.is_dir() or folder.is_symlink():
         raise ApiError(404, "unknown_export", f"no export {rev}")
     # A re-export of the same revision swaps the folder by rename (export_job._install):

@@ -1068,5 +1068,6 @@ def test_a_run_whose_owner_lost_the_lease_is_reaped(env, monkeypatch):
     # young runs get the lease TTL as grace (the row may predate a slow lease write)
     assert jobs.stale_reason(store, run) is None
     assert "lease" in jobs.stale_reason(store, run, lease_grace_s=-1)
-    monkeypatch.setattr(store, "lease_holder", lambda name: {"pid": os.getppid()})
+    # the holder is read in the source's own project (schema v8)
+    monkeypatch.setattr(store, "lease_holder", lambda name, project_id: {"pid": os.getppid()})
     assert jobs.stale_reason(store, run, lease_grace_s=-1) is None

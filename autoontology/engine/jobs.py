@@ -30,7 +30,18 @@ from typing import Any
 
 from autoontology.config import Settings, postgres_env
 from autoontology.engine.client import BackendClient
-from autoontology.store.db import Lease, LeaseLost, Run, Source, SourceBusy, Store, now_iso
+from autoontology.store.db import (
+    Lease,
+    LeaseLost,
+    ProjectStore,
+    Run,
+    Source,
+    SourceBusy,
+    Store,
+    now_iso,
+    root_store,
+    scoped,
+)
 from autoontology.structured import pipeline
 
 logger = logging.getLogger("autoontology.jobs")
@@ -896,6 +907,43 @@ def hold_sources(
             _HELD.reset(reset)
 
 
+#: Lease name of the v1 global build gate (never a valid source name), held in the default
+#: project's lease namespace by every build, export and apply of any project: the
+#: installation has one engine backend, so only one of them runs at a time.
+ENGINE_LEASE = "*engine*"
+#: Phrase every busy refusal carries (the run manager answers it with HTTP 409).
+BUSY_PHRASE = "already has an active"
+
+
+@contextmanager
+def hold_engine(
+    store: Store | ProjectStore, operation: str, *, log_path: Path | None = None
+) -> Iterator[None]:
+    """Hold the global build gate (:data:`ENGINE_LEASE`) for the body: a build, export or
+    apply of another project (in any process) is refused with a :class:`JobError` while one
+    runs. Taken before the project's own leases."""
+    root = root_store(store)
+    label = operation
+    if isinstance(store, ProjectStore):
+        label = f"{operation} of project {store.slug!r}"
+    with ExitStack() as stack:
+        try:
+            lease = stack.enter_context(
+                root.lease([ENGINE_LEASE], label, project_id=root.default_project_id)
+            )
+        except SourceBusy as exc:
+            raise JobError(
+                f"the engine {BUSY_PHRASE} {exc.operation} (pid {exc.pid}); one build, export "
+                "or apply runs at a time across all projects: wait for it to finish",
+                log_path=log_path,
+            ) from exc
+        reset = _HELD.set((*_HELD.get(), lease))
+        try:
+            yield
+        finally:
+            _HELD.reset(reset)
+
+
 def verify_sources(
     store: Store, sources: list[Source], *, log_path: Path | None = None
 ) -> list[Source]:
@@ -980,8 +1028,13 @@ def stale_reason(store: Store, run: Run, *, lease_grace_s: float | None = None) 
         return f"process {pid} is gone (the pid now belongs to a newer process)"
     grace = LEASE_TTL_S if lease_grace_s is None else lease_grace_s
     if run.source_id and time.time() - began > grace:
-        source = store.get_source_by_id(run.source_id)
-        holder = store.lease_holder(source.name) if source is not None else None
+        root = root_store(store)
+        source = root.get_source_by_id(run.source_id)
+        holder = (
+            root.lease_holder(source.name, project_id=source.project_id)
+            if source is not None
+            else None
+        )
         if holder is None or holder.get("pid") != pid:
             return f"process {pid} no longer holds the source lease"
     return None
@@ -1099,6 +1152,7 @@ def run_structured(
     skip_export: bool = False,
     client: BackendClient | None = None,
 ) -> RunResult:
+    store = scoped(store)  # a plain store: the default project
     source = store.get_source(source_name)
     if source is None:
         raise JobError(f"unknown source {source_name!r} (see `autoontology source list`)")
@@ -1195,17 +1249,10 @@ def run_ingest_job(
 ) -> RunResult | None:
     """Run only the ``ingest`` step (the ``/ingest`` shim). None when skipped."""
     setup_job_logging(settings)
-    key = database_name.casefold()
-    source = next(
-        (
-            s
-            for s in store.list_sources()
-            if s.kind in ("files", "database")
-            and pipeline.catalog_database_name(s).casefold() == key
-        ),
-        None,
-    )
+    # any project's source: upstream names only the database (one project per database)
+    source = pipeline.source_for_database(root_store(store), database_name)
     if source is not None:
+        store = scoped(root_store(store), source.project_id)
         try:
             with hold_sources(store, [source.name], INGEST_KIND):
                 if reap_stale_runs(store, source.id):

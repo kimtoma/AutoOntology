@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from autoontology.config import Settings
-from autoontology.store.db import Source, Store
+from autoontology.store.db import ProjectStore, Source, Store, root_store, scoped
 
 #: How long removal waits for the service to tear down the ingested graph.
 RM_GRAPH_WAIT_S = 120.0
@@ -66,9 +66,14 @@ def remove_source(
 ) -> None:
     """Remove *src*. Raises :class:`RemoveError` (source kept) when the backend teardown
     fails or does not finish and *force* is not set, or another operation holds the
-    source's lease."""
+    source's lease. *store* may be a project view: a source of another project is
+    refused; the removal runs in *src*'s project either way."""
     from autoontology.config import assert_source_database
     from autoontology.store.db import SourceBusy
+
+    if isinstance(store, ProjectStore) and src.project_id != store.id:
+        raise RemoveError(f"source {src.name!r} belongs to another project; nothing was removed")
+    store = scoped(root_store(store), src.project_id)
 
     def say(message: str, warning: bool = False) -> None:
         if notify:
@@ -264,7 +269,8 @@ def find_orphan_connections(
             return pg.database_exists(settings, name)
 
     owned: set[str] = set()
-    for src in store.list_sources() if store is not None else []:
+    # every project's sources: a database another project owns is never an orphan
+    for src in root_store(store).list_all_sources() if store is not None else []:
         if src.kind in ("files", "database"):
             try:
                 owned.add(pipeline.catalog_database_name(src).casefold())
@@ -403,13 +409,25 @@ def remove_added_aliases(
     from autoontology.engine.align import hand_over_aliases
     from autoontology.store.alignments import AlignmentStore
 
+    store = scoped(root_store(store), src.project_id)  # supporters: this project's sources
     plan, handover = _split_plan(store, src)
     aligns = AlignmentStore(store)
     hand_over_aliases(aligns, handover)  # still supported: the supporters own it now
     if not plan:
         return
     if remover is None:
-        from autoontology.engine.upstream_terms import remove_term_synonyms as remover
+        import functools
+
+        from autoontology.engine.upstream_terms import remove_term_synonyms
+        from autoontology.structured import pipeline
+
+        # only Terms of this project's structured sources (never another project's)
+        databases = [
+            pipeline.catalog_database_name(s)
+            for s in store.list_sources()
+            if s.kind in ("files", "database")
+        ]
+        remover = functools.partial(remove_term_synonyms, databases=databases)
     for term_id, aliases in sorted(plan.items()):
         try:
             result = remover(settings, term_id, aliases)

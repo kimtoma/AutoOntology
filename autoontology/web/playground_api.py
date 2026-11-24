@@ -60,6 +60,7 @@ from autoontology.playground.sparql import (
     SparqlError,
     SparqlRunner,
 )
+from autoontology.store.db import ProjectStore
 from autoontology.web.api import PREFIX, Api, ApiError, mask
 
 logger = logging.getLogger("autoontology.web")
@@ -190,7 +191,9 @@ class SqlSlots:
 
     The ReAct agent behind it makes up to ``TEXT_TO_SQL_REACT_MAX_TOOL_CALLS`` model calls
     per question and takes no playground slot, so a public site bounds it here. Used from
-    the event loop only (async routes): a plain counter is enough."""
+    the event loop only (async routes): a plain counter is enough. The limit is
+    installation-wide, not per project: every project's questions go to the same upstream
+    agent, whose cost the setting bounds."""
 
     def __init__(self) -> None:
         self.active = 0
@@ -268,9 +271,13 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             app.state.playground = found
         return found
 
+    def view() -> ProjectStore:
+        """The project the routes serve (the default project; T3 adds project routes)."""
+        return api.project()
+
     def scope() -> Scope:
         try:
-            return pg().scope()
+            return pg().scope(view())
         except PlaygroundError as exc:
             raise _api_error(exc) from exc
 
@@ -300,7 +307,7 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     async def chat(body: ChatIn) -> EventSourceResponse:
         s = scope()
         if body.conversation_id:
-            conv = pg().pg.get_conversation(body.conversation_id)
+            conv = s.pg.get_conversation(body.conversation_id)
             if conv is None or conv["scope"] != s.key:
                 raise ApiError(
                     404,
@@ -332,18 +339,20 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
 
     @router.get("/conversations")
     def conversations() -> dict[str, Any]:
-        return {"conversations": pg().pg.list_conversations(scope().key)}
+        s = scope()
+        return {"conversations": s.pg.list_conversations(s.key)}
 
     @router.get("/conversations/{conversation_id}")
     def conversation(conversation_id: str) -> dict[str, Any]:
-        conv = pg().pg.get_conversation(conversation_id)
+        store = pg().pg_for(view())
+        conv = store.get_conversation(conversation_id)
         if conv is None:
             raise ApiError(404, "unknown_conversation", f"no conversation {conversation_id!r}")
-        return mask({**conv, "messages": pg().pg.messages(conversation_id)})
+        return mask({**conv, "messages": store.messages(conversation_id)})
 
     @router.delete("/conversations/{conversation_id}")
     def delete_conversation(conversation_id: str) -> dict[str, Any]:
-        if not pg().pg.delete_conversation(conversation_id):
+        if not pg().pg_for(view()).delete_conversation(conversation_id):
             raise ApiError(404, "unknown_conversation", f"no conversation {conversation_id!r}")
         return {"deleted": conversation_id}
 
@@ -352,8 +361,8 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     @router.post("/sql")
     async def sql(body: SqlIn) -> EventSourceResponse:
         target_db = None
-        if body.source:
-            src = api.source(body.source)
+        if body.source:  # a structured source of this project only
+            src = api.source(body.source, project=view())
             if src.kind not in ("files", "database"):
                 raise ApiError(400, "not_structured", f"source {src.name!r} is a {src.kind} source")
             target_db = src.catalog_database_id
@@ -539,7 +548,7 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     async def run_sparql(body: SparqlIn) -> dict[str, Any]:
         try:
             return await anyio.to_thread.run_sync(
-                lambda: sparql_answer(api, sparql, body.query, limit=body.limit)
+                lambda: sparql_answer(api, sparql, body.query, limit=body.limit, project=view())
             )
         except SparqlError as exc:
             raise _api_error(exc) from exc
@@ -554,13 +563,16 @@ def sparql_answer(
     *,
     limit: int = DEFAULT_LIMIT,
     revision: int | None = None,
+    project: ProjectStore | None = None,
 ) -> dict[str, Any]:
-    """*query* over snapshot *revision* (default: the latest) in *runner*'s workers, with
-    its read-only checks, deadline and row cap; masked. Blocking (a worker thread).
-    Raises :class:`SparqlError` and, for an unknown revision, :class:`ApiError`."""
-    head, model = api.snapshot(revision)
-    path = snapshot_ttl(api.settings, head, model)
-    key = snapshot_key(api.settings, head)
+    """*query* over the project's snapshot *revision* (default: its latest; *project*
+    None = the default project) in *runner*'s workers, with its read-only checks, deadline
+    and row cap; masked. Blocking (a worker thread). Raises :class:`SparqlError` and, for
+    an unknown revision, :class:`ApiError`."""
+    view = project if project is not None else api.project()
+    head, model = api.snapshot(revision, project=view)
+    path = snapshot_ttl(api.settings, head, model, view)
+    key = snapshot_key(view, head)
     return mask(
         {
             **runner.run_file(key, path, query, limit=limit),
@@ -570,41 +582,42 @@ def sparql_answer(
     )
 
 
-def snapshot_key(settings: Any, head: Any) -> str:
+def snapshot_key(project: Any, head: Any) -> str:
     """Identity of snapshot *head* beyond its revision number -- revisions restart in a
-    recreated store and ``exports/`` may be shared by several homes: workspace, revision
-    and a hash of the snapshot's run id and creation time."""
-    digest = hashlib.sha256(
-        f"{settings.workspace}\0{head.run_id}\0{head.created_at}".encode()
-    ).hexdigest()[:12]
-    return f"r{head.revision}-{digest}"
+    recreated store, every project has its own r1, r2 ..., and ``exports/`` may be shared
+    by several homes: the project's id, the revision and a hash of the project id, the
+    snapshot's run id and creation time. *project*: a project view (or its id)."""
+    pid = project if isinstance(project, str) else project.id
+    digest = hashlib.sha256(f"{pid}\0{head.run_id}\0{head.created_at}".encode()).hexdigest()[:12]
+    return f"{pid}-r{head.revision}-{digest}"
 
 
-def export_matches(settings: Any, head: Any, folder: Path) -> bool:
-    """Whether the export in *folder* was written from snapshot *head* (its marker)."""
-    from autoontology.engine.export_job import read_export_metadata
+def export_matches(project: ProjectStore, head: Any, folder: Path) -> bool:
+    """Whether the export in *folder* was written from snapshot *head* of *project* (its
+    marker)."""
+    from autoontology.engine.export_job import marker_matches_project, read_export_metadata
 
     meta = read_export_metadata(folder) or {}
     return (
-        meta.get("workspace") == settings.workspace
+        marker_matches_project(meta, project)
         and meta.get("revision") == head.revision
         and meta.get("snapshot_run") == head.run_id
         and meta.get("snapshot_created_at") == head.created_at
     )
 
 
-def snapshot_ttl(settings: Any, head: Any, model: Any) -> Path:
-    """The Turtle file of snapshot *head*: its export's ``ontology.ttl`` when that export
-    was written from this very snapshot (:func:`export_matches`), else
+def snapshot_ttl(settings: Any, head: Any, model: Any, project: ProjectStore) -> Path:
+    """The Turtle file of snapshot *head* of *project*: its export's ``ontology.ttl`` when
+    that export was written from this very snapshot (:func:`export_matches`), else
     ``<home>/cache/ontology-<snapshot_key>.ttl``, written from the model on demand."""
-    from autoontology.engine.export_job import revision_dir_name
+    from autoontology.engine.export_job import revision_dir
     from autoontology.export import rdf
 
-    folder = Path(settings.exports_dir) / revision_dir_name(head.revision)
+    folder = revision_dir(settings, project, head.revision)
     exported = folder / "ontology.ttl"
-    if exported.is_file() and export_matches(settings, head, folder):
+    if exported.is_file() and export_matches(project, head, folder):
         return exported
-    cached = Path(settings.home) / "cache" / f"ontology-{snapshot_key(settings, head)}.ttl"
+    cached = Path(settings.home) / "cache" / f"ontology-{snapshot_key(project, head)}.ttl"
     if not cached.is_file():
         cached.parent.mkdir(parents=True, exist_ok=True)
         tmp = cached.with_name(f".{cached.name}.{uuid.uuid4().hex}.tmp")

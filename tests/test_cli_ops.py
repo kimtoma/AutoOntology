@@ -323,7 +323,7 @@ def test_samples_list_and_load_with_conflict_and_replace(isolated_env, tmp_path,
 @pytest.fixture
 def exports(isolated_env):
     settings = Settings.from_env()
-    root = Path(settings.exports_dir) / "r0002"
+    root = Path(settings.exports_dir) / "default" / "r0002"  # exports/<project slug>/
     (root / "okf").mkdir(parents=True)
     (root / "ossie").mkdir()
     (root / "report.md").write_text("# 보고서\n", "utf-8")

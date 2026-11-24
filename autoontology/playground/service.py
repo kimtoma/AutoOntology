@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Playground orchestration: scope, element index and RAG chat.
 
-One :class:`Playground` per service process (``web/playground_api.py``). The scope is the
-workspace's latest ontology snapshot; the element index is keyed by the workspace and
-rebuilt when the snapshot revision changes. Every LLM call holds the workspace's slot, so
-one runs at a time (409 ``playground_busy`` otherwise).
+One :class:`Playground` per service process (``web/playground_api.py``), serving every
+project. A scope is one project's latest ontology snapshot; the element index, the
+conversations and the slot are keyed by the project (its id, plus the scope key inside it)
+and the index is rebuilt when the project's snapshot revision changes. Every LLM call holds
+its project's slot, so one runs at a time per project (409 ``playground_busy`` otherwise);
+projects never wait for each other here (the SQL relay's slots stay installation-wide,
+``web/playground_api.py`` ``SqlSlots``: the upstream agent is one backend).
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from autoontology.playground.elements import Element, elements_from_model
 from autoontology.playground.index import DEFAULT_TOP_K, ElementIndex, Embedder, Hit, build_index
 from autoontology.playground.llm import LLMError, PlaygroundLLM
 from autoontology.playground.store import PlaygroundStore
-from autoontology.store.db import Source, Store
+from autoontology.store.db import DEFAULT_PROJECT_ID, ProjectStore, Source, Store, scoped
 
 logger = logging.getLogger("autoontology.playground")
 
@@ -41,7 +44,8 @@ class PlaygroundError(Exception):
 
 @dataclass
 class Scope:
-    #: the workspace name (the key of the index, conversations and slot)
+    #: the scope key inside the project (the ontology's name: the project's name when the
+    #: snapshot was built; conversations keep it)
     key: str
     #: the snapshot revision the scope was taken from
     revision: int
@@ -51,6 +55,14 @@ class Scope:
     names: list[str]
     structured: list[Source] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    #: the project the scope belongs to (the outer key of index, conversations and slot)
+    project_id: str = DEFAULT_PROJECT_ID
+    #: the project's playground tables (:class:`PlaygroundStore` of ``project_id``)
+    pg: Any = None
+
+    @property
+    def slot_key(self) -> tuple[str, str]:
+        return (self.project_id, self.key)
 
 
 @dataclass
@@ -122,23 +134,38 @@ class Playground:
         embedder_factory: Callable[[], tuple[Embedder, str]],
     ) -> None:
         self.store = store
-        self.pg = PlaygroundStore(store)
+        #: the default project's playground tables (callers with a scope use ``scope.pg``)
+        self.pg = PlaygroundStore(scoped(store))
+        #: ``model_for(project view)`` -> ``(revision, model)`` of its latest snapshot
         self.model_for = model_for
         self.llm_factory = llm_factory
         self.embedder_factory = embedder_factory
-        self._indexes: dict[str, ElementIndex] = {}
+        self._indexes: dict[tuple[str, str], ElementIndex] = {}
         self._index_lock = threading.Lock()
-        self._busy: set[str] = set()
+        self._busy: set[tuple[str, str]] = set()
         self._busy_lock = threading.Lock()
+
+    def view(self, project: ProjectStore | str | None = None) -> ProjectStore:
+        """The project view of *project* (a view, an id or slug; None = the default)."""
+        if isinstance(project, ProjectStore):
+            return project
+        return scoped(self.store, project)
+
+    def pg_for(self, project: ProjectStore | str | None = None) -> PlaygroundStore:
+        """The playground tables of *project*."""
+        return PlaygroundStore(self.view(project))
 
     # --- scope / concurrency ------------------------------------------------------------
 
-    def scope(self) -> Scope:
-        """The latest snapshot (``model_for`` raises when there is none)."""
-        revision, model = self.model_for()
+    def scope(self, project: ProjectStore | str | None = None) -> Scope:
+        """The project's latest snapshot (*project* None = the default project;
+        ``model_for`` raises when there is none). Its structured sources are the
+        project's (the SQL relay's targets)."""
+        view = self.view(project)
+        revision, model = self.model_for(view)
         structured, warnings = [], []
         for name in model.structured_sources:
-            s = self.store.get_source(name)
+            s = view.get_source(name)
             if s is not None and s.kind in STRUCTURED_KINDS and s.catalog_database_id:
                 structured.append(s)
             else:
@@ -150,16 +177,19 @@ class Playground:
             names=[*model.structured_sources, *model.documents_sources],
             structured=structured,
             warnings=warnings,
+            project_id=view.id,
+            pg=PlaygroundStore(view),
         )
 
     @contextlib.contextmanager
-    def slot(self, key: str) -> Iterator[None]:
+    def slot(self, key: tuple[str, str] | str) -> Iterator[None]:
         with self._busy_lock:
             if key in self._busy:
                 raise PlaygroundError(
                     409,
                     "playground_busy",
-                    f"another playground call for {key!r} is running; wait for it to finish",
+                    f"another playground call for {key[-1] if isinstance(key, tuple) else key!r} "
+                    "is running; wait for it to finish",
                 )
             self._busy.add(key)
         try:
@@ -172,7 +202,7 @@ class Playground:
         """The slot entered now (409 raised here, before a response starts); close the
         returned stack to release it."""
         stack = contextlib.ExitStack()
-        stack.enter_context(self.slot(scope.key))
+        stack.enter_context(self.slot(scope.slot_key))
         return stack
 
     # --- index --------------------------------------------------------------------------
@@ -188,14 +218,15 @@ class Playground:
         embed, model_name = self.embedder()
         revision = scope.revision
         sid = scope.key
+        cache_key = scope.slot_key
         with self._index_lock:
-            cached = self._indexes.get(sid)
+            cached = self._indexes.get(cache_key)
             if cached and cached.revision == revision and cached.model == model_name:
                 return cached
         elements = self.elements(scope)
         try:
             idx = build_index(
-                self.pg, sid, elements, revision=revision, model=model_name, embed=embed
+                self._pg(scope), sid, elements, revision=revision, model=model_name, embed=embed
             )
         except Exception as exc:  # noqa: BLE001 - the embed endpoint's own errors
             raise PlaygroundError(
@@ -204,14 +235,18 @@ class Playground:
                 f"embedding the ontology failed: {type(exc).__name__}: {str(exc)[:300]}",
             ) from exc
         with self._index_lock:
-            self._indexes[sid] = idx
+            self._indexes[cache_key] = idx
         return idx
 
+    def _pg(self, scope: Scope) -> PlaygroundStore:
+        return scope.pg if scope.pg is not None else self.pg_for(scope.project_id)
+
     def index_status(self, scope: Scope) -> dict[str, Any]:
-        meta = self.pg.index_meta(scope.key)
+        meta = self._pg(scope).index_meta(scope.key)
         revision = scope.revision
         return {
             "workspace": scope.key,
+            "project": scope.project_id,
             "scope": scope.names,
             "warnings": scope.warnings,
             "revision": revision,
@@ -238,7 +273,7 @@ class Playground:
         self, scope: Scope, conversation_id: str | None, history: list[dict[str, str]] | None
     ) -> tuple[str | None, list[dict]]:
         if conversation_id:
-            conv = self.pg.get_conversation(conversation_id)
+            conv = self._pg(scope).get_conversation(conversation_id)
             if conv is None or conv["scope"] != scope.key:
                 raise PlaygroundError(
                     404,
@@ -248,7 +283,7 @@ class Playground:
             # an incomplete (truncated) answer is not context for the next turn
             return conversation_id, [
                 {"role": m["role"], "content": m["content"]}
-                for m in self.pg.messages(conversation_id)
+                for m in self._pg(scope).messages(conversation_id)
                 if not m["incomplete"]
             ]
         return None, list(history or [])
@@ -317,9 +352,10 @@ class Playground:
             if persist:
 
                 def save_partial() -> tuple[str, int]:
-                    cid = conversation_id or self.pg.create_conversation(scope.key, question[:80])
-                    self.pg.add_message(cid, "user", question)
-                    mid = self.pg.add_message(
+                    pg = self._pg(scope)
+                    cid = conversation_id or pg.create_conversation(scope.key, question[:80])
+                    pg.add_message(cid, "user", question)
+                    mid = pg.add_message(
                         cid,
                         "assistant",
                         partial,
@@ -341,9 +377,10 @@ class Playground:
         if persist:
 
             def save() -> tuple[str, int]:
-                cid = conversation_id or self.pg.create_conversation(scope.key, question[:80])
-                self.pg.add_message(cid, "user", question)
-                mid = self.pg.add_message(
+                pg = self._pg(scope)
+                cid = conversation_id or pg.create_conversation(scope.key, question[:80])
+                pg.add_message(cid, "user", question)
+                mid = pg.add_message(
                     cid,
                     "assistant",
                     answer,

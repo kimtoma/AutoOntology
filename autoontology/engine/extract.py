@@ -35,7 +35,7 @@ from autoontology.engine.jobs import (
     require_llm_proxy,
     setup_job_logging,
 )
-from autoontology.store.db import Run, Source, Store, now_iso
+from autoontology.store.db import Run, Source, Store, now_iso, scoped
 from autoontology.store.documents import DocumentStore
 from autoontology.unstructured import chunker, consolidate, readers, report
 from autoontology.unstructured.extractor import (
@@ -782,8 +782,9 @@ def validate_documents_source_name(name: str) -> str:
 def ensure_documents_source(
     store: Store, name: str, target: Path, recursive: bool = False
 ) -> Source:
-    """The documents source *name* (created, or its locator updated, for *target*)."""
-    return _documents_source(store, name, target, recursive)
+    """The documents source *name* of *store*'s project (a plain store: the default
+    project), created, or its locator updated, for *target*."""
+    return _documents_source(scoped(store), name, target, recursive)
 
 
 def documents_target(source: Source) -> tuple[Path, bool]:
@@ -830,6 +831,7 @@ def run_extract(
     if max_chunks is not None and max_chunks < 0:
         raise JobError("--max-chunks must be >= 0")
     log_path = setup_job_logging(settings)
+    store = scoped(store)  # a plain store: the default project
     with hold_sources(store, [source_name], EXTRACT_KIND, log_path=log_path):
         return _run_extract_held(
             source_name,
@@ -1006,6 +1008,7 @@ def _run_extract_held(
 
 def summary_rows(store: Store, source_name: str) -> list[tuple[str, ...]]:
     """Per-document rows for the CLI table: path, engine, pages, chunks, extracted, concepts."""
+    store = scoped(store)
     source = store.get_source(source_name)
     if source is None:
         return []

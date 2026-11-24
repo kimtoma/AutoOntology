@@ -5,9 +5,16 @@ Each run executes one of the CLI job functions (``build.run_build``,
 ``export_job.run_export``, ``apply.run_apply``) in its own thread, so runs started from the UI persist exactly
 like CLI runs (``runs``/``steps`` rows, ``<home>/logs/jobs.log``).
 
-- One active run per workspace: an in-process lock on the workspace key, on top of the
-  jobs' own store lease (``Store.lease`` via ``jobs.hold_sources``, atomic across
-  processes, so it also sees CLI runs and ``source rm``).
+- One active run per project: an in-process lock on the project's key (``(project id,
+  WORKSPACE)``; a source operation on ``(project id, source)``), on top of the jobs' own
+  store lease (``Store.lease`` via ``jobs.hold_sources``, atomic across processes, so it
+  also sees CLI runs and ``source rm``).
+- The v1 global build gate: one build, export or apply at a time across all projects
+  (the installation has one engine backend). A run of another project while one runs is
+  refused (409), never queued; the jobs hold the same gate across processes
+  (``jobs.hold_engine``).
+- :meth:`RunManager.claim_idle` (a restart, a sample load) is installation-wide: it
+  needs nothing at all active and holds every project until released.
 - The run id is known only once the job has created (or resumed) its run row, so the job
   gets a :class:`TrackingStore` that reports it; :meth:`RunManager.start` waits for that
   (or for the job failing its pre-checks, which is returned as an error).
@@ -28,13 +35,17 @@ from pathlib import Path
 from typing import Any
 
 from autoontology.config import Settings
-from autoontology.store.db import Run, Store
+from autoontology.store.db import DEFAULT_PROJECT_ID, Run, Store
 
 logger = logging.getLogger("autoontology.web.runs")
 
 RUN_KINDS: tuple[str, ...] = ("build", "export", "apply")
-#: The run manager's key for workspace-wide runs (build, export).
+#: The run manager's key for project-wide runs (build, export, apply), per project.
 WORKSPACE = "*workspace*"
+#: The "project" of an installation-wide :meth:`RunManager.claim_idle`.
+ALL_PROJECTS = "*"
+#: The run kinds behind the global build gate (every run kind of the manager).
+GATED_KINDS: frozenset[str] = frozenset(RUN_KINDS)
 RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{6}$")
 #: How long ``start`` waits for the job to create its run row.
 START_TIMEOUT_S = 60.0
@@ -157,6 +168,7 @@ class _Active:
     source: str
     kind: str
     thread_name: str
+    project: str = DEFAULT_PROJECT_ID
     run_id: str | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
     started: threading.Event = field(default_factory=threading.Event)
@@ -191,27 +203,68 @@ def is_top_step(name: str) -> bool:
 
 class RunManager:
     def __init__(
-        self, settings: Settings, jobs: Callable[[], dict[str, JobFn]] = default_jobs
+        self,
+        settings: Settings,
+        jobs: Callable[[], dict[str, JobFn]] = default_jobs,
+        *,
+        default_project: str = DEFAULT_PROJECT_ID,
     ) -> None:
         self.settings = settings
         self._jobs = jobs
+        #: the project a call without ``project=`` means
+        self.default_project = default_project
         self._lock = threading.Lock()
-        self._by_source: dict[str, _Active] = {}
+        #: ``(project id, source or WORKSPACE)`` -> the run or claim holding it
+        self._by_source: dict[tuple[str, str], _Active] = {}
         self._by_run: dict[str, _Active] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._seq = 0
 
+    def _pid(self, project: str | None) -> str:
+        return project or self.default_project
+
+    def _global_claim(self) -> _Active | None:
+        """An installation-wide :meth:`claim_idle` (caller holds the lock)."""
+        return next((a for (p, _), a in self._by_source.items() if p == ALL_PROJECTS), None)
+
+    def _holder(self, project: str, source: str) -> _Active | None:
+        """What blocks *source* of *project* (caller holds the lock): its own entry, the
+        project-wide one, or an installation-wide claim."""
+        return (
+            self._by_source.get((project, source))
+            or self._by_source.get((project, WORKSPACE))
+            or self._global_claim()
+        )
+
+    def _gate(self, project: str) -> _Active | None:
+        """A run behind the global build gate in another project (caller holds the lock)."""
+        return next(
+            (
+                a
+                for a in self._by_source.values()
+                if a.thread_name and a.kind in GATED_KINDS and a.project != project
+            ),
+            None,
+        )
+
     # --- queries ----------------------------------------------------------------
 
-    def active_source(self, source: str) -> _Active | None:
-        """The run holding *source*: its own, or a workspace-wide build/export."""
+    def active_source(self, source: str, *, project: str | None = None) -> _Active | None:
+        """The run holding *source* of *project* (None = the default project): its own,
+        or a project-wide build/export/apply, or an installation-wide claim."""
         with self._lock:
-            return self._by_source.get(source) or self._by_source.get(WORKSPACE)
+            return self._holder(self._pid(project), source)
 
-    def busy(self) -> _Active | None:
-        """Any run or claim this service holds (None when idle)."""
+    def busy(self, *, project: str | None = None) -> _Active | None:
+        """Any run or claim this service holds (None when idle); with *project*, only
+        that project's (and installation-wide claims)."""
         with self._lock:
-            return next(iter(self._by_source.values()), None)
+            if project is None:
+                return next(iter(self._by_source.values()), None)
+            return next(
+                (a for (p, _), a in self._by_source.items() if p in (project, ALL_PROJECTS)),
+                None,
+            )
 
     def is_managed(self, run_id: str) -> bool:
         with self._lock:
@@ -231,23 +284,40 @@ class RunManager:
         call: Callable[[JobFn, Store], Any],
         *,
         timeout: float = START_TIMEOUT_S,
+        project: str | None = None,
     ) -> str:
-        """Start *call(job_fn, store)* for *source* in a thread; return the run id."""
+        """Start *call(job_fn, store)* for *source* of *project* (None = the default
+        project) in a thread; return the run id. *store* is the whole (tracking) store:
+        the call picks the project (``store.project(id)``). A run of another project
+        behind the global build gate is a 409."""
         if kind not in RUN_KINDS:
             raise RunStartError(f"unknown run kind {kind!r}")
+        pid = self._pid(project)
+        key = (pid, source)
         with self._lock:
-            if source in self._by_source:
-                busy = self._by_source[source]
+            busy = self._by_source.get(key) or self._global_claim()
+            if busy is not None:
                 raise RunStartError(
                     f"source {source!r} already has an active {busy.kind} run"
                     + (f" {busy.run_id}" if busy.run_id else ""),
                     status=409,
                 )
+            gate = self._gate(pid) if kind in GATED_KINDS else None
+            if gate is not None:
+                raise RunStartError(
+                    f"the engine already has an active {gate.kind} run"
+                    + (f" {gate.run_id}" if gate.run_id else "")
+                    + " of another project; one build, export or apply runs at a time",
+                    status=409,
+                )
             self._seq += 1
             active = _Active(
-                source=source, kind=kind, thread_name=f"autoontology-run-{self._seq}-{kind}"
+                source=source,
+                kind=kind,
+                thread_name=f"autoontology-run-{self._seq}-{kind}",
+                project=pid,
             )
-            self._by_source[source] = active
+            self._by_source[key] = active
         handler = _RunLogHandler(active.thread_name)
         logging.getLogger().addHandler(handler)
 
@@ -314,7 +384,7 @@ class RunManager:
                 logging.getLogger().removeHandler(handler)
                 handler.close()
                 with self._lock:
-                    self._by_source.pop(source, None)
+                    self._by_source.pop(key, None)
                     if active.run_id:
                         self._by_run.pop(active.run_id, None)
 
@@ -331,29 +401,38 @@ class RunManager:
             )
         return active.run_id
 
-    def claim(self, source: str, kind: str) -> None:
-        """Hold *source* for a non-run operation (an upload): runs and other claims get 409
-        until :meth:`release`."""
+    def claim(self, source: str, kind: str, *, project: str | None = None) -> None:
+        """Hold *source* of *project* for a non-run operation (an upload): runs and other
+        claims get 409 until :meth:`release`."""
+        pid = self._pid(project)
         with self._lock:
-            busy = self._by_source.get(source) or self._by_source.get(WORKSPACE)
+            busy = self._holder(pid, source)
             if busy is not None:
                 raise RunStartError(f"source {source!r} is busy ({busy.kind})", status=409)
-            self._by_source[source] = _Active(source=source, kind=kind, thread_name="")
+            self._by_source[(pid, source)] = _Active(
+                source=source, kind=kind, thread_name="", project=pid
+            )
 
     def claim_idle(self, source: str, kind: str) -> None:
-        """Like :meth:`claim`, but only when nothing at all (no run, no other claim) is
-        active: the whole workspace is held until :meth:`release`."""
+        """Like :meth:`claim`, but only when nothing at all (no run, no other claim, in
+        any project) is active: the whole installation is held until :meth:`release`."""
         with self._lock:
             busy = next(iter(self._by_source.values()), None)
             if busy is not None:
                 raise RunStartError(f"the workspace is busy ({busy.kind})", status=409)
-            self._by_source[source] = _Active(source=source, kind=kind, thread_name="")
+            self._by_source[(ALL_PROJECTS, source)] = _Active(
+                source=source, kind=kind, thread_name="", project=ALL_PROJECTS
+            )
 
-    def release(self, source: str) -> None:
+    def release(self, source: str, *, project: str | None = None) -> None:
+        """Release a claim on *source* of *project*, or the installation-wide claim of
+        that name (:meth:`claim_idle`)."""
         with self._lock:
-            active = self._by_source.get(source)
-            if active is not None and active.run_id is None and not active.thread_name:
-                self._by_source.pop(source, None)
+            for key in ((self._pid(project), source), (ALL_PROJECTS, source)):
+                active = self._by_source.get(key)
+                if active is not None and active.run_id is None and not active.thread_name:
+                    self._by_source.pop(key, None)
+                    return
 
     def cancel(self, run_id: str) -> bool:
         """Flag a managed run for cancellation; False when it is not running here."""

@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from autoontology.config import SOURCE_NAME_MAX_LEN, Settings, validate_pg_database_name
-from autoontology.store.db import Source, Store
+from autoontology.config import Settings, source_database_name, source_name_max_len
+from autoontology.store.db import ProjectStore, Source, Store, root_store, scoped
 from autoontology.structured.loaders import discover_files
 
 SOURCE_NAME_RE = re.compile(r"^[a-z0-9_]+$")
@@ -34,22 +34,60 @@ class SourceError(ValueError):
     pass
 
 
-def pg_database_for(name: str) -> str:
-    return validate_pg_database_name(f"autoontology_src_{name}")
+def pg_database_for(name: str, slug: str | None = None) -> str:
+    """The local database of a new files source *name*: ``autoontology_src_<name>`` in the
+    default project (*slug* None), ``autoontology_src_<slug_>__<name>`` in another
+    (:func:`autoontology.config.source_database_name`). An existing source keeps the name
+    its row stores (``sources.pg_database``)."""
+    return source_database_name(name, slug)
 
 
-def validate_source_name(name: str) -> str:
+def database_slug(store: Store | ProjectStore) -> str | None:
+    """The slug that goes into a new source database name of *store*'s project: None for
+    the default project (its databases keep the historical ``autoontology_src_<name>``)."""
+    view = scoped(store)
+    return None if view.is_default else view.slug
+
+
+def validate_source_name(name: str, slug: str | None = None) -> str:
+    """*name* when it can name a structured source of the project with *slug* (None: the
+    default project): ``[a-z0-9_]+`` and short enough for its database name to fit
+    Postgres' 63-byte identifier limit (:func:`autoontology.config.source_name_max_len`)."""
     if not SOURCE_NAME_RE.fullmatch(name or ""):
         raise SourceError(
             f"invalid source name {name!r}: use lowercase letters, digits and _ only "
             "(the local database is named autoontology_src_<name>)"
         )
-    if len(name) > SOURCE_NAME_MAX_LEN:
+    limit = source_name_max_len(slug)
+    if len(name) > limit:
+        where = f" in project {slug!r}" if slug else ""
+        pattern = (
+            f"autoontology_src_{slug.replace('-', '_')}__<name>"
+            if slug
+            else ("autoontology_src_<name>")
+        )
         raise SourceError(
-            f"invalid source name {name!r}: at most {SOURCE_NAME_MAX_LEN} characters (the local "
-            "database autoontology_src_<name> must fit Postgres' 63-byte identifier limit)"
+            f"invalid source name {name!r}: at most {limit} characters{where} (the local "
+            f"database {pattern} must fit Postgres' 63-byte identifier limit)"
         )
     return name
+
+
+def source_for_database(store: Store | ProjectStore, database_name: str) -> Source | None:
+    """The structured source, in any project, the upstream catalog knows as
+    *database_name* (case-insensitive; a database belongs to one project only)."""
+    key = (database_name or "").casefold()
+    if not key:
+        return None
+    for s in root_store(store).list_all_sources():
+        if s.kind not in ("files", "database"):
+            continue
+        try:
+            if catalog_database_name(s).casefold() == key:
+                return s
+        except Exception:  # noqa: BLE001 - an unparsable locator names no database
+            continue
+    return None
 
 
 def looks_like_url(target: str) -> bool:
@@ -310,12 +348,22 @@ def display_locator(source: Source) -> str:
 
 
 def add_source(
-    store: Store, target: str, *, name: str, kind: str | None = None, recursive: bool = False
+    store: Store | ProjectStore,
+    target: str,
+    *,
+    name: str,
+    kind: str | None = None,
+    recursive: bool = False,
 ) -> Source:
-    """Validate and record a source. No data is moved until ``autoontology build``."""
-    validate_source_name(name)
+    """Validate and record a source in *store*'s project (a plain store: the default
+    project). No data is moved until ``autoontology build``. A database another source
+    already uses is refused -- in this project, and in any other (an upstream catalog
+    database, with its Terms, belongs to one project only)."""
+    view = scoped(store)
+    slug = database_slug(view)
+    validate_source_name(name, slug)
     kind = kind or ("database" if looks_like_url(target) else "files")
-    if store.get_source(name):
+    if view.get_source(name):
         raise SourceError(f"source {name!r} already exists (remove it with `source rm {name}`)")
     if kind == "files":
         path = Path(target).expanduser().resolve()
@@ -323,7 +371,7 @@ def add_source(
         if not files:
             raise SourceError(f"no supported files in {path}")
         locator = json.dumps({"path": str(path), "recursive": recursive}, ensure_ascii=False)
-        pg_database: str | None = pg_database_for(name)
+        pg_database: str | None = pg_database_for(name, slug)
         db_name = pg_database
     elif kind == "database":
         if not looks_like_url(target):
@@ -332,15 +380,19 @@ def add_source(
         locator, pg_database = target, None
     else:
         raise SourceError(f"unsupported kind {kind!r} (files | database)")
-    for other in store.list_sources():
-        if (
-            other.kind in ("files", "database")
-            and catalog_database_name(other).casefold() == db_name.casefold()
-        ):
+    other = source_for_database(view, db_name)
+    if other is not None:
+        if other.project_id == view.id:
             raise SourceError(f"source {other.name!r} already uses database {db_name!r}")
-    return store.add_source(
+        owner = view.root.get_project(other.project_id)
+        raise SourceError(
+            f"database {db_name!r} is already registered by source {other.name!r} of project "
+            f"{owner.slug if owner else other.project_id!r}: a database can belong to one "
+            "project only"
+        )
+    return view.add_source(
         name=name,
-        kind=kind,
-        locator=locator,  # type: ignore[arg-type]
+        kind=kind,  # type: ignore[arg-type]
+        locator=locator,
         pg_database=pg_database,
     )

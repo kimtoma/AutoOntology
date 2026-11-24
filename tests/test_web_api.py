@@ -778,7 +778,7 @@ def test_graph_alignment_subclass_relation_direction():
 
 def test_exports_list_and_path_safe_download(env):
     c, settings, _, _ = env
-    rev_dir = Path(settings.exports_dir) / "r0003"
+    rev_dir = Path(settings.exports_dir) / "default" / "r0003"  # exports/<project slug>/
     (rev_dir / "upstream").mkdir(parents=True)
     (rev_dir / "ontology.ttl").write_text("@prefix ao: <x#> .\n", encoding="utf-8")
     (rev_dir / "report.md").write_text("# 보고서\n", encoding="utf-8")
@@ -788,9 +788,9 @@ def test_exports_list_and_path_safe_download(env):
     (rev_dir / "okf" / "concepts").mkdir(parents=True)
     (rev_dir / "okf" / "index.md").write_text("---\nokf_version: '0.2'\n---\n", "utf-8")
     (rev_dir / "okf" / "concepts" / "계약.md").write_text("---\ntype: X\n---\n# 계약\n", "utf-8")
-    (Path(settings.exports_dir) / "r0001").mkdir()
-    (Path(settings.exports_dir) / "hanbit-docs").mkdir()  # not a revision folder
-    (Path(settings.exports_dir) / "secret.txt").write_text("top secret")
+    (Path(settings.exports_dir) / "default" / "r0001").mkdir()
+    (Path(settings.exports_dir) / "default" / "hanbit-docs").mkdir()  # not a revision folder
+    (Path(settings.exports_dir) / "default" / "secret.txt").write_text("top secret")
     listed = c.get(f"{API}/exports").json()["exports"]
     assert [e["revision"] for e in listed] == [3, 1] and listed[0]["dir"] == "r0003"
     assert [f["name"] for f in listed[0]["files"]] == [
@@ -841,7 +841,7 @@ def test_export_zip_holds_exactly_the_listed_files(env):
     import zipfile
 
     c, settings, _, _ = env
-    exports = Path(settings.exports_dir)
+    exports = Path(settings.exports_dir) / "default"  # exports/<project slug>/
     rev_dir = exports / "r0003"
     (rev_dir / "okf" / "concepts").mkdir(parents=True)
     (rev_dir / "ontology.ttl").write_text("@prefix ao: <x#> .\n", encoding="utf-8")
@@ -884,7 +884,7 @@ def test_export_zip_is_built_again_when_a_re_export_swaps_the_folder(env, monkey
     import zipfile
 
     c, settings, _, _ = env
-    exports = Path(settings.exports_dir)
+    exports = Path(settings.exports_dir) / "default"  # exports/<project slug>/
     rev_dir = exports / "r0003"
     rev_dir.mkdir(parents=True)
     (rev_dir / "export.json").write_text("old", encoding="utf-8")
@@ -926,7 +926,7 @@ def test_exports_list_skips_a_symlinked_revision_folder(env):
     import os
 
     c, settings, _, _ = env
-    exports = Path(settings.exports_dir)
+    exports = Path(settings.exports_dir) / "default"  # exports/<project slug>/
     (exports / "elsewhere").mkdir(parents=True)
     (exports / "elsewhere" / "ontology.ttl").write_text("x", encoding="utf-8")
     os.symlink(exports / "elsewhere", exports / "r0004")
@@ -1411,7 +1411,7 @@ def test_app_startup_restores_an_export_interrupted_between_the_renames(isolated
     only in the backup; the service start (lifespan) restores it and logs what it did,
     without waiting for the next export."""
     settings = Settings.from_env()
-    final = settings.exports_dir / "r0001"
+    final = settings.exports_dir / "default" / "r0001"  # exports/<project slug>/
     backup = final.with_name("r0001.prev-20260101T000000-crashed")
     backup.mkdir(parents=True)
     (backup / export_job.EXPORT_MARKER).write_text("{}", encoding="utf-8")
@@ -1428,7 +1428,10 @@ def test_startup_recovery_continues_after_one_folder_fails(isolated_env, monkeyp
     """Round 4 #2: an error restoring one revision folder is logged with its path and the
     next folder is still restored."""
     settings = Settings.from_env()
-    finals = [settings.exports_dir / "r0001", settings.exports_dir / "r0002"]
+    finals = [
+        settings.exports_dir / "default" / "r0001",
+        settings.exports_dir / "default" / "r0002",
+    ]
     for final in finals:
         backup = final.with_name(f"{final.name}.prev-20260101T000000-crashed")
         backup.mkdir(parents=True)

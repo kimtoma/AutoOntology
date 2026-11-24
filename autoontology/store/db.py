@@ -9,6 +9,8 @@ The schema is a list of numbered migrations applied in order and recorded in
 from __future__ import annotations
 
 import contextlib
+import functools
+import inspect
 import json
 import os
 import re
@@ -1776,22 +1778,82 @@ class Store:
             self.release_lease(token)
 
 
+@functools.cache
+def _project_scoped_methods(cls: type) -> frozenset[str]:
+    """The public methods of *cls* (a :class:`Store` class) that take ``project_id``."""
+    out = set()
+    for name, member in inspect.getmembers(cls, inspect.isfunction):
+        if name.startswith("_"):
+            continue
+        if "project_id" in inspect.signature(member).parameters:
+            out.add(name)
+    return frozenset(out)
+
+
 class ProjectStore:
     """A :class:`Store` seen through one project: every read and write is limited to it.
 
     Objects looked up by a store-wide id (a source, a run) come back only when they belong
     to the project; another project's id reads as missing. Calls go through the store's
     public methods with ``project_id``, so a subclass's hooks (``TrackingStore``) still
-    see them."""
+    see them.
+
+    It stands in for a :class:`Store` wherever the engine takes one (build, export, apply,
+    align, extract, the review/alignment/document stores): any other attribute is the
+    store's own, and a store method with a ``project_id`` keyword gets this project's id
+    (so a deprecated default-project call can never leak through). Store-wide id methods
+    (steps, manifests, ``update_run``) pass through unchanged; ``default_project_id`` is
+    this project's id, so the per-project tables (``DecisionStore(view)``,
+    ``AgentTokens(view)``, ``PlaygroundStore(view)``) are scoped to it too."""
 
     def __init__(self, store: Store, project: Project) -> None:
         self.store = store
         self.project = project
         self.id = project.id
 
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__") or name in ("store", "project", "id"):
+            raise AttributeError(name)
+        attr = getattr(self.store, name)
+        if name in _project_scoped_methods(type(self.store)) and callable(attr):
+            return functools.partial(attr, project_id=self.id)
+        return attr
+
+    def __repr__(self) -> str:
+        return f"ProjectStore({self.project.slug!r}, {self.store.path})"
+
     @property
     def slug(self) -> str:
         return self.project.slug
+
+    @property
+    def name(self) -> str:
+        """The project's display name (the ontology's name)."""
+        return self.project.name
+
+    @property
+    def default_project_id(self) -> str:
+        """This project's id (see the class docstring)."""
+        return self.id
+
+    @property
+    def root(self) -> Store:
+        """The whole store (administration and store-wide gates only)."""
+        return self.store
+
+    @property
+    def is_default(self) -> bool:
+        return self.id == self.store.default_project_id
+
+    def latest_workspace_run(self, kind: str) -> Run | None:
+        """Deprecated alias of :meth:`latest_project_run`."""
+        return self.latest_project_run(kind)
+
+    def delete_source(self, source_id: str) -> None:
+        """Delete one of this project's sources (another project's id raises)."""
+        if self.get_source_by_id(source_id) is None:
+            raise ValueError("the source does not belong to this project")
+        self.store.delete_source(source_id)
 
     def refresh(self) -> ProjectStore:
         """The same view with the project row read again (after a rename)."""
@@ -1901,3 +1963,19 @@ class ProjectStore:
         from autoontology.playground.store import PlaygroundStore
 
         return PlaygroundStore(self.store, project_id=self.id)
+
+
+def scoped(store: Store | ProjectStore, project: str | None = None) -> ProjectStore:
+    """*store* as a :class:`ProjectStore`: a view stays itself (a *project* naming another
+    project raises ValueError), a plain store gives the view of *project* (an id or a slug;
+    None = the default project)."""
+    if isinstance(store, ProjectStore):
+        if project is not None and project not in (store.id, store.slug):
+            raise ValueError(f"this view is of project {store.slug!r}, not {project!r}")
+        return store
+    return store.project(project)
+
+
+def root_store(store: Store | ProjectStore) -> Store:
+    """The whole :class:`Store` behind *store* (itself when it is one)."""
+    return store.store if isinstance(store, ProjectStore) else store

@@ -8,10 +8,11 @@ Steps ``collect -> serialize -> upstream -> ossie -> okf -> report``
 other formats need (``all``, the default, runs every step).
 ``collect`` loads the snapshot written by ``autoontology build`` -- the export never
 rebuilds the model -- and every format writer serialises that same object; ``serialize``
-re-parses the Turtle file and fails the run if the export invariants do not hold. The
-files go to ``exports/r<revision:04d>/`` (``--out DIR`` writes ``DIR/r<revision:04d>/``):
+re-parses the Turtle file and fails the run if the export invariants do not hold. An
+export covers one project's snapshot (a plain store: the default project). The files go to
+``exports/<project slug>/r<revision:04d>/`` (``--out DIR`` writes ``DIR/r<revision:04d>/``):
 ``ontology.ttl``, ``ontology.jsonld``, ``ontology.graphml``, ``report.md``, the
-``export.json`` marker (workspace, revision, snapshot run and time, upstream fetch time)
+``export.json`` marker (project, revision, snapshot run and time, upstream fetch time)
 and, per structured source, ``upstream/<source>.model.yaml`` and
 ``upstream/<source>.ossie.zip`` fetched from the backend, ``ossie/`` (semantic model,
 ontology, mapping, ``validation.json``: :mod:`autoontology.export.ossie`, built from those
@@ -25,6 +26,10 @@ it was; a failed Ossie/OKF validation
 copies its ``validation.json`` to ``logs/<run>.<format>-validation.json``. A ``--format``
 export keeps the other formats' files of the previous export of
 the same revision.
+
+Exports written before projects (``exports/r<rev>/`` and their ``.prev-*`` backups) are
+moved once into the default project's folder (:func:`migrate_legacy_exports`, at service
+start and before an export), recorded by :data:`LAYOUT_MARKER`.
 """
 
 from __future__ import annotations
@@ -54,7 +59,7 @@ from autoontology.export import graphml, okf, ossie, rdf
 from autoontology.export import report as export_report
 from autoontology.ontology import model as merged
 from autoontology.store.alignments import AlignmentStore
-from autoontology.store.db import Run, Snapshot, Source, Store, now_iso
+from autoontology.store.db import ProjectStore, Run, Snapshot, Source, Store, now_iso, scoped
 from autoontology.store.documents import DocumentStore
 from autoontology.structured.semantic import database_id_for
 from autoontology.unstructured.report import display_path
@@ -115,14 +120,36 @@ def revision_dir_name(revision: int) -> str:
     return f"r{int(revision):04d}"
 
 
-def export_target(settings: Settings, revision: int, out: Path | None) -> Path:
-    """The folder an export of *revision* goes to: ``exports/r<rev>/`` or ``<out>/r<rev>/``.
+def _slug_of(project: Any) -> str:
+    """The slug of *project* (a :class:`ProjectStore`, a ``Project`` row or a slug)."""
+    slug = project if isinstance(project, str) else getattr(project, "slug", None)
+    if not isinstance(slug, str) or not slug or "/" in slug or slug.startswith("."):
+        raise ValueError(f"not a project slug: {slug!r}")
+    return slug
+
+
+def project_exports_dir(settings: Settings, project: Any) -> Path:
+    """``exports/<slug>/``: the revision folders of *project* (a :class:`ProjectStore`, a
+    ``Project`` row or its slug)."""
+    return Path(settings.exports_dir) / _slug_of(project)
+
+
+def revision_dir(settings: Settings, project: Any, revision: int) -> Path:
+    """``exports/<slug>/r<rev>/``."""
+    return project_exports_dir(settings, project) / revision_dir_name(revision)
+
+
+def export_target(settings: Settings, revision: int, out: Path | None, project: Any = None) -> Path:
+    """The folder an export of *revision* of *project* goes to: ``exports/<slug>/r<rev>/``
+    or ``<out>/r<rev>/``.
 
     ``--out`` names a parent directory, never the folder that gets replaced, and may not
     be the filesystem root, the home directory or the repository itself.
     """
     if out is None:
-        return settings.exports_dir / revision_dir_name(revision)
+        if project is None:
+            raise ValueError("an export into the exports root needs its project")
+        return revision_dir(settings, project, revision)
     parent = Path(out).expanduser().resolve()
     if parent in {Path(parent.anchor), Path.home().resolve(), REPO_ROOT.resolve()}:
         raise JobError(f"refusing to export into {parent}: pick a dedicated directory")
@@ -256,30 +283,146 @@ def recover_interrupted_install(final: Path) -> Path | None:
     return backup
 
 
-def recover_interrupted_exports(settings: Settings, store: Store) -> list[Path]:
-    """Service start: :func:`recover_interrupted_install` for every revision folder of
-    the exports root that has a ``.prev-*`` backup beside it, under the workspace lease
-    (an export running in another process is left alone). Returns the restored folders;
-    each restore is logged. (``--out`` targets are recovered by their next export.)"""
-    from autoontology.engine.build import WORKSPACE_LEASE
+#: Written into the exports root once the legacy ``r<rev>`` folders were moved into the
+#: default project's folder (:func:`migrate_legacy_exports`); its presence skips the scan.
+LAYOUT_MARKER = ".layout-projects.json"
+#: What the migration moves out of the exports root: revision folders, their ``.prev-*``
+#: backups and the work folders of an interrupted export (``.r0003.<run>.tmp``).
+LEGACY_ENTRY = re.compile(r"r\d{4,}(\.prev-.+)?|\.r\d{4,}\..+\.tmp")
 
-    root = settings.exports_dir
+
+def _legacy_entries(root: Path) -> list[Path]:
+    return sorted(p for p in root.iterdir() if LEGACY_ENTRY.fullmatch(p.name))
+
+
+def _migrate_legacy_exports_held(settings: Settings, store: Store | ProjectStore) -> list[str]:
+    """:func:`migrate_legacy_exports` with the build gate already held."""
+    from autoontology.store.db import root_store
+
+    root = Path(settings.exports_dir)
     if not root.is_dir() or root.is_symlink():
         return []
-    finals = sorted({p.name.split(".prev-", 1)[0] for p in root.glob("*.prev-*")})
-    if not finals:
+    marker = root / LAYOUT_MARKER
+    if marker.is_file():
+        return []
+    default = root_store(store).default_project()
+    target = root / _slug_of(default)
+    moved: list[str] = []
+    conflicts: list[str] = []
+    for entry in _legacy_entries(root):
+        dest = target / entry.name
+        if dest.exists() or dest.is_symlink():
+            conflicts.append(entry.name)  # both exist: never overwrite either
+            continue
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            entry.rename(dest)  # one atomic rename per entry: a crash leaves each whole
+        except OSError as exc:  # this entry stays; the migration runs again next time
+            logger.warning("exports: could not move %s into %s: %s", entry, target, exc)
+            conflicts.append(entry.name)
+            continue
+        moved.append(entry.name)
+    if moved:
+        logger.info(
+            "exports: moved %d legacy folder(s) into %s: %s", len(moved), target, ", ".join(moved)
+        )
+    if conflicts:
+        logger.warning(
+            "exports: %s left in %s (already in %s, or not movable): move or delete one; "
+            "the migration runs again at the next start",
+            ", ".join(conflicts),
+            root,
+            target,
+        )
+        return moved
+    record = {
+        "layout": "projects-v1",
+        "default_project": default.id,
+        "slug": default.slug,
+        "moved": moved,
+        "migrated_at": now_iso(),
+    }
+    tmp = root / f".{LAYOUT_MARKER}.{os.getpid()}.tmp"
+    tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(marker)
+    return moved
+
+
+def migrate_legacy_exports(settings: Settings, store: Store | ProjectStore) -> list[str]:
+    """Move the exports written before projects (``exports/r<rev>``, their ``.prev-*``
+    backups and interrupted work folders) into the default project's folder
+    ``exports/<slug>/``, one atomic rename per entry, under the global build gate (an
+    export running in another process: skipped, retried at the next call). Idempotent:
+    an entry already moved is gone from the root; one present on both sides is left in
+    place (logged) and the migration is not recorded, so it runs again. Once nothing is
+    left, :data:`LAYOUT_MARKER` records it and later calls return at once. Returns the
+    names moved by this call."""
+    from autoontology.engine.jobs import hold_engine
+
+    root = Path(settings.exports_dir)
+    if not root.is_dir() or root.is_symlink() or (root / LAYOUT_MARKER).is_file():
+        return []
+    try:
+        with hold_engine(store, "export-migration"):
+            return _migrate_legacy_exports_held(settings, store)
+    except JobError as exc:
+        logger.warning("exports migration skipped: %s", exc)
+        return []
+
+
+def rename_project_exports(settings: Settings, old_slug: str, new_slug: str) -> bool:
+    """After a project's slug changed: rename ``exports/<old>/`` to ``exports/<new>/``
+    (False when there is nothing to move or ``<new>`` already exists; then the folder
+    stays where it is)."""
+    old = Path(settings.exports_dir) / _slug_of(old_slug)
+    new = Path(settings.exports_dir) / _slug_of(new_slug)
+    if old == new or not old.is_dir() or old.is_symlink() or new.exists() or new.is_symlink():
+        return False
+    old.rename(new)
+    return True
+
+
+def _recover_folders(root: Path) -> list[Path]:
+    """Restore every interrupted install under *root* (a project folder, or the exports
+    root for anything the migration left); returns the restored folders."""
+    finals = sorted(
+        {
+            p.name.split(".prev-", 1)[0]
+            for p in root.glob("*.prev-*")
+            if REVISION_DIR.fullmatch(p.name.split(".prev-", 1)[0])
+        }
+    )
+    restored: list[Path] = []
+    for name in finals:
+        try:
+            if recover_interrupted_install(root / name) is not None:
+                restored.append(root / name)
+        except Exception as exc:  # noqa: BLE001 - this folder only; the others go on
+            logger.warning("startup: could not restore the export %s: %s", root / name, exc)
+    return restored
+
+
+def recover_interrupted_exports(settings: Settings, store: Store | ProjectStore) -> list[Path]:
+    """Service start: move the legacy exports into the default project's folder
+    (:func:`migrate_legacy_exports`), then :func:`recover_interrupted_install` for every
+    revision folder of every project folder (and of the exports root) that has a
+    ``.prev-*`` backup beside it, under the global build gate (an export running in
+    another process is left alone). Returns the restored folders; each restore is logged.
+    (``--out`` targets are recovered by their next export.)"""
+    from autoontology.engine.jobs import hold_engine
+
+    root = Path(settings.exports_dir)
+    if not root.is_dir() or root.is_symlink():
         return []
     restored: list[Path] = []
     try:
-        with hold_sources(store, [WORKSPACE_LEASE], EXPORT_KIND):
-            for name in finals:
-                if not name:
-                    continue
-                try:
-                    if recover_interrupted_install(root / name) is not None:
-                        restored.append(root / name)
-                except Exception as exc:  # noqa: BLE001 - this folder only; the others go on
-                    logger.warning("startup: could not restore the export %s: %s", root / name, exc)
+        with hold_engine(store, "export-recovery"):
+            _migrate_legacy_exports_held(settings, store)
+            parents = [root] + sorted(
+                p for p in root.iterdir() if p.is_dir() and not p.is_symlink()
+            )
+            for parent in parents:
+                restored += _recover_folders(parent)
     except JobError as exc:
         logger.warning("startup export recovery skipped: %s", exc)
     if restored:
@@ -314,7 +457,7 @@ def _remove_listed(folder: Path, listed: set[str]) -> bool:
 @dataclass
 class _ExportCtx:
     settings: Settings
-    store: Store
+    store: ProjectStore
     run: Run
     snapshot: Snapshot
     structured: list[Source]
@@ -517,12 +660,15 @@ def _short(value: Any) -> str:
 
 
 def export_metadata(ctx: _ExportCtx) -> dict[str, Any]:
-    """What :data:`EXPORT_MARKER` records: which snapshot of which workspace this is, and
-    per concrete format (``rdf``, ``ossie``, ``okf``) which export run wrote it and when."""
+    """What :data:`EXPORT_MARKER` records: which snapshot of which project this is, and
+    per concrete format (``rdf``, ``ossie``, ``okf``) which export run wrote it and when.
+    ``workspace`` (the project's name) is kept for readers of older markers."""
     written = {"export_run": ctx.run.id, "exported_at": ctx.run.started_at}
     formats = {**ctx.kept_formats, **dict.fromkeys(CONCRETE_FORMATS[ctx.format], written)}
     return {
-        "workspace": ctx.settings.workspace,
+        "project": ctx.store.id,
+        "project_slug": ctx.store.slug,
+        "workspace": ctx.store.name,
         "revision": ctx.snapshot.revision,
         "snapshot_run": ctx.snapshot.run_id,
         "snapshot_created_at": ctx.snapshot.created_at,
@@ -541,6 +687,14 @@ def _previous_formats(marker: dict[str, Any]) -> dict[str, Any]:
         return {k: v for k, v in formats.items() if k in FORMAT_ENTRIES}
     previous = {"export_run": marker.get("export_run"), "exported_at": None}
     return dict.fromkeys(CONCRETE_FORMATS.get(str(marker.get("format", "all")), ()), previous)
+
+
+def marker_matches_project(marker: dict[str, Any], project: ProjectStore) -> bool:
+    """Whether an :data:`EXPORT_MARKER` was written for *project*: its ``project`` id, or
+    -- a marker written before projects, which has none -- *project* is the default one."""
+    if "project" in marker:
+        return marker.get("project") == project.id
+    return project.is_default
 
 
 def _upstream_source(name: str) -> str:
@@ -562,7 +716,7 @@ def _carry_over(ctx: _ExportCtx, final: Path) -> None:
     marker = read_export_metadata(final)
     if (
         marker is None
-        or marker.get("workspace") != ctx.settings.workspace
+        or not marker_matches_project(marker, ctx.store)
         or marker.get("revision") != ctx.snapshot.revision
     ):
         return
@@ -663,15 +817,20 @@ def run_export(
     out: Path | None = None,
     client: BackendClient | None = None,
     format: str = "all",
+    project: str | None = None,
 ) -> RunResult:
-    """Export snapshot *revision* (default: the latest) to ``exports/r<rev>/`` or *out*;
-    *format* (``all`` | ``rdf`` | ``ossie`` | ``okf``) picks the formats written. The
-    revision folder is replaced, but the files of the formats not chosen are carried over
-    from its previous export of the same revision (``export.json`` ``formats`` says which
-    run wrote each format)."""
+    """Export the project's snapshot *revision* (default: its latest) to
+    ``exports/<slug>/r<rev>/`` or *out*; *store* is the project's view, or a plain store
+    with *project* (an id or slug; None = the default project). *format* (``all`` |
+    ``rdf`` | ``ossie`` | ``okf``) picks the formats written. The revision folder is
+    replaced, but the files of the formats not chosen are carried over from its previous
+    export of the same revision (``export.json`` ``formats`` says which run wrote each
+    format)."""
     from autoontology.engine.build import WORKSPACE_LEASE, refuse_if_active
+    from autoontology.engine.jobs import hold_engine
 
     log_path = setup_job_logging(settings)
+    store = scoped(store, project)
     if format not in EXPORT_FORMATS:
         raise JobError(
             f"unknown export format {format!r} (choose {'|'.join(EXPORT_FORMATS)})",
@@ -692,10 +851,15 @@ def run_export(
     names = [s["name"] for s in head.sources if s.get("kind") == "structured" and s.get("included")]
     structured = [s for s in (store.get_source(n) for n in names) if s is not None]
     gone = sorted(set(names) - {s.name for s in structured})
-    with hold_sources(
-        store, [WORKSPACE_LEASE, *(s.name for s in structured)], EXPORT_KIND, log_path=log_path
+    with (
+        hold_engine(store, EXPORT_KIND, log_path=log_path),
+        hold_sources(
+            store, [WORKSPACE_LEASE, *(s.name for s in structured)], EXPORT_KIND, log_path=log_path
+        ),
     ):
         refuse_if_active(store, log_path=log_path)
+        if out is None:
+            _migrate_legacy_exports_held(settings, store)
         snapshot = store.get_snapshot(head.revision)
         assert snapshot is not None
         return _run_export_held(
@@ -713,7 +877,7 @@ def run_export(
 def _run_export_held(
     *,
     settings: Settings,
-    store: Store,
+    store: ProjectStore,
     snapshot: Snapshot,
     structured: list[Source],
     gone: list[str],
@@ -721,7 +885,7 @@ def _run_export_held(
     client: BackendClient | None,
     format: str = "all",
 ) -> RunResult:
-    final = export_target(settings, snapshot.revision, out)
+    final = export_target(settings, snapshot.revision, out, store)
     recover_interrupted_install(final)
     check_replaceable(settings, final)
     wanted = EXPORT_FORMATS[format]

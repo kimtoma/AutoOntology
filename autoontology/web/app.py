@@ -110,6 +110,26 @@ def enqueue_delete(database: str, settings: Settings | None = None) -> threading
     return thread
 
 
+def delete_refusal(store: Any, database: str, project: str | None) -> tuple[int, str] | None:
+    """Why ``/ingest/delete`` of *database* must be refused for a caller naming *project*
+    (an id or slug), or None. The database's source -- in any project, a database belongs
+    to one -- must be of that project; upstream itself names no project (then nothing is
+    refused)."""
+    if project is None:
+        return None
+    from autoontology.store.db import ProjectNotFound
+    from autoontology.structured import pipeline
+
+    try:
+        view = store.project(project)
+    except ProjectNotFound:
+        return 404, f"unknown project {project[:80]!r}"
+    source = pipeline.source_for_database(store, database)
+    if source is not None and source.project_id != view.id:
+        return 409, f"database {database!r} belongs to another project"
+    return None
+
+
 def _sweep_stale_runs(store: Any) -> None:
     """Fail the runs a killed process left 'running' (also sourceless ``/ingest`` runs,
     which no job's own pre-check ever looks at), so the UI and their SSE streams end."""
@@ -214,12 +234,15 @@ def create_app(
         return {"status": "accepted"}
 
     @app.post("/ingest/delete", status_code=202)
-    def ingest_delete(database_name: str) -> dict[str, str]:
+    def ingest_delete(database_name: str, project: str | None = None) -> dict[str, str]:
         # upstream server/ingestion/proxy.py:trigger_reset (called on connection delete)
         logger.info("POST /ingest/delete database=%r", database_name)
         if not database_name.strip():
             # delete_all_data(None) would wipe every database: never forward a blank name.
             raise HTTPException(status_code=422, detail="database_name is required")
+        refusal = delete_refusal(state.store, database_name, project)
+        if refusal is not None:
+            raise HTTPException(status_code=refusal[0], detail=refusal[1])
         enqueue_delete(database_name, settings)
         return {"status": "accepted"}
 

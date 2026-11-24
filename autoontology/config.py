@@ -135,14 +135,46 @@ PLACEHOLDER_KEY_MARKERS: tuple[str, ...] = ("your-api-key-here",)
 # The Postgres server is shared with other apps: AutoOntology only ever touches its catalog
 # DB and its per-source DBs. engine/pg.py creates only names that pass this regex; the
 # catalog name itself must not use the per-source prefix (validate_catalog_database_name).
+# A source of a non-default project is ``autoontology_src_<slug>__<name>`` (the slug's
+# dashes as underscores, :func:`source_database_name`): the same character set, so the
+# regex is unchanged.
 PG_DATABASE_RE = re.compile(r"^autoontology(_src_[a-z0-9_]+)?$")
 #: Maintenance DB used only for server/existence checks (never migrated or written).
 PG_MAINTENANCE_DB = "postgres"
 #: Postgres truncates identifiers to NAMEDATALEN-1 = 63 bytes, so two longer names could
 #: address the same database (a DROP of one would drop the other): refuse them.
 PG_IDENTIFIER_MAX_BYTES = 63
-#: Longest structured source name: ``autoontology_src_`` (17 bytes) + name <= 63 bytes.
-SOURCE_NAME_MAX_LEN = PG_IDENTIFIER_MAX_BYTES - len("autoontology_src_")
+#: Prefix of every per-source database; the catalog database may never carry it.
+SOURCE_DB_PREFIX = "autoontology_src_"
+#: Between a non-default project's slug and the source name in a database name.
+PROJECT_DB_SEPARATOR = "__"
+#: Longest project slug (``autoontology.store.db.SLUG_MAX``, pinned by a test).
+PROJECT_SLUG_MAX_LEN = 24
+#: Longest structured source name of the default project: ``autoontology_src_`` (17
+#: bytes) + name <= 63 bytes.
+SOURCE_NAME_MAX_LEN = PG_IDENTIFIER_MAX_BYTES - len(SOURCE_DB_PREFIX)
+#: Longest structured source name every project allows (its slug at the 24-character
+#: maximum): 63 - 17 - 24 - 2 = 20. A shorter slug leaves more (:func:`source_name_max_len`).
+PROJECT_SOURCE_NAME_MAX_LEN = SOURCE_NAME_MAX_LEN - PROJECT_SLUG_MAX_LEN - len(PROJECT_DB_SEPARATOR)
+
+
+def source_name_max_len(slug: str | None = None) -> int:
+    """Longest structured source name in the project with *slug* (None: the default
+    project, whose databases carry no slug)."""
+    if not slug:
+        return SOURCE_NAME_MAX_LEN
+    return SOURCE_NAME_MAX_LEN - len(slug) - len(PROJECT_DB_SEPARATOR)
+
+
+def source_database_name(name: str, slug: str | None = None) -> str:
+    """The local database of structured source *name*: ``autoontology_src_<name>`` in the
+    default project (*slug* None), ``autoontology_src_<slug_>__<name>`` in another (the
+    slug's dashes become underscores). Validated (:func:`validate_pg_database_name`)."""
+    if slug:
+        return validate_pg_database_name(
+            f"{SOURCE_DB_PREFIX}{slug.replace('-', '_')}{PROJECT_DB_SEPARATOR}{name}"
+        )
+    return validate_pg_database_name(f"{SOURCE_DB_PREFIX}{name}")
 
 
 def validate_pg_database_name(name: str) -> str:
@@ -157,13 +189,11 @@ def validate_pg_database_name(name: str) -> str:
         raise ValueError(
             f"database name {name!r} is {len(name.encode('utf-8'))} bytes; Postgres truncates "
             f"identifiers to {PG_IDENTIFIER_MAX_BYTES} bytes, so it could address another "
-            f"database (source names are limited to {SOURCE_NAME_MAX_LEN} characters)."
+            f"database (source names are limited to {SOURCE_NAME_MAX_LEN} characters in the "
+            f"default project, {PROJECT_SOURCE_NAME_MAX_LEN} or more in another, depending on "
+            "its slug)."
         )
     return name
-
-
-#: Prefix of every per-source database; the catalog database may never carry it.
-SOURCE_DB_PREFIX = "autoontology_src_"
 
 
 def validate_catalog_database_name(name: str) -> str:

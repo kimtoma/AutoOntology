@@ -850,7 +850,7 @@ def test_chat_streams_cites_and_persists(client):
 def test_one_llm_call_per_workspace(client):
     c, settings, app, llm, _ = client
     pg = app.state.playground
-    with pg.slot(settings.workspace):
+    with pg.slot((pg.store.default_project_id, settings.workspace)):  # (project, scope)
         resp = c.post(f"{API}/chat", json={"question": "x"})
         assert resp.status_code == 409 and resp.json()["error"] == "playground_busy"
         old = c.post(f"{API}/chat", json={"source": "hanbit-docs", "question": "x"})
@@ -878,14 +878,17 @@ def test_sparql_endpoint(client, model):
     c, settings, _, _, _ = client
     # no export of the latest snapshot yet: its Turtle is written to the cache on demand
     first = c.post(f"{API}/sparql", json={"query": "ASK { ?s a owl:Class }"}).json()
-    head = Store.for_home(settings.home).latest_snapshot(with_model=False)
-    key = playground_api.snapshot_key(settings, head)
+    view = Store.for_home(settings.home).project()
+    head = view.latest_snapshot(with_model=False)
+    key = playground_api.snapshot_key(view, head)
     assert first["revision"] == 1 and first["ttl"] == f"ontology-{key}.ttl"
-    assert key.startswith("r1-") and (settings.home / "cache" / first["ttl"]).is_file()
+    assert key.startswith(f"{view.id}-r1-") and (settings.home / "cache" / first["ttl"]).is_file()
     # a recreated store restarts at revision 1: another snapshot, another key
     other = type(head)(**{**head.__dict__, "run_id": "fresh-db"})
-    assert playground_api.snapshot_key(settings, other) != key
-    out = settings.exports_dir / "r0001"
+    assert playground_api.snapshot_key(view, other) != key
+    # ... and so does another project's r1 (the key carries the project id)
+    assert playground_api.snapshot_key("prj_other", head) != key
+    out = settings.exports_dir / view.slug / "r0001"  # exports/<project slug>/r0001
     out.mkdir(parents=True)
     rdf.write(model, out)
     # an r0001 export without a marker (or another snapshot's) is not this snapshot

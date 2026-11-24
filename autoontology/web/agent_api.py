@@ -42,6 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from autoontology import __version__
 from autoontology.playground.sparql import DEFAULT_LIMIT, MAX_LIMIT, MAX_QUERY_CHARS, SparqlError
 from autoontology.store.agent_tokens import AgentToken, AgentTokens, TokenError
+from autoontology.store.db import ProjectNotFound, ProjectStore
 from autoontology.web.api import (
     CONCEPT_ID_RE,
     Api,
@@ -271,8 +272,18 @@ class AgentService:
 
     # --- tools ------------------------------------------------------------------------
 
-    def latest_revision(self) -> int | None:
-        return self.api.store.latest_revision()
+    def project(self, token: AgentToken) -> ProjectStore:
+        """The project *token* belongs to: every tool reads only its snapshots and
+        exports, and its ``revision_pin`` is a revision of that project. (A token whose
+        project is gone reads as unknown.)"""
+        try:
+            return self.api.store.project(token.project_id or None)
+        except ProjectNotFound as exc:
+            raise ToolError(404, "unknown_project", "this token's project is gone") from exc
+
+    def latest_revision(self, token: AgentToken | None = None) -> int | None:
+        view = self.project(token) if token is not None else self.api.store.project()
+        return view.latest_revision()
 
     def run_tool(self, token: AgentToken, name: str, arguments: Any) -> dict[str, Any]:
         """*name*'s result (always with ``revision``); :class:`ToolError` for a domain
@@ -304,20 +315,23 @@ class AgentService:
         return asked if asked is not None else pin
 
     def _served(self, token: AgentToken) -> int | None:
-        return token.revision_pin if token.revision_pin is not None else self.latest_revision()
+        return token.revision_pin if token.revision_pin is not None else self.latest_revision(token)
 
     def _tool_list_revisions(self, token: AgentToken, args: ListRevisionsArgs) -> dict[str, Any]:
         from autoontology.web.revisions import revision_list, revision_row
 
+        view = self.project(token)
         if token.revision_pin is not None:
-            snap = self.api.store.get_snapshot(token.revision_pin, with_model=False)
-            rows = [revision_row(self.api.store, snap)] if snap is not None else []
+            snap = view.get_snapshot(token.revision_pin, with_model=False)
+            rows = [revision_row(view, snap)] if snap is not None else []
         else:
-            rows = revision_list(self.api.store, args.limit)
+            rows = revision_list(view, args.limit)
         return {"revision": self._served(token), "revisions": rows}
 
     def _tool_get_ontology_summary(self, token: AgentToken, args: SummaryArgs) -> dict[str, Any]:
-        return ontology_summary(self.api, self._revision(token, args.revision))
+        return ontology_summary(
+            self.api, self._revision(token, args.revision), project=self.project(token)
+        )
 
     def _tool_search_concepts(self, token: AgentToken, args: SearchArgs) -> dict[str, Any]:
         found = concept_listing(
@@ -327,6 +341,7 @@ class AgentService:
             page=1,
             size=args.limit,
             revision=self._revision(token, args.revision),
+            project=self.project(token),
         )
         return {k: found[k] for k in ("revision", "items", "total")}
 
@@ -335,10 +350,10 @@ class AgentService:
         if args.id:
             if not CONCEPT_ID_RE.fullmatch(args.id):
                 raise ToolError(400, "invalid_concept_id", f"invalid concept id {args.id!r}")
-            return concept_body(self.api, args.id, revision)
+            return concept_body(self.api, args.id, revision, project=self.project(token))
         if not args.name:
             raise ToolError(400, "invalid_arguments", "give the concept's id or name")
-        _, _, index = self.api.concepts(revision)
+        _, _, index = self.api.concepts(revision, project=self.project(token))
         needle = args.name.strip().casefold()
         match = next((i for i in index.items if i["name"].casefold() == needle), None) or next(
             (
@@ -350,7 +365,7 @@ class AgentService:
         )
         if match is None:
             raise ToolError(404, "unknown_concept", f"no concept named {args.name[:80]!r}")
-        return concept_body(self.api, match["id"], revision)
+        return concept_body(self.api, match["id"], revision, project=self.project(token))
 
     def _tool_sparql_query(self, token: AgentToken, args: SparqlArgs) -> dict[str, Any]:
         from autoontology.web.playground_api import sparql_answer
@@ -364,18 +379,19 @@ class AgentService:
             args.query,
             limit=args.limit,
             revision=self._revision(token, args.revision),
+            project=self.project(token),
         )
 
     def _tool_list_exports(self, token: AgentToken, args: ExportsArgs) -> dict[str, Any]:
-        exports = export_listing(self.api.settings)
+        exports = export_listing(self.api.settings, self.project(token))
         if token.revision_pin is not None:
             exports = [e for e in exports if e["revision"] == token.revision_pin]
         return {"revision": self._served(token), "exports": exports}
 
     def instructions(self, token: AgentToken) -> str:
-        ws = self.api.settings.workspace
-        latest = self.latest_revision()
-        text = f"AutoOntology: the versioned ontology of workspace '{ws}'. "
+        ws = self.project(token).name
+        latest = self.latest_revision(token)
+        text = f"AutoOntology: the versioned ontology of project '{ws}'. "
         if token.revision_pin is not None:
             text += (
                 f"This token is pinned to r{token.revision_pin}: every tool answers from that "
@@ -650,10 +666,12 @@ def build_router(service: AgentService) -> APIRouter:
                     )
             try:
                 resp = await anyio.to_thread.run_sync(
-                    export_zip_response, service.api.settings, rev
+                    export_zip_response, service.api.settings, rev, service.project(token)
                 )
             except ApiError as exc:
                 return _error(exc.status, exc.error, exc.detail)
+            except ToolError as exc:
+                return _error(exc.status, exc.code, exc.message)
             ok = True
             return resp
         finally:

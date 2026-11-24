@@ -16,8 +16,10 @@ With nothing pending (no unapplied decision, no removed one) merge and snapshot 
 recorded ``skipped`` ("no pending decisions") and no revision is written -- so a scheduled
 ``build --resume && apply`` adds no empty revisions -- unless ``force``.
 
-It needs the upstream backend (the structured Terms) but never the LLM proxy, and holds
-the workspace lease like build and export: it refuses to start while one of them runs.
+It covers one project (a plain store: the default project). It needs the upstream backend
+(the structured Terms) but never the LLM proxy, and holds the global build gate and the
+project's lease like build and export: it refuses to start while one of them runs (a
+build, export or apply of any project).
 """
 
 from __future__ import annotations
@@ -46,7 +48,7 @@ from autoontology.engine.build import (
 from autoontology.engine.client import BackendClient
 from autoontology.engine.jobs import JobError, hold_sources
 from autoontology.store.alignments import AlignmentStore
-from autoontology.store.db import Source, Store
+from autoontology.store.db import Source, Store, scoped
 from autoontology.store.decisions import DecisionStore
 from autoontology.store.documents import DocumentStore
 from autoontology.structured.semantic import combine, fetch_snapshot
@@ -67,18 +69,24 @@ def pending_work(store: Store, model: Any | None = None) -> dict[str, Any]:
     (an undone alias or acknowledgement). *model*: the latest snapshot's, when loaded."""
     from autoontology.ontology.model import MergedOntology
 
+    store = scoped(store)
     current = DecisionStore(store).list()
     keys = {(d.kind, d.subject_key) for d in current}
     pending = {(d.kind, d.subject_key) for d in current if d.applied_revision is None}
+    # alignment rows are store-wide: only those of this project's documents sources
+    own = {s.id for s in store.list_sources()}
     reverted = {
         ("alignment", row.concept_id)
         for row in AlignmentStore(store).review_rows()
-        if (
-            row.judged
-            and ("alignment", row.concept_id) not in keys
-            and ("concept", row.concept_id) not in keys  # an acknowledgement: a rejection
+        if row.source_id in own
+        and (
+            (
+                row.judged
+                and ("alignment", row.concept_id) not in keys
+                and ("concept", row.concept_id) not in keys  # an acknowledgement: a rejection
+            )
+            or overlay.unfold_pending(row)
         )
-        or overlay.unfold_pending(row)
     }
     if model is None:
         snap = store.latest_snapshot()
@@ -104,11 +112,14 @@ def run_apply(
     client: BackendClient | None = None,
     writer: Any = None,
     force: bool = False,
+    project: str | None = None,
 ) -> BuildResult:
-    """Apply the review decisions and save a new snapshot (module docstring). With nothing
-    pending (:func:`pending_work`) merge and snapshot are skipped and no revision is written,
-    unless *force*."""
+    """Apply the review decisions of the project (*store* a project view, or a plain store
+    with *project*; None = the default project) and save its next snapshot (module
+    docstring). With nothing pending (:func:`pending_work`) merge and snapshot are skipped
+    and no revision is written, unless *force*."""
     log_path = jobs.setup_job_logging(settings)
+    store = scoped(store, project)
     registered = registration_order(store)
     if not registered:
         raise JobError("no sources: nothing to apply", log_path=log_path)
@@ -117,7 +128,10 @@ def run_apply(
             "no ontology snapshot yet: run `uv run autoontology build` first", log_path=log_path
         )
     names = [WORKSPACE_LEASE, *(s.name for s in registered)]
-    with hold_sources(store, names, APPLY_KIND, log_path=log_path):
+    with (
+        jobs.hold_engine(store, APPLY_KIND, log_path=log_path),
+        hold_sources(store, names, APPLY_KIND, log_path=log_path),
+    ):
         registered = jobs.verify_sources(store, registered, log_path=log_path)
         refuse_if_active(store, log_path=log_path)
         client = client or BackendClient(settings.backend_url)
@@ -151,7 +165,8 @@ def run_apply(
             resume=False,
             extract_backends=None,
             align_backends=None,
-            writer=writer or align_job.UpstreamTermWriter(settings, client),
+            writer=writer
+            or align_job.UpstreamTermWriter(settings, client, databases=_databases(registered)),
         )
         plan = [
             _Step("decisions", GLOBAL, lambda: _step_decisions(build)),
@@ -185,8 +200,16 @@ def run_apply(
         return result
 
 
+def _databases(sources: list[Source]) -> list[str]:
+    """The upstream catalog databases of the structured *sources* (the Terms a project may
+    write to: :class:`~autoontology.engine.align.UpstreamTermWriter`)."""
+    from autoontology.structured import pipeline
+
+    return [pipeline.catalog_database_name(s) for s in sources if s.kind in STRUCTURED_KINDS]
+
+
 def _min_conf(store: Store) -> float:
-    previous = store.latest_workspace_run(BUILD_KIND)
+    previous = scoped(store).latest_project_run(BUILD_KIND)
     value = previous.params.get("min_conf") if previous is not None else None
     return float(value) if value is not None else align_job.al.min_conf_from_env()
 

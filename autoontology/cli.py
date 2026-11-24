@@ -789,7 +789,7 @@ def ontology_summary(revision: int | None = None) -> None:
         _fail("no ontology snapshot yet: run `uv run autoontology build`")
     c = snap.counts
     typer.echo(f"revision {snap.revision}  ({snap.created_at}, run {snap.run_id})")
-    typer.echo(f"workspace {settings.workspace}  base IRI {settings.base_iri}")
+    typer.echo(f"project {store.project().name}  base IRI {settings.base_iri}")
     typer.echo(
         _table(
             ("SOURCE", "KIND", "INCLUDED", "COUNTS"),
@@ -1375,7 +1375,7 @@ def _print_step_times(store, since: str) -> None:
     """Elapsed time per top-level step of the build run started at/after *since*."""
     from autoontology.engine.build import is_top_step
 
-    run = store.latest_workspace_run("build")
+    run = store.latest_project_run("build")
     if run is None or (run.started_at or "") < since:
         return
     rows = [

@@ -981,7 +981,7 @@ def test_export_reads_the_snapshot_and_overwrites_its_folder(env):
     env["client"].terms.clear()  # an export never reads the Terms again
     result = export_job.run_export(store, settings, client=env["client"])
     assert result.status == "succeeded"
-    folder = settings.exports_dir / "r0001"
+    folder = settings.exports_dir / "default" / "r0001"  # exports/<project slug>/
     assert result.export_dir == folder
     names = sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
     assert [n for n in names if not n.startswith("okf/")] == [
@@ -1129,7 +1129,7 @@ def test_export_refuses_a_pre_manifest_folder_in_the_exports_root(env):
     store, settings = env["store"], env["settings"]
     run(env)
     folder = export_job.run_export(store, settings, client=env["client"]).export_dir
-    assert folder.parent == settings.exports_dir
+    assert folder.parent == settings.exports_dir / "default"
     marker = export_job.read_export_metadata(folder)
     old = {k: v for k, v in marker.items() if k != "files"}  # what an older exporter wrote
     (folder / "export.json").write_text(json.dumps(old), encoding="utf-8")

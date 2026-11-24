@@ -38,7 +38,7 @@ from autoontology.engine.jobs import (
     verify_sources,
 )
 from autoontology.store.alignments import AlignmentRecord, AlignmentStore
-from autoontology.store.db import Run, Source, Store, now_iso
+from autoontology.store.db import Run, Source, Store, now_iso, scoped
 from autoontology.store.documents import DocumentStore
 from autoontology.structured.semantic import StructuredSnapshot, combine, fetch_snapshot
 from autoontology.unstructured import align as al
@@ -107,18 +107,30 @@ class AlignBackends:
 
 
 class UpstreamTermWriter:
-    """Synonyms in-process (no API field for them), descriptions through the PATCH."""
+    """Synonyms in-process (no API field for them), descriptions through the PATCH.
 
-    def __init__(self, settings: Settings, client: BackendClient) -> None:
+    *databases*: the upstream catalog databases of the project's structured sources. When
+    given, a write to a Term no table of those databases represents is refused
+    (:class:`~autoontology.engine.upstream_terms.TermNotInProject`): a project never edits
+    another project's Terms."""
+
+    def __init__(
+        self, settings: Settings, client: BackendClient, databases: list[str] | None = None
+    ) -> None:
         self.settings = settings
         self.client = client
+        self.databases = list(databases) if databases is not None else None
 
     def add_synonyms(self, term_id: str, additions: list[str]) -> dict[str, Any]:
         from autoontology.engine.upstream_terms import add_term_synonyms
 
-        return add_term_synonyms(self.settings, term_id, additions)
+        return add_term_synonyms(self.settings, term_id, additions, databases=self.databases)
 
     def patch_description(self, term_id: str, description: str) -> dict[str, Any]:
+        if self.databases is not None:
+            from autoontology.engine.upstream_terms import check_term_in_databases
+
+            check_term_in_databases(self.settings, term_id, self.databases)
         return self.client.patch_term(term_id, {"description": description})
 
     def refresh_embeddings(self, term_id: str) -> bool:
@@ -129,7 +141,7 @@ class UpstreamTermWriter:
     def remove_synonyms(self, term_id: str, removals: list[str]) -> dict[str, Any]:
         from autoontology.engine.upstream_terms import remove_term_synonyms
 
-        return remove_term_synonyms(self.settings, term_id, removals)
+        return remove_term_synonyms(self.settings, term_id, removals, databases=self.databases)
 
 
 @dataclass
@@ -960,6 +972,13 @@ ALIGN_STEP_FUNCS: dict[str, Callable[[Any], dict[str, Any]]] = {
 }
 
 
+def _databases(structured: list[Source]) -> list[str]:
+    """The upstream catalog databases of *structured* (what the Term writer may touch)."""
+    from autoontology.structured.pipeline import catalog_database_name
+
+    return [catalog_database_name(s) for s in structured]
+
+
 def _structured_source(store: Store, name: str | None) -> Source:
     if name:
         source = store.get_source(name)
@@ -997,6 +1016,7 @@ def run_align(
     check_service: bool = True,
 ) -> RunResult:
     log_path = setup_job_logging(settings)
+    store = scoped(store)  # a plain store: the default project
     source = store.get_source(source_name)
     if source is None:
         raise JobError(f"unknown source {source_name!r} (see `autoontology source list`)")
@@ -1141,7 +1161,7 @@ def _run_align_held(
         run=run,
         client=client,
         backends=backends or AlignBackends(settings),
-        writer=writer or UpstreamTermWriter(settings, client),
+        writer=writer or UpstreamTermWriter(settings, client, _databases([structured])),
         dry_run=dry_run,
         min_sim=min_sim,
         min_conf=min_conf,
@@ -1171,6 +1191,7 @@ def summary(
 ) -> dict[str, Any]:
     """Counts for the CLI table: relation counts (of the verdicts against
     *structured_source*, default: the run's) and patches applied/planned."""
+    store = scoped(store)
     source = store.get_source(source_name)
     run = store.get_run(result.run_id)
     structured_source = structured_source or (run.params.get("structured_source") if run else None)
@@ -1272,7 +1293,7 @@ def align_pass(
         run=run,
         client=client,
         backends=backends or AlignBackends(settings),
-        writer=writer or UpstreamTermWriter(settings, client),
+        writer=writer or UpstreamTermWriter(settings, client, _databases(structured)),
         dry_run=False,
         min_sim=min_sim,
         min_conf=min_conf,

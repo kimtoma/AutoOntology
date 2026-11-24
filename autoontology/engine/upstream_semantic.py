@@ -41,6 +41,23 @@ def database_table_ids(s: Any, database_name: str) -> Any:
     )
 
 
+def term_databases_statement(s: Any, term_id: str) -> Any:
+    """``SELECT catalog_database.name`` of every database with a table that represents
+    Term *term_id* (``table__term``): whose project the Term belongs to."""
+    from sqlalchemy import select
+
+    return (
+        select(s.catalog_database.c.name)
+        .select_from(
+            s.table__term.join(s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id)
+            .join(s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id)
+            .join(s.catalog_database, s.catalog_database.c.id == s.catalog_schema.c.database_id)
+        )
+        .where(s.table__term.c.term_id == term_id)
+        .distinct()
+    )
+
+
 def detach_statement(s: Any, database_name: str) -> Any:
     """Delete the ``table__term`` links of this database's tables (Terms stay)."""
     from sqlalchemy import delete

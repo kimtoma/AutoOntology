@@ -37,7 +37,7 @@ def agent(isolated_env):
     Store.for_home(settings.home).save_snapshot(
         "r2", merged.build(settings.workspace, structured=[_snapshot()])
     )
-    rev_dir = Path(settings.exports_dir) / "r0001"
+    rev_dir = Path(settings.exports_dir) / "default" / "r0001"  # exports/<project slug>/
     (rev_dir / "okf").mkdir(parents=True)
     (rev_dir / "report.md").write_text("# 보고서\n", "utf-8")
     (rev_dir / "okf" / "index.md").write_text("---\nokf_version: '0.2'\n---\n", "utf-8")

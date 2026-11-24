@@ -16,6 +16,11 @@ vendored source; :func:`require_internals` fails loudly at runtime too.
 
 A recompilation of the Term's table (``source rm`` + fresh ``build``) resets synonyms to
 the compiler's; re-running ``align`` restores them.
+
+Projects: every write takes the *databases* of the calling project's structured sources;
+a Term that no table of those databases represents is refused (:class:`TermNotInProject`)
+inside the same write transaction, so a project never edits another project's Terms (a
+database belongs to one project only, ``structured/pipeline.py`` ``add_source``).
 """
 
 from __future__ import annotations
@@ -31,6 +36,44 @@ logger = logging.getLogger("autoontology.jobs")
 
 class UpstreamInternalsChanged(RuntimeError):
     pass
+
+
+class TermNotInProject(PermissionError):
+    """The Term belongs to no structured source of the calling project."""
+
+
+def term_in_databases(found: Sequence[str], databases: Sequence[str]) -> bool:
+    """Whether a Term represented in the catalog databases *found* belongs to a project
+    whose structured sources are *databases* (case-insensitive, like the catalog keys)."""
+    wanted = {d.casefold() for d in databases}
+    return any(str(d).casefold() in wanted for d in found)
+
+
+def _guard(up: dict[str, Any], term_id: str, databases: Sequence[str] | None) -> None:
+    """Raise :class:`TermNotInProject` unless *databases* is None or the Term is one of a
+    table of them (read inside the caller's transaction)."""
+    if databases is None:
+        return
+    from autoontology.engine.upstream_semantic import term_databases_statement
+
+    rows = up["store"]().query_write(term_databases_statement(up["s"], term_id))
+    found = [r["name"] for r in rows]
+    if not term_in_databases(found, databases):
+        raise TermNotInProject(
+            f"upstream Term {term_id} belongs to no structured source of this project "
+            f"(its databases: {', '.join(sorted(found)) or 'none'}); refusing to change it"
+        )
+
+
+def check_term_in_databases(settings: Settings, term_id: str, databases: Sequence[str]) -> None:
+    """:class:`TermNotInProject` unless Term *term_id* belongs to *databases* (a read in
+    its own transaction: the description PATCH goes through upstream's API)."""
+    from autoontology.engine.jobs import prepare_upstream_env
+
+    prepare_upstream_env(settings)
+    up = require_internals()
+    with up["write_transaction"]():
+        _guard(up, term_id, databases)
 
 
 def require_internals() -> dict[str, Any]:
@@ -73,7 +116,13 @@ def refresh_term(settings: Settings, term_id: str) -> bool:
     return True
 
 
-def add_term_synonyms(settings: Settings, term_id: str, additions: Sequence[str]) -> dict[str, Any]:
+def add_term_synonyms(
+    settings: Settings,
+    term_id: str,
+    additions: Sequence[str],
+    *,
+    databases: Sequence[str] | None = None,
+) -> dict[str, Any]:
     """Merge *additions* into ``term.synonyms`` and refresh the Term's embeddings.
 
     The merge happens inside one upstream write transaction: the current array is re-read
@@ -95,6 +144,7 @@ def add_term_synonyms(settings: Settings, term_id: str, additions: Sequence[str]
 
     s = up["s"]
     with up["write_transaction"]():
+        _guard(up, term_id, databases)
         rows = up["store"]().query_write(
             select(s.term.c.name, s.term.c.synonyms).where(s.term.c.id == term_id).with_for_update()
         )
@@ -118,7 +168,13 @@ def add_term_synonyms(settings: Settings, term_id: str, additions: Sequence[str]
     }
 
 
-def set_term_synonyms(settings: Settings, term_id: str, synonyms: Sequence[str]) -> dict[str, Any]:
+def set_term_synonyms(
+    settings: Settings,
+    term_id: str,
+    synonyms: Sequence[str],
+    *,
+    databases: Sequence[str] | None = None,
+) -> dict[str, Any]:
     """Replace ``term.synonyms`` outright (manual corrections only; ``align`` never
     removes synonyms and uses :func:`add_term_synonyms`)."""
     from autoontology.engine.client import USER_ID
@@ -130,6 +186,7 @@ def set_term_synonyms(settings: Settings, term_id: str, synonyms: Sequence[str])
 
     s = up["s"]
     with up["write_transaction"]():
+        _guard(up, term_id, databases)
         rows = up["store"]().query_write(
             update(s.term)
             .where(s.term.c.id == term_id)
@@ -145,7 +202,11 @@ def set_term_synonyms(settings: Settings, term_id: str, synonyms: Sequence[str])
 
 
 def remove_term_synonyms(
-    settings: Settings, term_id: str, removals: Sequence[str]
+    settings: Settings,
+    term_id: str,
+    removals: Sequence[str],
+    *,
+    databases: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Reviewed repair of a wrong alignment: take *removals* (the exact strings recorded
     as added: no case or whitespace normalisation, whole aliases only, so a manual
@@ -165,6 +226,7 @@ def remove_term_synonyms(
     drop = {r for r in removals if r}
     s = up["s"]
     with up["write_transaction"]():
+        _guard(up, term_id, databases)
         rows = up["store"]().query_write(
             select(s.term.c.name, s.term.c.synonyms).where(s.term.c.id == term_id).with_for_update()
         )
