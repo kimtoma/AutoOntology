@@ -50,7 +50,9 @@ def _run_ingest(database: str, settings: Settings) -> None:
 
     try:
         result = jobs.run_ingest_job(
-            database, settings=settings, store=Store.for_home(settings.home)
+            database,
+            settings=settings,
+            store=Store.for_home(settings.home, default_project_slug=settings.workspace),
         )
         if result is not None:
             logger.info("ingest run %s for %r: %s", result.run_id, database, result.status)

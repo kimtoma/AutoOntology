@@ -362,7 +362,7 @@ def status() -> None:
 def _store(settings):
     from autoontology.store.db import Store
 
-    return Store.for_home(settings.home)
+    return Store.for_home(settings.home, default_project_slug=settings.workspace)
 
 
 def _table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:

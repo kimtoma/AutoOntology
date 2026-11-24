@@ -17,7 +17,9 @@ Subjects:
   (it stays its own class; the review inbox stops listing it).
 
 ``applied_revision`` is the snapshot that first reflected the decision (an ``apply`` run,
-or a build whose align pass applied it); NULL while pending.
+or a build whose align pass applied it); NULL while pending. It is a revision of the
+decision's project (schema v8: decisions are per project, one per
+``(project_id, kind, subject_key)``).
 """
 
 from __future__ import annotations
@@ -98,8 +100,12 @@ def _decision(row: sqlite3.Row) -> Decision:
 
 
 class DecisionStore:
-    def __init__(self, store: Store) -> None:
+    """The review decisions of one project (*project_id* None = the default project;
+    deprecated, prefer ``store.project(...).decisions()``)."""
+
+    def __init__(self, store: Store, project_id: str | None = None) -> None:
         self.store = store
+        self.project_id = project_id or store.default_project_id
 
     def _conn(self):
         return self.store._conn()
@@ -118,18 +124,20 @@ class DecisionStore:
         with self._conn() as conn:
             if decision.kind in CONCEPT_KINDS:  # one decision per concept, whatever its kind
                 conn.execute(
-                    "DELETE FROM review_decisions WHERE subject_key = ? AND kind IN (?, ?) "
-                    "AND kind != ?",
-                    (decision.subject_key, *CONCEPT_KINDS, decision.kind),
+                    "DELETE FROM review_decisions WHERE project_id = ? AND subject_key = ? "
+                    "AND kind IN (?, ?) AND kind != ?",
+                    (self.project_id, decision.subject_key, *CONCEPT_KINDS, decision.kind),
                 )
             conn.execute(
-                "INSERT INTO review_decisions (kind, subject_key, decision, payload_json, note, "
-                "decided_by, decided_at, applied_revision) VALUES (?,?,?,?,?,?,?,NULL) "
-                "ON CONFLICT (kind, subject_key) DO UPDATE SET decision = excluded.decision, "
+                "INSERT INTO review_decisions (project_id, kind, subject_key, decision, "
+                "payload_json, note, decided_by, decided_at, applied_revision) "
+                "VALUES (?,?,?,?,?,?,?,?,NULL) ON CONFLICT (project_id, kind, subject_key) "
+                "DO UPDATE SET decision = excluded.decision, "
                 "payload_json = excluded.payload_json, note = excluded.note, "
                 "decided_by = excluded.decided_by, decided_at = excluded.decided_at, "
                 "applied_revision = NULL",
                 (
+                    self.project_id,
                     decision.kind,
                     decision.subject_key,
                     decision.decision,
@@ -140,31 +148,34 @@ class DecisionStore:
                 ),
             )
             row = conn.execute(
-                "SELECT * FROM review_decisions WHERE kind = ? AND subject_key = ?",
-                (decision.kind, decision.subject_key),
+                "SELECT * FROM review_decisions WHERE project_id = ? AND kind = ? "
+                "AND subject_key = ?",
+                (self.project_id, decision.kind, decision.subject_key),
             ).fetchone()
         return _decision(row)
 
     def get(self, kind: str, subject_key: str) -> Decision | None:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT * FROM review_decisions WHERE kind = ? AND subject_key = ?",
-                (kind, subject_key),
+                "SELECT * FROM review_decisions WHERE project_id = ? AND kind = ? "
+                "AND subject_key = ?",
+                (self.project_id, kind, subject_key),
             ).fetchone()
         return _decision(row) if row else None
 
     def delete(self, kind: str, subject_key: str) -> bool:
         with self._conn() as conn:
             cur = conn.execute(
-                "DELETE FROM review_decisions WHERE kind = ? AND subject_key = ?",
-                (kind, subject_key),
+                "DELETE FROM review_decisions WHERE project_id = ? AND kind = ? "
+                "AND subject_key = ?",
+                (self.project_id, kind, subject_key),
             )
         return cur.rowcount > 0
 
     def list(self, kind: str | None = None, *, pending: bool | None = None) -> list[Decision]:
         """Every decision (of *kind*); *pending* True/False: only unapplied/applied ones."""
-        sql = "SELECT * FROM review_decisions WHERE 1 = 1"
-        args: list[Any] = []
+        sql = "SELECT * FROM review_decisions WHERE project_id = ?"
+        args: list[Any] = [self.project_id]
         if kind is not None:
             sql += " AND kind = ?"
             args.append(kind)
@@ -191,8 +202,9 @@ class DecisionStore:
                 )
                 cur = conn.execute(
                     "UPDATE review_decisions SET applied_revision = ?, payload_json = ? "
-                    "WHERE id = ? AND decided_at = ? AND applied_revision IS NULL",
-                    (revision, payload, d.id, d.decided_at),
+                    "WHERE id = ? AND project_id = ? AND decided_at = ? "
+                    "AND applied_revision IS NULL",
+                    (revision, payload, d.id, self.project_id, d.decided_at),
                 )
                 retired += cur.rowcount
         return retired
@@ -205,8 +217,9 @@ class DecisionStore:
             for d in decisions:
                 cur = conn.execute(
                     "UPDATE review_decisions SET applied_revision = ? "
-                    "WHERE id = ? AND decided_at = ? AND applied_revision IS NULL",
-                    (revision, d.id, d.decided_at),
+                    "WHERE id = ? AND project_id = ? AND decided_at = ? "
+                    "AND applied_revision IS NULL",
+                    (revision, d.id, self.project_id, d.decided_at),
                 )
                 marked += cur.rowcount
         return marked

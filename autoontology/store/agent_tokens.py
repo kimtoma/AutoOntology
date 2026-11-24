@@ -5,6 +5,10 @@ A token is ``aok_`` + ``secrets.token_urlsafe(32)``. It is returned once, when i
 created or rotated; the store keeps only its SHA-256 (hex). Rotating replaces the hash
 (the old token stops working at once); revoking clears it and keeps the row, so the call
 history still names the token. ``revision_pin`` NULL means "follow the latest snapshot".
+
+Schema v8: a token belongs to one project (``project_id``) and its ``revision_pin`` is a
+revision of that project. :meth:`AgentTokens.lookup` is store-wide (the raw token names
+its project); every other method is limited to the instance's project.
 """
 
 from __future__ import annotations
@@ -46,6 +50,7 @@ class AgentToken:
     created_at: str
     last_used_at: str | None
     revoked_at: str | None
+    project_id: str = ""
 
     @property
     def expired(self) -> bool:
@@ -72,7 +77,7 @@ class AgentToken:
         }
 
 
-_COLUMNS = "id, name, revision_pin, expires_at, created_at, last_used_at, revoked_at"
+_COLUMNS = "id, name, revision_pin, expires_at, created_at, last_used_at, revoked_at, project_id"
 
 
 def _token(row: Any) -> AgentToken:
@@ -86,8 +91,12 @@ class TokenError(Exception):
 
 
 class AgentTokens:
-    def __init__(self, store: Store) -> None:
+    """The agent tokens of one project (*project_id* None = the default project;
+    deprecated, prefer ``store.project(...).agent_tokens()``)."""
+
+    def __init__(self, store: Store, project_id: str | None = None) -> None:
         self.store = store
+        self.project_id = project_id or store.default_project_id
 
     # --- tokens -------------------------------------------------------------------------
 
@@ -106,7 +115,7 @@ class AgentTokens:
         with self.store._conn() as conn:
             conn.execute(
                 "INSERT INTO agent_tokens (id, name, token_hash, revision_pin, expires_at, "
-                "created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                "created_at, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     token_id,
                     name,
@@ -114,6 +123,7 @@ class AgentTokens:
                     revision_pin,
                     expires,
                     created.isoformat(timespec="milliseconds"),
+                    self.project_id,
                 ),
             )
         found = self.get(token_id)
@@ -123,14 +133,17 @@ class AgentTokens:
     def get(self, token_id: str) -> AgentToken | None:
         with self.store._conn() as conn:
             row = conn.execute(
-                f"SELECT {_COLUMNS} FROM agent_tokens WHERE id = ?", (token_id,)
+                f"SELECT {_COLUMNS} FROM agent_tokens WHERE id = ? AND project_id = ?",
+                (token_id, self.project_id),
             ).fetchone()
         return _token(row) if row else None
 
     def list_tokens(self) -> list[AgentToken]:
         with self.store._conn() as conn:
             rows = conn.execute(
-                f"SELECT {_COLUMNS} FROM agent_tokens ORDER BY created_at DESC, id"
+                f"SELECT {_COLUMNS} FROM agent_tokens WHERE project_id = ? "
+                "ORDER BY created_at DESC, id",
+                (self.project_id,),
             ).fetchall()
         return [_token(r) for r in rows]
 
@@ -150,8 +163,9 @@ class AgentTokens:
         raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
         with self.store._conn() as conn:
             conn.execute(
-                "UPDATE agent_tokens SET token_hash = ? WHERE id = ? AND revoked_at IS NULL",
-                (token_hash(raw), token_id),
+                "UPDATE agent_tokens SET token_hash = ? WHERE id = ? AND project_id = ? "
+                "AND revoked_at IS NULL",
+                (token_hash(raw), token_id, self.project_id),
             )
         return raw, self._require(token_id)
 
@@ -161,13 +175,15 @@ class AgentTokens:
         if not current.revoked_at:
             with self.store._conn() as conn:
                 conn.execute(
-                    "UPDATE agent_tokens SET token_hash = NULL, revoked_at = ? WHERE id = ?",
-                    (now_iso(), token_id),
+                    "UPDATE agent_tokens SET token_hash = NULL, revoked_at = ? "
+                    "WHERE id = ? AND project_id = ?",
+                    (now_iso(), token_id, self.project_id),
                 )
         return self._require(token_id)
 
     def lookup(self, raw: str) -> AgentToken | None:
-        """The active token whose hash matches *raw* (revoked/expired/unknown: None)."""
+        """The active token whose hash matches *raw* (revoked/expired/unknown: None), in any
+        project: check its ``project_id``."""
         if not raw or not raw.startswith(TOKEN_PREFIX) or len(raw) > 200:
             return None
         digest = token_hash(raw)
@@ -204,11 +220,13 @@ class AgentTokens:
 
     def usage(self, days: int | None = None) -> dict[str, Any]:
         """Call counts: totals, by tool, by day (UTC) and per token, over the last *days*
-        days (default: every kept row)."""
-        where, params = "", ()
+        days (default: every kept row), of the project's tokens."""
+        where = "WHERE c.token_id IN (SELECT id FROM agent_tokens WHERE project_id = ?)"
+        params: tuple[Any, ...] = (self.project_id,)
         if days:
             since = datetime.now(timezone.utc) - timedelta(days=days)
-            where, params = "WHERE c.ts >= ?", (since.isoformat(timespec="milliseconds"),)
+            where += " AND c.ts >= ?"
+            params += (since.isoformat(timespec="milliseconds"),)
         with self.store._conn() as conn:
             total = conn.execute(
                 f"SELECT count(*) n, coalesce(sum(ok), 0) ok FROM agent_calls c {where}", params

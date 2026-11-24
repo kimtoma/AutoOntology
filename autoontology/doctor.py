@@ -199,7 +199,11 @@ def check_upstream_connections(settings: Settings) -> Check:
     import psycopg
 
     db = Path(settings.home) / "autoontology.db"
-    store = Store.for_home(settings.home) if db.is_file() else None
+    store = (
+        Store.for_home(settings.home, default_project_slug=settings.workspace)
+        if db.is_file()
+        else None
+    )
     try:
         with BackendClient(settings.backend_url, timeout=10.0) as client:
             orphans = find_orphan_connections(settings, store, client)

@@ -8,18 +8,25 @@ The schema is a list of numbered migrations applied in order and recorded in
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from autoontology.playground.store import PlaygroundStore
+    from autoontology.store.agent_tokens import AgentTokens
+    from autoontology.store.decisions import DecisionStore
 
 SourceKind = Literal["files", "database", "documents"]
 RunStatus = Literal["pending", "running", "succeeded", "failed", "cancelled"]
@@ -27,7 +34,11 @@ RunStatus = Literal["pending", "running", "succeeded", "failed", "cancelled"]
 StepStatus = Literal["pending", "running", "succeeded", "failed", "skipped"]
 ACTIVE_RUN_STATUSES: tuple[str, ...] = ("pending", "running")
 
-MIGRATIONS: list[tuple[int, str]] = [
+#: A migration is SQL (statements separated by ``;``) or a function run on the migrating
+#: connection inside the migration's transaction (``PRAGMA foreign_keys`` is OFF there).
+Migration = str | Callable[[sqlite3.Connection], None]
+
+MIGRATIONS: list[tuple[int, Migration]] = [
     (
         1,
         # Schema v1. sources/runs/steps: registered sources and their runs. documents ..
@@ -450,6 +461,8 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE INDEX IF NOT EXISTS agent_calls_token_idx ON agent_calls (token_id)
         """,
     ),
+    # Schema v8: projects (:func:`_migrate_v8`, a Python migration: it rebuilds tables).
+    (8, lambda conn: _migrate_v8(conn)),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
@@ -461,6 +474,291 @@ ENSURED_INDEXES: list[tuple[int, str]] = [
         "WHERE judged_json != '{}' OR applied_json != '{}'",
     ),
 ]
+
+
+#: The project every pre-v8 row belongs to (its slug starts as ``default`` and becomes the
+#: workspace's slug the first time the app opens the store, see :meth:`Store.__init__`).
+DEFAULT_PROJECT_ID = "prj_default"
+SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{1,23}$")
+SLUG_MAX = 24
+#: store_meta keys: the default project's id; set while the default project still waits for
+#: its workspace slug (removed once it got one).
+META_DEFAULT_PROJECT = "default_project_id"
+META_SLUG_PENDING = "default_project_slug_pending"
+
+
+def project_slug_from_workspace(workspace: str) -> str:
+    """A valid project slug for a workspace name: lower-cased, runs of other characters
+    folded to ``-``, ``p-`` in front of a leading digit, cut to 24 characters; ``default``
+    when nothing usable is left."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (workspace or "").strip().lower()).strip("-")
+    if slug and not slug[0].isalpha():
+        slug = "p-" + slug
+    slug = slug[:SLUG_MAX].rstrip("-")
+    return slug if SLUG_RE.fullmatch(slug) else "default"
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
+    return [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def _rebuild(
+    conn: sqlite3.Connection,
+    table: str,
+    create: str,
+    *,
+    project_expr: str,
+    extra: dict[str, str] | None = None,
+    indexes: tuple[str, ...] = (),
+) -> None:
+    """Rebuild *table* as *create* (``{t}`` = the table name): create ``<table>__v8``, copy
+    every column the two shapes share (``project_id`` from the old row when it has one,
+    else *project_expr*; *extra* = other new columns' expressions when the old row lacks
+    them), drop the old table, rename the copy, recreate *indexes*. Row counts are checked.
+    Child tables keep referencing the table by name, so their foreign keys stay valid; the
+    caller runs with ``PRAGMA foreign_keys = OFF`` so the drop cascades nothing."""
+    tmp = f"{table}__v8"
+    old = _columns(conn, table)
+    conn.execute(f"DROP TABLE IF EXISTS {tmp}")
+    conn.execute(create.replace("{t}", tmp))
+    new = _columns(conn, tmp)
+    exprs = dict(extra or {})
+    exprs["project_id"] = (
+        f"COALESCE(project_id, {project_expr})" if "project_id" in old else project_expr
+    )
+    cols, values = [], []
+    for col in new:
+        if col in old and col != "project_id":
+            cols.append(col)
+            values.append(col)
+        elif col in exprs:
+            cols.append(col)
+            values.append(exprs[col])
+    before = conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+    conn.execute(f"INSERT INTO {tmp} ({', '.join(cols)}) SELECT {', '.join(values)} FROM {table}")
+    after = conn.execute(f"SELECT count(*) FROM {tmp}").fetchone()[0]
+    if after != before:
+        raise RuntimeError(f"migration v8: {table} kept {after} of {before} rows")
+    conn.execute(f"DROP TABLE {table}")
+    conn.execute(f"ALTER TABLE {tmp} RENAME TO {table}")
+    for statement in indexes:
+        conn.execute(statement)
+
+
+def _migrate_v8(conn: sqlite3.Connection) -> None:
+    """Schema v8: projects.
+
+    ``projects`` holds the projects (slug ``^[a-z][a-z0-9-]{1,23}$``, checked in Python);
+    ``store_meta`` names the default project (:data:`DEFAULT_PROJECT_ID`), which every
+    earlier row is backfilled to. Its slug starts as ``default`` with a pending mark that
+    :meth:`Store.__init__` resolves to the workspace's slug the first time the store is
+    opened with one (the migration itself has no settings).
+
+    ``project_id`` (NOT NULL, references ``projects``) is added by rebuilding: ``sources``
+    (UNIQUE ``(project_id, name)``), ``runs`` (a run of a source takes the source's
+    project), ``review_decisions`` (UNIQUE ``(project_id, kind, subject_key)``),
+    ``agent_tokens``, ``source_leases`` (key ``(project_id, source_name)``) and the three
+    playground tables, which keep their ``scope`` column as a key inside the project.
+    ``ontology_snapshots`` gets a store-wide surrogate ``id`` and a per-project
+    ``revision`` (UNIQUE ``(project_id, revision)``); existing rows keep ``id = revision =``
+    their old revision, so every stored revision number (``review_decisions.applied_revision``,
+    ``agent_tokens.revision_pin``, ``playground_index_meta.revision``, run params, export
+    folders) keeps meaning the same snapshot, now read as (the row's project, revision).
+
+    Safe to re-run over tables that already have the v8 shape (a downgraded
+    ``schema_version``): columns present are copied, never reset."""
+    default = repr(DEFAULT_PROJECT_ID)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, "
+        "name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, "
+        "archived_at TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
+    inserted = conn.execute(
+        "INSERT OR IGNORE INTO projects (id, slug, name, description, created_at) "
+        "VALUES (?, 'default', 'default', '', ?)",
+        (DEFAULT_PROJECT_ID, now_iso()),
+    ).rowcount
+    conn.execute(
+        "INSERT OR IGNORE INTO store_meta (key, value) VALUES (?, ?)",
+        (META_DEFAULT_PROJECT, DEFAULT_PROJECT_ID),
+    )
+    if inserted:
+        conn.execute(
+            "INSERT OR IGNORE INTO store_meta (key, value) VALUES (?, '1')", (META_SLUG_PENDING,)
+        )
+    ref = "project_id TEXT NOT NULL REFERENCES projects (id)"
+    _rebuild(
+        conn,
+        "sources",
+        f"""CREATE TABLE {{t}} (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('files', 'database', 'documents')),
+            locator TEXT NOT NULL,
+            pg_database TEXT,
+            catalog_database_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            {ref},
+            UNIQUE (project_id, name)
+        )""",
+        project_expr=default,
+    )
+    _rebuild(
+        conn,
+        "runs",
+        f"""CREATE TABLE {{t}} (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            source_id TEXT,
+            status TEXT NOT NULL
+                CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')),
+            started_at TEXT,
+            finished_at TEXT,
+            error TEXT,
+            params_json TEXT NOT NULL DEFAULT '{{}}',
+            {ref}
+        )""",
+        project_expr=(
+            f"COALESCE((SELECT s.project_id FROM sources s WHERE s.id = runs.source_id), {default})"
+        ),
+        indexes=(
+            "CREATE INDEX runs_source_idx ON runs (source_id, started_at)",
+            "CREATE INDEX runs_project_idx ON runs (project_id, kind, started_at)",
+        ),
+    )
+    _rebuild(
+        conn,
+        "review_decisions",
+        f"""CREATE TABLE {{t}} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL CHECK (kind IN ('alignment', 'alias', 'concept')),
+            subject_key TEXT NOT NULL,
+            decision TEXT NOT NULL CHECK (decision IN ('accept', 'reject', 'acknowledge')),
+            payload_json TEXT NOT NULL DEFAULT '{{}}',
+            note TEXT NOT NULL DEFAULT '',
+            decided_by TEXT NOT NULL DEFAULT 'local',
+            decided_at TEXT NOT NULL,
+            applied_revision INTEGER,
+            {ref},
+            UNIQUE (project_id, kind, subject_key)
+        )""",
+        project_expr=default,
+    )
+    _rebuild(
+        conn,
+        "agent_tokens",
+        f"""CREATE TABLE {{t}} (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            token_hash TEXT UNIQUE,
+            revision_pin INTEGER,
+            expires_at TEXT,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT,
+            revoked_at TEXT,
+            {ref}
+        )""",
+        project_expr=default,
+        indexes=("CREATE INDEX agent_tokens_project_idx ON agent_tokens (project_id)",),
+    )
+    _rebuild(
+        conn,
+        "source_leases",
+        f"""CREATE TABLE {{t}} (
+            {ref},
+            source_name TEXT NOT NULL,
+            token TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            pid INTEGER NOT NULL,
+            acquired_at TEXT NOT NULL,
+            expires_at REAL NOT NULL,
+            PRIMARY KEY (project_id, source_name)
+        )""",
+        project_expr=default,
+    )
+    _rebuild(
+        conn,
+        "playground_index",
+        f"""CREATE TABLE {{t}} (
+            {ref},
+            scope TEXT NOT NULL,
+            element_id TEXT NOT NULL,
+            element_type TEXT NOT NULL,
+            text_sha TEXT NOT NULL,
+            embedding BLOB,
+            model TEXT NOT NULL,
+            PRIMARY KEY (project_id, scope, element_id)
+        )""",
+        project_expr=default,
+    )
+    _rebuild(
+        conn,
+        "playground_index_meta",
+        f"""CREATE TABLE {{t}} (
+            {ref},
+            scope TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            elements INTEGER NOT NULL,
+            built_at TEXT NOT NULL,
+            PRIMARY KEY (project_id, scope)
+        )""",
+        project_expr=default,
+    )
+    _rebuild(
+        conn,
+        "playground_conversations",
+        f"""CREATE TABLE {{t}} (
+            id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            {ref}
+        )""",
+        project_expr=default,
+        indexes=(
+            "CREATE INDEX playground_conversations_scope "
+            "ON playground_conversations (project_id, scope, updated_at)",
+        ),
+    )
+    _rebuild(
+        conn,
+        "ontology_snapshots",
+        f"""CREATE TABLE {{t}} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            {ref},
+            revision INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            run_id TEXT NOT NULL DEFAULT '',
+            sources_json TEXT NOT NULL DEFAULT '[]',
+            counts_json TEXT NOT NULL DEFAULT '{{}}',
+            model_json TEXT NOT NULL,
+            UNIQUE (project_id, revision)
+        )""",
+        project_expr=default,
+        extra={"id": "revision"},  # pre-v8 rows: surrogate id = the old global revision
+    )
+    rebuilt = (
+        "sources",
+        "runs",
+        "review_decisions",
+        "agent_tokens",
+        "source_leases",
+        "playground_index",
+        "playground_index_meta",
+        "playground_conversations",
+        "playground_messages",
+        "ontology_snapshots",
+    )
+    for table in rebuilt:
+        bad = conn.execute(f"PRAGMA foreign_key_check({table})").fetchall()
+        if bad:
+            raise RuntimeError(f"migration v8: {table} has dangling references: {bad[:3]}")
 
 
 def _ensure_indexes(conn: sqlite3.Connection, version: int) -> None:
@@ -541,6 +839,7 @@ class Source:
     catalog_database_id: str | None
     created_at: str
     updated_at: str
+    project_id: str = DEFAULT_PROJECT_ID
 
 
 @dataclass(frozen=True)
@@ -553,6 +852,7 @@ class Run:
     finished_at: str | None
     error: str | None
     params: dict[str, Any]
+    project_id: str = DEFAULT_PROJECT_ID
 
 
 @dataclass(frozen=True)
@@ -576,6 +876,41 @@ class Snapshot:
     sources: list[dict[str, Any]]
     counts: dict[str, Any]
     model: dict[str, Any] | None = None
+    project_id: str = DEFAULT_PROJECT_ID
+
+
+@dataclass(frozen=True)
+class Project:
+    """One project (schema v8): its own sources, runs, revisions, review decisions, agent
+    tokens, playground and leases. ``archived_at`` set = hidden from default listings."""
+
+    id: str
+    slug: str
+    name: str
+    description: str
+    created_at: str
+    archived_at: str | None
+
+    @property
+    def archived(self) -> bool:
+        return bool(self.archived_at)
+
+
+class ProjectNotFound(LookupError):
+    """No project with that id or slug."""
+
+
+def validate_slug(slug: str) -> str:
+    if not isinstance(slug, str) or not SLUG_RE.fullmatch(slug):
+        raise ValueError(
+            f"invalid project slug {str(slug)[:40]!r}: 2-24 characters, lower-case letters, "
+            "digits and '-', starting with a letter"
+        )
+    return slug
+
+
+def _project(row: sqlite3.Row) -> Project:
+    return Project(**{k: row[k] for k in row.keys()})
 
 
 def _snapshot(row: sqlite3.Row, model: dict[str, Any] | None) -> Snapshot:
@@ -586,6 +921,7 @@ def _snapshot(row: sqlite3.Row, model: dict[str, Any] | None) -> Snapshot:
         sources=json.loads(row["sources_json"] or "[]"),
         counts=json.loads(row["counts_json"] or "{}"),
         model=model,
+        project_id=row["project_id"],
     )
 
 
@@ -677,16 +1013,165 @@ def _ensure_wal(conn: sqlite3.Connection) -> None:
 class Store:
     """Thin typed wrapper. Opens a short-lived connection per call (safe across threads)."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, default_project_slug: str | None = None) -> None:
+        """Open (and migrate) the store. *default_project_slug* = the workspace name
+        (``Settings.workspace``): the first open that passes it gives the default project
+        that slug (slugified, :func:`project_slug_from_workspace`) and the workspace name
+        as its display name, once; later opens and user renames are never overridden."""
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.migrate()
         # The store can hold external DB credentials (database sources): owner-only.
         os.chmod(self.path, 0o600)
+        self.default_project_id = self._read_default_project_id()
+        if default_project_slug:
+            self._settle_default_slug(default_project_slug)
 
     @classmethod
-    def for_home(cls, home: Path) -> Store:
-        return cls(Path(home) / "autoontology.db")
+    def for_home(cls, home: Path, *, default_project_slug: str | None = None) -> Store:
+        return cls(Path(home) / "autoontology.db", default_project_slug=default_project_slug)
+
+    def _read_default_project_id(self) -> str:
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    "SELECT value FROM store_meta WHERE key = ?", (META_DEFAULT_PROJECT,)
+                ).fetchone()
+        except sqlite3.OperationalError:  # a store held below v8 (tests)
+            return DEFAULT_PROJECT_ID
+        return str(row[0]) if row else DEFAULT_PROJECT_ID
+
+    def _settle_default_slug(self, workspace: str) -> None:
+        slug = project_slug_from_workspace(workspace)
+        with self._immediate() as conn:
+            if not conn.execute(
+                "SELECT 1 FROM store_meta WHERE key = ?", (META_SLUG_PENDING,)
+            ).fetchone():
+                return
+            taken = conn.execute(
+                "SELECT 1 FROM projects WHERE slug = ? AND id != ?",
+                (slug, self.default_project_id),
+            ).fetchone()
+            if not taken:
+                conn.execute(
+                    "UPDATE projects SET slug = ?, name = ? WHERE id = ?",
+                    (slug, workspace.strip()[:200] or slug, self.default_project_id),
+                )
+            conn.execute("DELETE FROM store_meta WHERE key = ?", (META_SLUG_PENDING,))
+
+    def _pid(self, project_id: str | None) -> str:
+        return project_id or self.default_project_id
+
+    # --- projects -------------------------------------------------------------
+
+    def project(self, ref: str | None = None) -> ProjectStore:
+        """The project-scoped view of *ref* (an id or a slug; None = the default project).
+        Raises :class:`ProjectNotFound`. Archived projects are still returned."""
+        found = self.get_project(ref) if ref else self.default_project()
+        if found is None:
+            raise ProjectNotFound(f"unknown project {str(ref)[:80]!r}")
+        return ProjectStore(self, found)
+
+    def default_project(self) -> Project:
+        found = self.get_project(self.default_project_id)
+        assert found is not None, "the default project row is missing"
+        return found
+
+    def get_project(self, ref: str) -> Project | None:
+        """The project whose id or slug is *ref*."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM projects WHERE id = ? OR slug = ? ORDER BY id = ? DESC LIMIT 1",
+                (ref, ref, ref),
+            ).fetchone()
+        return _project(row) if row else None
+
+    def get_project_by_slug(self, slug: str) -> Project | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM projects WHERE slug = ?", (slug,)).fetchone()
+        return _project(row) if row else None
+
+    def list_projects(self, *, include_archived: bool = False) -> list[Project]:
+        """Projects, the default one first, then by creation."""
+        sql = "SELECT * FROM projects"
+        if not include_archived:
+            sql += " WHERE archived_at IS NULL"
+        sql += " ORDER BY id != ?, created_at, rowid"
+        with self._conn() as conn:
+            rows = conn.execute(sql, (self.default_project_id,)).fetchall()
+        return [_project(r) for r in rows]
+
+    def create_project(
+        self, slug: str, *, name: str | None = None, description: str = ""
+    ) -> ProjectStore:
+        validate_slug(slug)
+        project_id = "prj_" + uuid.uuid4().hex[:12]
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    "INSERT INTO projects (id, slug, name, description, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (project_id, slug, (name or slug).strip() or slug, description, now_iso()),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"project {slug!r} already exists") from exc
+        return self.project(project_id)
+
+    def _require_project(self, ref: str) -> Project:
+        found = self.get_project(ref)
+        if found is None:
+            raise ProjectNotFound(f"unknown project {str(ref)[:80]!r}")
+        return found
+
+    def rename_project(
+        self,
+        ref: str,
+        *,
+        name: str | None = None,
+        slug: str | None = None,
+        description: str | None = None,
+    ) -> Project:
+        """Change a project's display name, slug and/or description."""
+        current = self._require_project(ref)
+        if slug is not None:
+            validate_slug(slug)
+        if name is not None and not name.strip():
+            raise ValueError("a project name cannot be empty")
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    "UPDATE projects SET slug = ?, name = ?, description = ? WHERE id = ?",
+                    (
+                        slug if slug is not None else current.slug,
+                        name.strip() if name is not None else current.name,
+                        description if description is not None else current.description,
+                        current.id,
+                    ),
+                )
+                if slug is not None and current.id == self.default_project_id:
+                    conn.execute("DELETE FROM store_meta WHERE key = ?", (META_SLUG_PENDING,))
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"project {slug!r} already exists") from exc
+        return self._require_project(current.id)
+
+    def archive_project(self, ref: str) -> Project:
+        """Hide a project from default listings (its data stays). The default project
+        cannot be archived."""
+        current = self._require_project(ref)
+        if current.id == self.default_project_id:
+            raise ValueError("the default project cannot be archived")
+        if not current.archived_at:
+            with self._conn() as conn:
+                conn.execute(
+                    "UPDATE projects SET archived_at = ? WHERE id = ?", (now_iso(), current.id)
+                )
+        return self._require_project(current.id)
+
+    def unarchive_project(self, ref: str) -> Project:
+        current = self._require_project(ref)
+        with self._conn() as conn:
+            conn.execute("UPDATE projects SET archived_at = NULL WHERE id = ?", (current.id,))
+        return self._require_project(current.id)
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -742,6 +1227,9 @@ class Store:
         conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
         try:
             conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            # table rebuilds (v8) must not cascade or check references mid-copy; the
+            # pragma is a no-op inside a transaction, so it is set before any BEGIN
+            conn.execute("PRAGMA foreign_keys=OFF")
             _ensure_wal(conn)
             current = 0
             while True:
@@ -760,9 +1248,12 @@ class Store:
                         conn.execute("COMMIT")
                         return current
                     version, sql = pending[0]
-                    for statement in (s.strip() for s in sql.split(";")):
-                        if statement:
-                            conn.execute(statement)
+                    if callable(sql):
+                        sql(conn)
+                    else:
+                        for statement in (s.strip() for s in sql.split(";")):
+                            if statement:
+                                conn.execute(statement)
                     conn.execute(
                         "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
                         (version, now_iso()),
@@ -777,38 +1268,65 @@ class Store:
 
     # --- sources --------------------------------------------------------------
 
+    # Methods with a ``project_id`` keyword: None means the default project. Callers that
+    # leave it out are deprecated (they predate projects); use :meth:`project` instead.
+
     def add_source(
-        self, *, name: str, kind: SourceKind, locator: str, pg_database: str | None = None
+        self,
+        *,
+        name: str,
+        kind: SourceKind,
+        locator: str,
+        pg_database: str | None = None,
+        project_id: str | None = None,
     ) -> Source:
+        """Register a source in the project (names are unique per project)."""
         ts = now_iso()
         source_id = uuid.uuid4().hex
+        pid = self._pid(project_id)
         try:
             with self._conn() as conn:
                 conn.execute(
                     "INSERT INTO sources (id, name, kind, locator, pg_database, "
-                    "catalog_database_id, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
-                    (source_id, name, kind, locator, pg_database, ts, ts),
+                    "catalog_database_id, created_at, updated_at, project_id) "
+                    "VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+                    (source_id, name, kind, locator, pg_database, ts, ts, pid),
                 )
         except sqlite3.IntegrityError as exc:
             if "UNIQUE" not in str(exc):
                 raise
             raise ValueError(f"source {name!r} already exists") from exc
-        return self.get_source(name)  # type: ignore[return-value]
+        return self.get_source(name, project_id=pid)  # type: ignore[return-value]
 
-    def get_source(self, name: str) -> Source | None:
+    def get_source(self, name: str, *, project_id: str | None = None) -> Source | None:
+        """The source named *name* in the project (deprecated without *project_id*)."""
         with self._conn() as conn:
-            row = conn.execute("SELECT * FROM sources WHERE name = ?", (name,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM sources WHERE project_id = ? AND name = ?",
+                (self._pid(project_id), name),
+            ).fetchone()
         return _source(row) if row else None
 
     def get_source_by_id(self, source_id: str) -> Source | None:
+        """The source with id *source_id* in any project (ids are store-wide); check its
+        ``project_id``, or use :meth:`ProjectStore.get_source_by_id`."""
         with self._conn() as conn:
             row = conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
         return _source(row) if row else None
 
-    def list_sources(self) -> list[Source]:
+    def list_sources(self, *, project_id: str | None = None) -> list[Source]:
+        """The project's sources by name (deprecated without *project_id*)."""
         with self._conn() as conn:
-            rows = conn.execute("SELECT * FROM sources ORDER BY name").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM sources WHERE project_id = ? ORDER BY name",
+                (self._pid(project_id),),
+            ).fetchall()
+        return [_source(r) for r in rows]
+
+    def list_all_sources(self) -> list[Source]:
+        """Every project's sources (administration only)."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM sources ORDER BY project_id, name").fetchall()
         return [_source(r) for r in rows]
 
     def set_locator(self, source_id: str, locator: str) -> None:
@@ -891,12 +1409,23 @@ class Store:
         source_id: str | None,
         params: dict[str, Any] | None = None,
         status: RunStatus = "running",
+        project_id: str | None = None,
     ) -> Run:
+        """A new run. A run of a source belongs to the source's project (*project_id*, when
+        given, must match it); a project-wide run to *project_id* (deprecated: None = the
+        default project)."""
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
+        pid = self._pid(project_id)
+        if source_id is not None:
+            source = self.get_source_by_id(source_id)
+            if source is not None:
+                if project_id is not None and source.project_id != project_id:
+                    raise ValueError(f"source {source.name!r} belongs to another project")
+                pid = source.project_id
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO runs (id, kind, source_id, status, started_at, params_json) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO runs (id, kind, source_id, status, started_at, params_json, "
+                "project_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     kind,
@@ -904,6 +1433,7 @@ class Store:
                     status,
                     now_iso(),
                     json.dumps(params or {}, ensure_ascii=False, default=str),
+                    pid,
                 ),
             )
         return self.get_run(run_id)  # type: ignore[return-value]
@@ -936,10 +1466,16 @@ class Store:
     # --- ontology snapshots --------------------------------------------------------
 
     def save_snapshot(
-        self, run_id: str, model: Any, *, sources: list[dict[str, Any]] | None = None
+        self,
+        run_id: str,
+        model: Any,
+        *,
+        sources: list[dict[str, Any]] | None = None,
+        project_id: str | None = None,
     ) -> int:
         """Persist *model* (a :class:`~autoontology.ontology.model.MergedOntology`) as the
-        next revision and return it. *sources* defaults to the model's source names."""
+        project's next revision (``max + 1`` within the project, under the write lock) and
+        return it. *sources* defaults to the model's source names."""
         data = model.to_dict()
         counts = model.counts()
         if sources is None:
@@ -947,11 +1483,21 @@ class Store:
                 *({"name": n, "kind": "structured"} for n in model.structured_sources),
                 *({"name": n, "kind": "documents"} for n in model.documents_sources),
             ]
-        with self._conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO ontology_snapshots (created_at, run_id, sources_json, "
-                "counts_json, model_json) VALUES (?, ?, ?, ?, ?)",
+        pid = self._pid(project_id)
+        with self._immediate() as conn:
+            revision = int(
+                conn.execute(
+                    "SELECT coalesce(max(revision), 0) + 1 FROM ontology_snapshots "
+                    "WHERE project_id = ?",
+                    (pid,),
+                ).fetchone()[0]
+            )
+            conn.execute(
+                "INSERT INTO ontology_snapshots (project_id, revision, created_at, run_id, "
+                "sources_json, counts_json, model_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
+                    pid,
+                    revision,
                     now_iso(),
                     run_id,
                     json.dumps(sources, ensure_ascii=False, default=str),
@@ -959,45 +1505,56 @@ class Store:
                     json.dumps(data, ensure_ascii=False, default=str),
                 ),
             )
-        return int(cur.lastrowid)
+        return revision
 
-    def latest_snapshot(self, *, with_model: bool = True) -> Snapshot | None:
-        return self._snapshot(None, with_model)
+    def latest_snapshot(
+        self, *, with_model: bool = True, project_id: str | None = None
+    ) -> Snapshot | None:
+        return self._snapshot(None, with_model, self._pid(project_id))
 
-    def get_snapshot(self, revision: int, *, with_model: bool = True) -> Snapshot | None:
-        return self._snapshot(int(revision), with_model)
+    def get_snapshot(
+        self, revision: int, *, with_model: bool = True, project_id: str | None = None
+    ) -> Snapshot | None:
+        """The project's snapshot *revision* (deprecated without *project_id*)."""
+        return self._snapshot(int(revision), with_model, self._pid(project_id))
 
-    def latest_revision(self) -> int | None:
-        """Revision of the newest snapshot (the cache key of derived views)."""
-        with self._conn() as conn:
-            row = conn.execute("SELECT max(revision) FROM ontology_snapshots").fetchone()
-        return int(row[0]) if row and row[0] is not None else None
-
-    def previous_revision(self, revision: int) -> int | None:
-        """The newest revision older than *revision* (None: there is none)."""
+    def latest_revision(self, *, project_id: str | None = None) -> int | None:
+        """Revision of the project's newest snapshot (the cache key of derived views)."""
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT max(revision) FROM ontology_snapshots WHERE revision < ?", (revision,)
+                "SELECT max(revision) FROM ontology_snapshots WHERE project_id = ?",
+                (self._pid(project_id),),
             ).fetchone()
         return int(row[0]) if row and row[0] is not None else None
 
-    def list_snapshots(self, limit: int = 50) -> list[Snapshot]:
+    def previous_revision(self, revision: int, *, project_id: str | None = None) -> int | None:
+        """The project's newest revision older than *revision* (None: there is none)."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT max(revision) FROM ontology_snapshots "
+                "WHERE project_id = ? AND revision < ?",
+                (self._pid(project_id), revision),
+            ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    def list_snapshots(self, limit: int = 50, *, project_id: str | None = None) -> list[Snapshot]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT revision, created_at, run_id, sources_json, counts_json "
-                "FROM ontology_snapshots ORDER BY revision DESC LIMIT ?",
-                (limit,),
+                "SELECT project_id, revision, created_at, run_id, sources_json, counts_json "
+                "FROM ontology_snapshots WHERE project_id = ? ORDER BY revision DESC LIMIT ?",
+                (self._pid(project_id), limit),
             ).fetchall()
         return [_snapshot(r, None) for r in rows]
 
-    def _snapshot(self, revision: int | None, with_model: bool) -> Snapshot | None:
-        cols = "revision, created_at, run_id, sources_json, counts_json" + (
+    def _snapshot(self, revision: int | None, with_model: bool, pid: str) -> Snapshot | None:
+        cols = "project_id, revision, created_at, run_id, sources_json, counts_json" + (
             ", model_json" if with_model else ""
         )
-        sql = f"SELECT {cols} FROM ontology_snapshots "
-        sql += "WHERE revision = ?" if revision is not None else "ORDER BY revision DESC LIMIT 1"
+        sql = f"SELECT {cols} FROM ontology_snapshots WHERE project_id = ? "
+        sql += "AND revision = ?" if revision is not None else "ORDER BY revision DESC LIMIT 1"
+        args: tuple[Any, ...] = (pid, revision) if revision is not None else (pid,)
         with self._conn() as conn:
-            row = conn.execute(sql, (revision,) if revision is not None else ()).fetchone()
+            row = conn.execute(sql, args).fetchone()
         if row is None:
             return None
         return _snapshot(row, json.loads(row["model_json"]) if with_model else None)
@@ -1013,30 +1570,47 @@ class Store:
             row = conn.execute(sql, args).fetchone()
         return _run(row) if row else None
 
-    def active_runs(self, source_id: str | None = None) -> list[Run]:
+    def active_runs(
+        self, source_id: str | None = None, *, project_id: str | None = None
+    ) -> list[Run]:
+        """Pending/running runs (of *source_id*); *project_id* None = every project."""
         sql = "SELECT * FROM runs WHERE status IN ('pending', 'running')"
         args: list[Any] = []
         if source_id is not None:
             sql += " AND source_id = ?"
             args.append(source_id)
+        if project_id is not None:
+            sql += " AND project_id = ?"
+            args.append(project_id)
         with self._conn() as conn:
             rows = conn.execute(sql + " ORDER BY started_at", args).fetchall()
         return [_run(r) for r in rows]
 
-    def latest_workspace_run(self, kind: str) -> Run | None:
-        """The newest workspace-wide run (no source) of *kind*, whatever its status."""
-        sql = "SELECT * FROM runs WHERE kind = ? AND source_id IS NULL"
+    def latest_project_run(self, kind: str, *, project_id: str | None = None) -> Run | None:
+        """The project's newest project-wide run (no source) of *kind*, whatever its
+        status."""
+        sql = "SELECT * FROM runs WHERE project_id = ? AND kind = ? AND source_id IS NULL"
         sql += " ORDER BY started_at DESC, rowid DESC LIMIT 1"
         with self._conn() as conn:
-            row = conn.execute(sql, (kind,)).fetchone()
+            row = conn.execute(sql, (self._pid(project_id), kind)).fetchone()
         return _run(row) if row is not None else None
 
-    def list_runs(self, source_id: str | None = None, limit: int = 50) -> list[Run]:
-        sql = "SELECT * FROM runs"
+    def latest_workspace_run(self, kind: str) -> Run | None:
+        """Deprecated: :meth:`latest_project_run` of the default project."""
+        return self.latest_project_run(kind)
+
+    def list_runs(
+        self, source_id: str | None = None, limit: int = 50, *, project_id: str | None = None
+    ) -> list[Run]:
+        """Newest runs first (of *source_id*); *project_id* None = every project."""
+        sql = "SELECT * FROM runs WHERE 1 = 1"
         args: list[Any] = []
         if source_id is not None:
-            sql += " WHERE source_id = ?"
+            sql += " AND source_id = ?"
             args.append(source_id)
+        if project_id is not None:
+            sql += " AND project_id = ?"
+            args.append(project_id)
         sql += " ORDER BY started_at DESC, rowid DESC LIMIT ?"
         args.append(limit)
         with self._conn() as conn:
@@ -1085,19 +1659,21 @@ class Store:
             ).fetchall()
         return [_step(r) for r in rows]
 
-    def last_succeeded_step(self, run_kind: str, prefix: str, detail_key: str) -> Step | None:
+    def last_succeeded_step(
+        self, run_kind: str, prefix: str, detail_key: str, *, project_id: str | None = None
+    ) -> Step | None:
         """The succeeded step named ``prefix*`` whose detail carries *detail_key*, from the
-        newest run of *run_kind* that has one (the newest finished of that run's steps).
-        No run-count cutoff: unrelated runs never hide it."""
+        project's newest run of *run_kind* that has one (the newest finished of that run's
+        steps). No run-count cutoff: unrelated runs never hide it."""
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT s.* FROM steps s JOIN runs r ON r.id = s.run_id "
-                "WHERE r.kind = ? AND s.status = 'succeeded' "
+                "WHERE r.project_id = ? AND r.kind = ? AND s.status = 'succeeded' "
                 "AND substr(s.name, 1, ?) = ? "
                 "AND json_extract(s.detail_json, '$.' || ?) IS NOT NULL "
                 "ORDER BY r.started_at DESC, r.rowid DESC, s.finished_at DESC, s.id DESC "
                 "LIMIT 1",
-                (run_kind, len(prefix), prefix, detail_key),
+                (self._pid(project_id), run_kind, len(prefix), prefix, detail_key),
             ).fetchone()
         return _step(row) if row is not None else None
 
@@ -1106,29 +1682,39 @@ class Store:
 
     # --- source leases --------------------------------------------------------
 
-    def acquire_leases(self, names: list[str], operation: str, *, ttl: float = LEASE_TTL_S) -> str:
-        """Reserve every source in *names* for *operation*, all or nothing; return the
-        lease token. Raises :class:`SourceBusy` while a lease's holder pid is alive (also
-        past its expiry: a suspended or slow holder keeps exclusivity). Only a lease whose
-        pid is gone is reclaimed."""
+    def acquire_leases(
+        self,
+        names: list[str],
+        operation: str,
+        *,
+        ttl: float = LEASE_TTL_S,
+        project_id: str | None = None,
+    ) -> str:
+        """Reserve every source in *names* (of the project) for *operation*, all or nothing;
+        return the lease token. Raises :class:`SourceBusy` while a lease's holder pid is
+        alive (also past its expiry: a suspended or slow holder keeps exclusivity). Only a
+        lease whose pid is gone is reclaimed."""
         token = uuid.uuid4().hex
         now = time.time()
         wanted = sorted(set(names))
+        pid = self._pid(project_id)
         with self._immediate() as conn:
             for name in wanted:
                 row = conn.execute(
-                    "SELECT * FROM source_leases WHERE source_name = ?", (name,)
+                    "SELECT * FROM source_leases WHERE project_id = ? AND source_name = ?",
+                    (pid, name),
                 ).fetchone()
                 if row is not None and pid_alive(row["pid"]):
                     raise SourceBusy(name, row["operation"], row["pid"])
             for name in wanted:
                 conn.execute(
-                    "INSERT INTO source_leases (source_name, token, operation, pid, "
-                    "acquired_at, expires_at) VALUES (?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT (source_name) DO UPDATE SET token = excluded.token, "
-                    "operation = excluded.operation, pid = excluded.pid, "
-                    "acquired_at = excluded.acquired_at, expires_at = excluded.expires_at",
-                    (name, token, operation, os.getpid(), now_iso(), now + ttl),
+                    "INSERT INTO source_leases (project_id, source_name, token, operation, pid, "
+                    "acquired_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT (project_id, source_name) DO UPDATE SET "
+                    "token = excluded.token, operation = excluded.operation, "
+                    "pid = excluded.pid, acquired_at = excluded.acquired_at, "
+                    "expires_at = excluded.expires_at",
+                    (pid, name, token, operation, os.getpid(), now_iso(), now + ttl),
                 )
         return token
 
@@ -1145,11 +1731,12 @@ class Store:
         with self._conn() as conn:
             conn.execute("DELETE FROM source_leases WHERE token = ?", (token,))
 
-    def lease_holder(self, name: str) -> dict[str, Any] | None:
-        """The live lease on *name* (``operation``, ``pid``, ...), if any."""
+    def lease_holder(self, name: str, *, project_id: str | None = None) -> dict[str, Any] | None:
+        """The live lease on the project's source *name* (``operation``, ``pid``, ...)."""
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT * FROM source_leases WHERE source_name = ?", (name,)
+                "SELECT * FROM source_leases WHERE project_id = ? AND source_name = ?",
+                (self._pid(project_id), name),
             ).fetchone()
         if row is None or not pid_alive(row["pid"]):
             return None
@@ -1157,12 +1744,17 @@ class Store:
 
     @contextmanager
     def lease(
-        self, names: list[str], operation: str, *, ttl: float = LEASE_TTL_S
+        self,
+        names: list[str],
+        operation: str,
+        *,
+        ttl: float = LEASE_TTL_S,
+        project_id: str | None = None,
     ) -> Iterator[Lease]:
-        """Hold the sources' lease for the ``with`` body, refreshed by a heartbeat thread.
-        A failed heartbeat (the row is no longer ours) marks the :class:`Lease` lost; the
-        holder checks it (:meth:`Lease.check`) before each step and stops."""
-        token = self.acquire_leases(names, operation, ttl=ttl)
+        """Hold the project's sources' lease for the ``with`` body, refreshed by a heartbeat
+        thread. A failed heartbeat (the row is no longer ours) marks the :class:`Lease`
+        lost; the holder checks it (:meth:`Lease.check`) before each step and stops."""
+        token = self.acquire_leases(names, operation, ttl=ttl, project_id=project_id)
         stop = threading.Event()
         held = Lease(self, token, sorted(set(names)), operation, threading.Event())
 
@@ -1182,3 +1774,130 @@ class Store:
             stop.set()
             thread.join(timeout=5)
             self.release_lease(token)
+
+
+class ProjectStore:
+    """A :class:`Store` seen through one project: every read and write is limited to it.
+
+    Objects looked up by a store-wide id (a source, a run) come back only when they belong
+    to the project; another project's id reads as missing. Calls go through the store's
+    public methods with ``project_id``, so a subclass's hooks (``TrackingStore``) still
+    see them."""
+
+    def __init__(self, store: Store, project: Project) -> None:
+        self.store = store
+        self.project = project
+        self.id = project.id
+
+    @property
+    def slug(self) -> str:
+        return self.project.slug
+
+    def refresh(self) -> ProjectStore:
+        """The same view with the project row read again (after a rename)."""
+        return self.store.project(self.id)
+
+    # --- sources ----------------------------------------------------------------------
+
+    def add_source(
+        self, *, name: str, kind: SourceKind, locator: str, pg_database: str | None = None
+    ) -> Source:
+        return self.store.add_source(
+            name=name, kind=kind, locator=locator, pg_database=pg_database, project_id=self.id
+        )
+
+    def get_source(self, name: str) -> Source | None:
+        return self.store.get_source(name, project_id=self.id)
+
+    def get_source_by_id(self, source_id: str) -> Source | None:
+        found = self.store.get_source_by_id(source_id)
+        return found if found is not None and found.project_id == self.id else None
+
+    def list_sources(self) -> list[Source]:
+        return self.store.list_sources(project_id=self.id)
+
+    # --- runs -------------------------------------------------------------------------
+
+    def create_run(
+        self,
+        *,
+        kind: str,
+        source_id: str | None,
+        params: dict[str, Any] | None = None,
+        status: RunStatus = "running",
+    ) -> Run:
+        """A run in this project (a source of another project raises ValueError)."""
+        return self.store.create_run(
+            kind=kind, source_id=source_id, params=params, status=status, project_id=self.id
+        )
+
+    def get_run(self, run_id: str) -> Run | None:
+        found = self.store.get_run(run_id)
+        return found if found is not None and found.project_id == self.id else None
+
+    def list_runs(self, source_id: str | None = None, limit: int = 50) -> list[Run]:
+        return self.store.list_runs(source_id, limit, project_id=self.id)
+
+    def active_runs(self, source_id: str | None = None) -> list[Run]:
+        return self.store.active_runs(source_id, project_id=self.id)
+
+    def latest_project_run(self, kind: str) -> Run | None:
+        return self.store.latest_project_run(kind, project_id=self.id)
+
+    def last_succeeded_step(self, run_kind: str, prefix: str, detail_key: str) -> Step | None:
+        return self.store.last_succeeded_step(run_kind, prefix, detail_key, project_id=self.id)
+
+    # --- snapshots --------------------------------------------------------------------
+
+    def save_snapshot(
+        self, run_id: str, model: Any, *, sources: list[dict[str, Any]] | None = None
+    ) -> int:
+        return self.store.save_snapshot(run_id, model, sources=sources, project_id=self.id)
+
+    def latest_snapshot(self, *, with_model: bool = True) -> Snapshot | None:
+        return self.store.latest_snapshot(with_model=with_model, project_id=self.id)
+
+    def get_snapshot(self, revision: int, *, with_model: bool = True) -> Snapshot | None:
+        return self.store.get_snapshot(revision, with_model=with_model, project_id=self.id)
+
+    def latest_revision(self) -> int | None:
+        return self.store.latest_revision(project_id=self.id)
+
+    def previous_revision(self, revision: int) -> int | None:
+        return self.store.previous_revision(revision, project_id=self.id)
+
+    def list_snapshots(self, limit: int = 50) -> list[Snapshot]:
+        return self.store.list_snapshots(limit, project_id=self.id)
+
+    # --- leases -----------------------------------------------------------------------
+
+    def acquire_leases(self, names: list[str], operation: str, *, ttl: float = LEASE_TTL_S) -> str:
+        return self.store.acquire_leases(names, operation, ttl=ttl, project_id=self.id)
+
+    def lease_holder(self, name: str) -> dict[str, Any] | None:
+        return self.store.lease_holder(name, project_id=self.id)
+
+    def lease(
+        self, names: list[str], operation: str, *, ttl: float = LEASE_TTL_S
+    ) -> contextlib.AbstractContextManager[Lease]:
+        return self.store.lease(names, operation, ttl=ttl, project_id=self.id)
+
+    # --- per-project tables kept in their own modules ---------------------------------
+
+    def decisions(self) -> DecisionStore:
+        """The project's :class:`~autoontology.store.decisions.DecisionStore`."""
+        from autoontology.store.decisions import DecisionStore
+
+        return DecisionStore(self.store, project_id=self.id)
+
+    def agent_tokens(self) -> AgentTokens:
+        """The project's :class:`~autoontology.store.agent_tokens.AgentTokens`."""
+        from autoontology.store.agent_tokens import AgentTokens
+
+        return AgentTokens(self.store, project_id=self.id)
+
+    def playground(self) -> PlaygroundStore:
+        """The project's :class:`~autoontology.playground.store.PlaygroundStore`."""
+        from autoontology.playground.store import PlaygroundStore
+
+        return PlaygroundStore(self.store, project_id=self.id)

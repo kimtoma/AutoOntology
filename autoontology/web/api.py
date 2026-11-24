@@ -257,7 +257,9 @@ class Api:
     @property
     def store(self) -> Store:
         if self._store is None:
-            self._store = Store.for_home(self.settings.home)
+            self._store = Store.for_home(
+                self.settings.home, default_project_slug=self.settings.workspace
+            )
         return self._store
 
     @property
