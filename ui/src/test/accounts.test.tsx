@@ -513,6 +513,19 @@ describe("members page", () => {
     expect(await screen.findByText(/keeps at least one owner/)).toBeInTheDocument()
   })
 
+  it("tells an owner who is not an admin to ask an administrator for a new account", async () => {
+    mockFetch(routes("owner", {
+      "GET /members": () => ({ members: [member("kim@example.com", "owner", { id: "u1" })] }),
+      "POST /members": () => json(403, { error: "admin_required_for_new_user", detail: "ask an administrator" }),
+    }))
+    renderApp("/p/main/members")
+    expect(await screen.findByText(/For someone new, ask an administrator to invite them/)).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText("Email"), "stranger@example.com")
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ask an administrator to invite this person.")
+  })
+
   it("is closed to non-owners", async () => {
     const { calls } = mockFetch(routes("editor"))
     renderApp("/p/main/members")

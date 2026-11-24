@@ -1,7 +1,8 @@
 /* `/p/:project/members` (owners and admins): the project's members with their role, add one
-   by email (an unknown email becomes a new account with an invitation link, shown with a copy
-   button when mail is not set up), change a role, remove a member (a project keeps an owner:
-   409 last_owner). */
+   by email (admins only: an unknown email becomes a new account with an invitation link, shown
+   with a copy button when mail is not set up; an owner who is not an admin adds existing users
+   and gets 403 admin_required_for_new_user otherwise), change a role, remove a member (a
+   project keeps an owner: 409 last_owner). */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2, ScrollText, Trash2, UserPlus, Users } from "lucide-react"
@@ -43,6 +44,7 @@ function AddMember({ slug, onInvite }: { slug: string; onInvite: (i: Invite) => 
   const [role, setRole] = useState<string>("viewer")
   const [problem, setProblem] = useState<string | null>(null)
   const emailRef = useRef<HTMLInputElement>(null)
+  const isAdmin = useMe().is_admin
   const add = useMutation({
     mutationFn: () => authApi.members.add(slug, { email: email.trim(), role }),
     onSuccess: (res) => {
@@ -72,7 +74,7 @@ function AddMember({ slug, onInvite }: { slug: string; onInvite: (i: Invite) => 
     <Card className="gap-3 py-4" id="member-add">
       <CardHeader className="px-4">
         <CardTitle className="flex items-center gap-2 text-base"><UserPlus className="size-4" aria-hidden /> {t("members.add.title")}</CardTitle>
-        <CardDescription>{t("members.add.description")}</CardDescription>
+        <CardDescription>{t(isAdmin ? "members.add.description" : "members.add.description.owner")}</CardDescription>
       </CardHeader>
       <CardContent className="px-4">
         <form onSubmit={submit} noValidate className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem_auto] sm:items-end">

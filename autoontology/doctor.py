@@ -630,8 +630,40 @@ def check_projects(settings: Settings) -> Check:
     return Check("projects", "OK", summary)
 
 
+PUBLIC_URL_REMEDY = "set AUTOONTOLOGY_PUBLIC_URL in .env to the canonical https URL users open"
+
+
+def check_public_url(settings: Settings) -> Check | None:
+    """Accounts mode only: invitation and magic links and the Secure (``__Host-``) session
+    cookie depend on ``AUTOONTOLOGY_PUBLIC_URL`` being the canonical https URL."""
+    if not settings.accounts_enabled:
+        return None
+    name = "public url"
+    url = settings.public_url
+    if not url:
+        return Check(
+            name,
+            "WARN",
+            "accounts are on but AUTOONTOLOGY_PUBLIC_URL is not set: links follow the "
+            "request's Host and the cookie may not be Secure",
+            PUBLIC_URL_REMEDY,
+        )
+    if not url.startswith("https://"):
+        return Check(
+            name,
+            "WARN",
+            f"accounts are on but {url} is not https: links and the session cookie travel "
+            "unencrypted",
+            PUBLIC_URL_REMEDY,
+        )
+    return Check(name, "OK", url)
+
+
 def run_checks(settings: Settings, *, skip_models: bool = False) -> list[Check]:
     checks = [check_env_file()]
+    public = check_public_url(settings)
+    if public is not None:
+        checks.append(public)
     checks += check_postgres(settings)
     checks += check_ports(settings)
     checks.append(

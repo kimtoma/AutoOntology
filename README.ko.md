@@ -874,13 +874,24 @@ ACL 태그로 로그인한 서버)는 신원 헤더가 없으므로 같은 방�
 `/api/status`의 `remote`에 호스트 이름이 나옵니다(로그인은 나오지 않습니다).
 **AutoOntology에는 `tailscale funnel`을 절대 쓰지 마세요.** 자체 인증이 없습니다.
 
+신원 헤더를 믿는 근거는 네트워크에서 tailnet `Host`를 보낼 수 있는 것이 tailscaled뿐이라는
+점입니다. 하지만 이 컴퓨터의 어떤 프로세스든 `127.0.0.1`에 접속해 그 `Host`와 원하는
+`Tailscale-User-Login`을 보낼 수 있습니다. 따라서 `AUTOONTOLOGY_TAILSCALE_HOSTS`를 설정하면 모든
+로컬 프로세스(와 모든 로컬 사용자 계정)가 tailnet 신원을 사칭할 수 있고, 계정 모드에서는 그
+이메일의 사용자로 로그인됩니다. 믿을 수 없는 사람이나 소프트웨어와 함께 쓰는 컴퓨터에서는
+`AUTOONTOLOGY_TAILSCALE_HOSTS`를 설정하지 마세요.
+
 ### 계정
 
 기본값(`AUTOONTOLOGY_AUTH=off`)에서는 계정이 없습니다. 서비스에 닿는 사람은 누구나 모든 것을 할
 수 있습니다. `AUTOONTOLOGY_AUTH=accounts`로 켜면 이메일과 비밀번호(12자 이상) 또는 1회용 링크로
-로그인하고 세션 쿠키(`ao_session`: HttpOnly, SameSite=Strict, 로컬이 아닌 호스트나 https
-`AUTOONTOLOGY_PUBLIC_URL`이면 Secure, 유효 시간 `AUTOONTOLOGY_SESSION_HOURS` 기본 12시간)를
-받습니다. 설정된 tailnet 호스트에서는 Tailscale 로그인과 이메일이 같은 사용자로 로그인됩니다.
+로그인하고 세션 쿠키(HttpOnly, SameSite=Strict, Path=/, Domain 없음, 유효 시간
+`AUTOONTOLOGY_SESSION_HOURS` 기본 12시간)를 받습니다. 로컬이 아닌 호스트, `X-Forwarded-Proto:
+https` 뒤, https `AUTOONTOLOGY_PUBLIC_URL`에서는 Secure이고 이름이 `__Host-ao_session`입니다
+(브라우저가 형제 서브도메인이나 평문 http에서 온 이런 쿠키를 거부하므로 다른 사이트가 세션을 심을
+수 없음). 평문 http 로컬 사용에서는 `ao_session`입니다. 서비스 앞의 게이트웨이는 `Cookie`
+헤더(`__Host-ao_session`)를 그대로 전달해야 합니다. 설정된 tailnet 호스트에서는 Tailscale
+로그인과 이메일이 같은 사용자로 로그인됩니다.
 
 계정 기능을 켜기 전에 서버에서 첫 관리자를 만드세요. 비밀번호 없이 만들면 관리자가 비밀번호를
 정할 1회용 초대 링크(7일 유효)를 출력합니다.
@@ -890,8 +901,9 @@ uv run ao user create you@example.com --name "You" --admin
 # 또는: printf '%s\n' "$PASSWORD" | uv run ao user create you@example.com --admin --password-stdin
 ```
 
-그다음 `AUTOONTOLOGY_AUTH=accounts`(공개 주소로 접속한다면 링크가 그 주소를 가리키도록
-`AUTOONTOLOGY_PUBLIC_URL`도)를 설정하고 다시 시작합니다. 다른 명령: `ao user list [--json]`,
+그다음 `AUTOONTOLOGY_AUTH=accounts`와, 사람들이 여는 대표 https 주소로
+`AUTOONTOLOGY_PUBLIC_URL`을 설정하고(초대·로그인 링크가 그 주소를 가리키고 Secure 쿠키도 이 값에
+달려 있음. 계정 모드인데 비어 있거나 https가 아니면 `ao doctor`가 경고) 다시 시작합니다. 다른 명령: `ao user list [--json]`,
 `ao user disable|enable <email>`(비활성화하면 바로 로그아웃), `ao user link <email>
 [--purpose magic|reset|invite]`(메일이 없을 때 전달할 로그인 또는 비밀번호 재설정 링크).
 CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩니다.
@@ -901,9 +913,15 @@ CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩�
 주소에 계정이 있는지 알려 주지 않습니다. SMTP가 없으면 버튼이 숨겨집니다.
 
 로그인 API(`/api/auth/*`, 세션 없이 접근 가능, 호스트·교차 출처 검사는 그대로): `POST login
-{email, password}`(실패는 모두 401 `invalid_credentials`, IP나 이메일별 분당 5회 실패 뒤
-429), `POST logout`, `GET me`, `POST magic-link {email}`(항상 202), `POST magic {token}`,
-`POST accept-invite {token, password}`, `POST password {current, new}`(다른 세션 종료).
+{email, password}`(실패는 모두 401 `invalid_credentials`, 클라이언트 IP 하나에서 분당 20회 또는
+한 IP에서 이메일 하나로 5회 실패 뒤 429), `POST logout`, `GET me`, `POST magic-link
+{email}`(항상 202, IP별·이메일+IP별 분당 5통, 이메일별 시간당 20통까지), `POST magic {token}`,
+`POST accept-invite {token, password}`, `POST password {current, new}`(다른 세션 종료, 틀린 현재
+비밀번호는 로그인 실패처럼 셈). 다른 주소에서 난 이메일의 실패는 그 사용자를 잠그지 않습니다.
+실패 응답만 느려지고(최대 4초) 다른 IP에서 맞는 비밀번호를 넣으면 로그인됩니다. 여러 IP에서 한
+주소로 링크를 요청하면 그 주소의 시간당 링크 한도를 다 쓸 수 있지만, 사용자는 비밀번호로 계속
+로그인할 수 있습니다. 클라이언트 IP는 접속한 주소이고, 루프백(로컬 게이트웨이)에서 온 요청만
+`X-Forwarded-For`의 첫 항목을 씁니다. 다른 헤더는 믿지 않습니다.
 로그인 링크는 두 단계입니다. `/auth/magic/<token>`을 열면 "로그인 계속" 버튼만 보이고(링크를
 미리 여는 메일 검사기가 링크를 써 버리지 않음), 버튼이 토큰을 `POST /api/auth/magic`으로 보내야
 로그인됩니다. SSO(OIDC)는 예정이며 `AUTOONTOLOGY_OIDC_*`는 예약되어 있습니다.
@@ -937,12 +955,21 @@ CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩�
 아니면 계속 답합니다.
 
 연결 토큰은 만든(또는 마지막으로 교체한) 사람을 기억합니다. 그 사람이 비활성화되거나 토큰의
-프로젝트 멤버가 아니게 되면 토큰도 멈춥니다. 계정 기능 이전의 토큰은 계속 동작합니다.
+프로젝트 멤버가 아니게 되면 토큰도 멈춥니다. 만든 사람이 없는 토큰(계정 기능 이전이나 CLI로 만든
+것)은 누가 빠져도 계속 동작하므로, 토큰을 가진 사람이 떠나면 직접 폐기하세요(`ao -p <p> agent
+tokens revoke <id>`).
+
+플레이그라운드 대화는 사용자가 아니라 프로젝트에 속합니다. 플레이그라운드를 쓸 수 있는 멤버는
+프로젝트의 모든 대화를 읽을 수 있으므로(아직 사용자별 소유 없음), 다른 멤버가 보면 안 되는 내용은
+넣지 마세요.
 
 #### 멤버, 사용자, 감사 로그
 
-- 멤버(owner): `GET|POST /api/projects/<p>/members`(`{email, role}`, 없는 이메일은 새 사용자가
-  되고 응답에 `invite_link`), `PATCH|DELETE /api/projects/<p>/members/<user_id>`(owner는 한 명
+- 멤버(owner): `GET|POST /api/projects/<p>/members`(`{email, role}`, 계정은 관리자만 만듭니다.
+  관리자가 없는 이메일을 넣으면 새 사용자가 되고 응답에 `invite_link`. 관리자가 아닌 owner는 없는
+  이메일과 비활성 계정 모두 같은 403 `admin_required_for_new_user`를 받으니 관리자에게 초대를
+  요청하세요. 기존 사용자를 추가하면 그 주소에 계정이 있다는 것은 owner에게 드러납니다),
+  `PATCH|DELETE /api/projects/<p>/members/<user_id>`(owner는 한 명
   이상 남아야 함: 409 `last_owner`). CLI: `ao -p <p> member list|add <email> --role R|role <email> R|remove <email>`.
 - 사용자(관리자): `GET|POST /api/users`(`{email, name?, is_admin?}` -> `{user, invite_link,
   mail_sent}`), `PATCH /api/users/<id>`(`{name?, is_admin?, disabled?}`, 마지막 활성 관리자는
@@ -963,7 +990,9 @@ CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩�
 `INGESTION_SERVICE_URL=http://127.0.0.1:<port>/internal/<key>`로 접근하며, CLI·공급자
 테스트·플레이그라운드는 `X-AutoOntology-Internal`을 보냅니다. 그 밖에는 관리자 세션이 있어야
 합니다. `AUTOONTOLOGY_AUTH`를 바꾼 뒤에는 엔진이 새 키를 받도록 전부 다시 시작하세요
-(`ao down && ao up`). 서비스 앞의 게이트웨이는 `X-AutoOntology-Internal`, `X-AutoOntology-As`,
+(`ao down && ao up`). `internal.key`를 교체할 때(지우면 처음 쓸 때 새로 만듦)도 같습니다.
+서비스·엔진·실행 중인 CLI 명령은 다시 시작할 때까지 예전에 만든 키를 씁니다. 이 파일은 읽을
+때마다 0600으로 되돌려집니다. 서비스 앞의 게이트웨이는 `X-AutoOntology-Internal`, `X-AutoOntology-As`,
 그리고 `/mcp`·`/agent/v1` 밖의 `Authorization`을 절대 전달하면 안 됩니다.
 
 취약점 신고 방법은 [SECURITY.md](SECURITY.md)를 보세요.

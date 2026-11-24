@@ -87,6 +87,7 @@ export const enAccounts = {
   "auth.error.not_a_member": "This person is not a member any more.",
   "auth.error.user_disabled": "The user is disabled: enable them first.",
   "auth.error.project_required": "Pick a project you own.",
+  "auth.error.admin_required_for_new_user": "This address has no active account. Ask an administrator to invite this person.",
 
   "nav.users": "Users",
   "nav.users.hint": "Accounts, invitations and the audit log",
@@ -106,6 +107,7 @@ export const enAccounts = {
   "members.col.actions": "Actions",
   "members.add.title": "Add a member",
   "members.add.description": "An email without an account gets one, with an invitation link.",
+  "members.add.description.owner": "Add people who already have an account. For someone new, ask an administrator to invite them.",
   "members.add.email": "Email",
   "members.add.role": "Role",
   "members.add.submit": "Add",

@@ -392,3 +392,37 @@ def test_vendored_migrations_have_one_head_at_the_engine_13_revision():
     config.set_main_option("script_location", str(VENDOR_DIR / "alembic"))
     chain = [r.revision for r in ScriptDirectory.from_config(config).walk_revisions()][:4]
     assert chain == ["caee572fa81c", "84dd4f50dbba", "7d864cacef9c", "99d4d343dd0b"]
+
+
+@pytest.mark.parametrize(
+    ("auth", "url", "status"),
+    [
+        ("off", "", None),
+        ("accounts", "", "WARN"),
+        ("accounts", "http://ao.example.com", "WARN"),
+        ("accounts", "https://ao.example.com", "OK"),
+    ],
+)
+def test_public_url_check_in_accounts_mode(isolated_env, monkeypatch, auth, url, status):
+    monkeypatch.setenv("AUTOONTOLOGY_AUTH", auth)
+    if url:
+        monkeypatch.setenv("AUTOONTOLOGY_PUBLIC_URL", url)
+    check = doctor.check_public_url(Settings.from_env())
+    if status is None:
+        assert check is None
+        return
+    assert check is not None and check.status == status
+    if status == "WARN":
+        assert "AUTOONTOLOGY_PUBLIC_URL" in check.remedy
+        from autoontology.i18n import remedy
+
+        assert "https" in remedy(check.remedy, "ko") and "설정" in remedy(check.remedy, "ko")
+
+
+def test_run_checks_lists_the_public_url_row_with_accounts_on(isolated_env, monkeypatch):
+    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    _stub_infra(monkeypatch)
+    monkeypatch.setattr(doctor, "check_ollama", lambda s: Check("ollama", "OK"))
+    checks = doctor.run_checks(Settings.from_env(), skip_models=True)
+    row = next(c for c in checks if c.name == "public url")
+    assert row.status == "WARN"

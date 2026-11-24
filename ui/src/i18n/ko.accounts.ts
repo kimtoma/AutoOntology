@@ -88,6 +88,7 @@ export const koAccounts: Record<keyof typeof enAccounts, string> = {
   "auth.error.not_a_member": "이미 멤버가 아닙니다.",
   "auth.error.user_disabled": "비활성 사용자입니다. 먼저 활성화하세요.",
   "auth.error.project_required": "소유한 프로젝트를 고르세요.",
+  "auth.error.admin_required_for_new_user": "이 주소에는 활성 계정이 없습니다. 관리자에게 이 사람을 초대해 달라고 요청하세요.",
 
   "nav.users": "사용자",
   "nav.users.hint": "계정, 초대, 감사 로그",
@@ -107,6 +108,7 @@ export const koAccounts: Record<keyof typeof enAccounts, string> = {
   "members.col.actions": "작업",
   "members.add.title": "멤버 추가",
   "members.add.description": "계정이 없는 이메일은 새 계정과 초대 링크가 만들어집니다.",
+  "members.add.description.owner": "이미 계정이 있는 사람을 추가할 수 있습니다. 새로운 사람은 관리자에게 초대를 요청하세요.",
   "members.add.email": "이메일",
   "members.add.role": "역할",
   "members.add.submit": "추가",

@@ -86,6 +86,7 @@ MESSAGES: dict[str, str] = {
     "remedy.codex_login": "이 사용자로 `codex login` 실행 (ChatGPT 계정)",
     "remedy.install_cli": "{bin} CLI를 설치하고 로그인하세요 ({login})",
     "remedy.env_missing": "uv run autoontology init (.env 작성; 또는 cp .env.example .env)",
+    "remedy.public_url": ".env의 AUTOONTOLOGY_PUBLIC_URL을 사용자가 여는 대표 https 주소로 설정하세요",
     "remedy.start_postgres": "Postgres 시작. 예: `docker compose up -d`",
     "remedy.pgvector": (
         "uv run autoontology setup (서버에 pgvector 필요. 예: docker-compose.yml 이미지)"

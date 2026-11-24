@@ -454,12 +454,32 @@ def test_token_lives_on_its_creators_access(env):
 # --- management -----------------------------------------------------------------------------
 
 
-def test_members_api_and_last_owner(env):
+def test_only_admins_create_accounts_through_members(env):
     owner = env.client("own@example.com", role="owner")
-    resp = owner.post(f"{BETA}/members", json={"email": "new@example.com", "role": "viewer"})
+    off = env.accounts.create_user("off@example.com")
+    env.accounts.disable(off.id)
+    answers = set()
+    for email in ("stranger@example.com", "off@example.com"):
+        resp = owner.post(f"{BETA}/members", json={"email": email, "role": "viewer"})
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["error"] == "admin_required_for_new_user"
+        assert "invite_link" not in resp.text
+        answers.add(resp.text)
+    assert len(answers) == 1  # an unknown address looks like a disabled account
+    assert env.accounts.by_email("stranger@example.com") is None
+    resp = env.admin.post(f"{BETA}/members", json={"email": "new@example.com", "role": "viewer"})
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["created"] is True and "/ui/invite#token=" in body["invite_link"]
+
+
+def test_members_api_and_last_owner(env):
+    owner = env.client("own@example.com", role="owner")
+    env.accounts.create_user("new@example.com")
+    resp = owner.post(f"{BETA}/members", json={"email": "new@example.com", "role": "viewer"})
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["created"] is False and "invite_link" not in body
     assert body["member"]["role"] == "viewer" and body["mail_sent"] is False
     new_id = body["member"]["id"]
     resp = owner.post(f"{BETA}/members", json={"email": "new@example.com", "role": "viewer"})
@@ -486,7 +506,7 @@ def test_members_api_and_last_owner(env):
     resp = owner.patch(f"{BETA}/members/{own_id}", json={"role": "viewer"})
     assert resp.status_code == 409 and resp.json()["error"] == "last_owner"
     actions = [e["action"] for e in env.accounts.list_audit(project_id=env.beta.id)]
-    assert {"member.add", "member.role", "member.remove", "user.invite"} <= set(actions)
+    assert {"member.add", "member.role", "member.remove"} <= set(actions)
 
 
 def test_users_api(env):

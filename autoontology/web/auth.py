@@ -6,15 +6,19 @@ Modes (``AUTOONTOLOGY_AUTH``)
 * ``off`` (default): no accounts. Every caller past the host guard is a synthetic
   :class:`Actor` with admin rights named after the tailnet login or ``"local"`` -- the
   behaviour from before accounts, unchanged.
-* ``accounts``: a caller is the user of its ``ao_session`` cookie, else the user whose
+* ``accounts``: a caller is the user of its session cookie, else the user whose
   email is the Tailscale login (``tailscale serve`` identity header, on a configured
   tailnet hostname), else nobody (``current_user`` is None). A disabled user is nobody.
 
-Session cookie ``ao_session``: a random id (the store keeps its SHA-256), ``HttpOnly``,
-``SameSite=Strict``, ``Path=/``, ``Max-Age`` = ``AUTOONTOLOGY_SESSION_HOURS``; ``Secure``
-when the request does not come to 127.0.0.1/localhost, when ``AUTOONTOLOGY_PUBLIC_URL`` is
-https or when the proxy says the request was https (``X-Forwarded-Proto``). A login always
-issues a new id (and ends the session it replaces).
+Session cookie: a random id (the store keeps its SHA-256), ``HttpOnly``,
+``SameSite=Strict``, ``Path=/``, no ``Domain``, ``Max-Age`` = ``AUTOONTOLOGY_SESSION_HOURS``;
+``Secure`` when the request does not come to 127.0.0.1/localhost, when
+``AUTOONTOLOGY_PUBLIC_URL`` is https or when the proxy says the request was https
+(``X-Forwarded-Proto``). A Secure cookie is named ``__Host-ao_session`` (the browser then
+refuses one set by a sibling subdomain or over plain http: no cookie tossing); a cookie for
+plain-http local use is ``ao_session``. A request that would get a Secure cookie only reads
+``__Host-ao_session``; a local plain-http one prefers it and falls back to ``ao_session``.
+Logout clears both. A login always issues a new id (and ends the session it replaces).
 
 The routes work without a session; every non-GET one still passes the service's host and
 cross-origin checks (``web/api.py``), which is what stops login CSRF.
@@ -22,9 +26,12 @@ cross-origin checks (``web/api.py``), which is what stops login CSRF.
 ``POST /api/auth/login``
     ``{email, password}`` -> 200 the :func:`me` body + cookie; 401 ``invalid_credentials``
     for every failure (unknown email, wrong password, no password, disabled); 429
-    ``too_many_attempts`` (``Retry-After``) after 5 failures a minute per client IP or per
-    email; failures answer after an exponential delay. Audit ``login_ok`` /
-    ``login_failed``.
+    ``too_many_attempts`` (``Retry-After``) after :data:`LOGIN_IP_LIMIT` failures a minute
+    from one client IP, or :data:`LOGIN_PAIR_LIMIT` for one email from one IP (attempts in
+    flight count, so parallel requests cannot overshoot). Failures for an email from any
+    IP never refuse a request -- a correct password from another address still signs in
+    (no targeted lockout) -- they only slow the failed answers down: an exponential delay
+    up to :data:`FAIL_DELAY_MAX_S`. Audit ``login_ok`` / ``login_failed``.
 ``POST /api/auth/logout``
     200 ``{"ok": true}``, the session ends and the cookie is cleared.
 ``GET /api/auth/me``
@@ -32,7 +39,10 @@ cross-origin checks (``web/api.py``), which is what stops login CSRF.
     session_expires_at}`` (``user`` null when signed out).
 ``POST /api/auth/magic-link``
     ``{email}`` -> always 202 ``{"ok": true}``; a link is mailed only when the user exists,
-    is active, SMTP is configured and the per-IP/per-email limit allows it.
+    is active, SMTP is configured and the limits allow it: :data:`MAGIC_LIMIT` a minute per
+    client IP and per (email, IP), and a generous :data:`MAGIC_EMAIL_LIMIT` an hour per
+    email (so mail cannot be flooded; someone sending requests for an address from many
+    IPs can use that hourly cap up -- the user can still sign in with a password).
 ``GET /auth/magic/{token}``
     never signs in (mail scanners prefetch links): a valid magic token gets a small confirm
     page whose button POSTs it to ``/api/auth/magic`` (``no-store``, no framing); anything
@@ -48,7 +58,9 @@ cross-origin checks (``web/api.py``), which is what stops login CSRF.
 ``POST /api/auth/password``
     ``{current, new}`` (signed in; ``current`` is ignored for a user without a password)
     -> 200 ``{"ok": true, "revoked_sessions": n}``, every other session ends; 401
-    ``login_required``, 403 ``wrong_password``, 400 ``weak_password``.
+    ``login_required``, 403 ``wrong_password``, 400 ``weak_password``; wrong ``current``
+    passwords count towards the caller's IP and (email, IP) limits (429), never another
+    IP's failures.
 
 ``GET /api/auth/me`` also lists ``permissions`` (``{slug: [permission, ...]}``, admins:
 every project) and ``installation_permissions`` (see ``web/projects.py``).
@@ -66,6 +78,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import logging
 import re
 import threading
@@ -95,16 +108,25 @@ if TYPE_CHECKING:  # pragma: no cover - api imports this module
 
 log = logging.getLogger("autoontology.auth")
 
+#: The session cookie: ``__Host-ao_session`` when Secure, ``ao_session`` on plain-http
+#: local use (see the module docstring).
 COOKIE = "ao_session"
-#: Failed logins allowed per client IP and per email within :data:`LOGIN_WINDOW_S`.
-LOGIN_LIMIT = 5
+HOST_COOKIE = "__Host-ao_session"
+#: Failed logins (and wrong current passwords) allowed within :data:`LOGIN_WINDOW_S` per
+#: client IP (shared offices sit behind one address) and per (email, client IP). Both
+#: refuse with 429; failures for one email from all addresses only add delay.
+LOGIN_IP_LIMIT = 20
+LOGIN_PAIR_LIMIT = 5
 LOGIN_WINDOW_S = 60.0
 #: A failed login answers after ``FAIL_DELAY_S * 2**(failures - 1)`` seconds, at most
-#: :data:`FAIL_DELAY_MAX_S`.
+#: :data:`FAIL_DELAY_MAX_S` (failures: the most of the IP's, the pair's and the email's).
 FAIL_DELAY_S = 0.25
 FAIL_DELAY_MAX_S = 4.0
-#: Magic-link requests allowed per client IP and per email within the window.
+#: Magic-link requests allowed per client IP and per (email, IP) within the window, and per
+#: email within :data:`MAGIC_EMAIL_WINDOW_S`.
 MAGIC_LIMIT = 5
+MAGIC_EMAIL_LIMIT = 20
+MAGIC_EMAIL_WINDOW_S = 3600.0
 EMAIL_FIELD_MAX = 320
 #: Where the browser goes after a magic link (and after a bad one).
 UI_HOME = "/ui/"
@@ -221,13 +243,17 @@ def engine_refusal(api: Api, request: Request) -> Response | None:
     return None
 
 
+#: One lock for every limiter: :func:`reserve` checks and records several keys at once.
+_LIMIT_LOCK = threading.RLock()
+
+
 class RateLimiter:
     """Events per key in a sliding window (in memory, per process, thread-safe)."""
 
     def __init__(self, limit: int, window_s: float) -> None:
         self.limit, self.window_s = limit, window_s
         self._events: dict[str, deque[float]] = {}
-        self._lock = threading.Lock()
+        self._lock = _LIMIT_LOCK
 
     def _prune(self, key: str, now: float) -> deque[float]:
         events = self._events.setdefault(key, deque())
@@ -248,30 +274,78 @@ class RateLimiter:
                 return 0
             return max(1, int(events[len(events) - self.limit] + self.window_s - now) + 1)
 
-    def hit(self, key: str) -> int:
+    def hit(self, key: str, now: float | None = None) -> int:
         """Record an event; the count in the window."""
         with self._lock:
-            events = self._prune(key, time.monotonic())
-            events.append(time.monotonic())
+            now = time.monotonic() if now is None else now
+            events = self._prune(key, now)
+            events.append(now)
             if len(self._events) > 10_000:  # forget idle keys
                 for stale in [k for k, v in self._events.items() if not v][:5000]:
                     del self._events[stale]
             return len(events)
+
+    def forget(self, key: str, stamp: float) -> None:
+        """Drop the event recorded at *stamp* (a reservation that turned out fine)."""
+        with self._lock:
+            events = self._events.get(key)
+            if events is not None:
+                try:
+                    events.remove(stamp)
+                except ValueError:
+                    pass
 
     def reset(self, key: str) -> None:
         with self._lock:
             self._events.pop(key, None)
 
 
+def reserve(slots: list[tuple[RateLimiter, str]]) -> tuple[int, float]:
+    """Check and record one attempt on every ``(limiter, key)`` at once: ``(retry, stamp)``
+    -- ``retry`` > 0 (seconds) when one of them is at its limit (nothing is recorded),
+    else 0 and the attempt is recorded at ``stamp`` (an attempt in flight counts, so
+    parallel requests cannot get past a limit). :func:`release` takes it back."""
+    with _LIMIT_LOCK:
+        retry = max(limiter.retry_after(key) for limiter, key in slots)
+        if retry:
+            return retry, 0.0
+        stamp = time.monotonic()
+        for limiter, key in slots:
+            limiter.hit(key, stamp)
+        return 0, stamp
+
+
+def release(slots: list[tuple[RateLimiter, str]], stamp: float) -> None:
+    """Take back an attempt :func:`reserve` recorded (it succeeded)."""
+    with _LIMIT_LOCK:
+        for limiter, key in slots:
+            limiter.forget(key, stamp)
+
+
+#: Peers whose ``X-Forwarded-For`` is believed: the local gateway (and Starlette's test
+#: client, which is not an address a socket can have).
+TRUSTED_PEERS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1", "testclient"})
+_IP_RE = re.compile(r"^[0-9A-Fa-f.:]{2,45}$")
+
+
+def _valid_ip(value: str) -> str | None:
+    if not _IP_RE.match(value):
+        return None
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return None
+
+
 def client_ip(request: Request) -> str:
-    """The caller's IP. Behind the local gateway (the peer is loopback) the address the
-    proxy reports (``CF-Connecting-IP``, else the first ``X-Forwarded-For``)."""
+    """The caller's IP. Behind the local gateway (the peer is loopback) the first
+    ``X-Forwarded-For`` entry when it is an IP address; no other header is trusted (a
+    peer that is not loopback could set any of them)."""
     peer = request.client.host if request.client else ""
-    if peer in ("127.0.0.1", "::1", "localhost", "testclient", ""):
-        forwarded = (request.headers.get("cf-connecting-ip") or "").strip()
-        if not forwarded:
-            forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-        if forwarded and len(forwarded) <= 64:
+    if peer in TRUSTED_PEERS:
+        first = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        forwarded = _valid_ip(first) if first else None
+        if forwarded:
             return forwarded
     return peer or "-"
 
@@ -347,13 +421,22 @@ class AuthService:
 
     api: Api
     mailer: Mailer = field(default_factory=Mailer)
-    login_ip: RateLimiter = field(default_factory=lambda: RateLimiter(LOGIN_LIMIT, LOGIN_WINDOW_S))
+    login_ip: RateLimiter = field(
+        default_factory=lambda: RateLimiter(LOGIN_IP_LIMIT, LOGIN_WINDOW_S)
+    )
+    login_pair: RateLimiter = field(
+        default_factory=lambda: RateLimiter(LOGIN_PAIR_LIMIT, LOGIN_WINDOW_S)
+    )
+    #: failures per email from every address: only the delay, never a refusal
     login_email: RateLimiter = field(
-        default_factory=lambda: RateLimiter(LOGIN_LIMIT, LOGIN_WINDOW_S)
+        default_factory=lambda: RateLimiter(LOGIN_PAIR_LIMIT, LOGIN_WINDOW_S)
     )
     magic_ip: RateLimiter = field(default_factory=lambda: RateLimiter(MAGIC_LIMIT, LOGIN_WINDOW_S))
-    magic_email: RateLimiter = field(
+    magic_pair: RateLimiter = field(
         default_factory=lambda: RateLimiter(MAGIC_LIMIT, LOGIN_WINDOW_S)
+    )
+    magic_email: RateLimiter = field(
+        default_factory=lambda: RateLimiter(MAGIC_EMAIL_LIMIT, MAGIC_EMAIL_WINDOW_S)
     )
     password: PasswordProvider = field(default_factory=PasswordProvider)
     magic: MagicLinkProvider = field(default_factory=MagicLinkProvider)
@@ -365,6 +448,10 @@ class AuthService:
     @property
     def enabled(self) -> bool:
         return self.api.settings.accounts_enabled
+
+    def login_slots(self, email: str, ip: str) -> list[tuple[RateLimiter, str]]:
+        """The limits a password attempt counts against: the client IP, the (email, IP)."""
+        return [(self.login_ip, f"ip:{ip}"), (self.login_pair, f"pair:{email}|{ip}")]
 
     @property
     def magic_link_enabled(self) -> bool:
@@ -386,18 +473,36 @@ class AuthService:
             return True
         return host_name(request.headers.get("host") or "") not in LOCAL_HOSTS
 
+    def cookie_name(self, request: Request) -> str:
+        return HOST_COOKIE if self.secure_cookie(request) else COOKIE
+
+    def session_cookie(self, request: Request) -> str | None:
+        """The session id the request carries: ``__Host-ao_session``; on a plain-http
+        local request also ``ao_session``. A Secure request never reads the unprefixed
+        name, which a sibling subdomain or a plain-http page could have planted."""
+        raw = request.cookies.get(HOST_COOKIE)
+        if raw:
+            return raw
+        if self.secure_cookie(request):
+            return None
+        return request.cookies.get(COOKIE) or None
+
     def set_cookie(self, response: Response, request: Request, raw: str) -> None:
+        secure = self.secure_cookie(request)
+        # __Host- requires Secure, Path=/ and no Domain (the browser enforces it)
         response.set_cookie(
-            COOKIE,
+            HOST_COOKIE if secure else COOKIE,
             raw,
             max_age=int(self.api.settings.session_hours * 3600),
             path="/",
             httponly=True,
             samesite="strict",
-            secure=self.secure_cookie(request),
+            secure=secure,
         )
 
     def clear_cookie(self, response: Response, request: Request) -> None:
+        """Clear both names (a cookie set before a switch to https, or the other way)."""
+        response.delete_cookie(HOST_COOKIE, path="/", httponly=True, samesite="strict", secure=True)
         response.delete_cookie(
             COOKIE,
             path="/",
@@ -409,7 +514,7 @@ class AuthService:
     def start_session(self, request: Request, user: User) -> str:
         """A new session for *user*; the session the request's cookie names ends."""
         accounts = self.accounts
-        old = request.cookies.get(COOKIE)
+        old = self.session_cookie(request)
         if old:
             accounts.revoke_session(old)
         raw, _ = accounts.create_session(
@@ -428,7 +533,7 @@ class AuthService:
             return Actor(name=name, is_admin=True, via="off")
         if internal_caller(self.api, request):
             return cli_actor(self.api, request)
-        found = self.accounts.lookup_session(request.cookies.get(COOKIE))
+        found = self.accounts.lookup_session(self.session_cookie(request))
         if found is not None:
             session, user = found
             return Actor(
@@ -585,17 +690,23 @@ def build_router(api: Api) -> APIRouter:
         email = _str_field(body, "email", EMAIL_FIELD_MAX).strip().lower()
         password = _str_field(body, "password", PASSWORD_MAX)
         ip = client_ip(request)
-        ip_key, email_key = f"ip:{ip}", f"email:{email}"
-        retry = max(auth.login_ip.retry_after(ip_key), auth.login_email.retry_after(email_key))
+        slots = auth.login_slots(email, ip)
+        retry, stamp = reserve(slots)
         if retry:
             return _too_many(retry)
         user = await run_in_threadpool(auth.password.authenticate, auth.accounts, email, password)
         if user is None:
-            failures = max(auth.login_ip.hit(ip_key), auth.login_email.hit(email_key))
+            # the reservation stays as the failure; the email's own count only slows down
+            failures = max(
+                auth.login_ip.count(slots[0][1]),
+                auth.login_pair.count(slots[1][1]),
+                auth.login_email.hit(f"email:{email}"),
+            )
             auth.accounts.record("login_failed", target=email[:200], ip=ip)
             await asyncio.sleep(_fail_delay(failures))
             return _invalid_credentials()
-        auth.login_email.reset(email_key)
+        release(slots, stamp)
+        auth.login_pair.reset(slots[1][1])
         raw = auth.start_session(request, user)
         accounts = auth.accounts
         accounts.record("login_ok", user_id=user.id, detail={"method": "password"}, ip=ip)
@@ -617,11 +728,11 @@ def build_router(api: Api) -> APIRouter:
     @router.post("/api/auth/logout")
     def logout(request: Request) -> Response:
         auth = service(request)
-        raw = request.cookies.get(COOKIE)
-        if raw and auth.enabled:
-            found = auth.accounts.lookup_session(raw)
-            if auth.accounts.revoke_session(raw) and found is not None:
-                auth.accounts.record("logout", user_id=found[1].id, ip=client_ip(request))
+        if auth.enabled:
+            for raw in {request.cookies.get(HOST_COOKIE), request.cookies.get(COOKIE)} - {None}:
+                found = auth.accounts.lookup_session(raw)
+                if auth.accounts.revoke_session(raw) and found is not None:
+                    auth.accounts.record("logout", user_id=found[1].id, ip=client_ip(request))
         response = JSONResponse({"ok": True})
         auth.clear_cookie(response, request)
         return response
@@ -645,10 +756,14 @@ def build_router(api: Api) -> APIRouter:
         if not auth.mailer.enabled:
             return answer
         ip = client_ip(request)
-        ip_key, email_key = f"ip:{ip}", f"email:{email}"
-        over = auth.magic_ip.hit(ip_key) > MAGIC_LIMIT
-        over = auth.magic_email.hit(email_key) > MAGIC_LIMIT or over
-        if over:
+        retry, _ = reserve(
+            [
+                (auth.magic_ip, f"ip:{ip}"),
+                (auth.magic_pair, f"pair:{email}|{ip}"),
+                (auth.magic_email, f"email:{email}"),
+            ]
+        )
+        if retry:
             return answer
         user = auth.accounts.by_email(email)
         if user is None or not user.active:
@@ -780,21 +895,22 @@ def build_router(api: Api) -> APIRouter:
         current = _str_field(body, "current", PASSWORD_MAX) if "current" in body else ""
         new = _str_field(body, "new", PASSWORD_MAX)
         accounts = auth.accounts
-        email_key = f"email:{actor.user.email}"
-        retry = auth.login_email.retry_after(email_key)
+        ip = client_ip(request)
+        slots = auth.login_slots(actor.user.email, ip)
+        retry, stamp = reserve(slots)
         if retry:
             return _too_many(retry)  # type: ignore[return-value]
         if actor.user.has_password and accounts.verify_password(actor.user.email, current) is None:
-            auth.login_email.hit(email_key)
-            accounts.record("password_change_failed", user_id=actor.user.id, ip=client_ip(request))
+            accounts.record("password_change_failed", user_id=actor.user.id, ip=ip)
             raise ApiError(403, "wrong_password", "the current password is wrong")
+        release(slots, stamp)
         try:
             accounts.set_password(actor.user.id, new)
         except AccountError as exc:
             raise ApiError(400, exc.code, str(exc)) from exc
         revoked = accounts.revoke_all_for_user(
             actor.user.id,
-            except_raw=request.cookies.get(COOKIE) if actor.via == "session" else None,
+            except_raw=auth.session_cookie(request) if actor.via == "session" else None,
         )
         accounts.record(
             "password_change",

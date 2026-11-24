@@ -102,6 +102,9 @@ MESSAGES: dict[str, str] = {
     "remedy.codex_login": "run `codex login` as this user (ChatGPT account)",
     "remedy.install_cli": "install the {bin} CLI and log in ({login})",
     "remedy.env_missing": "uv run autoontology init (writes .env; or cp .env.example .env)",
+    "remedy.public_url": (
+        "set AUTOONTOLOGY_PUBLIC_URL in .env to the canonical https URL users open"
+    ),
     "remedy.start_postgres": "start Postgres, e.g. `docker compose up -d`",
     "remedy.pgvector": (
         "uv run autoontology setup (the server needs pgvector, e.g. the docker-compose.yml image)"

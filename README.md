@@ -931,14 +931,25 @@ refused on that hostname too. `/api/status` lists the hostnames under `remote` (
 logins). **Never use `tailscale funnel`** for AutoOntology: it has no authentication of
 its own.
 
+The identity header is trusted because only tailscaled can send the tailnet `Host` from the
+network -- but any process on this machine can connect to `127.0.0.1` and send that `Host`
+and any `Tailscale-User-Login` it likes. With `AUTOONTOLOGY_TAILSCALE_HOSTS` set, every
+local process (and every local user account) can therefore claim a tailnet identity, and
+with accounts on, sign in as the user with that email. On a machine shared with people or
+software you do not trust, leave `AUTOONTOLOGY_TAILSCALE_HOSTS` unset.
+
 ### Accounts
 
 By default (`AUTOONTOLOGY_AUTH=off`) there are no accounts: everyone who reaches the
 service may do everything. With `AUTOONTOLOGY_AUTH=accounts` people sign in with an email
 and a password (at least 12 characters), or with a one-time link, and get a session cookie
-(`ao_session`: HttpOnly, SameSite=Strict, Secure on a non-local host or with an https
-`AUTOONTOLOGY_PUBLIC_URL`, valid `AUTOONTOLOGY_SESSION_HOURS`, default 12). On a configured
-tailnet hostname, a Tailscale login signs in the user with the same email.
+(HttpOnly, SameSite=Strict, Path=/, no Domain, valid `AUTOONTOLOGY_SESSION_HOURS`, default
+12). It is Secure on a non-local host, behind `X-Forwarded-Proto: https` or with an https
+`AUTOONTOLOGY_PUBLIC_URL`, and then named `__Host-ao_session` (browsers refuse such a
+cookie from a sibling subdomain or plain http, so no other site can plant a session);
+for plain-http local use it is `ao_session`. A gateway in front of the service must pass
+the `Cookie` header (`__Host-ao_session`) through unchanged. On a configured tailnet
+hostname, a Tailscale login signs in the user with the same email.
 
 Create the first admin on the server before switching accounts on. Without a password the
 command prints a one-time invitation link (valid 7 days) where the admin chooses one:
@@ -948,8 +959,10 @@ uv run ao user create you@example.com --name "You" --admin
 # or: printf '%s\n' "$PASSWORD" | uv run ao user create you@example.com --admin --password-stdin
 ```
 
-Then set `AUTOONTOLOGY_AUTH=accounts` (and `AUTOONTOLOGY_PUBLIC_URL` if the service is
-reached through a public address, so links point there) and restart. Other commands:
+Then set `AUTOONTOLOGY_AUTH=accounts` and `AUTOONTOLOGY_PUBLIC_URL` to the canonical
+https URL people open (invitation and sign-in links point there, and the Secure cookie
+depends on it; `ao doctor` warns when accounts are on and it is unset or not https), and
+restart. Other commands:
 `ao user list [--json]`, `ao user disable|enable <email>` (disabling signs the user out),
 `ao user link <email> [--purpose magic|reset|invite]` (a sign-in or password-reset link to
 pass on when mail is not configured). The CLI acts as an admin and its changes are recorded
@@ -961,10 +974,16 @@ The answer never tells whether an address has an account. Without SMTP the butto
 
 Sign-in API (`/api/auth/*`, reachable without a session; the host and cross-origin checks
 still apply): `POST login {email, password}` (401 `invalid_credentials` for every failure,
-429 after 5 failures a minute per IP or email), `POST logout`, `GET me`,
-`POST magic-link {email}` (always 202), `POST magic {token}`,
+429 after 20 failures a minute from one client IP or 5 for one email from one IP),
+`POST logout`, `GET me`, `POST magic-link {email}` (always 202; at most 5 links a minute
+per IP and per email and IP, 20 an hour per email), `POST magic {token}`,
 `POST accept-invite {token, password}`, `POST password {current, new}` (ends the other
-sessions). A sign-in link works in two steps: opening `/auth/magic/<token>` only shows a
+sessions; wrong current passwords count like failed logins). Failures for an email from
+other addresses never lock its user out: they only slow failed answers down (up to 4
+seconds), and the right password from another IP still signs in. Someone requesting links
+for an address from many IPs can use up its hourly link quota; the user can still sign in
+with a password. The client IP is the peer address, or, from a loopback peer (the local
+gateway), the first `X-Forwarded-For` entry; no other header is trusted. A sign-in link works in two steps: opening `/auth/magic/<token>` only shows a
 "Continue to sign in" button (a mail scanner that prefetches the link does not use it up);
 the button posts the token to `POST /api/auth/magic`, which signs in. Single sign-on (OIDC)
 is planned; `AUTOONTOLOGY_OIDC_*` is reserved.
@@ -1000,13 +1019,23 @@ body. Admins are owners of every project.
 playground still answers unless `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`.
 
 Agent tokens remember who created (or last rotated) them: a token stops working once its
-creator is disabled or is no longer a member of the token's project. Tokens from before
-accounts keep working.
+creator is disabled or is no longer a member of the token's project. Tokens without a
+creator -- made before accounts or by the CLI -- keep working after anyone is removed:
+revoke them explicitly (`ao -p <p> agent tokens revoke <id>`) when the person who holds
+one leaves.
+
+Playground conversations belong to the project, not to a user: every member who may use
+the playground can read every conversation in the project (there is no per-user ownership
+yet), so do not paste anything into it that other members must not see.
 
 #### Members, users and the audit log
 
-- Members (owners): `GET|POST /api/projects/<p>/members` (`{email, role}`; an unknown email
-  becomes a new user and the answer carries an `invite_link`), `PATCH|DELETE
+- Members (owners): `GET|POST /api/projects/<p>/members` (`{email, role}`; only admins
+  create accounts: for an admin an unknown email becomes a new user and the answer carries
+  an `invite_link`; an owner who is not an admin gets 403 `admin_required_for_new_user` for
+  an unknown email and for a disabled account alike -- ask an administrator to invite the
+  person. Adding an existing user does tell an owner that the address has an account),
+  `PATCH|DELETE
   /api/projects/<p>/members/<user_id>` (a project keeps at least one owner: 409
   `last_owner`). CLI: `ao -p <p> member list|add <email> --role R|role <email> R|remove <email>`.
 - Users (admins): `GET|POST /api/users` (`{email, name?, is_admin?}` -> `{user,
@@ -1031,7 +1060,10 @@ from it: the engine sends one as its OpenAI API key to `/v1`, it reaches `/inges
 `INGESTION_SERVICE_URL=http://127.0.0.1:<port>/internal/<key>`, and the CLI, the provider
 probe and the playground send `X-AutoOntology-Internal`. Everyone else needs an admin
 session for these routes. After switching `AUTOONTOLOGY_AUTH`, restart everything
-(`ao down && ao up`) so the engine gets the new keys. A gateway in front of the service must
+(`ao down && ao up`) so the engine gets the new keys. The same goes for rotating
+`internal.key` (delete it; a new one is made on first use): the service, the engine and any
+running CLI command each keep the keys they derived until they restart. The file is set
+back to 0600 whenever it is read. A gateway in front of the service must
 never forward `X-AutoOntology-Internal`, `X-AutoOntology-As` or, outside `/mcp` and
 `/agent/v1`, `Authorization`.
 

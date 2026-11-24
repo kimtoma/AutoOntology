@@ -160,28 +160,118 @@ def test_login_bad_request_shapes(env):
     assert _login(client, password=long_pw).status_code == 400
 
 
-def test_rate_limit_per_email_and_per_ip(env, monkeypatch):
-    client, _, accounts, _ = env
-    delays = []
+ATTACKER = {"x-forwarded-for": "198.51.100.7"}
+VICTIM = {"x-forwarded-for": "203.0.113.9"}
 
-    async def no_sleep(seconds):
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    delays: list[float] = []
+
+    async def fake(seconds):
         delays.append(seconds)
 
-    monkeypatch.setattr(auth_mod.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(auth_mod.asyncio, "sleep", fake)
     monkeypatch.setattr(auth_mod, "FAIL_DELAY_S", 0.25)
-    for _ in range(5):
+    return delays
+
+
+def test_rate_limit_per_email_and_ip_pair_and_per_ip(env, no_sleep):
+    client, _, accounts, _ = env
+    for _ in range(auth_mod.LOGIN_PAIR_LIMIT):
         assert _login(client, password="wrong password!!").status_code == 401
-    assert delays == [0.25, 0.5, 1.0, 2.0, 4.0]  # exponential, capped
-    resp = _login(client)  # the right password, but the email is locked for now
+    assert no_sleep == [0.25, 0.5, 1.0, 2.0, 4.0]  # exponential, capped
+    resp = _login(client)  # the right password, but this email from this IP is limited
     assert resp.status_code == 429 and resp.json()["error"] == "too_many_attempts"
     assert int(resp.headers["retry-after"]) >= 1
-    # per IP: other emails from the same address
+    # other emails from the same address are still allowed until the per-IP limit
+    for n in range(auth_mod.LOGIN_IP_LIMIT - auth_mod.LOGIN_PAIR_LIMIT):
+        resp = _login(client, email=f"u{n}@example.com", password="wrong password!!")
+        assert resp.status_code == 401
     accounts.create_user("lee@example.com", password=PW)
-    resp = _login(client, email="lee@example.com")
-    assert resp.status_code == 429
+    assert _login(client, email="lee@example.com").status_code == 429  # per IP now
     # another client IP (behind the local gateway) is not limited by the first one
-    other = _login(client, email="lee@example.com", headers={"cf-connecting-ip": "203.0.113.9"})
-    assert other.status_code == 200
+    assert _login(client, email="lee@example.com", headers=VICTIM).status_code == 200
+
+
+def test_no_targeted_lockout_from_another_ip(env, no_sleep):
+    client, *_ = env
+    for _ in range(10):
+        resp = _login(client, password="wrong password!!", headers=ATTACKER)
+        assert resp.status_code in (401, 429)
+    assert _login(client, headers=ATTACKER).status_code == 429  # the attacker's IP is limited
+    no_sleep.clear()
+    victim = TestClient(client.app)
+    resp = _login(victim, headers=VICTIM)  # the right password from elsewhere signs in
+    assert resp.status_code == 200, resp.text
+    assert no_sleep == []  # a success is never delayed
+    # a wrong password from the victim's IP is only slowed down by the email's failures
+    assert _login(victim, password="nope nope nope", headers=VICTIM).status_code == 401
+    assert no_sleep == [auth_mod.FAIL_DELAY_MAX_S]
+
+
+def test_password_change_is_not_blocked_by_another_ips_failures(env, no_sleep):
+    client, *_ = env
+    assert _login(client, headers=VICTIM).status_code == 200
+    attacker = TestClient(client.app)
+    for _ in range(10):
+        _login(attacker, password="wrong password!!", headers=ATTACKER)
+    resp = client.post(
+        "/api/auth/password", json={"current": PW, "new": "a brand new password"}, headers=VICTIM
+    )
+    assert resp.status_code == 200, resp.text
+    # the caller's own wrong current passwords are limited per (email, IP)
+    for _ in range(auth_mod.LOGIN_PAIR_LIMIT):
+        resp = client.post(
+            "/api/auth/password", json={"current": "nope nope", "new": "x" * 12}, headers=VICTIM
+        )
+        assert resp.status_code == 403
+    resp = client.post(
+        "/api/auth/password",
+        json={"current": "a brand new password", "new": "x" * 12},
+        headers=VICTIM,
+    )
+    assert resp.status_code == 429
+
+
+def test_concurrent_attempts_cannot_pass_the_limit():
+    import concurrent.futures
+
+    ip = auth_mod.RateLimiter(3, 60)
+    pair = auth_mod.RateLimiter(100, 60)
+    slots = [(ip, "ip:x"), (pair, "pair:x")]
+    with concurrent.futures.ThreadPoolExecutor(16) as pool:
+        results = list(pool.map(lambda _: auth_mod.reserve(slots)[0], range(64)))
+    assert sum(1 for r in results if r == 0) == 3
+    assert pair.count("pair:x") == 3  # a refused attempt records nothing
+    retry, stamp = auth_mod.RateLimiter(1, 60), 0.0
+    one = [(retry, "k")]
+    _, stamp = auth_mod.reserve(one)
+    auth_mod.release(one, stamp)  # a success gives the slot back
+    assert auth_mod.reserve(one)[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("peer", "headers", "expected"),
+    [
+        ("127.0.0.1", {"x-forwarded-for": "203.0.113.9, 10.0.0.1"}, "203.0.113.9"),
+        ("::1", {"x-forwarded-for": "2001:db8::1"}, "2001:db8::1"),
+        ("127.0.0.1", {"cf-connecting-ip": "203.0.113.9"}, "127.0.0.1"),  # not trusted
+        ("127.0.0.1", {"x-forwarded-for": "not-an-ip"}, "127.0.0.1"),
+        ("127.0.0.1", {"x-forwarded-for": "1.2.3.4<script>"}, "127.0.0.1"),
+        ("192.168.1.20", {"x-forwarded-for": "203.0.113.9"}, "192.168.1.20"),  # not loopback
+        ("192.168.1.20", {}, "192.168.1.20"),
+    ],
+)
+def test_client_ip_trusts_forwarded_for_only_from_loopback(peer, headers, expected):
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "client": (peer, 1234),
+        "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+    }
+    assert auth_mod.client_ip(Request(scope)) == expected
 
 
 def test_login_rotates_the_session(env):
@@ -201,7 +291,33 @@ def test_cookie_is_secure_with_an_https_public_url(isolated_env, monkeypatch):
     accounts.create_user("kim@example.com", password=PW)
     resp = _login(client)
     assert resp.status_code == 200
-    assert "secure" in _set_cookie(resp).lower()
+    cookie = _set_cookie(resp)
+    assert cookie.startswith("__Host-ao_session=") and "secure" in cookie.lower()
+    assert "domain" not in cookie.lower() and "path=/" in cookie.lower()
+    raw = resp.cookies["__Host-ao_session"]
+    # the __Host- cookie is read; an unprefixed one (tossed by a sibling site) is not
+    secure = TestClient(client.app, base_url="https://testserver")
+    secure.cookies.set("ao_session", raw)
+    assert secure.get("/api/auth/me").json()["authenticated"] is False
+    secure.cookies.clear()
+    secure.cookies.set("__Host-ao_session", raw)
+    assert secure.get("/api/auth/me").json()["authenticated"] is True
+    resp = secure.post("/api/auth/logout")
+    cleared = _set_cookie(resp)
+    assert "__Host-ao_session=" in cleared and "ao_session=" in cleared.replace("__Host-", "")
+    assert accounts.lookup_session(raw) is None
+
+
+def test_local_plain_http_prefers_the_host_cookie(env):
+    client, _, accounts, user = env
+    mine, _ = accounts.create_session(user.id)
+    other = accounts.create_user("lee@example.com", password=PW)
+    theirs, _ = accounts.create_session(other.id)
+    c = TestClient(client.app)
+    c.cookies.set("ao_session", theirs)
+    assert c.get("/api/auth/me").json()["user"]["email"] == "lee@example.com"
+    c.cookies.set("__Host-ao_session", mine)
+    assert c.get("/api/auth/me").json()["user"]["email"] == "kim@example.com"
 
 
 def test_cookie_is_secure_on_a_tailnet_host_and_behind_https(isolated_env, monkeypatch):
@@ -322,7 +438,8 @@ def test_magic_link_mail_and_single_use_redeem(isolated_env, monkeypatch, caplog
     assert resp.status_code == 200 and resp.json()["user"]["email"] == "kim@example.com"
     assert "secure" in _set_cookie(resp).lower()  # https public URL
     assert resp.headers["referrer-policy"] == "no-referrer"
-    assert accounts.lookup_session(resp.cookies["ao_session"])[1].email == "kim@example.com"
+    raw = resp.cookies["__Host-ao_session"]
+    assert accounts.lookup_session(raw)[1].email == "kim@example.com"
     again = TestClient(client.app).get(f"/auth/magic/{token}", follow_redirects=False)
     assert again.status_code == 303 and again.headers["location"] == "/ui/login?error=link"
     assert "set-cookie" not in again.headers
@@ -346,7 +463,15 @@ def test_magic_link_requests_are_limited(isolated_env, monkeypatch):
     for _ in range(auth_mod.MAGIC_LIMIT + 3):
         resp = client.post("/api/auth/magic-link", json={"email": "kim@example.com"})
         assert resp.status_code == 202
-    assert len(FakeSMTP.sent) == auth_mod.MAGIC_LIMIT
+    assert len(FakeSMTP.sent) == auth_mod.MAGIC_LIMIT  # per (email, IP)
+    # the same address from other IPs still gets links, up to the hourly per-email cap
+    for n in range(auth_mod.MAGIC_EMAIL_LIMIT + 5):
+        client.post(
+            "/api/auth/magic-link",
+            json={"email": "kim@example.com"},
+            headers={"x-forwarded-for": f"203.0.113.{n + 1}"},
+        )
+    assert len(FakeSMTP.sent) == auth_mod.MAGIC_EMAIL_LIMIT
 
 
 def test_expired_magic_token_is_refused(env, monkeypatch):

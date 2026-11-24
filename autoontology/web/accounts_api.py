@@ -16,8 +16,13 @@ audit log.
 ``/api/projects/{project}/members`` (``members.manage``: owners and admins)
     ``GET`` -> ``{members: [user + role + member_since]}``
     ``POST`` ``{email, role}`` -> 201 ``{member, created, invite_link?, expires_at?,
-    mail_sent}``: an existing user is added; an unknown email becomes a new user with an
-    invitation link; 409 ``member_exists``.
+    mail_sent}``: an existing active user is added; 409 ``member_exists``. Only an admin
+    creates accounts: for an admin an unknown email becomes a new user with an invitation
+    link; an owner who is not an admin gets 403 ``admin_required_for_new_user`` for an
+    unknown email *and* for a disabled user (one answer: it does not tell an unknown
+    address from a disabled account). Adding an existing user does show an owner that
+    the address has an account -- accepted: owners pick members among the installation's
+    users.
     ``PATCH /{user_id}`` ``{role}`` -> the member; ``DELETE /{user_id}`` -> ``{removed}``;
     409 ``last_owner`` (a project keeps an owner), 404 ``not_a_member``.
 
@@ -306,6 +311,12 @@ def add_member_routes(router: APIRouter, api: Api, ctx_dep: Any) -> None:
         role = _role(body)
         accounts = Accounts(api.store)
         user = accounts.by_email(email)
+        if not ctx.is_admin and (user is None or not user.active):
+            raise ApiError(
+                403,
+                "admin_required_for_new_user",
+                "this address has no active account: ask an administrator to invite this person",
+            )
         created = user is None
         out: dict[str, Any] = {"created": created, "mail_sent": False}
         try:

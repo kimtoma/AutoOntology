@@ -845,13 +845,24 @@ _SECRETS: dict[str, bytes] = {}
 
 
 def internal_secret(settings: Settings) -> bytes:
-    """The installation's local-trust secret (created 0600 on first use; cached per file
-    for the life of the process -- replacing the file needs a restart)."""
+    """The installation's local-trust secret (created 0600 on first use, set back to 0600
+    when read; cached per file for the life of the process). Rotating it -- deleting or
+    replacing ``internal.key`` -- needs a restart of the service, the engine and any
+    running CLI command (``ao down && ao up``): each keeps the keys it derived."""
     path = settings.run_dir / INTERNAL_KEY_FILE
     cached = _SECRETS.get(str(path))
     if cached is None:
         cached = _SECRETS[str(path)] = _read_or_create_secret(path)
     return cached
+
+
+def _owner_only(path: Path) -> None:
+    """``chmod 0600`` (a file copied or restored with looser modes); best effort."""
+    try:
+        if path.stat().st_mode & 0o077:
+            path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def _read_or_create_secret(path: Path) -> bytes:
@@ -862,6 +873,7 @@ def _read_or_create_secret(path: Path) -> bytes:
     except FileNotFoundError:
         raw = ""
     if len(raw) >= 32:
+        _owner_only(path)
         return raw.encode("ascii")
     path.parent.mkdir(parents=True, exist_ok=True)
     value = _secrets.token_urlsafe(48)
@@ -870,10 +882,12 @@ def _read_or_create_secret(path: Path) -> bytes:
     except FileExistsError:  # another process won the race (or an empty file)
         raw = path.read_text(encoding="ascii").strip()
         if len(raw) >= 32:
+            _owner_only(path)
             return raw.encode("ascii")
         fd = os.open(path, os.O_WRONLY | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="ascii") as fh:
         fh.write(value + "\n")
+    _owner_only(path)  # O_TRUNC kept the old (maybe looser) mode
     return value.encode("ascii")
 
 

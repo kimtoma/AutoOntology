@@ -242,3 +242,19 @@ def test_sql_concurrency_setting(isolated_env, monkeypatch):
     assert Settings.from_env().sql_concurrency == 5
     monkeypatch.setenv("AUTOONTOLOGY_SQL_CONCURRENCY", "0")
     assert Settings.from_env().sql_concurrency == 1
+
+
+def test_internal_secret_file_is_kept_owner_only(tmp_path):
+    from autoontology.config import _read_or_create_secret
+
+    key = tmp_path / "run" / "internal.key"
+    first = _read_or_create_secret(key)
+    assert key.stat().st_mode & 0o777 == 0o600
+    key.chmod(0o644)  # e.g. restored from a backup
+    assert _read_or_create_secret(key) == first
+    assert key.stat().st_mode & 0o777 == 0o600
+    key.write_text("short\n")  # too short: rewritten in place, mode tightened again
+    key.chmod(0o664)
+    second = _read_or_create_secret(key)
+    assert second != first and len(second) >= 32
+    assert key.stat().st_mode & 0o777 == 0o600

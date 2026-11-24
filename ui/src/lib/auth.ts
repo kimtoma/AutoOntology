@@ -210,6 +210,7 @@ export const authApi = {
 const AUTH_ERRORS = new Set([
   "invalid_credentials", "invalid_token", "weak_password", "wrong_password", "invalid_email", "user_exists",
   "member_exists", "last_owner", "last_admin", "not_a_member", "user_disabled", "project_required",
+  "admin_required_for_new_user",
 ])
 
 /** An accounts API error in the UI language (429 names the wait). */
