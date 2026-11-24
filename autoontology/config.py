@@ -481,6 +481,8 @@ def _tailscale_hosts(raw: str) -> tuple[str, ...]:
 AUTH_MODES = ("off", "accounts")
 #: AUTOONTOLOGY_ARCHIVED_PLAYGROUND values (the first is the default).
 ARCHIVED_PLAYGROUND_MODES = ("allow", "deny")
+#: AUTOONTOLOGY_WORKFLOWS values (the first is the default).
+WORKFLOW_MODES = ("on", "off")
 #: Reserved for single sign-on (not read yet): AUTOONTOLOGY_OIDC_ISSUER,
 #: AUTOONTOLOGY_OIDC_CLIENT_ID, AUTOONTOLOGY_OIDC_CLIENT_SECRET, AUTOONTOLOGY_OIDC_SCOPES
 #: (see ``autoontology/web/auth.py``, ``OIDCProvider``).
@@ -600,6 +602,12 @@ class Settings:
     #: Playground questions on archived projects (AUTOONTOLOGY_ARCHIVED_PLAYGROUND):
     #: ``allow`` or ``deny``.
     archived_playground: str = "allow"
+    #: Workflow triggers (AUTOONTOLOGY_WORKFLOWS): ``on`` (schedules and on_action
+    #: triggers fire) or ``off`` (only manual runs; paused runs still resume).
+    workflows: str = "on"
+    #: The zone workflow schedules are read in (AUTOONTOLOGY_TZ, an IANA name such as
+    #: ``Asia/Seoul``; empty = the system's local time).
+    tz: str = ""
 
     def __post_init__(self) -> None:
         validate_catalog_database_name(self.postgres_database)
@@ -675,6 +683,8 @@ class Settings:
             archived_playground=_choice_env(
                 env, "AUTOONTOLOGY_ARCHIVED_PLAYGROUND", ARCHIVED_PLAYGROUND_MODES
             ),
+            workflows=_choice_env(env, "AUTOONTOLOGY_WORKFLOWS", WORKFLOW_MODES),
+            tz=env.get("AUTOONTOLOGY_TZ", "").strip(),
         )
 
     @property

@@ -268,6 +268,11 @@ class Api:
         #: ``GET /api/sources/freshness`` per project id, one computation at a time each
         self._fresh: dict[str, _Freshness] = {}
         self._freshness_lock = threading.Lock()
+        # paused workflow objects resume, and on_action workflows start, from action
+        # decisions made through this process (autoontology/logic/workflows.py)
+        from autoontology.logic import workflows
+
+        workflows.install(settings)
 
     @property
     def store(self) -> Store:
@@ -1246,6 +1251,11 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
     from autoontology.web.actions_api import add_action_routes
 
     add_action_routes(router, api, ctx_dep)
+
+    # workflows: run, runs, cancel (autoontology/web/workflows_api.py) --------------------
+    from autoontology.web.workflows_api import add_workflow_routes
+
+    add_workflow_routes(router, api, ctx_dep)
 
     # outside-agent tokens and usage (the agent surface itself: agent_api.install) ---------
     from autoontology.web.agent_api import add_management_routes

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from autoontology.store.decisions import DecisionStore
     from autoontology.store.logic import LogicDefs
     from autoontology.store.objects import ObjectEdits, ObjectTypes
+    from autoontology.store.workflows import WorkflowRuns
 
 SourceKind = Literal["files", "database", "documents"]
 RunStatus = Literal["pending", "running", "succeeded", "failed", "cancelled"]
@@ -2287,6 +2288,12 @@ class ProjectStore:
         from autoontology.store.actions import ActionRuns
 
         return ActionRuns(self.store, project_id=self.id)
+
+    def workflow_runs(self) -> WorkflowRuns:
+        """The project's :class:`~autoontology.store.workflows.WorkflowRuns`."""
+        from autoontology.store.workflows import WorkflowRuns
+
+        return WorkflowRuns(self.store, project_id=self.id)
 
     def logic_defs(self) -> LogicDefs:
         """The project's :class:`~autoontology.store.logic.LogicDefs`."""

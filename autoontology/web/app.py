@@ -173,7 +173,14 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _recover_exports(settings, state.store)  # (state: api.install below)
+        from autoontology.logic import scheduler
+
+        app.state.scheduler = None
+        if scheduler.AUTOSTART:  # schedules + reconciling paused workflow runs
+            app.state.scheduler = scheduler.Scheduler(settings, state.store).start()
         yield
+        if app.state.scheduler is not None:
+            app.state.scheduler.stop()
         _shutdown_providers(registry)
         sparql = getattr(app.state, "sparql", None)
         if sparql is not None:  # stop its worker processes, running queries included

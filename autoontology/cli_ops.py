@@ -2674,8 +2674,10 @@ def action_run(
         payload["idempotency_key"] = idempotency_key
     body = _guard(lambda: _local().call("POST", f"/actions/{seg}/submit", json=payload))
     from autoontology.logic import actions as runner
+    from autoontology.logic import workflows
 
     runner.wait_notifications()
+    workflows.wait()  # on_action workflows this run started
     if as_json:
         _json(body)
         return
@@ -2712,8 +2714,10 @@ def _run_decision(run_id: str, verb: str, payload: dict[str, Any], as_json: bool
     seg = _action_run_seg(run_id)
     body = _guard(lambda: _local().call("POST", f"/actions/runs/{seg}/{verb}", json=payload))
     from autoontology.logic import actions as runner
+    from autoontology.logic import workflows
 
     runner.wait_notifications()
+    workflows.wait()  # paused workflow objects resumed by this decision
     if as_json:
         _json(body)
         return
@@ -2749,6 +2753,162 @@ def action_revert(
     _run_decision(run_id, "revert", {"force": force}, as_json)
 
 
+# --- workflows ----------------------------------------------------------------------
+
+workflow_app = typer.Typer(help=msg("help.workflow"), no_args_is_help=True)
+
+
+def _workflow_seg(name: str) -> str:
+    if not name or len(name) > 200:
+        _error("unknown_workflow", f"no workflow {name[:80]!r}", 2)
+    return quote(name, safe="")
+
+
+def _workflow_run_seg(run_id: str) -> str:
+    if not re.fullmatch(r"wfr_[0-9a-f]{1,32}", run_id):
+        _error("unknown_run", f"no workflow run {run_id[:80]!r}", 2)
+    return run_id
+
+
+def _counts(summary: dict[str, Any]) -> str:
+    keys = ("matched", "completed", "actions_applied", "pending_approval", "skipped", "failed")
+    text = " ".join(f"{k}={summary.get(k, 0)}" for k in keys)
+    return text + (" truncated" if summary.get("truncated") else "")
+
+
+def _workflow_run_rows(runs: list[dict[str, Any]]) -> str:
+    rows = [
+        (
+            r["id"],
+            _short(r["workflow"], 24),
+            r["trigger"],
+            r["status"],
+            _counts(r.get("summary") or {}),
+            (r["started_at"] or "-")[:19],
+        )
+        for r in runs
+    ]
+    return base._table(("ID", "WORKFLOW", "TRIGGER", "STATUS", "COUNTS", "STARTED"), rows)
+
+
+@workflow_app.command("list", help=msg("help.workflow.list"))
+def workflow_list(as_json: bool = _JSON) -> None:
+    body = _guard(lambda: _local().call("GET", "/workflows"))
+    if as_json:
+        _json(body)
+        return
+    if not body["workflows"]:
+        typer.echo(msg("ops.workflow_none"))
+        return
+    rows = []
+    for w in body["workflows"]:
+        trigger = w["trigger"]
+        when = trigger.get("schedule") or (
+            f"on {trigger['on_action']}" if trigger.get("on_action") else "manual"
+        )
+        last = w.get("last_run") or {}
+        rows.append(
+            (
+                w["name"],
+                _short(w["label"], 24),
+                _short(w["object_type_label"] or w["object_type"], 20),
+                when,
+                w.get("next_slot") or "-",
+                last.get("status") or "-",
+            )
+        )
+    typer.echo(base._table(("NAME", "LABEL", "OBJECT TYPE", "TRIGGER", "NEXT", "LAST RUN"), rows))
+
+
+@workflow_app.command("run", help=msg("help.workflow.run"))
+def workflow_run(
+    name: str = typer.Argument(..., help=msg("help.workflow.name")),
+    wait: bool = typer.Option(False, "--wait", help=msg("help.workflow.wait")),
+    as_json: bool = _JSON,
+) -> None:
+    seg = _workflow_seg(name)
+    path = f"/workflows/{seg}/run"
+    from autoontology.logic import actions as runner
+    from autoontology.logic import workflows
+
+    def call() -> Any:
+        if not wait:
+            try:  # the running service processes the objects in the background
+                return _service().call("POST", path, json={"wait": False})
+            except ServiceDown:
+                pass
+        return _local().call("POST", path, json={"wait": True})
+
+    body = _guard(call)
+    workflows.wait()
+    runner.wait_notifications()
+    if as_json:
+        _json(body)
+        return
+    run = body["run"]
+    typer.echo(msg("ops.workflow_run", id=run["id"], status=run["status"]))
+    typer.echo("  " + _counts(run.get("summary") or {}))
+    if run.get("error"):
+        typer.echo(f"  {run['error']}")
+
+
+@workflow_app.command("runs", help=msg("help.workflow.runs"))
+def workflow_runs(
+    status: str = typer.Option(None, "--status", help=msg("help.workflow.status")),
+    workflow: str = typer.Option(None, "--workflow", help=msg("help.workflow.name")),
+    limit: int = typer.Option(50, "--limit", min=1, max=500, help=msg("help.opt.size")),
+    as_json: bool = _JSON,
+) -> None:
+    params: dict[str, Any] = {"limit": limit}
+    params.update({k: v for k, v in (("status", status), ("workflow", workflow)) if v})
+    body = _guard(lambda: _local().call("GET", "/workflows/runs", params=params))
+    if as_json:
+        _json(body)
+        return
+    if not body["runs"]:
+        typer.echo(msg("ops.workflow_no_runs"))
+        return
+    typer.echo(_workflow_run_rows(body["runs"]))
+
+
+@workflow_app.command("show", help=msg("help.workflow.show"))
+def workflow_show(
+    run_id: str = typer.Argument(..., help=msg("help.workflow.run_id")),
+    as_json: bool = _JSON,
+) -> None:
+    seg = _workflow_run_seg(run_id)
+    body = _guard(lambda: _local().call("GET", f"/workflows/runs/{seg}"))
+    if as_json:
+        _json(body)
+        return
+    run = body["run"]
+    typer.echo(
+        f"{run['id']} {run['workflow']} (v{run['workflow_version']}) {run['trigger']} "
+        f"{run['fire_slot']}: {run['status']}"
+    )
+    typer.echo("  " + _counts(run["summary"]))
+    if run.get("error"):
+        typer.echo(f"  {run['error']}")
+    for o in run["objects"]:
+        reason = f" ({_short(o['reason'], 60)})" if o.get("reason") else ""
+        typer.echo(f"  {_short(o['key'], 24)}: {o['status']}{reason}")
+    if run["action_runs"]:
+        typer.echo(_run_rows(run["action_runs"]))
+
+
+@workflow_app.command("cancel", help=msg("help.workflow.cancel"))
+def workflow_cancel(
+    run_id: str = typer.Argument(..., help=msg("help.workflow.run_id")),
+    as_json: bool = _JSON,
+) -> None:
+    seg = _workflow_run_seg(run_id)
+    body = _project_write("POST", f"/workflows/runs/{seg}/cancel")
+    if as_json:
+        _json(body)
+        return
+    typer.echo(msg("ops.workflow_run", id=body["run"]["id"], status=body["run"]["status"]))
+
+
 def register(app: typer.Typer, source_app: typer.Typer) -> None:
     """Add the parity commands to the CLI (called at the end of :mod:`autoontology.cli`)."""
     app.add_typer(ontology_app, name="ontology")
@@ -2764,6 +2924,7 @@ def register(app: typer.Typer, source_app: typer.Typer) -> None:
     app.add_typer(object_app, name="object")
     app.add_typer(logic_app, name="logic")
     app.add_typer(action_app, name="action")
+    app.add_typer(workflow_app, name="workflow")
     app.command("audit", help=msg("help.audit"))(audit_cmd)
     source_app.command("freshness", help=msg("help.sources.freshness"))(sources_freshness)
     # `sources freshness` (the UI's page name) is `source freshness`

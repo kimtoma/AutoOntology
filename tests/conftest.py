@@ -104,3 +104,15 @@ def isolated_env(tmp_path, monkeypatch):
     for key in set(os.environ) - set(saved):
         del os.environ[key]
     os.environ.update(saved)
+
+
+@pytest.fixture(autouse=True)
+def _workflow_threads(monkeypatch):
+    """No test starts the workflow scheduler unless it asks (``scheduler.AUTOSTART``);
+    workflow worker threads are joined and the action listener removed afterwards."""
+    from autoontology.logic import scheduler, workflows
+
+    monkeypatch.setattr(scheduler, "AUTOSTART", False)
+    yield
+    workflows.wait(10)
+    workflows.uninstall()

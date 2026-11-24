@@ -388,6 +388,7 @@ def test_me_lists_memberships(env):
                 "playground.manage",
                 "logic.edit",
                 "action.run",
+                "workflow.run",
             ],
         }
     ]

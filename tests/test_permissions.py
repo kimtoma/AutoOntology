@@ -110,6 +110,7 @@ def test_role_table_is_cumulative():
         "playground.manage",
         "logic.edit",
         "action.run",
+        "workflow.run",
     }
     assert set(role_permissions("owner")) - set(role_permissions("editor")) == {
         "project.manage",
@@ -172,6 +173,11 @@ ROUTES = [
     ("POST", f"{BETA}/actions/runs/act_x/approve", None, "objects.read"),
     ("POST", f"{BETA}/actions/runs/act_x/reject", {"note": "n"}, "objects.read"),
     ("POST", f"{BETA}/actions/runs/act_x/revert", None, "objects.read"),
+    ("GET", f"{BETA}/workflows", None, "logic.read"),
+    ("GET", f"{BETA}/workflows/runs", None, "logic.read"),
+    ("GET", f"{BETA}/workflows/runs/wfr_x", None, "logic.read"),
+    ("POST", f"{BETA}/workflows/w1/run", None, "workflow.run"),
+    ("POST", f"{BETA}/workflows/runs/wfr_x/cancel", None, "workflow.run"),
     (
         "POST",
         f"{BETA}/sources",

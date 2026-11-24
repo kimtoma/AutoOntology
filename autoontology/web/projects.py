@@ -42,7 +42,7 @@ names it); installation-wide routes call :func:`require_installation` (admins on
 role table is :data:`PROJECT_PERMISSIONS`: viewer reads, downloads and asks the
 playground; reviewer also decides reviews and applies them and approves action runs;
 editor also changes sources, starts builds and exports, manages agent tokens, saves logic
-drafts, activates functions and runs actions; owner also manages the project and its
+drafts, activates functions, runs actions and runs / cancels workflows; owner also manages the project and its
 members, reads its audit log, binds object types (key and title columns), activates
 actions and workflows and creates agent tokens with the ``execute`` scope. ``action.run``
 and ``action.approve`` are defaults: an action's ``permission.min_role`` and a run's
@@ -101,6 +101,8 @@ PROJECT_PERMISSIONS: dict[str, str] = {
     # submit / revert actions: the default; each action's permission.min_role decides
     # (routes need objects.read, the action runner checks the role)
     "action.run": "editor",
+    # run a workflow now and cancel its runs (the run acts as the workflow's activator)
+    "workflow.run": "editor",
     "project.manage": "owner",  # rename, archive, unarchive
     "members.manage": "owner",  # add / change / remove members
     "audit.read": "owner",  # the project's audit log

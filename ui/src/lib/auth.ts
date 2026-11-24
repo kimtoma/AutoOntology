@@ -21,7 +21,7 @@ export type ProjectPermission =
   | "project.read" | "exports.read" | "playground.ask" | "playground.manage" | "review.decide" | "review.apply"
   | "sources.write" | "runs.start" | "agent.tokens" | "project.manage" | "members.manage" | "audit.read"
   | "objects.read" | "objects.manage" | "logic.read" | "functions.call" | "logic.edit" | "logic.activate"
-  | "action.run" | "action.approve"
+  | "action.run" | "action.approve" | "workflow.run"
 
 export interface User {
   id: string
@@ -264,6 +264,7 @@ export const AUDIT_ACTIONS = [
   "project.create", "project.rename", "project.archive", "project.unarchive",
   "object.bind", "logic.save", "logic.status",
   "action.submit", "action.approve", "action.reject", "action.apply", "action.revert", "action.fail",
+  "workflow.run", "workflow.finish", "workflow.cancel",
 ]
 
 export const AUDIT_PAGE_SIZE = 50
