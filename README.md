@@ -22,8 +22,8 @@ checklist, the 10-minute path, how to prepare your own files, and a troubleshoot
 
 The web UI's sidebar: the **project switcher** at the top, then **Overview** (what changed,
 what needs you), **Review** (confirm what the models proposed), **Sources**, **Build**,
-**Ontology**, **Graph**, **Playground**, **Exports**, **Connect** (outside agents over MCP
-and REST), **Status** and **Settings**. With [accounts](#accounts) on, Settings and
+**Ontology**, **Graph**, **Objects** and **Logic** (the [actionable ontology](#actionable-ontology)),
+**Playground**, **Exports**, **Connect** (outside agents over MCP and REST), **Status** and **Settings**. With [accounts](#accounts) on, Settings and
 **Users** are shown to admins only. Before the first build, the Overview is the
 five-step **Get started** checklist; afterwards the checklist stays under
 **Settings → Setup guide** (`/ui/setup`).
@@ -431,6 +431,126 @@ scheduled run adds no empty revisions:
 30 2 * * * cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
 ```
 
+## Actionable ontology
+
+The ontology says what your business *is*; the actionable layer lets people and agents
+*act* on it, under rules a person confirmed. It follows the same principle as the rest of
+AutoOntology: **the models propose, a person confirms, only confirmed definitions run.**
+Four layers sit on top of a build:
+
+| Layer | What it is | Where |
+|---|---|---|
+| **Objects** | A class bound to one source table becomes an *object type*: its rows are objects, with a key column, a title column and links (foreign keys) to other types. Proposed after every build, confirmed in **Review** (category *Object types*). | **Objects** page, `ao object`, `GET /api/objects/...` |
+| **Functions** | Computed values and yes/no checks on one object, written in a small expression language (no code runs): `청구금액 - coalesce(수납금액, 0)`, `수납상태 != "완납" and 연체일수() > 0`. | **Logic** page, `ao logic`, agent tool `call_function` |
+| **Actions** | A change a person (or an agent) makes to one object: parameters, preconditions, effects (`set` a column or an *operational* property such as a reminder stage), notifications, who may run it, approval (`none`, `reviewer` or `owner`, optionally only `when` an expression holds) and an agent policy (`none`, `propose`, `execute`). | object page buttons, `ao action`, agent tools `preview_action` / `submit_action` |
+| **Workflows** | A schedule (`daily 02:00`, `hourly`, `weekly MON 09:00`), an `on_action` trigger or a manual run that goes through the objects of a type (`where` a condition holds) and runs `if` / `action` / `notify` steps on each. | **Logic** page (Workflows tab), `ao workflow` |
+
+**Sources are never written.** An action's effects go to AutoOntology's edit layer (SQLite)
+and are shown over the source row when an object is read; every applied run can be
+reverted. When the source value changes after an edit, the object page marks a
+*conflict*. Writing back to an outside system is not part of this release.
+
+Definitions are **versioned and governed**: a spec is saved as a `draft`, then `active`
+(functions: editor; actions and workflows: owner), and `retired` when no longer used.
+After every new revision each definition is validated again against the object types: one
+whose column, link or referenced function is gone becomes `broken` and cannot run until it
+validates again (it then gets its previous status back).
+
+**Naming object types.** A spec, a route, a CLI command or an agent tool names an object
+type by its id (`ot_...`), its class name (`term-...`), its label (exact, then ignoring
+case) or its table (`invoices`, or `public.invoices`). Links can be named by the target's
+table too (`count(invoices where 수납상태 != "완납")`, `contracts.계약명`). Table names do not
+depend on the language the build labelled the classes in, so the sample specs use them. A
+name that matches several types is refused with the candidates (409
+`ambiguous_object_type`; in a spec, the error `ambiguous_object_type`).
+
+#### The 연체 독촉 example
+
+The quickstart sample set ships the logic of its 청구수납규정 (제6조 연체 판정, 제7조 독촉
+절차) under `samples/quickstart/logic/`:
+
+```bash
+uv run ao demo --set quickstart --no-open          # build first
+uv run ao object types                              # confirm the proposals in Review, or:
+uv run ao object bind invoices && uv run ao object bind contracts && uv run ao object bind customers
+uv run ao logic apply -f samples/quickstart/logic/functions.yaml
+for f in 미수금 연체일수 연체여부 남은일수 미수청구건수; do uv run ao logic activate function $f; done
+uv run ao logic apply -f samples/quickstart/logic/actions.yaml
+uv run ao logic activate action 독촉단계기록          # owner
+uv run ao action preview 독촉단계기록 INV-20200003 --param 단계=2
+uv run ao logic apply -f samples/quickstart/logic/workflows.yaml
+uv run ao logic activate workflow 연체독촉            # owner; runs every day at 02:00
+uv run ao workflow run 연체독촉 --wait                 # or now
+uv run ao action runs --status pending_approval     # stage 4 waits for an owner
+```
+
+- functions `미수금`, `연체일수` (청구일 + 30 days is taken as the due date: the data has no
+  지급기한 column), `연체여부`, `남은일수`, `미수청구건수`;
+- the action `독촉단계기록` records a reminder stage (1-4) as operational properties
+  `독촉단계`/`독촉메모`, refuses a fully paid invoice, notifies the editors, needs an owner's
+  approval for stage 4 (`approval: {role: owner, when: param.단계 >= 4}`), and agents may
+  only propose it;
+- the workflow `연체독촉` goes through the overdue invoices every day at 02:00 and records
+  the stage their overdue days call for, once.
+
+#### Approvals
+
+A run that needs approval waits as `pending_approval` (**Review → Approvals**, `ao action
+runs --status pending_approval`). Approving evaluates the preconditions again on the
+current data and the current version of the action; a run whose precondition no longer
+holds fails instead of being applied. Who may approve: the run's approval role
+(`reviewer` or `owner`). With accounts on, a person never approves their own request
+(four-eyes; 403 `self_approval`); with accounts off there is one local user, so
+self-approval is allowed. **An agent's proposal may be approved by the person who created
+the agent's token**: the request belongs to the agent (`agent:<token id>`), and the token's
+creator stays the human in the loop. The requester may withdraw (reject) their own
+request. A revert needs an editor (or the action's `min_role`, if higher); when a later
+edit changed the same property, only an owner can force it.
+
+#### Workflows
+
+The service runs a scheduler (one thread, every 60 s) that fires the due slot of every
+active workflow with a schedule, in `AUTOONTOLOGY_TZ` (default: the system's time zone).
+After downtime the latest missed slot fires once (within 6 hours); older ones are not
+backfilled, and a slot fires once even with two schedulers. A step whose action needs
+approval pauses that object; the run resumes it when the approval is decided (rejected:
+the object is skipped). An object whose same action already waits for approval is not
+submitted again (counted as *already pending*). A run acts with the role of the person who
+activated the workflow; with accounts on, if that person is disabled or no longer an owner,
+the run fails (`activator_not_allowed`) until an owner activates the workflow again. `AUTOONTOLOGY_WORKFLOWS=off` stops the schedules and
+`on_action` triggers (manual runs still work, paused runs still resume).
+
+#### Logic from documents
+
+`ao logic extract` (or **Logic → Extract from documents**) starts a `logic` run: the
+rule and process concepts the build found in your documents, with their verified evidence
+quotes, the object types and the existing definitions go to the chat model, which proposes
+functions, actions and workflows. Every proposal is validated against the ontology: valid
+ones are *ready*, the others are kept with their errors (*needs an edit*, for example a
+due-date column the data does not have). Review them in **Review → Logic proposals**:
+accept (a `draft` definition is saved), edit and accept, or reject; activation stays a
+separate step. **Cost:** the run makes one chat call per batch of up to 12 concepts (at
+most 80 concepts per run), so it spends tokens like a small build step; nothing runs
+until you start it.
+
+#### Skills for agents
+
+**Connect → Export skill** (`ao skill export`, `GET /api/logic/skill.zip`) downloads the
+active definitions as an Agent Skill (a folder an agent loads, led by `SKILL.md`):
+
+```
+autoontology-<project>/
+  SKILL.md                    front matter (name, description) + object types, functions,
+                              actions, workflows, a step-by-step procedure and examples
+  mcp.json                    the MCP server: {{AUTOONTOLOGY_URL}}/mcp, Bearer <token>
+  definitions/functions.yaml  the active specs (ao logic apply -f reads them)
+  definitions/actions.yaml
+  definitions/workflows.yaml
+```
+
+Replace the two placeholders with your service's URL and an agent token; the bundle never
+contains a token. Exporting unchanged definitions gives the same bytes.
+
 ## Operating
 
 After the first build the ontology is something you run, not a one-off export. The cycle:
@@ -551,7 +671,7 @@ default project. `doctor` and `status` are installation-wide and list the projec
 | `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` / `zip <rev> --out FILE` | Lists the export folders; lists one revision's files or prints a text file (e.g. `ossie/validation.json`, `okf/validation.json`); saves a file; saves the whole revision folder as one zip (`--out` a directory: `autoontology-r0003.zip`). |
 | `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F\|--examples [--limit N]` / `index [--rebuild]` | The Playground through the running service: the RAG answer streamed with its citations, the NL-to-SQL agent, a SPARQL query over the latest snapshot, the chat index. |
 | `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | The Settings page: the selection and where each value comes from (never the key), a candidate test (chat pong and embedding dimension), saving to `.env` (`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; the key only from stdin), and the service's self-restart. |
-| `autoontology agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90]` / `rotate <id>` / `revoke <id>` | Bearer tokens for outside agents (see [Connect outside agents](#connect-outside-agents)): `create` and `rotate` print the token once (only its SHA-256 is stored; rotating stops the old token at once), `revoke` keeps the token's call history. `--revision` pins the token to one snapshot. |
+| `autoontology agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90] [--scope read\|propose\|execute] [--action NAME]` / `rotate <id>` / `revoke <id>` | Bearer tokens for outside agents (see [Connect outside agents](#connect-outside-agents)): `create` and `rotate` print the token once (only its SHA-256 is stored; rotating stops the old token at once), `revoke` keeps the token's call history. `--revision` pins the token to one snapshot. `--scope propose` lets the agent submit actions that always wait for approval, `--scope execute` (owners) under each action's own approval rules; `--action` limits those scopes to the named actions. |
 | `autoontology agent usage [--days N]` | Agent calls by tool, by token (MCP and REST) and by day. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/<project slug>/r<rev>/` (or `DIR/r<rev>/`). |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
@@ -559,6 +679,12 @@ default project. `doctor` and `status` are installation-wide and list the projec
 | `autoontology tools status` | Shows the kordoc engine and the Node binary in use. |
 | `autoontology tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | Deletes upstream connections named `autoontology_src_*` whose database is gone. Connections whose database exists but that no source in this checkout owns are listed and deleted only with `--include-unowned` (another checkout sharing the catalog may use them); `--drop-db` then also drops their databases. |
 | `autoontology project list [--no-archived]` / `show [SLUG]` / `create <slug> [--name N] [--description D]` / `rename <slug> [--name N] [--slug S] [--description D]` / `archive <slug>` / `unarchive <slug>` | Lists the projects (latest revision, sources, last build, state), shows one (default: `--project`, else the default project), creates one, changes its name, description or slug (a new slug renames `exports/<slug>/`; 409 while one of its runs is active), archives it (read-only, hidden from lists) or makes it writable again. Changes go through the running service when it is up. |
+| `autoontology object types [--status S]` / `bind <type> [--key K] [--title T]` / `list <type> [-q TEXT] [--filter col=value] [--limit N] [--offset N]` / `get <type> <key>` | Object types (proposed, active, broken, retired); bind one by hand (key and title verified on the source; the type becomes active); search its objects; one object with its edits, conflicts and links. `<type>` is an id, class name, label or table. |
+| `autoontology logic list [--kind K] [--status S]` / `show <kind> <name>` / `apply -f FILE` / `validate -f FILE` / `test [NAME] [-f FILE] --key K [--param p=v]` / `activate <kind> <name>` / `retire <kind> <name>` | Function, action and workflow definitions: list, one with its history, save a file's specs as drafts, check them without saving, evaluate a function on objects, activate (functions: editor; actions and workflows: owner), retire. |
+| `autoontology logic extract [--wait]` / `candidates [--ready] [--status S]` / `accept <id> [-f FILE] [--note N]` / `reject <id>` | Propose definitions from the documents' rules (a `logic` run; uses the chat model), list the proposals, accept one as a draft (or an edited spec), reject one. |
+| `autoontology action list [--type T]` / `preview <name> <key> [--param p=v]` / `run <name> <key> [--param p=v] [--yes] [--idempotency-key K]` / `runs [--status S] [--action A] [--key K]` / `approve <run>` / `reject <run>` / `revert <run> [--force]` | Actions: what one would do (nothing is stored), run it (shows the preview and asks first), the runs, decide a pending run, revert an applied one. |
+| `autoontology workflow list` / `run <name> [--wait]` / `runs [--status S] [--workflow W]` / `show <run>` / `cancel <run>` | Workflows: trigger and next slot, run one now, the runs, one run with its objects and action runs, cancel an open run. |
+| `autoontology skill export [-o FILE\|DIR]` | Saves the active definitions as an Agent Skill zip (`SKILL.md`, `mcp.json`, `definitions/`). |
 | `autoontology version` | Prints the version. |
 
 Every command that prints a table also takes `--json` (the web API's body). The commands
@@ -637,6 +763,20 @@ installation-wide.
 | `POST /api/agent/tokens/{id}/rotate`, `DELETE /api/agent/tokens/{id}` | A new token for the same record (`{token, record, note}`; the old one stops at once; 409 `token_revoked`/`token_expired`), or revoke it (the record, with its call history, stays). |
 | `GET /api/agent/usage[?days=]` | Agent calls: `{days, total, ok, by_tool: [{tool, calls, ok, avg_ms}], by_day: [{day, calls}], by_token: [{token_id, name, calls, ok, by_surface: {mcp, rest}, last_call_at}]}`. |
 | `GET /api/agent/tools` | The agent tools with their descriptions and input schemas, `mcp_path`, `rest_base`, `rate_per_min`. |
+| `GET /api/objects/types[?status=]`, `GET /api/objects/types/{type}` | The object types (synced with the latest snapshot): table, key, title column, columns, links, status (`proposed`, `active`, `broken`, `retired`). `{type}` everywhere is an id, class name, label or table; 404 `unknown_object_type`, 409 `ambiguous_object_type` with `candidates`. |
+| `PUT /api/objects/types/{type}` | `{key?, title?}` binds a type by hand (verified on the source: the key must be unique and never empty); the type becomes active. |
+| `GET /api/objects/{type}?q=&filter=col=value&limit=&offset=&computed=` | A type's objects (source rows with the edit layer applied); `computed=1` adds the values of its active functions. |
+| `GET /api/objects/{type}/{key}`, `GET /api/objects/{type}/{key}/links/{link}[?then=]` | One object: values, source values, edit marks (conflicts, operational properties), links, history, `computed` and the `actions` the caller may run; the objects a link reaches (`then`: one more hop). |
+| `GET /api/logic[?kind=&status=]`, `GET /api/logic/{kind}/{name}` | The definitions; one with its history. |
+| `POST /api/logic/validate`, `POST /api/logic`, `POST /api/logic/{kind}/{name}/status` | `{spec}` (a mapping or YAML/JSON text) checked without saving (`{valid, errors}`), saved as a draft (400 `invalid_spec` with `errors`), or `{status: active\|retired\|draft}`. |
+| `POST /api/logic/test`, `POST /api/logic/functions/{name}/test`, `POST /api/logic/functions/{name}/call` | Evaluate an unsaved or stored function on chosen objects (`{keys, params?}`), or an active one on one object (`{key, params?}`). |
+| `GET /api/logic/candidates[?ready=&status=]` | The proposals of `logic` runs (`POST /api/runs {"kind": "logic"}`), decided through `POST /api/review/lg:<id>/decision` (`{decision, spec?}`: an edited spec is saved instead). |
+| `GET /api/logic/skill.zip` | The active definitions as an Agent Skill zip (see [Skills for agents](#skills-for-agents)). |
+| `GET /api/actions[?type=]`, `POST /api/actions/{name}/preview`, `POST /api/actions/{name}/submit` | The active actions; what one would do on `{key, params?}` (nothing is stored); run it (`idempotency_key?`): 201 with the run (`applied` or `pending_approval`), 409 `precondition_failed` (with `failures`), `object_busy`. |
+| `GET /api/actions/runs[?status=&action=&key=&type=&limit=]`, `GET /api/actions/runs/{id}` | Action runs with `can_approve` / `can_revert` for the caller. |
+| `POST /api/actions/runs/{id}/approve`, `…/reject`, `…/revert` | Decide a pending run (`{note?}`; 403 `self_approval` for your own request with accounts on), revert an applied one (`{force?}`; 409 `superseded`). |
+| `GET /api/workflows`, `POST /api/workflows/{name}/run` | The active workflows with their trigger, next slot and latest run; run one now (`{wait?}`: 202 with the running run, or 200 with the run as it ended or paused). |
+| `GET /api/workflows/runs[?workflow=&status=&limit=]`, `GET /api/workflows/runs/{id}`, `POST /api/workflows/runs/{id}/cancel` | Workflow runs; one with its objects and action runs; cancel an open run. |
 | `POST /mcp`, `/agent/v1/*` | The outside-agent surface (bearer token required): see [Connect outside agents](#connect-outside-agents). |
 | `POST /v1/chat/completions`, `GET /v1/models` | The model router used by the engine; not meant for clients. |
 | `POST /ingest`, `POST /ingest/delete?database_name=` | Internal: callbacks from the engine when a connection is registered or deleted. They queue an ingest or a graph deletion; not meant for clients. |
@@ -645,8 +785,9 @@ installation-wide.
 ### Connect outside agents
 
 Other agents -- Claude Code, Claude Desktop, Cursor or your own scripts -- can read the
-built ontology through an MCP endpoint and a small REST API. Both are read-only and need a
-bearer token, also from `localhost`:
+built ontology and its objects through an MCP endpoint and a small REST API, and, with a
+token that has a write scope, submit actions. Both need a bearer token, also from
+`localhost`:
 
 ```bash
 uv run autoontology agent tokens create claude-code          # prints aok_... once
@@ -672,7 +813,10 @@ Replace `http://127.0.0.1:7800` with the origin the agent reaches the service on
 example your Tailscale hostname). The tools, the same over MCP and REST, are
 `list_revisions`, `get_ontology_summary`, `search_concepts`, `get_concept` (by id, name or
 synonym), `sparql_query` (the Playground's read-only SPARQL checks, timeout and row cap)
-and `list_exports`; every result carries the `revision` it was answered from.
+and `list_exports`; for the [actionable ontology](#actionable-ontology) also
+`list_object_types`, `search_objects`, `get_object`, `list_functions`, `call_function`,
+`list_actions`, `preview_action`, `get_action_run` and the one write tool,
+`submit_action`. Every result carries the `revision` it was answered from.
 `get_concept`'s `decisions` show the current review state, also when an older revision is
 asked. An MCP request may batch at most 20 messages, and every tool call in a batch counts
 towards the token's rate limit.
@@ -686,6 +830,10 @@ towards the token's rate limit.
 | `GET /agent/v1/concepts/{id}[?revision=]` | `get_concept` |
 | `POST /agent/v1/sparql` | `sparql_query`: `{query, limit?, revision?}` |
 | `GET /agent/v1/exports`, `GET /agent/v1/exports/{rev}.zip` | `list_exports`; one revision folder as a zip |
+| `GET /agent/v1/objects/types`, `GET /agent/v1/objects/{type}?q=&filter=col=value&limit=&offset=`, `GET /agent/v1/objects/{type}/{key}` | `list_object_types`, `search_objects`, `get_object` |
+| `GET /agent/v1/functions[?type=]`, `POST /agent/v1/functions/{name}/call` | `list_functions`, `call_function`: `{key, type?, params?}` |
+| `GET /agent/v1/actions[?type=]`, `POST /agent/v1/actions/{name}/preview` | `list_actions`, `preview_action`: `{key, params?}` |
+| `POST /agent/v1/actions/{name}/submit`, `GET /agent/v1/actions/runs/{id}` | `submit_action` (write scope): `{key, params?, idempotency_key?}`; `get_action_run` |
 | `GET /agent/v1/openapi.json` | The OpenAPI description of these routes |
 
 A missing, wrong, revoked or expired token is answered 401 `{"error": "unauthorized"}`. A
@@ -697,6 +845,18 @@ and only their SHA-256 is stored. The Host and cross-origin checks of the servic
 apply. The web UI's **Connect** page (`/ui/connect`) does the same without a terminal:
 it shows these endpoints, creates, rotates and revokes tokens, and fills these snippets with
 a new token the one time it is shown.
+
+**Token scopes.** Every token reads (`read`). `propose` also lets the agent submit actions,
+and every such run waits for a person's approval (the action's approval role, else a
+reviewer). `execute` (only an owner may create or rotate such a token) runs actions under
+their own approval rules. An allow-list (`--action NAME`, or the action checkboxes on the
+Connect page) limits the write scopes to those actions. A token can never do more than an
+action's agent policy allows (`none` refuses, `propose` always waits for approval) nor
+more than its creator's current role. `submit_action` calls are also written to the audit
+log. The agent's request is recorded as `agent:<token id>`, so the token's creator may
+approve it (see [Approvals](#approvals)). Objects are read live through the latest
+revision, so a token pinned to an older revision gets 403 `revision_pinned` from the
+object, function and action tools.
 
 ### Export formats
 
@@ -815,6 +975,8 @@ then `.env`, then the built-in default.
 | `AUTOONTOLOGY_ALIGN_MIN_SIM` | `0.55` | Candidate Term cosine floor. |
 | `AUTOONTOLOGY_ALIGN_MIN_CONF` | `0.7` | Judge confidence needed to apply a verdict (`same` also needs 0.90, see above). |
 | `AUTOONTOLOGY_ALIGN_ALLOW_METRIC_SAME` | `0` | `1` lets a metric concept be judged `same` as a Term. |
+| `AUTOONTOLOGY_WORKFLOWS` | `on` | `off` stops scheduled and `on_action` workflow triggers (manual runs still work, paused runs still resume). |
+| `AUTOONTOLOGY_TZ` | the system's zone | IANA time zone (for example `Asia/Seoul`) workflow schedules are read in. |
 | `AUTOONTOLOGY_INTEGRATION` | `0` | `1` runs the integration tests (real Postgres and Ollama; set it in the shell). |
 
 The engine's own model variables (`DEFAULT_MODELS_*`, `REASONING_*`, `NON_REASONING_*`,
@@ -1010,15 +1172,19 @@ body. Admins are owners of every project.
 
 | Role | May |
 |---|---|
-| viewer | read everything in the project, download exports, ask the playground (chat, SQL, SPARQL, reading conversations) |
-| reviewer | + decide and undo review items, apply decisions (a new revision) |
-| editor | + add and remove sources, load samples, start builds and exports, list and manage agent tokens and their usage, delete playground conversations |
-| owner | + rename, archive and unarchive the project, manage its members, read its audit log |
+| viewer | read everything in the project, download exports, ask the playground (chat, SQL, SPARQL, reading conversations), read objects and definitions, evaluate functions, export a skill |
+| reviewer | + decide and undo review items, apply decisions (a new revision), approve or reject action runs whose approval role is reviewer |
+| editor | + add and remove sources, load samples, start builds and exports, list and manage agent tokens and their usage, delete playground conversations, save logic drafts, activate and retire functions, extract logic from documents, run actions (default `min_role`), run and cancel workflows |
+| owner | + rename, archive and unarchive the project, manage its members, read its audit log, confirm object types, activate and retire actions and workflows, approve runs whose approval role is owner, create agent tokens with the `execute` scope |
 | admin | + create projects, settings and restart, provider test, users, the whole audit log |
 
 `GET /api/auth/me` lists the caller's `permissions` per project slug and
 `installation_permissions`. The table lives in `autoontology/web/projects.py`
-(`PROJECT_PERMISSIONS`). A project's creator becomes its owner. On an archived project the
+(`PROJECT_PERMISSIONS`; the actionable ontology adds `objects.read`, `logic.read`,
+`functions.call` (viewer), `action.approve` (reviewer), `logic.edit`, `action.run`,
+`workflow.run` (editor), `objects.manage` and `logic.activate` (owner); `action.run` and
+`action.approve` are defaults that each action's `permission.min_role` and approval role
+override). A project's creator becomes its owner. On an archived project the
 playground still answers unless `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`.
 
 Agent tokens remember who created (or last rotated) them: a token stops working once its
@@ -1074,7 +1240,7 @@ See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
 ## Troubleshooting
 
-The [guide's troubleshooting table](docs/GUIDE.md#11-troubleshooting) lists every
+The [guide's troubleshooting table](docs/GUIDE.md#12-troubleshooting) lists every
 `doctor` and `init` remedy with its cause. The most common ones:
 
 | Symptom | Fix |

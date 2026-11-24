@@ -206,9 +206,18 @@ class LogicDefs:
         return saved
 
     def set_status(
-        self, kind: str, name: str, status: str, *, actor: str = "", reason: str = ""
+        self,
+        kind: str,
+        name: str,
+        status: str,
+        *,
+        actor: str = "",
+        reason: str = "",
+        record_same: bool = False,
     ) -> LogicDef | None:
-        """Change the status (``broken`` with *reason*); a history row records it."""
+        """Change the status (``broken`` with *reason*); a history row records it.
+        *record_same*: record a history row even when the status does not change (an
+        owner activating an already active workflow becomes its activator)."""
         if status not in STATUSES:
             raise ValueError(f"unknown logic status {status!r}")
         with self.store._conn() as conn:
@@ -221,6 +230,8 @@ class LogicDefs:
             d = _def(row)
             reason = reason if status == "broken" else ""
             if d.status == status and d.broken_reason == reason:
+                if record_same:
+                    self._history(conn, d, actor, f"status {status} (again)")
                 return d
             d.status, d.broken_reason = status, reason
             conn.execute(

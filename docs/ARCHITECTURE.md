@@ -12,7 +12,7 @@ overview is in the [README](../README.md).
 | Engine backend | `vendor/auto-ontology` (NVIDIA Auto Ontology, git submodule) | `127.0.0.1:3101` (`BACKEND_PORT`) | Connections, catalog, semantic model, exports and NL-to-SQL, over HTTP `/api/...`. |
 | CLI | `autoontology/cli.py` (typer), `autoontology/onboarding.py` | none | Runs `build` and `export` in-process; `up`/`down` supervise the two servers; `init`, `demo` and `provider` drive the onboarding. |
 | Postgres 17 + pgvector | `docker compose` or your own server | `5432` | The engine's catalog and vectors (`autoontology`) and one database per file source (`autoontology_src_<name>`; `autoontology_src_<slug_>__<name>` in a project other than the default one). |
-| SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: projects, sources, runs, documents, concepts, alignments, snapshots, playground, agent tokens, and (schema v9) accounts and the audit log. |
+| SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: projects, sources, runs, documents, concepts, alignments, snapshots, playground, agent tokens, (schema v9) accounts and the audit log, and (v10/v11) object types, logic definitions, action runs, the edit layer and workflow runs. |
 | Model providers | Ollama (`:11434`), an OpenAI-compatible URL, or the user's `claude` / `codex` CLI (chat only) | none | Chat (extraction, judges, playground, engine compile) and embeddings. |
 | kordoc (optional) | `<AUTOONTOLOGY_HOME>/kordoc` (npm, Node 20 or newer); OCR models in kordoc's model cache | none | Reads HWP/HWPX/PDF/DOCX/PPTX/XLS/XLSX into Markdown and OCRs images and scanned PDFs (PP-OCRv5 korean), run offline as a subprocess with an argv list. |
 
@@ -326,6 +326,8 @@ A person's decisions on what the build proposed are stored in `review_decisions`
 | alignment (proposal, axiom or automatic fold) | concept id | `accept` with `same`, `related`, `narrower` or `broader`; `reject` |
 | alias | `<term id>\|<alias>` | `accept`, `reject` |
 | unaligned concept | concept id | `acknowledge` |
+| object type proposal (`object`, inbox `ob:`) | the class's local name | `accept` (binds the type, see [Objects and logic](#objects-and-logic)), `reject` (retires it) |
+| logic candidate (`logic`, inbox `lg:`) | the candidate id | `accept` (saves a draft, optionally an edited spec), `reject` |
 
 A concept holds one decision: an alignment decision replaces its `concept` one and vice
 versa. Relation directions: accepting `broader` means the concept is narrower than the
@@ -448,7 +450,7 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 
 | Table | Holds |
 |---|---|
-| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground, v3: `term_alias_additions.source_id`, v4: `term_legacy_descriptions`, v5: `documents.reader_fingerprint`, v6: `review_decisions` and `alignments.judged_json`, v7: `agent_tokens`, `agent_calls`, v8: `projects`, `store_meta` and `project_id` on the tables below, v9: the account tables and `agent_tokens.created_by`). |
+| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground, v3: `term_alias_additions.source_id`, v4: `term_legacy_descriptions`, v5: `documents.reader_fingerprint`, v6: `review_decisions` and `alignments.judged_json`, v7: `agent_tokens`, `agent_calls`, v8: `projects`, `store_meta` and `project_id` on the tables below, v9: the account tables and `agent_tokens.created_by`, v10: the object and logic tables below, `agent_tokens.scopes` and the `object`/`logic` kinds of `review_decisions`, v11: `logic_candidates.rationale`, `spec_hash`, `evidence_verified`, `document`). |
 | `projects` | Projects: id, slug, name, description, created and archived times. |
 | `sources` | Registered sources (unique per project): name, kind (`files`, `database`, `documents`), locator, catalog database id. |
 | `source_leases` | Leases that keep builds, exports and deletes from overlapping. |
@@ -463,7 +465,13 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 | `review_decisions` | A person's decision per review subject (alignment, alias, concept), who made it, and the revision that first reflected it (`applied_revision`). |
 | `playground_index`, `playground_index_meta` | The element vectors and the snapshot they were built from. |
 | `playground_conversations`, `playground_messages` | Stored chats, keyed by project. |
-| `agent_tokens`, `agent_calls` | Outside-agent tokens (SHA-256 only) of a project, and their calls. `agent_tokens.created_by` (v9) is the user who created or last rotated the token (NULL for older tokens and the CLI's). |
+| `agent_tokens`, `agent_calls` | Outside-agent tokens (SHA-256 only) of a project, and their calls. `agent_tokens.created_by` (v9) is the user who created or last rotated the token (NULL for older tokens and the CLI's). `agent_tokens.scopes` (v10) is a JSON list: `read` always, `propose` / `execute`, `action:<name>` entries (`["read"]` for every older token). |
+| `object_types` (v10) | A snapshot class bound to one source table: `class_local` (unique per project), label, source, schema and table, key and title columns, links, the table's columns as last read, `status` (`proposed`, `active`, `broken`, `retired`) with `broken_reason`, `key_origin` (`pk`, `inferred`, `manual`), `key_checked`, `validated_revision`. |
+| `logic_defs`, `logic_def_history` (v10) | Function / action / workflow definitions (unique per project, kind and name): `spec_json`, `version`, `status` (`draft`, `active`, `retired`, `broken`) with `broken_reason`, `origin` (`manual`, `extracted`), `evidence_json`; the history keeps every version and status change. |
+| `logic_candidates` (v10, v11) | What a `logic` run proposed: kind, name, spec, validation errors, evidence quotes, confidence, the run and source; v11 adds the rationale, `spec_hash` (dedupe), `evidence_verified` and the document. |
+| `action_runs` (v10) | One action invocation: action name and version, object type and key, parameters, `status` (`pending_approval`, `applied`, `rejected`, `failed`, `reverted`; the CHECK also allows `previewed`, `approved`), requester, `via` (`ui`, `cli`, `agent`, `workflow`), token or workflow run, approver and approval role, the preview, the result, `idempotency_key` (unique per project). |
+| `object_edits` (v10) | The edit layer: per object and property the old, new and source value at edit time, `operational`, the action run, who and when, `reverted_at`. Sources are never written. |
+| `workflow_runs` (v10) | One firing of a workflow: version, `trigger` (`schedule`, `on_action`, `manual`), `fire_slot` (unique per project and workflow), `status` (`running`, `paused`, `succeeded`, `failed`, `cancelled`), steps (object outcomes and continuations) and summary. |
 | `users` | Accounts: email (unique, case-insensitive, stored lower-cased), name, PBKDF2 `pw_hash` (NULL until a password is set), `is_admin`, `disabled_at`, `last_login_at`. |
 | `sessions` | Sign-in sessions: the SHA-256 of the cookie id, user, created/expires/last-seen times (last seen written at most once a minute), IP and user agent. |
 | `login_tokens` | Single-use links (`magic`, `invite`, `reset`): SHA-256 only, expiry and `used_at`. |
@@ -475,6 +483,275 @@ The engine keeps its own state in Postgres: the catalog and semantic model table
 `autoontology_src_<name>` (or `autoontology_src_<slug_>__<name>`).
 `config.validate_pg_database_name` refuses every other
 database name.
+
+## Objects and logic
+
+The actionable layer (schema v10/v11) turns classes into **object types** over source
+rows, and adds **functions**, **actions** and **workflows** defined as specs, extracted
+from documents as proposals, and exported as an **agent skill**. The rule throughout:
+proposed automatically, confirmed by a person, only confirmed definitions run; sources are
+never written.
+
+| Part | Code |
+|---|---|
+| Object types, naming, reads, edit layer | `objects/binding.py`, `objects/naming.py`, `objects/reader.py`, `objects/overlay.py`, `objects/service.py`, `web/objects_api.py` |
+| Expression language, specs, registry | `logic/expr.py`, `logic/schema.py`, `logic/specs.py`, `logic/registry.py`, `logic/functions.py`, `web/logic_api.py` |
+| Actions | `logic/actions.py`, `store/actions.py`, `web/actions_api.py` |
+| Workflows | `logic/workflows.py`, `logic/scheduler.py`, `web/workflows_api.py` |
+| Logic extraction | `logic/extract.py`, `logic/candidates.py`, `unstructured/prompts.py` |
+| Agent tools and scopes, skill export | `web/agent_api.py`, `store/agent_tokens.py`, `logic/skills.py` |
+
+### Object types
+
+`binding.sync` runs once per snapshot revision (lazily, before any read of object types).
+Every structured class backed by exactly one table becomes a `proposed` type (review inbox
+category `objects`, `ob:`): its columns and foreign-key links come from the snapshot, the
+key is the first id-like column (`...ID`, `..._id`) that is no foreign key, else an id-like
+foreign key, else the first column; the title is the first text column whose name contains
+`명`, `이름`, `제목`, `name`, `title`, `label` or `subject` and is not the key -- with none,
+the title column stays empty and an object's title is its key (a status or code column
+would make a poor title). Proposals are refreshed on later revisions; a decided type keeps
+its key and title.
+
+Accepting (or binding by hand, `PUT /objects/types/{type}`, `objects.manage`) verifies the
+type against the source in a read-only transaction (`binding.verify`): the table's current
+columns; a one-column primary key is taken as the key unless one was set by hand,
+otherwise the key must be unique and never null (`key_stats`), else 409 `key_not_unique`.
+The type becomes `active`.
+
+A type is **broken** for one of two reasons, and comes back by itself when the cause goes:
+
+| Reason prefix | When | Checked |
+|---|---|---|
+| `snapshot: ` | the class is gone, or its table is no longer the class's table | on every new revision (`sync`) |
+| `source: ` | the table, the key, the title or a column the read needs is missing | on every read, in the same transaction (`service._checked`) |
+
+**Naming** (`objects/naming.py`): one resolver serves the REST API, the CLI (through the
+API), the agent tools and the specs. A reference names a type by, in order: its id
+(`ot_...`), its class's local name (`term-...`), its label (exactly, then ignoring case),
+its table (`invoices` or `public.invoices`, exactly, then ignoring case). The first step
+that matches decides; among several matches retired types drop out, then only active ones
+stay; more than one left is 409 `ambiguous_object_type` with the `candidates` (in specs:
+the validation error `ambiguous_object_type`). Table names make specs independent of the
+language the build labelled its classes in.
+
+**Reads** (`objects/reader.py`): Postgres only, one transaction per request that is
+`READ ONLY` with `statement_timeout` 5000 ms (connect timeout 5 s). Identifiers are only
+the bound type's, checked against the table's actual columns in the same transaction and
+quoted with `psycopg.sql.Identifier`; values are always parameters, and filters compare
+`CAST(col AS text) = %s`. A page is at most 200 rows; search text and filter values are
+cut to 200 characters; at most 5 filters and 2 link hops.
+
+**Edit layer** (`objects/overlay.py`, `object_edits`): reading an object applies each
+property's newest unreverted edit over the source value. An edit records the source value
+it was made against; when the source value differs now, the property is a `conflict`.
+Edits of properties that are no source column are **operational** properties (declared by
+actions with `operational: true`, e.g. a reminder stage) and are fields of type `any` in
+expressions.
+
+### Expression language
+
+Functions, preconditions, effect values, approval conditions, workflow filters and
+`{{ ... }}` in notification templates use one small language (`logic/expr.py`): a
+hand-written tokenizer and recursive-descent parser build an AST, `compile_expr`
+type-checks it against the schema, and closures evaluate it. Nothing reaches
+`eval`/`exec`/`compile`: an identifier names a field, a link, a parameter, a builtin or a
+defined function, or it is an error.
+
+- **Grammar**: `or` / `and` / `not` (keywords in any case), comparisons `== = != <> < <= > >=`,
+  `[not] in [a, b]`, `+ - * / %`, unary `-`, parentheses, literals (numbers, strings,
+  `true`, `false`, `null`), `#` comments, back-quoted names.
+- **Names**: a field by column name or property label (exact, then ignoring case),
+  `link.field` (outgoing links, at most 4 names in a path), `param.x`, another function of
+  the same type as `name()` / `fn.name()`. A link is named by its name, its label, the
+  target's label, the target's table (`invoices`, `public.invoices`) or (outgoing) its
+  column.
+- **Aggregates** over a link (incoming links only here): `count(link [where cond])`,
+  `exists(link [where cond])`, `sum(link.field [where cond])`, `min(link.field)`,
+  `max(link.field)`; `cond` is checked on the linked object.
+- **Builtins**: `today()`, `date("2026-01-31")`, `days_between`, `add_days`, `coalesce`,
+  `if`, `len`, `lower`, `upper`, `contains`, `round`, `abs`, `min`/`max`, `text`,
+  `number`. `date - date` is days, `date ± number` a date, `text + text` joins.
+- **Types**: `number`, `text`, `bool`, `date`, `null`, `any` (operational properties,
+  known when evaluated); `schema.column_type` maps Postgres / XSD types.
+- **Nulls**: arithmetic and ordering with null are null; `==` / `!=` compare null as a
+  value; `and` / `or` / `not` are three-valued; `if` takes a null condition as false.
+- **Limits**: 4000 characters of source, depth 32, 400 nodes, 100 list items, strings of
+  1000 characters, function-to-function calls 8 deep, 20,000 steps per evaluation of one
+  object, text values of 10,000 characters, numbers up to 1e30 in magnitude. Link reads
+  for a page of objects share a budget of 100 queries and 5000 rows
+  (`functions.MAX_LINK_QUERIES`, `MAX_LINK_ROWS`); one function's failure on one object is
+  that value's `error`, never the request's.
+
+### Specs, validation and lifecycle
+
+A spec is YAML or JSON with `kind: function | action | workflow` (`logic/specs.py`,
+pydantic, `extra: forbid`): at most 64,000 characters, 50 specs per document, names one
+word (letters, digits, `_`), no keyword or builtin as a name. Workflows have at most 50
+steps, nested 5 deep, and at most 5000 objects per run. `specs.validate` is fail-closed and
+returns structured errors (`path`, `code`, `message`, `pos`): the object type must be
+active, every expression must parse and type-check against its fields and links,
+referenced functions and actions must exist (not retired), parameters must line up, no
+function may call itself through others, an `approval.when` needs an approval role, and a
+workflow may not run the action it is triggered by.
+
+| Status | Means |
+|---|---|
+| `draft` | saved (`logic.edit`); every save of a changed spec is a new version and a draft again |
+| `active` | in use; activating needs a valid spec whose references are active. Functions: `logic.edit` (editor); actions and workflows: `logic.activate` (owner) |
+| `retired` | out of use; always allowed |
+| `broken` | set by the system while the spec no longer validates; it gets its previous status back once it does |
+
+**Revalidation** (`registry.ensure_validated`, run lazily before every use): a SHA-256
+fingerprint covers the synced snapshot revision, every object type (label, status, key,
+columns, links) and every definition (kind, name, version, status), stored in
+`store_meta`. When it changed, every non-retired definition is validated again (also an
+active one whose references are no longer active), repeated until nothing changes so
+chains of references settle. History rows record each change (`system` for revalidation).
+
+### Actions
+
+`logic/actions.py` runs preview → submit → (approve | reject) → apply → revert:
+
+- **Preview** stores nothing: parameters coerced and checked (type, required, enum,
+  default), every precondition evaluated, the effects (old and new value), whether approval
+  is needed (an unevaluable `approval.when` needs it: fail-closed), the rendered
+  notifications with a recipient count (never addresses) and whether the caller may submit.
+- **Submit** evaluates outside the store's write lock, then inside one `BEGIN IMMEDIATE`
+  transaction compares the object's edit-layer marker with the one the evaluation read and
+  writes the run and its edits together. A changed marker re-evaluates, at most 3 times,
+  then 409 `object_busy`. 409 `precondition_failed` carries the failures.
+  `idempotency_key` (1-200 characters, unique per project) returns the first run; 409
+  `idempotency_conflict` when it was for another action or object.
+- **Approval**: the approver needs the run's approval role (`reviewer` or `owner`). With
+  accounts on the requester may not approve their own run (four-eyes, 403
+  `self_approval`); accounts off has one local user, so self-approval is allowed. The
+  requester may reject (withdraw) their own request. Approving re-checks the preconditions
+  and the action's current active version: otherwise the run becomes `failed`.
+- **Revert** reverses an applied run's edits: editor or the action's `min_role`, whichever
+  is higher; 409 `superseded` when a later edit changed one of the same properties, unless
+  an owner passes `force`.
+- **Permissions**: routes need `objects.read`; submitting needs the spec's
+  `permission.min_role` (default editor), deciding the run's approval role.
+- **Notifications** are sent after the commit from a daemon thread (at most 50 recipients;
+  role recipients need accounts); a mail failure never fails the run, and the outcome
+  (counts only) is merged into the run's `result`.
+- **Audit**: `action.submit`, `action.approve`, `action.reject`, `action.apply`,
+  `action.revert`, `action.fail`, with the run id as target. Callbacks registered with
+  `on_run_decided` run after a run reached `applied`, `rejected`, `failed` or `reverted`.
+
+**Agents** act with their token creator's current role (accounts off or no creator:
+owner) and the token's scopes. The effective mode is the lower of the token's write scope
+and the spec's `agent` policy: `none` refuses (403 `agent_not_allowed`), `propose` always
+creates a `pending_approval` run (approval role: the spec's, else `reviewer`), `execute`
+follows the spec's approval rules. The requester of an agent's run is `agent:<token id>`,
+so four-eyes does not stop the token's creator from approving it: the creator is the
+human in the loop. A person's own request still cannot be approved by that person.
+
+### Workflows
+
+`logic/workflows.py` fires one active workflow: the `workflow_runs` row is inserted first
+with its `fire_slot` (`2026-11-25T02:00` for a schedule, `action:<run id>` for
+`on_action`, `manual:<id>`), unique per workflow, so a duplicate firing returns the
+existing run. Objects are read page by page in key order, the `where` filter is evaluated
+per object (failures counted in `where_errors`), and at most
+`min(for_each.limit, max_objects)` matching objects are processed (`truncated` past that,
+or after 50,000 rows scanned).
+
+Per object the steps run in order: `if`, `action` (parameters from expressions,
+idempotency key from the run id, step path and object key; the object is read again after
+an applied action) and `notify`. Outcomes: `done`, `paused` (an action waits for
+approval), `skipped` (a precondition does not hold, the approval was rejected, the same
+request already waits for approval, or the workflow changed meanwhile) and `failed`.
+
+- **Pause and resume**: a `pending_approval` action stores a continuation under the action
+  run's id. The listener on `actions.on_run_decided` resumes it (`applied`: the steps after
+  the action; `rejected`: skip; `failed`: fail); a continuation is claimed atomically, so
+  the listener and `reconcile` never resume it twice. `reconcile` (every scheduler tick and
+  at startup) picks up decisions made elsewhere and fails runs interrupted mid-way.
+- **Already pending**: before an action step submits, the runner looks for a
+  `pending_approval` run of the same action on the same object with equal (coerced)
+  parameters, from any requester; if there is one, nothing is submitted and the object is
+  `skipped` with `already_pending: <run id>`, so a daily workflow does not ask again every
+  day.
+- **Who acts**: the user who activated the workflow (the newest non-system `active` history
+  entry). With accounts on that user must still exist, be enabled and be an owner of the
+  project (or an admin, or the CLI) when the run starts and whenever an object resumes;
+  otherwise the run or object fails. An owner activating an already active workflow is
+  recorded as its new activator (a history row `status active (again)`), so no retire is
+  needed to take it over. Action runs carry `requested_by: workflow:<name>`,
+  `via: workflow`; the audit log records `workflow.run`, `workflow.finish`,
+  `workflow.cancel`.
+- **`on_action`**: an applied action starts every active workflow triggered by it, for that
+  object; workflow-triggered chains stop at depth 3 (`depth_limit`).
+
+**Scheduler** (`logic/scheduler.py`): a daemon thread started from the service's lifespan,
+ticking every 60 s over the non-archived projects: `reconcile` first, then -- when
+`AUTOONTOLOGY_WORKFLOWS` is `on` (default) -- the due slot of every active scheduled
+workflow (`daily HH:MM`, `hourly` at minute 0, `weekly MON HH:MM`) in `AUTOONTOLOGY_TZ`
+(an IANA zone) or the system zone. Only the most recent slot is considered: it fires when
+at most 6 h old and not older than the activation, so downtime fires the latest missed slot
+once and never backfills. With `AUTOONTOLOGY_WORKFLOWS=off` the thread only reconciles and
+`on_action` triggers are off; manual runs (`workflow.run`, editor) still work.
+
+### Logic extraction
+
+A `logic` run (`POST /runs {kind: "logic"}`, `logic.edit`; `ao logic extract`) proposes
+definitions from the project's rule and process concepts (`logic/extract.py`), in four
+steps:
+
+1. **collect** -- rule/process concepts with their definitions and up to 3 verified
+   evidence quotes, grouped by document; related metric/attribute concepts; the active
+   object types (label, table, key, columns with types, field labels, links, operational
+   properties) and the existing definitions. At most 80 concepts per run, batched per
+   document into calls of at most 12 concepts and 16,000 characters.
+2. **extract** -- one JSON-mode chat call per batch (`invoke_json` with the validation
+   error fed back; `LOGIC_PROMPT_VERSION` 2, which tells the model to use the table or label
+   as `object_type` and that `approval.when` needs a reviewer or owner role). Each candidate
+   is checked on its own and dropped with a counted reason when it is malformed
+   (fail-closed: one bad candidate never fails the run; the run fails only when every call
+   failed). Quotes are verified against the document's chunks; a candidate without a
+   verified quote is kept with `evidence_verified` false and half the confidence.
+3. **validate** -- candidates are validated together with the project's definitions and
+   each other (`registry.check_many`); errors are stored: none is "ready", some is "needs
+   edit" (for example a column the data lacks).
+4. **store** -- dedupe by kind, name and the normalized spec's hash against definitions and
+   earlier candidates; decided candidates are never touched.
+
+Candidates are review items (category `logic`, `lg:<id>`, `logic/candidates.py`): accept
+saves the spec -- or the person's edited spec -- as a **draft** with `origin: extracted` and
+the evidence (refused when it does not validate, or when a non-retired definition of that
+name exists); activation stays a separate, role-checked step. Undo of an accept retires that
+draft while it is still the version the accept saved. Each batch is one model call, so
+extraction costs model usage in proportion to the number of rule/process concepts.
+
+### Agent scopes
+
+`store/agent_tokens.py::normalize_scopes` orders a token's scopes: `read` always, then
+`propose` / `execute`, then up to an `action:<name>` allow-list (at most 30 entries).
+`write_mode` is the highest write scope (or none); `allowed_actions` the allow-list (none:
+every action). Only owners may create a token with `execute`. `submit_action` is the only
+write tool (`WRITE_TOOLS`): a `read` token gets `scope_required`; every call is recorded
+in `agent_calls` and a submit is also audited (`action.submit`, `via: agent`,
+`token_id`). The object and action tools read live rows through the latest snapshot, so a
+revision-pinned token may use them only while its pin is the latest revision.
+
+### Skill export
+
+`logic/skills.py::build_skill` writes an Agent Skill bundle from a project's **active**
+definitions and active object types; `GET /logic/skill.zip` (`logic.read`, audited
+`skill.export` with the counts), `ao skill export [-o file.zip]` and the Connect page's
+"Export skill" button serve it. The zip holds one folder, `autoontology-<slug>/`:
+
+| File | Content |
+|---|---|
+| `SKILL.md` | YAML front matter (`name`: lower-case letters, digits, hyphens, at most 64 characters; `description`: what it does and when to use it, at most 1024 characters) and an English body: purpose, the agent procedure (search → get → call_function → preview → submit, never assume approval, report run ids), object types, functions, actions (parameters, preconditions, approval, agent policy), workflows, examples. Korean names and labels are kept. |
+| `mcp.json` | The MCP server entry with placeholders only: `{{AUTOONTOLOGY_URL}}/mcp` and `Authorization: Bearer <token>`. A real token is never written. |
+| `definitions/{functions,actions,workflows}.yaml` | The active specs in the format `ao logic apply -f` reads (only kinds that have one). |
+
+The output is deterministic: definitions and entries are sorted, and every entry carries
+one timestamp, the latest `updated_at` of the active definitions (1980-01-01 when there is
+none), so re-exporting unchanged definitions gives identical bytes.
 
 ## Formats (`autoontology/formats.py`)
 
@@ -685,4 +962,5 @@ language list, and add it to the parity tests (`tests/test_i18n.py`,
 | An export format | A module in `export/`, a step in `engine/export_job.py` (`EXPORT_STEPS`, `EXPORT_ENTRIES`, `FORMAT_ENTRIES`), and `web/runs.py` `TOP_STEPS`. |
 | A model provider | `web/providers/` (a `PassthroughProvider`, or a `CLIProvider` for a CLI login), `router.py` (`Registry`, `split_model`), `config.py` (`CHAT_PROVIDERS`, `expand_model_profile`). |
 | A sample set | A folder `samples/<set>/{structured,documents,images}` and its name in `onboarding.SAMPLE_SETS` / `SAMPLE_PREFIXES` (and `DEMO_DURATIONS`). |
+| An expression builtin | `logic/expr.py` (a `_b_<name>` method of `_Compiler`: type check and evaluation), the extraction prompt's builtin list in `unstructured/prompts.py` (bump `LOGIC_PROMPT_VERSION`). |
 | A UI page | `ui/src/pages` (strings in `ui/src/i18n/en.ts` and `ko.ts`), then `uv run autoontology tools build-ui` and commit `autoontology/web/static/dist`. |

@@ -319,7 +319,7 @@ MESSAGES: dict[str, str] = {
     "help.agent.tokens.create.action": "쓰기 범위를 이 액션으로만 제한 (반복 가능; 기본: 모든 액션).",
     "help.action": "액션: 개체에 대한 액션 미리보기·실행·승인·반려·되돌리기 (list, preview, run, runs, approve, reject, revert).",
     "help.action.list": "활성 액션 목록 (개체 유형별).",
-    "help.action.type": "이 개체 유형만 (이름 또는 라벨).",
+    "help.action.type": "이 개체 유형만 (이름, 라벨 또는 테이블).",
     "help.action.name": "액션 이름.",
     "help.action.key": "개체 키.",
     "help.action.param": "name=value 입력값 (반복 가능).",

@@ -22,7 +22,7 @@ pgvector와 원하는 모델로 내 컴퓨터에서 실행됩니다. 모델은 �
 
 웹 UI의 사이드바: 맨 위 **프로젝트 전환**, 그 아래 **개요**(무엇이 바뀌었고 무엇을 확인해야
 하는지), **검토**(모델이 제안한 것을 확인), **소스**, **빌드**, **온톨로지**, **그래프**,
-**플레이그라운드**, **내보내기**, **연결**(MCP·REST로 외부 에이전트 연결), **상태**, **설정**.
+**개체**와 **로직**([실행 가능한 온톨로지](#실행-가능한-온톨로지)), **플레이그라운드**, **내보내기**, **연결**(MCP·REST로 외부 에이전트 연결), **상태**, **설정**.
 [계정](#계정)을 켜면 설정과 **사용자**는 관리자에게만 보입니다. 첫 빌드 전에는 개요 자리에
 다섯 단계 **시작하기** 체크리스트가 나오고, 그 뒤에는 **설정 → 설치 안내**(`/ui/setup`)에서 다시 볼 수 있습니다.
 
@@ -389,6 +389,115 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 - 업스트림 용어가 바뀌면(이름·설명·동의어·표 편집, 용어 추가·삭제; align 자신이 쓴 동의어와
   설명은 제외) align을 다시 실행하고, 후보 용어가 바뀐 개념만 다시 판정합니다.
 
+## 실행 가능한 온톨로지
+
+온톨로지가 업무가 *무엇인지*를 말한다면, 실행 계층은 사람과 에이전트가 사람이 확정한 규칙대로
+그 위에서 *행동*하게 합니다. 원칙은 AutoOntology의 나머지 부분과 같습니다. **모델이 제안하고,
+사람이 확정하고, 확정된 정의만 실행합니다.** 빌드 위에 네 층이 올라갑니다.
+
+| 층 | 무엇인가 | 어디서 |
+|---|---|---|
+| **개체** | 소스 테이블 하나에 연결된 클래스가 *개체 유형*이 됩니다. 행 하나가 개체이고, 키 컬럼·제목 컬럼과 다른 유형으로 가는 링크(외래 키)가 있습니다. 빌드마다 제안되고 **검토**(분류 *개체 유형*)에서 확정합니다. | **개체** 페이지, `ao object`, `GET /api/objects/...` |
+| **펑션** | 개체 하나의 계산값과 예/아니오 판정. 작은 식 언어로 씁니다(코드는 실행되지 않음): `청구금액 - coalesce(수납금액, 0)`, `수납상태 != "완납" and 연체일수() > 0`. | **로직** 페이지, `ao logic`, 에이전트 도구 `call_function` |
+| **액션** | 사람(또는 에이전트)이 개체 하나에 하는 변경: 입력값, 실행 전 조건, 효과(컬럼이나 독촉 단계 같은 *운영 속성*을 `set`), 알림, 실행할 수 있는 역할, 승인(`none`, `reviewer`, `owner`; 식이 참일 때만(`when`)도 가능), 에이전트 정책(`none`, `propose`, `execute`). | 개체 페이지 버튼, `ao action`, 에이전트 도구 `preview_action` / `submit_action` |
+| **워크플로** | 일정(`daily 02:00`, `hourly`, `weekly MON 09:00`), `on_action` 트리거 또는 수동 실행으로 한 유형의 개체를(`where` 조건이 참인 것만) 돌며 각 개체에 `if` / `action` / `notify` 단계를 실행합니다. | **로직** 페이지(워크플로 탭), `ao workflow` |
+
+**소스는 절대 쓰지 않습니다.** 액션의 효과는 AutoOntology의 수정 기록 계층(SQLite)에 쌓이고,
+개체를 읽을 때 소스 행 위에 덮어 보여 줍니다. 적용된 실행은 모두 되돌릴 수 있습니다. 수정한 뒤
+소스 값이 바뀌면 개체 페이지에 *충돌*로 표시됩니다. 외부 시스템에 다시 쓰는 기능은 이번 릴리스에
+없습니다.
+
+정의는 **버전으로 관리되는 거버넌스 대상**입니다. 스펙은 `draft`로 저장되고, `active`가 되며(펑션:
+editor, 액션·워크플로: owner), 더 쓰지 않으면 `retired`가 됩니다. 새 리비전마다 모든 정의를 개체
+유형에 대해 다시 검증합니다. 컬럼·링크·참조한 펑션이 사라진 정의는 `broken`이 되어 다시 검증을
+통과할 때까지 실행되지 않습니다(통과하면 이전 상태로 돌아감).
+
+**개체 유형 이름.** 스펙, 경로, CLI 명령, 에이전트 도구는 개체 유형을 id(`ot_...`), 클래스
+이름(`term-...`), 라벨(정확히 같은 것, 다음으로 대소문자 무시) 또는 테이블(`invoices`, 또는
+`public.invoices`)로 가리킵니다. 링크도 대상의 테이블 이름으로 쓸 수 있습니다(`count(invoices where
+수납상태 != "완납")`, `contracts.계약명`). 테이블 이름은 빌드가 클래스 라벨을 어느 언어로 붙였는지와
+상관없으므로 샘플 스펙은 테이블 이름을 씁니다. 여러 유형에 맞는 이름은 후보 목록과 함께
+거부됩니다(409 `ambiguous_object_type`, 스펙에서는 오류 `ambiguous_object_type`).
+
+#### 연체 독촉 예제
+
+quickstart 샘플 세트에는 청구수납규정(제6조 연체 판정, 제7조 독촉 절차)의 로직이
+`samples/quickstart/logic/`에 들어 있습니다.
+
+```bash
+uv run ao demo --set quickstart --no-open          # 먼저 빌드
+uv run ao object types                              # 검토에서 제안을 확정하거나:
+uv run ao object bind invoices && uv run ao object bind contracts && uv run ao object bind customers
+uv run ao logic apply -f samples/quickstart/logic/functions.yaml
+for f in 미수금 연체일수 연체여부 남은일수 미수청구건수; do uv run ao logic activate function $f; done
+uv run ao logic apply -f samples/quickstart/logic/actions.yaml
+uv run ao logic activate action 독촉단계기록          # owner
+uv run ao action preview 독촉단계기록 INV-20200003 --param 단계=2
+uv run ao logic apply -f samples/quickstart/logic/workflows.yaml
+uv run ao logic activate workflow 연체독촉            # owner, 매일 02:00 실행
+uv run ao workflow run 연체독촉 --wait                 # 또는 지금
+uv run ao action runs --status pending_approval     # 4단계는 owner 승인 대기
+```
+
+- 펑션 `미수금`, `연체일수`(데이터에 지급기한 컬럼이 없어 청구일 + 30일을 지급기한으로 가정),
+  `연체여부`, `남은일수`, `미수청구건수`
+- 액션 `독촉단계기록`은 독촉 단계(1-4)를 운영 속성 `독촉단계`/`독촉메모`로 기록합니다. 완납된
+  청구서는 거부하고, editor에게 알리며, 4단계는 owner 승인이 필요하고(`approval: {role: owner,
+  when: param.단계 >= 4}`), 에이전트는 제안만 할 수 있습니다.
+- 워크플로 `연체독촉`은 매일 02:00 연체 청구서를 돌며 연체일수에 맞는 단계를 한 번씩 기록합니다.
+
+#### 승인
+
+승인이 필요한 실행은 `pending_approval`로 기다립니다(**검토 → 승인 대기**, `ao action runs
+--status pending_approval`). 승인할 때 현재 데이터와 현재 버전의 액션으로 실행 전 조건을 다시
+평가하며, 조건이 더는 맞지 않으면 적용 대신 실패합니다. 승인할 수 있는 사람은 실행의 승인
+역할(`reviewer` 또는 `owner`)입니다. 계정 모드에서는 자기 요청을 스스로 승인할 수 없습니다(4-eyes,
+403 `self_approval`). 계정이 꺼져 있으면 로컬 사용자 한 명뿐이라 스스로 승인할 수 있습니다.
+**에이전트의 제안은 그 에이전트 토큰을 만든 사람이 승인할 수 있습니다.** 요청자는 에이전트
+(`agent:<token id>`)이고, 토큰을 만든 사람이 사람 확인 단계(human-in-the-loop)로 남습니다. 요청자는
+자기 요청을 철회(거절)할 수 있습니다. 되돌리기는 editor(또는 그보다 높으면 액션의 `min_role`)가
+필요하고, 나중 수정이 같은 속성을 바꿨다면 owner만 강제로 되돌릴 수 있습니다.
+
+#### 워크플로
+
+서비스는 스케줄러(스레드 하나, 60초마다)를 돌려 일정이 있는 활성 워크플로의 차례가 된 슬롯을
+`AUTOONTOLOGY_TZ`(기본: 시스템 시간대) 기준으로 실행합니다. 서비스가 멈춰 있었다면 놓친 가장
+최근 슬롯 하나만(6시간 이내) 한 번 실행하고 그보다 오래된 것은 채우지 않으며, 스케줄러가 둘이어도
+슬롯은 한 번만 실행됩니다. 액션에 승인이 필요하면 그 개체의 단계가 일시정지되고, 승인이 결정되면
+이어서 실행됩니다(거절: 그 개체는 건너뜀). 같은 액션이 이미 승인을 기다리는 개체에는 다시 제출하지
+않습니다(*이미 대기 중*으로 집계). 실행은 워크플로를 활성화한 사람의 역할로 동작합니다. 계정
+모드에서 그 사람이 비활성화되었거나 더는 owner가 아니면, owner가 워크플로를 다시 활성화할 때까지
+실행이 실패합니다(`activator_not_allowed`). `AUTOONTOLOGY_WORKFLOWS=off`는 일정과 `on_action`
+트리거를 멈춥니다(수동 실행은 되고, 일시정지된 실행도 이어집니다).
+
+#### 문서에서 로직 추출
+
+`ao logic extract`(또는 **로직 → 문서에서 추출**)는 `logic` 실행을 시작합니다. 빌드가 문서에서
+찾은 규칙·절차 개념과 검증된 근거 인용, 개체 유형, 기존 정의를 채팅 모델에 보내고, 모델이 펑션·
+액션·워크플로를 제안합니다. 제안은 모두 온톨로지에 대해 검증됩니다. 통과한 것은 *바로 쓸 수
+있음*, 나머지는 오류와 함께 남습니다(*수정 필요*, 예: 데이터에 없는 지급기한 컬럼). **검토 →
+로직 제안**에서 수락(`draft` 정의 저장), 수정 후 수락, 거절하세요. 활성화는 따로 합니다.
+**비용:** 개념 최대 12개 묶음마다 채팅 호출 한 번(실행당 개념 최대 80개)이므로 작은 빌드 단계만큼
+토큰을 씁니다. 시작하기 전에는 아무것도 실행되지 않습니다.
+
+#### 에이전트용 스킬
+
+**연결 → 스킬 내보내기**(`ao skill export`, `GET /api/logic/skill.zip`)는 활성 정의를 Agent
+Skill(에이전트가 읽는 폴더, `SKILL.md`가 중심)로 내려받습니다.
+
+```
+autoontology-<project>/
+  SKILL.md                    front matter(name, description) + 개체 유형, 펑션, 액션,
+                              워크플로, 단계별 절차와 예시
+  mcp.json                    MCP 서버: {{AUTOONTOLOGY_URL}}/mcp, Bearer <token>
+  definitions/functions.yaml  활성 스펙(ao logic apply -f로 읽음)
+  definitions/actions.yaml
+  definitions/workflows.yaml
+```
+
+두 자리표시자를 서비스 URL과 에이전트 토큰으로 바꾸세요. 꾸러미에는 토큰이 절대 들어가지
+않습니다. 정의가 바뀌지 않았으면 다시 내보내도 바이트가 같습니다.
+
 ## 운영하기
 
 첫 빌드 뒤의 온톨로지는 한 번 내보내고 끝나는 결과물이 아니라 계속 운영하는 대상입니다. 주기는
@@ -510,7 +619,7 @@ export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를
 | `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` / `zip <rev> --out FILE` | 내보내기 폴더 목록; 리비전의 파일 목록 또는 텍스트 파일 출력(예: `ossie/validation.json`, `okf/validation.json`); 파일 저장; 리비전 폴더 전체를 zip 하나로 저장(`--out`이 디렉터리면 `autoontology-r0003.zip`). |
 | `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F\|--examples [--limit N]` / `index [--rebuild]` | 실행 중인 서비스로 플레이그라운드 사용: 인용과 함께 스트리밍되는 RAG 답변, 자연어 SQL 에이전트, 최신 스냅샷에 대한 SPARQL, 채팅 인덱스. |
 | `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | 설정 페이지: 현재 선택과 각 값의 출처(키는 표시 안 함), 후보 테스트(채팅 pong과 임베딩 차원), `.env` 저장(`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; 키는 표준 입력으로만), 서비스 자체 재시작. |
-| `autoontology agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90]` / `rotate <id>` / `revoke <id>` | 외부 에이전트용 베어러 토큰([외부 에이전트 연결](#외부-에이전트-연결) 참고): `create`와 `rotate`는 토큰을 한 번만 출력합니다(저장되는 것은 SHA-256뿐이고, 교체하면 이전 토큰은 즉시 멈춤). `revoke`는 토큰의 호출 기록을 남깁니다. `--revision`은 토큰을 스냅샷 하나에 고정합니다. |
+| `autoontology agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90] [--scope read\|propose\|execute] [--action NAME]` / `rotate <id>` / `revoke <id>` | 외부 에이전트용 베어러 토큰([외부 에이전트 연결](#외부-에이전트-연결) 참고): `create`와 `rotate`는 토큰을 한 번만 출력합니다(저장되는 것은 SHA-256뿐이고, 교체하면 이전 토큰은 즉시 멈춤). `revoke`는 토큰의 호출 기록을 남깁니다. `--revision`은 토큰을 스냅샷 하나에 고정합니다. `--scope propose`는 에이전트가 항상 승인을 기다리는 액션을 제출하게 하고, `--scope execute`(owner)는 각 액션의 승인 규칙대로 실행하게 합니다. `--action`은 이 범위를 지정한 액션으로 제한합니다. |
 | `autoontology agent usage [--days N]` | 도구별·토큰별(MCP와 REST)·날짜별 에이전트 호출. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/<프로젝트 슬러그>/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
@@ -518,6 +627,12 @@ export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를
 | `autoontology tools status` | 사용 중인 kordoc 엔진과 Node 바이너리를 보여 줍니다. |
 | `autoontology tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | 데이터베이스가 사라진 `autoontology_src_*` 업스트림 연결을 지웁니다. 데이터베이스는 있지만 이 체크아웃의 소스가 소유하지 않은 연결은 목록에만 나오고 `--include-unowned`일 때만 지웁니다(카탈로그를 공유하는 다른 체크아웃이 쓸 수 있음). 그때 `--drop-db`는 그 데이터베이스도 삭제합니다. |
 | `autoontology project list [--no-archived]` / `show [SLUG]` / `create <slug> [--name N] [--description D]` / `rename <slug> [--name N] [--slug S] [--description D]` / `archive <slug>` / `unarchive <slug>` | 프로젝트 목록(최신 리비전, 소스 수, 마지막 빌드, 상태), 하나 보기(기본: `--project`, 없으면 기본 프로젝트), 만들기, 이름·설명·슬러그 변경(새 슬러그는 `exports/<slug>/`도 옮김, 실행 중이면 409), 보관(읽기 전용, 목록에서 숨김)과 되돌리기. 변경은 서비스가 켜져 있으면 서비스를 거칩니다. |
+| `autoontology object types [--status S]` / `bind <type> [--key K] [--title T]` / `list <type> [-q TEXT] [--filter col=value] [--limit N] [--offset N]` / `get <type> <key>` | 개체 유형(proposed, active, broken, retired), 직접 연결(키·제목을 소스에서 확인, 유형이 active가 됨), 개체 검색, 개체 하나(수정 기록·충돌·링크 포함). `<type>`은 id, 클래스 이름, 라벨 또는 테이블입니다. |
+| `autoontology logic list [--kind K] [--status S]` / `show <kind> <name>` / `apply -f FILE` / `validate -f FILE` / `test [NAME] [-f FILE] --key K [--param p=v]` / `activate <kind> <name>` / `retire <kind> <name>` | 펑션·액션·워크플로 정의: 목록, 이력과 함께 하나 보기, 파일의 스펙을 초안으로 저장, 저장 없이 검사, 펑션을 개체에 평가, 활성화(펑션: editor, 액션·워크플로: owner), 은퇴. |
+| `autoontology logic extract [--wait]` / `candidates [--ready] [--status S]` / `accept <id> [-f FILE] [--note N]` / `reject <id>` | 문서의 규칙에서 정의 제안(`logic` 실행, 채팅 모델 사용), 제안 목록, 초안으로 수락(또는 수정한 스펙), 거절. |
+| `autoontology action list [--type T]` / `preview <name> <key> [--param p=v]` / `run <name> <key> [--param p=v] [--yes] [--idempotency-key K]` / `runs [--status S] [--action A] [--key K]` / `approve <run>` / `reject <run>` / `revert <run> [--force]` | 액션: 무엇을 할지 미리보기(아무것도 저장 안 함), 실행(미리보기를 보여 주고 먼저 물음), 실행 목록, 대기 중인 실행 결정, 적용된 실행 되돌리기. |
+| `autoontology workflow list` / `run <name> [--wait]` / `runs [--status S] [--workflow W]` / `show <run>` / `cancel <run>` | 워크플로: 트리거와 다음 슬롯, 지금 실행, 실행 목록, 실행 하나(개체와 액션 실행), 열린 실행 취소. |
+| `autoontology skill export [-o FILE\|DIR]` | 활성 정의를 Agent Skill zip(`SKILL.md`, `mcp.json`, `definitions/`)으로 저장합니다. |
 | `autoontology version` | 버전을 출력합니다. |
 
 표를 출력하는 명령은 모두 `--json`(웹 API 응답 본문)도 받습니다. `ontology` 아래 명령,
@@ -593,6 +708,20 @@ export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를
 | `POST /api/agent/tokens/{id}/rotate`, `DELETE /api/agent/tokens/{id}` | 같은 레코드에 새 토큰 발급(`{token, record, note}`, 이전 토큰은 즉시 멈춤, 409 `token_revoked`/`token_expired`), 또는 폐기(레코드와 호출 기록은 남음). |
 | `GET /api/agent/usage[?days=]` | 에이전트 호출: `{days, total, ok, by_tool: [{tool, calls, ok, avg_ms}], by_day: [{day, calls}], by_token: [{token_id, name, calls, ok, by_surface: {mcp, rest}, last_call_at}]}`. |
 | `GET /api/agent/tools` | 에이전트 도구와 설명·입력 스키마, `mcp_path`, `rest_base`, `rate_per_min`. |
+| `GET /api/objects/types[?status=]`, `GET /api/objects/types/{type}` | 개체 유형(최신 스냅숏과 동기화): 테이블, 키, 제목 컬럼, 컬럼, 링크, 상태(`proposed`, `active`, `broken`, `retired`). `{type}`은 어디서나 id, 클래스 이름, 라벨 또는 테이블이며, 404 `unknown_object_type`, 409 `ambiguous_object_type`(`candidates` 포함). |
+| `PUT /api/objects/types/{type}` | `{key?, title?}`로 유형을 직접 연결합니다(소스에서 확인: 키는 고유하고 비어 있지 않아야 함). 유형이 active가 됩니다. |
+| `GET /api/objects/{type}?q=&filter=col=value&limit=&offset=&computed=` | 유형의 개체(수정 기록 계층을 덮은 소스 행). `computed=1`이면 활성 펑션 값을 더합니다. |
+| `GET /api/objects/{type}/{key}`, `GET /api/objects/{type}/{key}/links/{link}[?then=]` | 개체 하나: 값, 소스 값, 수정 표시(충돌, 운영 속성), 링크, 이력, `computed`, 호출자가 실행할 수 있는 `actions`. 링크가 닿는 개체(`then`: 한 단계 더). |
+| `GET /api/logic[?kind=&status=]`, `GET /api/logic/{kind}/{name}` | 정의 목록, 이력과 함께 하나. |
+| `POST /api/logic/validate`, `POST /api/logic`, `POST /api/logic/{kind}/{name}/status` | `{spec}`(매핑 또는 YAML/JSON 텍스트)을 저장 없이 검사(`{valid, errors}`), 초안으로 저장(400 `invalid_spec`과 `errors`), 또는 `{status: active\|retired\|draft}`. |
+| `POST /api/logic/test`, `POST /api/logic/functions/{name}/test`, `POST /api/logic/functions/{name}/call` | 저장 안 한 펑션이나 저장된 펑션을 고른 개체에 평가(`{keys, params?}`), 활성 펑션을 개체 하나에 평가(`{key, params?}`). |
+| `GET /api/logic/candidates[?ready=&status=]` | `logic` 실행(`POST /api/runs {"kind": "logic"}`)의 제안. `POST /api/review/lg:<id>/decision`(`{decision, spec?}`, 수정한 스펙을 대신 저장)으로 결정합니다. |
+| `GET /api/logic/skill.zip` | 활성 정의를 Agent Skill zip으로([에이전트용 스킬](#에이전트용-스킬) 참고). |
+| `GET /api/actions[?type=]`, `POST /api/actions/{name}/preview`, `POST /api/actions/{name}/submit` | 활성 액션, `{key, params?}`에 무엇을 할지(아무것도 저장 안 함), 실행(`idempotency_key?`): 201과 실행(`applied` 또는 `pending_approval`), 409 `precondition_failed`(`failures` 포함), `object_busy`. |
+| `GET /api/actions/runs[?status=&action=&key=&type=&limit=]`, `GET /api/actions/runs/{id}` | 액션 실행과 호출자의 `can_approve` / `can_revert`. |
+| `POST /api/actions/runs/{id}/approve`, `…/reject`, `…/revert` | 대기 중인 실행 결정(`{note?}`, 계정 모드에서 자기 요청이면 403 `self_approval`), 적용된 실행 되돌리기(`{force?}`, 409 `superseded`). |
+| `GET /api/workflows`, `POST /api/workflows/{name}/run` | 활성 워크플로와 트리거·다음 슬롯·최근 실행, 지금 실행(`{wait?}`: 202와 실행 중인 실행, 또는 200과 끝나거나 일시정지된 실행). |
+| `GET /api/workflows/runs[?workflow=&status=&limit=]`, `GET /api/workflows/runs/{id}`, `POST /api/workflows/runs/{id}/cancel` | 워크플로 실행 목록, 개체와 액션 실행이 담긴 실행 하나, 열린 실행 취소. |
 | `POST /mcp`, `/agent/v1/*` | 외부 에이전트용 경로(베어러 토큰 필요): [외부 에이전트 연결](#외부-에이전트-연결) 참고. |
 | `POST /v1/chat/completions`, `GET /v1/models` | 엔진이 쓰는 모델 라우터. 클라이언트용이 아닙니다. |
 | `POST /ingest`, `POST /ingest/delete?database_name=` | 내부용: 연결이 등록되거나 삭제될 때 엔진이 호출하는 콜백. 적재나 그래프 삭제를 큐에 넣습니다. 클라이언트용이 아닙니다. |
@@ -601,8 +730,8 @@ export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를
 ### 외부 에이전트 연결
 
 다른 에이전트(Claude Code, Claude Desktop, Cursor, 직접 만든 스크립트)는 MCP 엔드포인트와
-작은 REST API로 빌드된 온톨로지를 읽을 수 있습니다. 둘 다 읽기 전용이며, `localhost`에서도
-베어러 토큰이 필요합니다.
+작은 REST API로 빌드된 온톨로지와 개체를 읽을 수 있고, 쓰기 범위가 있는 토큰이면 액션을 제출할 수
+있습니다. 둘 다 `localhost`에서도 베어러 토큰이 필요합니다.
 
 ```bash
 uv run autoontology agent tokens create claude-code          # aok_...를 한 번만 출력
@@ -627,7 +756,10 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 `http://127.0.0.1:7800`은 에이전트가 서비스에 닿는 주소(예: Tailscale 호스트 이름)로 바꾸세요.
 도구는 MCP와 REST에서 같으며 `list_revisions`, `get_ontology_summary`, `search_concepts`,
 `get_concept`(id, 이름 또는 동의어로), `sparql_query`(플레이그라운드와 같은 읽기 전용 검사,
-시간 제한, 행 상한), `list_exports`입니다. 모든 결과에는 답한 리비전 `revision`이 들어 있습니다.
+시간 제한, 행 상한), `list_exports`이고, [실행 가능한 온톨로지](#실행-가능한-온톨로지)용으로
+`list_object_types`, `search_objects`, `get_object`, `list_functions`, `call_function`,
+`list_actions`, `preview_action`, `get_action_run`과 유일한 쓰기 도구 `submit_action`이 있습니다.
+모든 결과에는 답한 리비전 `revision`이 들어 있습니다.
 `get_concept`의 `decisions`는 이전 리비전을 물어도 현재 검토 상태를 보여 줍니다. MCP 요청 하나에는
 메시지를 최대 20개까지 묶을 수 있고, 묶음 안의 도구 호출도 하나하나 토큰의 요청 수 제한에 들어갑니다.
 
@@ -640,6 +772,10 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 | `GET /agent/v1/concepts/{id}[?revision=]` | `get_concept` |
 | `POST /agent/v1/sparql` | `sparql_query`: `{query, limit?, revision?}` |
 | `GET /agent/v1/exports`, `GET /agent/v1/exports/{rev}.zip` | `list_exports`; 리비전 폴더 하나를 zip으로 |
+| `GET /agent/v1/objects/types`, `GET /agent/v1/objects/{type}?q=&filter=col=value&limit=&offset=`, `GET /agent/v1/objects/{type}/{key}` | `list_object_types`, `search_objects`, `get_object` |
+| `GET /agent/v1/functions[?type=]`, `POST /agent/v1/functions/{name}/call` | `list_functions`, `call_function`: `{key, type?, params?}` |
+| `GET /agent/v1/actions[?type=]`, `POST /agent/v1/actions/{name}/preview` | `list_actions`, `preview_action`: `{key, params?}` |
+| `POST /agent/v1/actions/{name}/submit`, `GET /agent/v1/actions/runs/{id}` | `submit_action`(쓰기 범위): `{key, params?, idempotency_key?}`; `get_action_run` |
 | `GET /agent/v1/openapi.json` | 이 경로들의 OpenAPI 설명 |
 
 토큰이 없거나 틀렸거나 폐기·만료되었으면 401 `{"error": "unauthorized"}`로 답합니다.
@@ -650,6 +786,15 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 그대로 적용됩니다. 웹 UI의 **연결** 페이지(`/ui/connect`)는 터미널 없이 같은 일을 합니다. 이
 엔드포인트를 보여 주고, 토큰을 만들고 재발급하고 폐기하며, 새 토큰이 한 번 보일 때 이 설정에
 그 토큰을 채워 줍니다.
+
+**토큰 범위.** 모든 토큰은 읽을 수 있습니다(`read`). `propose`는 액션 제출도 허용하며, 그 실행은
+모두 사람의 승인을 기다립니다(액션의 승인 역할, 없으면 reviewer). `execute`(owner만 이런 토큰을
+만들거나 재발급할 수 있음)는 액션을 각자의 승인 규칙대로 실행합니다. 허용 목록(`--action NAME`
+또는 연결 페이지의 액션 체크박스)은 쓰기 범위를 그 액션으로 제한합니다. 토큰은 액션의 에이전트
+정책(`none`은 거부, `propose`는 항상 승인 대기)이나 토큰을 만든 사람의 현재 역할을 넘을 수 없습니다.
+`submit_action` 호출은 감사 로그에도 기록됩니다. 에이전트의 요청은 `agent:<token id>`로 기록되므로
+토큰을 만든 사람이 승인할 수 있습니다([승인](#승인) 참고). 개체는 최신 리비전으로 실시간 읽으므로,
+이전 리비전에 고정된 토큰은 개체·펑션·액션 도구에서 403 `revision_pinned`을 받습니다.
 
 ### 내보내기 형식
 
@@ -764,6 +909,8 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 | `AUTOONTOLOGY_ALIGN_MIN_SIM` | `0.55` | 후보 용어 코사인 하한. |
 | `AUTOONTOLOGY_ALIGN_MIN_CONF` | `0.7` | 판정을 적용하는 데 필요한 신뢰도(`same`은 0.90도 필요, 위 참고). |
 | `AUTOONTOLOGY_ALIGN_ALLOW_METRIC_SAME` | `0` | `1`이면 metric 개념도 용어와 `same`으로 판정될 수 있습니다. |
+| `AUTOONTOLOGY_WORKFLOWS` | `on` | `off`이면 일정과 `on_action` 워크플로 트리거를 멈춥니다(수동 실행은 되고, 일시정지된 실행도 이어짐). |
+| `AUTOONTOLOGY_TZ` | 시스템 시간대 | 워크플로 일정을 읽는 IANA 시간대(예: `Asia/Seoul`). |
 | `AUTOONTOLOGY_INTEGRATION` | `0` | `1`이면 통합 테스트를 실행합니다(실제 Postgres와 Ollama, 셸에서 설정). |
 
 엔진 자체의 모델 변수(`DEFAULT_MODELS_*`, `REASONING_*`, `NON_REASONING_*`, `EMBED_*`,
@@ -945,14 +1092,18 @@ CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩�
 
 | 역할 | 할 수 있는 일 |
 |---|---|
-| viewer | 프로젝트 전체 읽기, 내보내기 내려받기, 플레이그라운드 질문(채팅, SQL, SPARQL, 대화 읽기) |
-| reviewer | + 검토 항목 결정·취소, 결정 적용(새 리비전) |
-| editor | + 소스 추가·삭제, 샘플 불러오기, 빌드·내보내기 시작, 연결 토큰 목록·관리·사용량, 플레이그라운드 대화 삭제 |
-| owner | + 프로젝트 이름 변경·보관·보관 해제, 멤버 관리, 프로젝트 감사 로그 |
+| viewer | 프로젝트 전체 읽기, 내보내기 내려받기, 플레이그라운드 질문(채팅, SQL, SPARQL, 대화 읽기), 개체·정의 읽기, 펑션 평가, 스킬 내보내기 |
+| reviewer | + 검토 항목 결정·취소, 결정 적용(새 리비전), 승인 역할이 reviewer인 액션 실행 승인·거절 |
+| editor | + 소스 추가·삭제, 샘플 불러오기, 빌드·내보내기 시작, 연결 토큰 목록·관리·사용량, 플레이그라운드 대화 삭제, 로직 초안 저장, 펑션 활성화·은퇴, 문서에서 로직 추출, 액션 실행(기본 `min_role`), 워크플로 실행·취소 |
+| owner | + 프로젝트 이름 변경·보관·보관 해제, 멤버 관리, 프로젝트 감사 로그, 개체 유형 확정, 액션·워크플로 활성화·은퇴, 승인 역할이 owner인 실행 승인, `execute` 범위 에이전트 토큰 만들기 |
 | admin | + 프로젝트 생성, 설정·재시작, 공급자 테스트, 사용자, 전체 감사 로그 |
 
 `GET /api/auth/me`는 프로젝트 슬러그별 `permissions`와 `installation_permissions`를 알려
-줍니다. 표는 `autoontology/web/projects.py`(`PROJECT_PERMISSIONS`)에 있습니다. 프로젝트를 만든
+줍니다. 표는 `autoontology/web/projects.py`(`PROJECT_PERMISSIONS`)에 있습니다(실행 가능한
+온톨로지가 `objects.read`, `logic.read`, `functions.call`(viewer), `action.approve`(reviewer),
+`logic.edit`, `action.run`, `workflow.run`(editor), `objects.manage`, `logic.activate`(owner)를
+더합니다. `action.run`과 `action.approve`는 기본값이며 액션마다 `permission.min_role`과 승인
+역할이 정합니다). 프로젝트를 만든
 사람이 owner가 됩니다. 보관된 프로젝트의 플레이그라운드는 `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`가
 아니면 계속 답합니다.
 
@@ -1001,7 +1152,7 @@ tokens revoke <id>`).
 
 ## 문제 해결
 
-[가이드의 문제 해결 표](docs/GUIDE.ko.md#11-문제-해결)에 `doctor`와 `init`의 모든 해결 방법이
+[가이드의 문제 해결 표](docs/GUIDE.ko.md#12-문제-해결)에 `doctor`와 `init`의 모든 해결 방법이
 원인과 함께 정리되어 있습니다. 가장 흔한 것들:
 
 | 증상 | 해결 |

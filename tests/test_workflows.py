@@ -549,6 +549,36 @@ def test_activator_role_is_checked_at_run_time(isolated_env, monkeypatch):
     assert _run(settings, view, slot="s4").status == "succeeded"
 
 
+def test_another_owner_reactivates_an_active_workflow(isolated_env, monkeypatch):
+    """Pressing Activate on an already active workflow records the new activator (no
+    retire first), so its runs work again after the old activator was demoted."""
+    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setattr(functions, "today", lambda: TODAY)
+    fx.install_backend(monkeypatch)
+    settings = Settings.from_env()
+    store = Store.for_home(settings.home)
+    view = fx.seed(store)
+    activate_samples(view)
+    from autoontology.store.accounts import Accounts
+
+    accounts = Accounts(store)
+    boss = accounts.create_user("boss@example.com")
+    accounts.add_member(view.id, boss.id, "owner")
+    other = accounts.create_user("other@example.com")
+    accounts.add_member(view.id, other.id, "owner")
+    _activate(view, sample_workflow(), actor="boss@example.com")
+    accounts.set_role(view.id, boss.id, "editor")
+    assert "no longer an owner" in _run(settings, view, slot="s1").error
+    before = len(view.logic_defs().history("workflow", WORKFLOW))
+    registry.set_status(view, "workflow", WORKFLOW, "active", actor="other@example.com")
+    assert workflows.activation(view, WORKFLOW)[0] == "other@example.com"
+    assert _run(settings, view, slot="s2").status != "failed"
+    # the same activator again records nothing new
+    after = len(view.logic_defs().history("workflow", WORKFLOW))
+    registry.set_status(view, "workflow", WORKFLOW, "active", actor="other@example.com")
+    assert len(view.logic_defs().history("workflow", WORKFLOW)) == after == before + 1
+
+
 def test_accounts_off_acts_as_owner(env):
     settings, view, _, _ = env
     _activate(view, sample_workflow())

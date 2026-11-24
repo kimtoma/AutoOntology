@@ -21,9 +21,10 @@ Contents:
 7. [Reading the results](#7-reading-the-results)
 8. [Operating a living ontology](#8-operating-a-living-ontology)
 9. [Sign-in and accounts](#9-sign-in-and-accounts) (shared installations)
-10. [When results look wrong](#10-when-results-look-wrong)
-11. [Troubleshooting](#11-troubleshooting)
-12. [FAQ](#12-faq)
+10. [An ontology that acts](#10-an-ontology-that-acts) (objects, functions, actions, workflows, skills)
+11. [When results look wrong](#11-when-results-look-wrong)
+12. [Troubleshooting](#12-troubleshooting)
+13. [FAQ](#13-faq)
 
 ## Start with one prompt
 
@@ -450,7 +451,8 @@ whole folder as one `autoontology-r<revision>.zip`.
 
 Your own AI assistants can read the ontology too: Claude Code, Claude Desktop, Cursor or a
 script asks it questions ("what does 계약 mean, and where is that written?") through MCP or
-a small REST API. They can only read; they never change anything. Each agent gets its own
+a small REST API. By default they can only read; a token with the *propose* or *execute*
+scope may also submit actions, under the rules of chapter 10. Each agent gets its own
 token:
 
 ```bash
@@ -573,7 +575,11 @@ need `uv run autoontology up`; the others read the local data and work with it d
 | Exports | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F`, `exports zip <rev> --out F` |
 | Status | `uv run autoontology status`, `doctor`, `provider status` |
 | Settings | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(service)* |
-| Connect | `uv run autoontology agent tokens create <name> [--revision R] [--expires-days 30\|90]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage` |
+| Connect | `uv run autoontology agent tokens create <name> [--revision R] [--expires-days 30\|90] [--scope propose\|execute] [--action NAME]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage`, `skill export [-o F]` |
+| Objects | `uv run autoontology object types [--status S]`, `object bind <type> [--key K] [--title T]`, `object list <type> [-q TEXT] [--filter col=value]`, `object get <type> <key>` (a type by table, label, `term-…` or `ot_…`) |
+| Logic | `uv run autoontology logic list [--kind K] [--status S]`, `logic show <kind> <name>`, `logic validate -f F`, `logic apply -f F`, `logic test <name> --key K [--param p=v]` (or `-f F`), `logic activate <kind> <name>`, `logic retire <kind> <name>`, `logic extract [--wait]`, `logic candidates [--ready] [--status S]`, `logic accept <id> [-f F] [--note N]`, `logic reject <id> [--note N]` |
+| Actions and approvals | `uv run autoontology action list [--type T]`, `action preview <name> <key> [--param p=v]`, `action run <name> <key> [--param p=v] [--yes] [--idempotency-key K]`, `action runs [--status S] [--action A] [--key K]`, `action approve <run>`, `action reject <run> [--note N]`, `action revert <run> [--force]` |
+| Workflows | `uv run autoontology workflow list`, `workflow run <name> [--wait]`, `workflow runs [--status S] [--workflow W]`, `workflow show <run>`, `workflow cancel <run>` |
 | Accounts | `uv run ao user create <email> [--admin]`, `user list`, `user disable\|enable <email>`, `user link <email> --purpose magic\|reset\|invite`, `member list`, `member add <email> --role R`, `member role <email> R`, `member remove <email>`, `audit` (chapter 9) |
 | Projects | `uv run autoontology project list`, `project show [slug]`, `project create <slug> --name N`, `project rename <slug> [--name N] [--slug S]`, `project archive <slug>`, `project unarchive <slug>` |
 
@@ -629,10 +635,10 @@ all: not in the project switcher, not on the Projects page.
 
 | Role | Can |
 |---|---|
-| **Viewer** | Read everything in the project (Overview, Review list, Sources, Build, Ontology, Graph), download exports, ask the playground (chat, SQL, SPARQL) and read its conversations |
-| **Reviewer** | Everything a viewer can, plus accept and reject review items (and undo) and **Apply** them |
-| **Editor** | Everything a reviewer can, plus add and remove sources, load samples, start and cancel builds and exports, manage agent tokens on **Connect**, delete playground conversations |
-| **Owner** | Everything an editor can, plus rename and archive the project, manage its members, read its audit log |
+| **Viewer** | Read everything in the project (Overview, Review list, Sources, Build, Ontology, Graph, Objects, Logic), download exports and the agent skill, ask the playground (chat, SQL, SPARQL) and read its conversations, see computed values |
+| **Reviewer** | Everything a viewer can, plus accept and reject review items (and undo) and **Apply** them, approve action runs that need a reviewer |
+| **Editor** | Everything a reviewer can, plus add and remove sources, load samples, start and cancel builds and exports, manage agent tokens on **Connect**, delete playground conversations, run actions (unless an action asks for a higher role), write drafts and activate functions, run workflows, extract logic from documents |
+| **Owner** | Everything an editor can, plus rename and archive the project, manage its members, read its audit log, accept object types, activate actions and workflows, approve runs that need an owner, create *execute* agent tokens |
 | **Admin** | Owner of every project, plus create projects, change **Settings** and restart, invite and manage users, read the whole audit log |
 
 Buttons your role cannot use are disabled (with the reason on hover) or hidden, and pages
@@ -701,7 +707,238 @@ Members page (**Audit log**, `/ui/p/<project>/audit`); admins read everything un
 fetches older entries. From a terminal: `uv run ao audit [--project P] [--user EMAIL]
 [--action A]`.
 
-## 10. When results look wrong
+## 10. An ontology that acts
+
+The ontology so far describes your business. This chapter makes it do work: the rows of
+your tables become **objects** you can open, your rules become **functions** that compute
+values and yes/no checks, the changes people make become **actions** with preconditions and
+approval, and recurring work becomes **workflows**. The principle is the same as for the
+ontology itself: the system proposes, a person confirms, and only what is confirmed runs.
+
+Two promises hold throughout:
+
+- **Your source data is never changed.** An action writes its values to AutoOntology's own
+  edit layer, beside the source row. Pages show the edited value on top, with the source
+  value next to it, and every applied action can be reverted.
+- **No code runs.** Functions and conditions are written in a small expression language
+  that AutoOntology checks against your ontology before it saves anything. A definition
+  that names a column the data does not have is refused (or marked broken later), never
+  run on a guess.
+
+The running example is the quickstart's billing policy (청구수납규정): article 6 says when
+an invoice is overdue, article 7 what to do after 30, 60 and 90 days. The sample
+definitions are in `samples/quickstart/logic/`: functions `미수금`, `연체일수`, `연체여부`
+(and two on contracts), the action `독촉단계기록` (record a reminder stage; stage 4, a
+termination review, needs an owner's approval) and the workflow `연체독촉` (every day at
+02:00, go through the overdue invoices and record the stage their overdue days call for).
+
+| Word | In plain language |
+|---|---|
+| **Object type** | A table read as a kind of thing, such as `invoices` as 청구 (invoice): which column identifies a row (the **key**) and which one names it (the **title**). |
+| **Object** | One row of that table, read live from the source, with any edits made by actions on top. |
+| **Function** | A formula on one object: a value (`미수금` = billed minus paid) or a yes/no check (`연체여부`). |
+| **Action** | A change to one object with parameters, **preconditions** (must hold, or the action is refused), **effects** (the values it sets) and optional **approval**. |
+| **Workflow** | Steps that go through objects on a schedule, after an action, or when someone presses **Run now**. |
+| **Draft / Active / Retired / Broken** | A definition does nothing until it is activated. Broken means the ontology changed under it (a column disappeared); it stops running until it fits again. |
+
+### Confirm object types
+
+Each table of a built structured source becomes a **proposed object type**. They wait on
+the **Review** page under **Object types**. Each card shows the table, the proposed key
+(the primary key, or a column named like `…ID` that is unique and never empty) with
+"unique on the source" once AutoOntology checked it, the title column, and the columns.
+A title is proposed only from a name-like column (`계약명`, `name`, `title` ...); when
+there is none the key is the title, so an invoice is shown as `INV-20200003`.
+
+**Accept** binds the type and makes it active: AutoOntology checks on the source that the
+key really is unique and never empty, and refuses otherwise. To choose another key or title,
+open the **Objects** page and press **Key and title**. Accepting and binding need the owner
+role (with accounts on, chapter 9).
+
+An object type can be named in a definition, a command or an agent call by its **table**
+(`invoices`, or `public.invoices`), its **label** (청구, any case), its name (`term-…`) or
+its id (`ot_…`). The table name does not depend on the language the build labelled your
+classes in, so the samples use it. A name that fits two types (two tables labelled the same)
+is refused with the list of candidates; use the table then.
+
+An active type becomes **broken** when its table or one of the columns it needs disappears
+(from the latest build or from the source). It cannot be read while broken and recovers by
+itself once the table and columns are back.
+
+### Read an object
+
+**Objects** lists the active types; pick one to see its objects in a table with search (by
+key or title) and one column filter. **Computed values** adds the active functions as
+columns. Open an object to see:
+
+- **Values**: the source row. A value an action changed is marked **Edited** (who and when),
+  with the source value beside it. **Conflict** means the source changed after the edit:
+  the page shows both, and the edit still wins until someone reverts it.
+- **Operational properties**: values that exist only in the edit layer because an action
+  declared them, such as `독촉단계` (reminder stage). They are not columns of the source.
+- **Computed values**: every active function of this type, evaluated now (an error shows
+  as such instead of a wrong number).
+- **Links**: the objects this one points to and the ones that point to it (an invoice's
+  contract, a contract's invoices).
+- **Recent changes** and **Actions**: the action runs on this object, and a button per
+  active action. A button is disabled with the reason when your role may not run it or a
+  precondition does not hold at the default parameters.
+
+### Write and test a function
+
+**Logic** has four tabs: **Functions**, **Actions**, **Workflows** and **Runs**. **New
+function** opens a YAML editor that checks the definition as you type (**Valid**, or the
+errors with their position). The quickstart's overdue days:
+
+```yaml
+kind: function
+name: 연체일수
+label: 연체일수
+object_type: invoices
+returns: number
+expr: |
+  if(수납상태 == "완납", 0, max(today() - (청구일 + 30), 0))
+```
+
+Expressions use column names or property labels (`청구일`, any case), links by the target
+table or label (`contracts.계약명`, `count(invoices where 수납상태 != "완납")` on a
+contract), `param.x` for parameters, arithmetic, comparisons, `and`/`or`/`not`, `x in [a, b]`,
+`if(c, a, b)` and functions such as `today()`, `days_between`, `add_days`, `coalesce`,
+`len`, `lower`, `min`/`max`, `count`/`sum` over a link, and other functions with `()`
+(`연체일수() > 0`). A date minus a date is a number of days; a date plus a number is a date.
+Empty values stay empty (a sum with an empty value is empty), so wrap them in `coalesce`.
+
+**Try on objects** evaluates the definition, saved or not, on objects you search and pick:
+check a paid invoice, an unpaid one and one without a payment amount. **Save draft** stores
+a version; **Activate** makes it count (functions: editor role). Every save and status change
+is kept under **Versions**, and an older version can be loaded back into the editor.
+**Retire** switches a definition off. From a terminal, `ao logic apply -f
+samples/quickstart/logic/functions.yaml` saves all five as drafts and `ao logic activate
+function 연체일수` activates one.
+
+### Run an action with a preview
+
+An action is defined the same way (**New action**, owners activate it). On an object page,
+press the action's button: a form asks for the parameters, and the **Preview** shows, before
+anything is stored:
+
+- **Preconditions**: each one with "holds" or "does not hold" and its message
+  (`이미 완납된 청구서입니다.` for a paid invoice);
+- **Changes**: every value it sets, the current value and what it **becomes**;
+- whether it **Needs approval by a** reviewer or owner, or **Applies at once, no approval
+  needed**, and how many mails it sends.
+
+The button says **Run** when it applies at once and **Ask for approval** when it does not.
+With `독촉단계기록`, stage 1 to 3 apply at once; stage 4 (`param.단계 >= 4`) waits for an
+owner. Running needs the role the action names (editor by default). Retrying the same
+submit is safe: the terminal and agents can pass an idempotency key that returns the first
+run.
+
+### Approvals
+
+Runs that wait for approval are listed on **Review → Approvals** (and under **Logic →
+Runs**). Open one to see the preview it was submitted with, then **Approve** or **Reject**
+(with an optional note).
+
+- **Who may approve**: someone with the run's approval role or higher. With accounts on, the
+  person who asked may not approve their own run (four-eyes rule); they may reject it to
+  withdraw it. With accounts off there is one local user, so you approve your own runs.
+- **Agents' proposals**: an agent with a *propose* token submits runs that always wait for a
+  person. The request is recorded as the agent's, not as the token creator's, so the person
+  who created the token may approve it: a human looks at every proposal, which is the point.
+  Agents themselves can never approve.
+- **When approved**, the preconditions are checked again on today's data and the action's
+  current version. If one no longer holds, or the action was changed or retired meanwhile,
+  the run becomes **Failed** with the reason instead of applying.
+- **Revert**: an applied run's **Revert** puts the values back (editor role, or the action's
+  role if higher). If a later edit changed the same value, reverting is refused; an owner
+  can **Revert anyway**.
+
+### Workflows
+
+A workflow names a trigger, the objects to go through and the steps per object. The
+quickstart's `연체독촉`:
+
+```yaml
+kind: workflow
+name: 연체독촉
+trigger:
+  schedule: daily 02:00          # or hourly, weekly MON 09:00, on_action: <name>, manual: true
+for_each:
+  object_type: invoices
+  where: 연체여부()
+steps:
+  - if: 연체일수() >= 90
+    then:
+      - if: coalesce(독촉단계, 0) < 4
+        then:
+          - action: 독촉단계기록
+            params: {단계: "4"}
+    # ... 60 and 30 days the same way (see samples/quickstart/logic/workflows.yaml)
+```
+
+- **Schedule**: the service checks every minute and fires each slot once, in the time zone
+  `AUTOONTOLOGY_TZ` (for example `Asia/Seoul`; default: the computer's). After downtime the
+  latest missed slot runs once (if it is at most 6 hours old); older ones are not caught up.
+  `AUTOONTOLOGY_WORKFLOWS=off` in `.env` switches scheduled and after-action triggers off;
+  the Workflows tab then says so and workflows run only with **Run now**.
+- **Run now** starts one by hand (editor role). The run page counts the objects that
+  matched, completed, were skipped or failed, and the actions applied.
+- **Pause and resume**: when an action step waits for approval, that object's steps pause
+  (the run shows **Paused**) and continue after the decision: approved continues with the
+  next step, rejected skips the object. Other objects are not held up.
+- **Already waiting**: if the same action with the same parameters already waits for
+  approval on an object (from yesterday's run, say), the workflow does not ask again; the
+  object counts as **Already waiting** and today's run moves on.
+- **Whose role**: a workflow acts with the role of the owner who activated it. With accounts
+  on, if that person is disabled or no longer an owner, the workflow's runs fail with
+  "an owner must activate it again" (troubleshooting below).
+
+**Cancel run** stops a running workflow before its next object; actions already waiting for
+approval stay in the approvals list.
+
+### Extract logic from your documents
+
+Writing definitions by hand is optional. **Logic → Extract from documents** (editor role) starts a
+run, listed as **Extract logic** among the runs, that gives the model the rules and procedures found in
+your documents, with their quotes, and your object types, and asks it for functions, actions
+and workflows. Every proposal is checked like a hand-written one.
+
+The run costs model calls: one per batch of up to 12 rule or process concepts of a document
+(at most 80 concepts per run). With a subscription that is part of your plan's usage; with
+an API endpoint it is billed. Start it when the documents have changed, not every night.
+
+The proposals wait on **Review → Logic proposals**, each with the quotes it came from (marked
+"quote found in the document" or not):
+
+- **Ready to use**: it validated. **Accept** saves it as a **draft**.
+- **Needs an edit**: the errors say why, typically a column the data does not have (the
+  policy speaks of a 지급기한, due date, the invoices table has none). **Edit and accept**
+  opens the definition; fix it (for example derive the due date as `청구일 + 30`) and
+  **Accept edited**.
+
+Accepting never activates. Open the draft on the Logic page, try it, and activate it there.
+Run the extraction again later and proposals already defined are skipped.
+
+### Export a skill for agents
+
+When your definitions are active, **Connect → Agent skill → Export skill** downloads a zip
+an AI agent can load as an Agent Skill:
+
+- `SKILL.md`: in English, what the skill is for, your object types (label, table, key,
+  fields), functions, actions (parameters, preconditions, approval, agent policy),
+  workflows, and the procedure an agent must follow (find the object, read it, compute with
+  functions, preview, submit only when asked, never assume approval, report the run id);
+- `mcp.json`: the connection to this server with `{{AUTOONTOLOGY_URL}}` and `<token>` as
+  placeholders. No token is ever in the zip: create one on **Connect** and fill it in;
+- `definitions/`: the active definitions as YAML, ready for `ao logic apply -f`.
+
+Exporting the same definitions again gives an identical file. What an agent may do still
+depends on its token: **Read** changes nothing, **Propose** submits runs that wait for a
+person, **Execute** (owners create it) runs actions whose agent policy allows it, under the
+same approval rules.
+
+## 11. When results look wrong
 
 **Rebuild or resume?** `uv run autoontology build --resume` continues the last build and
 keeps every step whose inputs did not change (files, kordoc and OCR availability, the
@@ -745,7 +982,7 @@ document chunk, finds fewer concepts, and its judgments are more often `related`
 `same`. That is safe (nothing is merged wrongly) but leaves more suggestions. Use it to
 keep data local; use a subscription or a larger endpoint for the best ontology.
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 `uv run autoontology doctor` checks everything and prints a REMEDY column; `init` prints
 `fix:` lines. The commands below are the ones doctor and init suggest, with a few extra
@@ -794,8 +1031,15 @@ same).
 | No **Email me a sign-in link** on the sign-in page | The installation has no outgoing mail (`AUTOONTOLOGY_SMTP_*`) | Sign in with the password, or get a link from an administrator |
 | A project is missing, or "You are not in any project yet" | You are not a member of it | Ask its owner or an administrator to add you (**Members**) |
 | A button is greyed out, or "Your role (...) cannot do this" / "You do not have permission (...)" | Your role in this project does not include that action (chapter 9, Roles) | Ask a project owner for a higher role |
+| "A precondition does not hold: ..." (`precondition_failed`) when running or approving an action | The object does not meet the action's precondition now (for example the invoice was paid meanwhile) | Usually right: check the values on the object page. An approval that hits it turns the run **Failed**; submit again once the object qualifies |
+| "The object changed while the action ran. Try again." (`object_busy`) | Someone or a workflow changed the same object at the same moment | Run it again |
+| `ambiguous_object_type` with a list of candidates | The name fits two object types (two tables with the same label) | Name the type by its table (`invoices`, `public.invoices`) or by `term-…` |
+| A definition shows **Broken** with a reason | A build or source change removed a column, link or object type it uses, or a function or action it uses is no longer active | When the column comes back it recovers by itself; otherwise edit it on the Logic page, **Save draft** and **Activate** again |
+| An object type shows **Broken** | Its table or key/title column is gone from the latest build or the source | Bring the table back and rebuild, or choose another key with **Key and title** |
+| Workflow runs fail with "..., who activated workflow ..., is no longer an owner of the project: an owner must activate it again" (or "is not an active user") | Accounts on: the owner who activated the workflow was disabled or lost the owner role, and a workflow acts with its activator's role | An owner presses **Retire**, then **Activate** on the Logic page, or runs `ao logic activate workflow <name>` (on an already active workflow it records the owner as the new activator) |
+| Scheduled workflows never run | `AUTOONTOLOGY_WORKFLOWS=off` (the Workflows tab says so), the service was down for more than 6 hours, the workflow is not active, or the time zone is not the one you expect | Set `AUTOONTOLOGY_WORKFLOWS=on` (or remove it) and `AUTOONTOLOGY_TZ=Asia/Seoul` in `.env`, then `uv run autoontology down && uv run autoontology up`; meanwhile **Run now** or `ao workflow run <name>` |
 
-## 12. FAQ
+## 13. FAQ
 
 **Is my data private?** With Ollama for chat and embeddings, nothing leaves your computer:
 the services listen only on 127.0.0.1 and reject other machines. With a Claude or ChatGPT

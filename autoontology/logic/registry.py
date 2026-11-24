@@ -187,10 +187,27 @@ def set_status(view: Any, kind: str, name: str, status: str, *, actor: str = "lo
         errors = activation_errors(spec, ctx)
         if errors:
             raise LogicError(409, "reference_not_active", _summary(errors), errors=errors)
-    updated = defs.set_status(kind, name, status, actor=actor)
+    # a person activating an already active definition becomes its activator (a workflow
+    # acts with its activator's role): record it unless they already are
+    again = (
+        status == "active"
+        and d.status == "active"
+        and actor not in ("", SYSTEM_ACTOR)
+        and _activator(view, kind, name) != actor
+    )
+    updated = defs.set_status(kind, name, status, actor=actor, record_same=again)
     assert updated is not None
     ensure_validated(view)
     return defs.get(kind, name) or updated
+
+
+def _activator(view: Any, kind: str, name: str) -> str | None:
+    """Who last activated *kind* *name* (the newest ``active`` history entry by a
+    person)."""
+    for row in view.logic_defs().history(kind, name):
+        if row["status"] == "active" and row["changed_by"] not in ("", SYSTEM_ACTOR):
+            return str(row["changed_by"])
+    return None
 
 
 # --- revalidation -----------------------------------------------------------------------

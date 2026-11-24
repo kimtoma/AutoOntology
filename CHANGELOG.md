@@ -9,6 +9,82 @@ behaviour).
 
 ### Added
 
+- **Actionable ontology: objects** (schema v10; `autoontology/objects/`). A structured
+  class bound to one table becomes an object type, proposed after every build (review
+  category `objects`, ids `ob:`) with an inferred key (one-column primary key, else the
+  first unique, never-empty `*ID` column) and title (a name-like column, else the key).
+  Owners confirm or bind them (`objects.manage`). Rows are read live through a read-only
+  Postgres transaction with a statement timeout and quoted identifiers; an edit layer
+  (`object_edits`) overlays action results on source rows (conflict marks, operational
+  properties, revert). A type whose class or table disappears becomes `broken` and comes
+  back by itself. Routes `GET /objects/types`, `PUT /objects/types/{type}`, `GET
+  /objects/{type}`, `GET /objects/{type}/{key}`, `GET /objects/{type}/{key}/links/{link}`;
+  CLI `ao object types|bind|list|get`; agent tools `list_object_types`, `search_objects`,
+  `get_object`; the **Objects** page.
+- **Object type names**: one resolver for the API, the CLI, the agent tools and the specs
+  (`autoontology/objects/naming.py`): id (`ot_...`), class name, label (exact, then any
+  case), table or `schema.table`. An ambiguous name is 409 `ambiguous_object_type` with
+  the `candidates`. Links may be named by the target's table (`count(invoices where ...)`,
+  `contracts.계약명`).
+- **Functions** (`autoontology/logic/expr.py`, `specs.py`, `functions.py`): a small
+  expression language (no eval: tokenizer, parser, type checker, evaluator with depth,
+  length and row limits) with fields, link paths, `param.x`, arithmetic, comparisons,
+  `and/or/not`, `in [...]`, `if`, date arithmetic, builtins and link aggregates
+  (`count/sum/min/max/exists`), and calls to other functions. Definitions (functions,
+  actions, workflows) are versioned YAML/JSON specs validated fail-closed against the
+  object types (`logic_defs`, `logic_def_history`): `draft` -> `active` -> `retired`,
+  revalidated on every revision change (`broken` until they fit again). Routes `GET/POST
+  /logic`, `POST /logic/validate`, `/logic/test`, `/logic/{kind}/{name}/status`,
+  `/logic/functions/{name}/test|call`; CLI `ao logic list|show|apply|validate|test|
+  activate|retire`; computed values on object pages; agent tools `list_functions`,
+  `call_function`. Permissions `logic.read`, `functions.call` (viewer), `logic.edit`
+  (editor), `logic.activate` (owner).
+- **Actions** (`autoontology/logic/actions.py`, `action_runs`): preview (parameters,
+  preconditions, effects, approval, notifications; nothing stored), submit with an
+  idempotency key, approval by the run's role (`reviewer` or `owner`, optionally `when`
+  an expression holds; four-eyes with accounts on, `self_approval`), apply into the edit
+  layer in one `BEGIN IMMEDIATE` transaction (409 `object_busy` after 3 changed
+  attempts), reject or withdraw, revert (409 `superseded` unless an owner forces it),
+  e-mail notifications after commit. Every transition is audited (`action.*`). Routes
+  under `/actions`, CLI `ao action list|preview|run|runs|approve|reject|revert`, action
+  buttons on object pages, **Review → Approvals**.
+- **Agent token scopes**: `read` (every token), `propose` (submitted actions always wait
+  for approval) and `execute` (owners only; the action's own approval rules), plus an
+  action allow-list (`action:<name>`, `--action`). The action's agent policy (`none`,
+  `propose`, `execute`) and the creator's current role cap what a token may do. New tools
+  `list_actions`, `preview_action`, `get_action_run` and the write tool `submit_action`
+  (also audited); REST under `/agent/v1/objects`, `/functions`, `/actions`. An agent's
+  request is recorded as `agent:<token id>`, so the token's creator may approve it
+  (human-in-the-loop), while accounts mode still blocks approving one's own request.
+- **Workflows** (`autoontology/logic/workflows.py`, `scheduler.py`, `workflow_runs`):
+  schedule (`daily HH:MM`, `hourly`, `weekly MON HH:MM`), `on_action` or manual triggers;
+  `for_each` an object type with a `where` filter and `if` / `action` / `notify` steps.
+  An object whose action waits for approval pauses and resumes when it is decided; an
+  object whose same action already waits is skipped (`already_pending`). Fire slots are
+  unique (no double firing), the latest missed slot fires once within 6 h. A run acts
+  with its activator's role (accounts mode: the activator must still be an owner;
+  `activator_not_allowed`). `AUTOONTOLOGY_WORKFLOWS=on|off`, `AUTOONTOLOGY_TZ`. Routes
+  under `/workflows`, CLI `ao workflow list|run|runs|show|cancel`, permission
+  `workflow.run` (editor).
+- **Logic from documents** (schema v11; `autoontology/logic/extract.py`,
+  `candidates.py`): a `logic` run sends the documents' rule and process concepts with
+  verified evidence, the object types (with their tables) and existing definitions to the
+  chat model (prompt version 2) and stores validated function / action / workflow
+  candidates: ready, or with their errors (needs an edit). Review category `logic`
+  (`lg:`): accept (a draft), edit and accept, reject, undo. CLI `ao logic extract|
+  candidates|accept|reject`, **Logic → Extract from documents**, **Review → Logic
+  proposals**. One chat call per batch of up to 12 concepts, at most 80 per run.
+- **Skill export** (`autoontology/logic/skills.py`): `GET /logic/skill.zip` (`logic.read`,
+  audited `skill.export`), `ao skill export [-o FILE]` and **Connect → Export skill**
+  download the active definitions as an Agent Skill: `SKILL.md` (front matter `name`,
+  `description`; object types, functions, actions, workflows, a procedure and examples),
+  `mcp.json` (placeholders `{{AUTOONTOLOGY_URL}}/mcp` and `Bearer <token>`, never a
+  token) and `definitions/*.yaml`. Re-exporting unchanged definitions gives identical
+  bytes.
+- **Quickstart logic samples** (`samples/quickstart/logic/`): functions `미수금`,
+  `연체일수`, `연체여부`, `남은일수`, `미수청구건수`, the action `독촉단계기록` (owner approval
+  for stage 4, agents propose only) and the daily workflow `연체독촉`, written with table
+  names so they validate whatever language the build labelled the classes in.
 - **Accounts and sign-in** (schema v9; `autoontology/store/accounts.py`,
   `autoontology/web/auth.py`, `autoontology/web/mailer.py`), off by default
   (`AUTOONTOLOGY_AUTH=off|accounts`). Tables `users`, `sessions`, `login_tokens`,
@@ -194,6 +270,13 @@ behaviour).
 
 ### Changed
 
+- **Title inference** for object type proposals takes a name-like column only (`명`,
+  `이름`, `제목`, `name`, `title`, `label`, `subject`); without one the key is the title
+  (invoices no longer get `수납상태`). Active bindings keep their title.
+- **The approval rule's message** reads "approval.when is set but approval.role is none;
+  choose reviewer or owner (or remove approval.when)", and the logic prompt states it.
+- **Re-activating an active definition** records the person as its new activator, so an
+  owner can take over a workflow whose activator lost the owner role without retiring it.
 - **Magic links take two steps**: `GET /auth/magic/<token>` no longer signs in (mail
   scanners prefetch links); it shows a confirm button that posts the token to the new
   `POST /api/auth/magic {token}`.

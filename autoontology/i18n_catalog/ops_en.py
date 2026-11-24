@@ -336,7 +336,7 @@ MESSAGES: dict[str, str] = {
     "help.agent.tokens.create.action": "Allow write scopes only for this action (repeatable; default: every action).",
     "help.action": "Actions: preview, run, approve, reject and revert actions on objects (list, preview, run, runs, approve, reject, revert).",
     "help.action.list": "List the active actions (of an object type).",
-    "help.action.type": "Only this object type (name or label).",
+    "help.action.type": "Only this object type (name, label or table).",
     "help.action.name": "The action's name.",
     "help.action.key": "The object's key.",
     "help.action.param": "name=value parameter (repeatable).",
