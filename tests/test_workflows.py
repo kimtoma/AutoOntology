@@ -575,3 +575,46 @@ def test_reconcile_fails_runs_interrupted_mid_way(env, monkeypatch):
     assert done.status == "failed" and done.error.startswith("interrupted")
     # execute() on an ended run does nothing
     assert workflows.execute(settings, view, run.id).status == "failed"
+
+
+# --- an approval still pending from an earlier run ----------------------------------------
+
+
+def test_next_day_does_not_duplicate_a_pending_approval(env):
+    settings, view, _, _ = env
+    _activate(view, sample_workflow())
+    first = _run(settings, view, slot="2026-11-25T02:00")
+    pending = view.action_runs().list(status="pending_approval")
+    assert [(a.object_key, a.workflow_run_id) for a in pending] == [("INV-6", first.id)]
+    # the next scheduled day: INV-6 still waits for the owner, so no second request
+    again = _run(settings, view, slot="2026-11-26T02:00")
+    assert again.status == "succeeded"
+    s = again.summary
+    assert s["already_pending"] == 1 and s["skipped"] == 1 and s["pending_approval"] == 0
+    assert (s["matched"], s["completed"], s["actions_applied"]) == (4, 3, 0)
+    assert view.action_runs().list(workflow_run_id=again.id) == []
+    assert [a.id for a in view.action_runs().list(status="pending_approval")] == [pending[0].id]
+    obj = {o["key"]: o for o in again.to_dict()["objects"]}["INV-6"]
+    assert obj["status"] == "skipped" and "already_pending" in obj["reason"]
+    assert obj["steps"][-1]["result"] == "already_pending"
+    assert obj["steps"][-1]["action_run_id"] == pending[0].id
+    # the owner approves the first request: the first run resumes, the next day is quiet
+    actions.approve(settings, view, pending[0].id, OWNER, when=TODAY)
+    workflows.wait()
+    assert view.workflow_runs().get(first.id).status == "succeeded"
+    third = _run(settings, view, slot="2026-11-27T02:00")
+    assert third.status == "succeeded" and third.summary["already_pending"] == 0
+    assert view.action_runs().list(workflow_run_id=third.id) == []
+
+
+def test_pending_approval_with_other_params_does_not_block(env):
+    settings, view, _, _ = env
+    _activate(view, sample_workflow())
+    manual, _ = actions.submit(
+        settings, view, ACTION, "INV-6", {"단계": 4, "메모": "직접"}, OWNER, when=TODAY
+    )
+    assert manual.status == "pending_approval"
+    run = _run(settings, view)
+    assert run.summary["already_pending"] == 0 and run.summary["pending_approval"] == 1
+    mine = view.action_runs().list(workflow_run_id=run.id, status="pending_approval")
+    assert [(a.object_key, a.params) for a in mine] == [("INV-6", {"단계": 4})]

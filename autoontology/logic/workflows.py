@@ -23,13 +23,14 @@ workflow's ``for_each`` type and ``where`` holds).
 Steps, per object, in order: ``if`` evaluates its condition (true: ``then``, else
 ``else``); ``action`` maps its parameters from expressions and submits the action with
 an idempotency key derived from (workflow run id, step path, object key), so retrying
-never applies an action twice; ``notify`` renders the message like an action's
+never applies an action twice (but see "Pending elsewhere" below); ``notify`` renders the message like an action's
 notification and sends it (role recipients need accounts). After an applied action the
 object is read again, so later steps see its new values.
 
 Object outcomes: ``done`` (every step ran), ``paused`` (an action waits for approval),
-``skipped`` (an action's precondition does not hold, its approval was rejected, or the
-workflow changed while the object was paused) and ``failed`` (an expression or an action
+``skipped`` (an action's precondition does not hold, its approval was rejected, the
+same request already waits for approval, or the workflow changed while the object was
+paused) and ``failed`` (an expression or an action
 failed: that object's remaining steps do not run; other objects go on).
 
 Statuses
@@ -43,8 +44,9 @@ their pending action runs are left as they are (decide them in the approvals lis
 decision no longer resumes anything).
 
 ``summary`` counts ``matched``, ``completed``, ``skipped``, ``failed``,
-``actions_applied``, ``pending_approval`` (objects waiting now), ``notified`` (notify
-steps that ran), ``where_errors``, ``scanned`` and ``truncated``; ``objects`` keeps the
+``actions_applied``, ``pending_approval`` (objects waiting now), ``already_pending``
+(objects skipped because the same request already waits for approval; also counted in
+``skipped``), ``notified`` (notify steps that ran), ``where_errors``, ``scanned`` and ``truncated``; ``objects`` keeps the
 detail of the first :data:`MAX_DETAIL_OBJECTS` objects (their steps, outcome and reason).
 
 Pause and resume
@@ -71,6 +73,23 @@ object) fails with the reason. With accounts off the role is owner. Action runs 
 ``requested_by: workflow:<name>``, ``via: workflow`` and the ``workflow_run_id``; the
 audit log records ``workflow.run``, ``workflow.finish`` and ``workflow.cancel``.
 
+Pending elsewhere
+-----------------
+The idempotency key only de-duplicates within one run, so a daily workflow would ask
+again every day while yesterday's request still waits (a guard such as
+``coalesce(독촉단계, 0) < 4`` only holds once the approval is applied). Before an action
+step submits, the runner therefore looks for a ``pending_approval`` run of the same action
+on the same object in the project -- from any requester, any workflow run or a manual
+submit -- whose parameters equal the step's (both normalised by the action's parameter
+coercion, compared as JSON). If there is one, nothing is submitted: the object is
+``skipped`` with reason ``already_pending: <action run id>``, its step entry records
+``result: already_pending`` and the existing ``action_run_id``, and the run counts it in
+``already_pending``. The object does not pause and is not linked to the other run: when
+that run is decided, only the run that created it resumes; the next scheduled run sees the
+applied (or rejected) outcome. Different parameters submit as usual. Manual, UI and agent
+submits are not affected. A retry of the same run (same idempotency key) is not treated as
+pending elsewhere: it returns its own run as before.
+
 ``on_action``
 -------------
 When an action is applied (any surface) and ``AUTOONTOLOGY_WORKFLOWS`` is on, every
@@ -84,6 +103,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import logging
 import secrets
 import threading
@@ -124,6 +144,7 @@ COUNTERS = (
     "failed",
     "actions_applied",
     "pending_approval",
+    "already_pending",
     "notified",
     "where_errors",
     "scanned",
@@ -413,6 +434,7 @@ class _Object:
     paused: dict[str, Any] | None = None
     applied: int = 0
     notified: int = 0
+    already_pending: int = 0
 
     def note(self, entry: dict[str, Any]) -> None:
         if len(self.steps) < MAX_DETAIL_STEPS:
@@ -454,6 +476,33 @@ def _send(env: _Env, messages: list[dict[str, Any]]) -> dict[str, Any]:
     return {"status": status, "sent": sent, "failed": failed}
 
 
+def _pending_elsewhere(
+    env: _Env, name: str, key: str, params: dict[str, Any], own_key: str
+) -> ActionRun | None:
+    """A ``pending_approval`` run of action *name* on object *key* with the same
+    (normalised) parameters, other than this step's own earlier submit; None when there is
+    none or the parameters cannot be normalised (the submit then reports why)."""
+    spec = env.ctx.actions.get(name)
+    if spec is None:
+        return None
+    try:
+        wanted = _canonical(functions._params(spec, actions._check_params(params)))  # type: ignore[arg-type]
+    except ObjectError:
+        return None
+    for found in env.view.action_runs().list(
+        status="pending_approval", action=name, object_key=str(key), limit=500
+    ):
+        if found.idempotency_key == own_key:
+            return None  # a retry of this very step: submit returns it
+        if _canonical(found.params) == wanted:
+            return found
+    return None
+
+
+def _canonical(params: Any) -> str:
+    return json.dumps(params or {}, sort_keys=True, ensure_ascii=False, default=str)
+
+
 def _step_action(env: _Env, ev: Any, o: _Object, step: StepSpec, path: Path) -> bool:
     entry: dict[str, Any] = {"path": path_text(path), "kind": "action", "action": step.action}
     try:
@@ -462,6 +511,14 @@ def _step_action(env: _Env, ev: Any, o: _Object, step: StepSpec, path: Path) -> 
         o.note({**entry, "result": "failed", "error": exc.message})
         return o.stop("failed", f"{path_text(path)}: {exc.message}")
     entry["params"] = params
+    key = idempotency_key(env.run_id, path, o.key)
+    waiting = _pending_elsewhere(env, str(step.action), o.key, params, key)
+    if waiting is not None:
+        o.already_pending += 1
+        o.note({**entry, "result": "already_pending", "action_run_id": waiting.id})
+        return o.stop(
+            "skipped", f"already_pending: {step.action} waits for approval in {waiting.id}"
+        )
     try:
         run, _ = actions.submit(
             env.settings,
@@ -470,7 +527,7 @@ def _step_action(env: _Env, ev: Any, o: _Object, step: StepSpec, path: Path) -> 
             o.key,
             params,
             env.caller,
-            idempotency_key=idempotency_key(env.run_id, path, o.key),
+            idempotency_key=key,
             mailer=env.mailer,
             when=env.when,
         )
@@ -627,6 +684,7 @@ def _record(
         if o.status in ("done", "skipped", "failed"):
             s["completed" if o.status == "done" else o.status] += 1
         s["actions_applied"] += o.applied
+        s["already_pending"] = s.get("already_pending", 0) + o.already_pending
         s["notified"] += o.notified
         if o.paused is not None and run.status in OPEN:
             paused[o.paused["action_run_id"]] = {

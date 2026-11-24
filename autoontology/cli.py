@@ -674,8 +674,8 @@ def review_list(
     category: str = typer.Option(
         None,
         "--category",
-        help="proposals | axioms | unaligned | aliases | stale_sources | folds (folds: only "
-        "when asked for)",
+        help="proposals | axioms | unaligned | aliases | objects | logic | stale_sources | "
+        "folds (folds: only when asked for)",
     ),
     status: str = typer.Option("pending", "--status", help="pending | decided | all"),
     limit: int = typer.Option(50, "--limit", min=1, max=1000, help=msg("help.review.limit")),

@@ -2946,6 +2946,8 @@ def _workflow_run_seg(run_id: str) -> str:
 def _counts(summary: dict[str, Any]) -> str:
     keys = ("matched", "completed", "actions_applied", "pending_approval", "skipped", "failed")
     text = " ".join(f"{k}={summary.get(k, 0)}" for k in keys)
+    if summary.get("already_pending"):
+        text += f" already_pending={summary['already_pending']}"
     return text + (" truncated" if summary.get("truncated") else "")
 
 

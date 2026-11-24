@@ -141,9 +141,12 @@ def test_cli_workflow_commands(client, monkeypatch):
     assert ok(["workflow", "runs"]).strip().endswith("no workflow runs")
     out = ok(["workflow", "run", WORKFLOW, "--wait"])
     assert "paused" in out and "matched=4" in out and "pending_approval=1" in out
+    run_id = json.loads(ok(["workflow", "runs", "--json"]))["runs"][-1]["id"]
+    # a second run while INV-6 still waits: no second request for the same approval
     data = json.loads(ok(["workflow", "run", WORKFLOW, "--json"]))  # service down: here
-    run_id = data["run"]["id"]
-    assert data["run"]["status"] == "paused"
+    assert data["run"]["status"] == "succeeded"
+    assert data["run"]["summary"]["already_pending"] == 1
+    assert "already_pending=1" in ok(["workflow", "runs"])
     shown = ok(["workflow", "show", run_id])
     assert "INV-6: paused" in shown and "pending_approval (owner)" in shown
     assert run_id in ok(["workflow", "runs", "--status", "paused"])
@@ -152,7 +155,11 @@ def test_cli_workflow_commands(client, monkeypatch):
     # approving from the CLI resumes the object in this process
     assert "applied" in ok(["action", "approve", act])
     assert "succeeded" in ok(["workflow", "show", run_id])
-    first = json.loads(ok(["workflow", "runs", "--json"]))["runs"][-1]["id"]
+    # revert stage 4: the next run asks again and pauses, and that run can be cancelled
+    ok(["action", "revert", act])
+    data = json.loads(ok(["workflow", "run", WORKFLOW, "--json"]))
+    assert data["run"]["status"] == "paused"
+    first = data["run"]["id"]
     assert "cancelled" in ok(["workflow", "cancel", first])
     out = runner.invoke(app, ["workflow", "cancel", first])
     assert out.exit_code == 1 and "not_cancellable" in out.output
