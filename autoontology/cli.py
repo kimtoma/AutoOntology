@@ -25,6 +25,30 @@ review_app = typer.Typer(
 )
 app.add_typer(review_app, name="review")
 
+#: The project the commands work on (``--project``/``-p`` or ``AUTOONTOLOGY_PROJECT``; None
+#: = the default project), set by :func:`main` for each invocation.
+_project_ref: str | None = None
+
+
+@app.callback()
+def main(
+    project: str = typer.Option(
+        None,
+        "--project",
+        "-p",
+        envvar="AUTOONTOLOGY_PROJECT",
+        metavar="SLUG",
+        help=msg("help.opt.project"),
+    ),
+) -> None:
+    global _project_ref
+    _project_ref = (project or "").strip() or None
+
+
+def _project() -> str | None:
+    """The project the command works on (a slug or id; None = the default project)."""
+    return _project_ref
+
 
 def _settings():
     from autoontology.config import Settings
@@ -351,18 +375,47 @@ def down() -> None:
 @app.command()
 def status() -> None:
     """Show the state of managed processes."""
+    from autoontology.doctor import project_summary
     from autoontology.engine.supervisor import Supervisor, format_status
 
-    typer.echo(format_status(Supervisor.from_settings(_settings()).status()))
+    settings = _settings()
+    typer.echo(format_status(Supervisor.from_settings(settings).status()))
+    try:
+        summary = project_summary(settings)
+    except Exception:  # noqa: BLE001 - the process status must print anyway
+        summary = None
+    if summary:
+        typer.echo(summary)
 
 
 # --- structured sources / builds -----------------------------------------------------
 
 
-def _store(settings):
+def _root_store(settings):
+    """The whole store (installation-wide commands)."""
     from autoontology.store.db import Store
 
     return Store.for_home(settings.home, default_project_slug=settings.workspace)
+
+
+def _store(settings, *, write: bool = False):
+    """The store of the selected project (``--project``): a project view that limits
+    every read and write to it; without ``--project`` the whole store (whose
+    project-less calls mean the default project, as before projects). *write*: the
+    command changes the project, refused (exit 2) for an archived one."""
+    from autoontology.store.db import ProjectNotFound
+
+    store = _root_store(settings)
+    ref = _project()
+    if ref is None:
+        return store
+    try:
+        view = store.project(ref)
+    except ProjectNotFound:
+        _fail(msg("project.unknown", project=ref), code=2)
+    if write and view.project.archived:
+        _fail(msg("project.archived", project=view.slug), code=2)
+    return view
 
 
 def _table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
@@ -391,7 +444,7 @@ def source_add(
     from autoontology.structured.loaders import LoadError
 
     settings = _settings()
-    store = _store(settings)
+    store = _store(settings, write=True)
     if kind == "documents":
         from autoontology.engine.extract import ensure_documents_source
         from autoontology.engine.jobs import JobError
@@ -474,7 +527,7 @@ def source_rm(
     from autoontology.structured.remove import RemoveError, remove_source
 
     settings = _settings()
-    store = _store(settings)
+    store = _store(settings, write=True)
     src = store.get_source(name)
     if src is None:
         _fail(msg("source.unknown", name=name))
@@ -515,7 +568,7 @@ def build(
     from autoontology.engine.client import BackendError
 
     settings = _settings()
-    store = _store(settings)
+    store = _store(settings, write=True)
     started = time.monotonic()
     log_path = jobs.jobs_log_path(settings)
     jobs.setup_job_logging(settings, console=True)
@@ -569,7 +622,7 @@ def apply_decisions(
     from autoontology.engine.client import BackendError
 
     settings = _settings()
-    store = _store(settings)
+    store = _store(settings, write=True)
     started = time.monotonic()
     log_path = jobs.jobs_log_path(settings)
     jobs.setup_job_logging(settings, console=True)
@@ -668,7 +721,7 @@ def _decide(item_id: str, decision: str, relation, term, note: str) -> None:
     from autoontology.web.review import ReviewError
 
     settings = _settings()
-    store = _store(settings)
+    store = _store(settings, write=True)
     inbox = _inbox(settings, store, with_sources=False)
     try:
         d = inbox.decide(
@@ -724,7 +777,7 @@ def review_undo(item_id: str = typer.Argument(...)) -> None:
 
     settings = _settings()
     try:
-        removed = _inbox(settings, _store(settings), with_sources=False).undo(item_id)
+        removed = _inbox(settings, _store(settings, write=True), with_sources=False).undo(item_id)
     except ReviewError as exc:
         _fail(f"{exc.error}: {exc.detail}")
     if not removed:
@@ -843,7 +896,7 @@ def export(
     settings = _settings()
     started = time.monotonic()
     log_path = jobs.jobs_log_path(settings)
-    store = _store(settings)
+    store = _store(settings, write=True)
     try:
         jobs.setup_job_logging(settings, console=True)
         result = export_job.run_export(
@@ -1330,7 +1383,7 @@ def tools_prune_connections(
     if drop_db and not include_unowned:
         _fail("--drop-db only applies with --include-unowned", code=2)
     settings = _settings()
-    store = _store(settings)
+    store = _root_store(settings)
     try:
         with BackendClient(settings.backend_url) as client:
             orphans = remove.find_orphan_connections(settings, store, client)
@@ -1417,7 +1470,7 @@ def demo(
 
     _step(1, total, msg("demo.step.services"))
     up()
-    store = _store(settings)
+    store = _store(settings, write=True)
     _demo_prune_orphans(settings, store)
 
     _step(2, total, msg("demo.step.samples", set=set_name))

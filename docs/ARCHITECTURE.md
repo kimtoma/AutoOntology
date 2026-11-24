@@ -11,8 +11,8 @@ overview is in the [README](../README.md).
 | AutoOntology service | `autoontology/web` (FastAPI, uvicorn) | `127.0.0.1:7800` (`AUTOONTOLOGY_PORT`) | REST API under `/api`, SSE run logs, the playground, the web UI under `/ui`, the `/v1` model router, and the `/ingest` shims the engine calls back. |
 | Engine backend | `vendor/auto-ontology` (NVIDIA Auto Ontology, git submodule) | `127.0.0.1:3101` (`BACKEND_PORT`) | Connections, catalog, semantic model, exports and NL-to-SQL, over HTTP `/api/...`. |
 | CLI | `autoontology/cli.py` (typer), `autoontology/onboarding.py` | none | Runs `build` and `export` in-process; `up`/`down` supervise the two servers; `init`, `demo` and `provider` drive the onboarding. |
-| Postgres 17 + pgvector | `docker compose` or your own server | `5432` | The engine's catalog and vectors (`autoontology`) and one database per file source (`autoontology_src_<name>`). |
-| SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: sources, runs, documents, concepts, alignments, snapshots, playground. |
+| Postgres 17 + pgvector | `docker compose` or your own server | `5432` | The engine's catalog and vectors (`autoontology`) and one database per file source (`autoontology_src_<name>`; `autoontology_src_<slug_>__<name>` in a project other than the default one). |
+| SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: projects, sources, runs, documents, concepts, alignments, snapshots, playground. |
 | Model providers | Ollama (`:11434`), an OpenAI-compatible URL, or the user's `claude` / `codex` CLI (chat only) | none | Chat (extraction, judges, playground, engine compile) and embeddings. |
 | kordoc (optional) | `<AUTOONTOLOGY_HOME>/kordoc` (npm, Node 20 or newer); OCR models in kordoc's model cache | none | Reads HWP/HWPX/PDF/DOCX/PPTX/XLS/XLSX into Markdown and OCRs images and scanned PDFs (PP-OCRv5 korean), run offline as a subprocess with an argv list. |
 
@@ -22,6 +22,46 @@ binds them to 127.0.0.1, writes PID files under `<home>/run/` and logs under
 `Host` is not local or whose `Origin` is cross-site. A tailnet hostname listed in
 `AUTOONTOLOGY_TAILSCALE_HOSTS` (forwarded by `tailscale serve`) is accepted only with the
 `Tailscale-User-Login` identity header, optionally limited to `AUTOONTOLOGY_TAILSCALE_LOGINS`.
+
+## Projects
+
+One installation holds several projects (schema v8, `store/db.py`). Each has its own
+sources, runs, review decisions, revisions (r1, r2, ... per project), exports,
+playground index and conversations, and outside-agent tokens. Rows from before projects
+belong to the default project (`prj_default`), whose slug is the workspace's
+(`AUTOONTOLOGY_WORKSPACE`, slugified) and can be renamed. A slug is
+`^[a-z][a-z0-9-]{1,23}$`; ids (`prj_<hex>`) never change.
+
+- **Store.** `Store.project(ref)` returns a `ProjectStore`: every read and write is
+  limited to that project, and an object looked up by a store-wide id (run, source)
+  belonging to another project reads as missing. It stands in for a `Store` wherever the
+  engine takes one, so a build of a project aligns, merges and snapshots only that
+  project's sources.
+- **Databases.** A source of the default project keeps `autoontology_src_<name>`; a new
+  source of another project gets `autoontology_src_<slug_>__<name>` (the name budget is
+  `46 - len(slug) - 2`). A database belongs to one project: registering the same external
+  database in a second project is refused.
+- **Exports** live in `exports/<slug>/r<rev:04d>/`. Legacy `exports/rNNNN` folders move
+  into the default project's folder once (recorded in `exports/.layout-projects.json`).
+  A slug rename (`PATCH /api/projects/{project}`) renames `exports/<old>/` to
+  `exports/<new>/` together with the store row (both or neither), and is refused while a
+  run of that project is active.
+- **Uploads** of the default project stay in `<home>/uploads/<name>/`; other projects'
+  go to `<home>/uploads/.projects/<project id>/<name>/`.
+- **Locks.** Run-manager keys and store leases are per project; v1 adds a global engine
+  gate, so one build, export or apply runs across the installation (another project's run
+  is refused with 409, never queued). Queries and the playground run per project.
+- **API.** Every project-scoped route is canonical under `/api/projects/{project}/...`
+  and kept as an alias under `/api/...` for the default project
+  (`web/projects.py`). The `ProjectContext` dependency resolves the slug (404
+  `unknown_project`), refuses writes to an archived project (409 `project_archived`) and
+  carries the caller (`actor`: the tailnet login or `local`); its `require(permission)`
+  is the hook where accounts and roles will plug in. Installation-wide routes
+  (`/api/status`, `/api/providers/test`, `/api/settings`) and the management routes
+  (`/api/projects`) have no project. The outside-agent surfaces (`/mcp`, `/agent/v1`)
+  take the project from the bearer token.
+- **CLI.** `--project/-p SLUG` (or `AUTOONTOLOGY_PROJECT`) before the command selects the
+  project: store commands use its `ProjectStore`, API commands call its canonical routes.
 
 ## How the engine is embedded
 
@@ -116,8 +156,9 @@ whose candidate Terms changed. A re-run step invalidates the
 later steps of its own source and every global step. Failed chunks or documents make the
 run `failed` with a `partial` note, but the snapshot is still saved.
 
-Concurrency: a build holds a store lease on the workspace and on every source, reaps runs
-left by dead processes, and refuses to start while another build, export or apply is active.
+Concurrency: a build holds a store lease on its project and on every source, plus the
+installation-wide engine gate, reaps runs left by dead processes, and refuses to start
+while another build, export or apply is active (in any project).
 
 ### Export (`engine/export_job.py`)
 
@@ -126,7 +167,7 @@ collect -> serialize -> upstream -> ossie -> okf -> report
 ```
 
 The export loads a snapshot; it never rebuilds the model. It writes into a temporary
-folder and swaps it into `exports/r<rev:04d>/`:
+folder and swaps it into `exports/<project slug>/r<rev:04d>/`:
 
 - `serialize` writes `ontology.ttl`, `ontology.jsonld` and `ontology.graphml`. The Turtle
   is checked by a parse round-trip.
@@ -282,8 +323,9 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 
 | Table | Holds |
 |---|---|
-| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground, v3: `term_alias_additions.source_id`, v4: `term_legacy_descriptions`, v5: `documents.reader_fingerprint`, v6: `review_decisions` and `alignments.judged_json`). |
-| `sources` | Registered sources: name, kind (`files`, `database`, `documents`), locator, catalog database id. |
+| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground, v3: `term_alias_additions.source_id`, v4: `term_legacy_descriptions`, v5: `documents.reader_fingerprint`, v6: `review_decisions` and `alignments.judged_json`, v7: `agent_tokens`, `agent_calls`, v8: `projects`, `store_meta` and `project_id` on the tables below). |
+| `projects` | Projects: id, slug, name, description, created and archived times. |
+| `sources` | Registered sources (unique per project): name, kind (`files`, `database`, `documents`), locator, catalog database id. |
 | `source_leases` | Leases that keep builds, exports and deletes from overlapping. |
 | `runs`, `steps` | Build, export and apply runs and their steps, with details, timings and `inputs_sha`. |
 | `file_manifests`, `semantic_baselines` | Input manifests and the catalog schema a semantic layer was compiled from. |
@@ -292,14 +334,16 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 | `term_embeddings` | Cached Term passage embeddings, by text hash and model. |
 | `alignments`, `alignment_previews` | Judge verdicts with the identity policy version, and dry-run proposals. |
 | `term_alias_additions`, `term_refresh_pending` | Synonyms AutoOntology added to Terms (with `source_id`, the documents source whose alignment added them, since v3; NULL on older rows), and Terms awaiting a refresh. `source rm` of a documents source removes that source's additions from the upstream Terms first. |
-| `ontology_snapshots` | One row per revision: the run, sources, counts and the full model JSON. |
+| `ontology_snapshots` | One row per revision of a project (surrogate `id`, per-project `revision`): the run, sources, counts and the full model JSON. |
 | `review_decisions` | A person's decision per review subject (alignment, alias, concept), who made it, and the revision that first reflected it (`applied_revision`). |
 | `playground_index`, `playground_index_meta` | The element vectors and the snapshot they were built from. |
-| `playground_conversations`, `playground_messages` | Stored chats, keyed by workspace. |
+| `playground_conversations`, `playground_messages` | Stored chats, keyed by project. |
+| `agent_tokens`, `agent_calls` | Outside-agent tokens (SHA-256 only) of a project, and their calls. |
 
 The engine keeps its own state in Postgres: the catalog and semantic model tables in the
 `autoontology` database, the `vdb.*` vector tables, and each file source's data in
-`autoontology_src_<name>`. `config.validate_pg_database_name` refuses every other
+`autoontology_src_<name>` (or `autoontology_src_<slug_>__<name>`).
+`config.validate_pg_database_name` refuses every other
 database name.
 
 ## Formats (`autoontology/formats.py`)

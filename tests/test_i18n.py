@@ -259,10 +259,28 @@ HELP_SCREENS = {
     ("provider", "test"): ("help.provider.test.provider",),
     ("provider", "use"): ("help.provider.use.chat_model", "help.provider.use.clear_api_key"),
     ("doctor",): ("help.doctor", "help.doctor.skip_models"),
+    (): ("help.opt.project",),
+    ("project",): (
+        "help.project",
+        "help.project.list",
+        "help.project.show",
+        "help.project.create",
+        "help.project.rename",
+        "help.project.archive",
+        "help.project.unarchive",
+    ),
+    ("project", "list"): ("help.project.archived",),
+    ("project", "show"): ("help.project.ref_default",),
+    ("project", "create"): (
+        "help.project.slug",
+        "help.project.name",
+        "help.project.description",
+    ),
+    ("project", "rename"): ("help.project.ref", "help.project.new_slug"),
 }
 
 
-@pytest.mark.parametrize("args", list(HELP_SCREENS), ids=" ".join)
+@pytest.mark.parametrize("args", list(HELP_SCREENS), ids=lambda a: " ".join(a) or "ao")
 def test_korean_help_is_intact_at_80_columns(tmp_path, args):
     """Rich cuts wide-character lines it cannot wrap ("비 …"): every Korean help text must
     survive an 80-column terminal whole."""

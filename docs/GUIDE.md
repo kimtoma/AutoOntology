@@ -124,7 +124,8 @@ numbers). The
 | **Snapshot / revision** | The saved result of one build, numbered 1, 2, 3 ... Nothing is overwritten: each build adds a new revision, and the screens show the latest. |
 | **Source** | One folder, set of uploaded files or database you registered, with a short name such as `hanbit` or `hanbit-docs`. A source holds either tables (structured) or documents. |
 | **Build** | The run that reads every source, asks the model to find concepts, aligns them and saves a new revision. The first build takes the longest; later builds reuse what did not change. |
-| **Export** | Writing a revision to files other tools can open (`exports/r0001/` and so on): RDF/OWL, GraphML, Ossie and OKF. |
+| **Export** | Writing a revision to files other tools can open (`exports/<project>/r0001/` and so on): RDF/OWL, GraphML, Ossie and OKF. |
+| **Project** | One ontology with its own sources, builds, revisions, review decisions, exports, playground chats and agent tokens. One installation can hold several (for example one per department); a build of one project never mixes in another's sources. What you built before projects existed is the **default project**. |
 | **Ossie** | Apache Ossie, an open file format for semantic models (datasets, entities, relationships). Analytics and BI tools that read Ossie can reuse your ontology. |
 | **OKF** | Open Knowledge Format, a folder of Markdown pages (one per concept, table and document) with links between them. People can read it, and AI agents or wikis can load it as a knowledge base. |
 
@@ -558,6 +559,10 @@ need `uv run autoontology up`; the others read the local data and work with it d
 | Status | `uv run autoontology status`, `doctor`, `provider status` |
 | Settings | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(service)* |
 | Connect | `uv run autoontology agent tokens create <name> [--revision R] [--expires-days 30\|90]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage` |
+| Projects | `uv run autoontology project list`, `project show [slug]`, `project create <slug> --name N`, `project rename <slug> [--name N] [--slug S]`, `project archive <slug>`, `project unarchive <slug>` |
+
+Every command works on the default project unless you name another one before it:
+`uv run autoontology -p contracts build` (or set `AUTOONTOLOGY_PROJECT=contracts` once).
 
 The API key is never a command-line argument: `settings set --api-key-stdin` reads it from
 the terminal without showing it (or from a pipe, e.g. a password manager's output).

@@ -606,6 +606,30 @@ def check_embed(settings: Settings) -> Check:
     )
 
 
+def project_summary(settings: Settings) -> str | None:
+    """``N project(s): default (default), beta, ... (+M archived)`` from the store, or None
+    when there is no store yet (never creates one)."""
+    from autoontology.store.db import Store
+
+    if not (Path(settings.home) / "autoontology.db").is_file():
+        return None
+    store = Store.for_home(settings.home, default_project_slug=settings.workspace)
+    projects = store.list_projects(include_archived=True)
+    live = [p for p in projects if not p.archived]
+    names = [f"{p.slug} (default)" if p.id == store.default_project_id else p.slug for p in live]
+    archived = len(projects) - len(live)
+    text = f"{len(live)} project(s): {', '.join(names)}"
+    return text + (f" (+{archived} archived)" if archived else "")
+
+
+def check_projects(settings: Settings) -> Check:
+    """The projects of this installation (``uv run autoontology project list``)."""
+    summary = project_summary(settings)
+    if summary is None:
+        return Check("projects", "SKIP", "no store yet (`uv run autoontology setup`)")
+    return Check("projects", "OK", summary)
+
+
 def run_checks(settings: Settings, *, skip_models: bool = False) -> list[Check]:
     checks = [check_env_file()]
     checks += check_postgres(settings)
@@ -616,6 +640,9 @@ def run_checks(settings: Settings, *, skip_models: bool = False) -> list[Check]:
             lambda: check_upstream_connections(settings),
             "uv run autoontology tools prune-connections",
         )
+    )
+    checks.append(
+        _guard("projects", lambda: check_projects(settings), "uv run autoontology doctor")
     )
     checks.append(_guard("node", check_node, NODE_REMEDY))
     checks.append(

@@ -116,7 +116,8 @@ curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/b
 | **스냅샷 / 리비전** | 빌드 한 번의 저장된 결과이며 1, 2, 3 … 번호가 붙습니다. 덮어쓰지 않고 빌드할 때마다 새 리비전이 추가되며, 화면은 가장 최근 것을 보여 줍니다. |
 | **소스** | 등록한 폴더, 업로드한 파일 묶음, 또는 데이터베이스 하나입니다. `hanbit`, `hanbit-docs`처럼 짧은 이름을 붙입니다. 소스 하나는 표(정형)나 문서 중 한 종류만 담습니다. |
 | **빌드** | 모든 소스를 읽고, 모델에게 개념을 찾게 하고, 매칭한 뒤, 새 리비전을 저장하는 실행입니다. 첫 빌드가 가장 오래 걸리고, 다음 빌드부터는 바뀌지 않은 부분을 재사용합니다. |
-| **내보내기** | 리비전을 다른 도구가 열 수 있는 파일로 쓰는 일입니다(`exports/r0001/` 등): RDF/OWL, GraphML, Ossie, OKF. |
+| **내보내기** | 리비전을 다른 도구가 열 수 있는 파일로 쓰는 일입니다(`exports/<프로젝트>/r0001/` 등): RDF/OWL, GraphML, Ossie, OKF. |
+| **프로젝트** | 소스, 빌드, 리비전, 검토 결정, 내보내기, 플레이그라운드 대화, 에이전트 토큰을 따로 가진 온톨로지 하나입니다. 한 설치에 여러 개를 둘 수 있고(예: 부서마다 하나), 한 프로젝트의 빌드에는 다른 프로젝트의 소스가 섞이지 않습니다. 프로젝트 기능 이전에 만든 것은 **기본 프로젝트**입니다. |
 | **Ossie** | Apache Ossie. 시맨틱 모델(데이터셋, 엔터티, 관계)을 담는 공개 파일 형식입니다. Ossie를 읽는 분석·BI 도구가 이 온톨로지를 그대로 쓸 수 있습니다. |
 | **OKF** | Open Knowledge Format. 개념·표·문서마다 마크다운 페이지 하나씩, 서로 링크로 이어진 폴더입니다. 사람이 위키처럼 읽을 수 있고, AI 에이전트나 지식 베이스가 그대로 불러올 수 있습니다. |
 
@@ -522,6 +523,10 @@ quickstart 샘플에서 1초 미만입니다(큰 온톨로지에서는 약 1분,
 | 상태 | `uv run autoontology status`, `doctor`, `provider status` |
 | 설정 | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(서비스)* |
 | 연결 | `uv run autoontology agent tokens create <name> [--revision R] [--expires-days 30\|90]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage` |
+| 프로젝트 | `uv run autoontology project list`, `project show [slug]`, `project create <slug> --name N`, `project rename <slug> [--name N] [--slug S]`, `project archive <slug>`, `project unarchive <slug>` |
+
+모든 명령은 기본 프로젝트를 다룹니다. 다른 프로젝트는 명령 앞에 이름을 줍니다:
+`uv run autoontology -p contracts build`(또는 `AUTOONTOLOGY_PROJECT=contracts`를 한 번 설정).
 
 API 키는 명령줄 인수로 받지 않습니다. `settings set --api-key-stdin`은 터미널에서 화면에 표시하지
 않고 읽거나, 파이프(예: 비밀번호 관리자 출력)로 받습니다.

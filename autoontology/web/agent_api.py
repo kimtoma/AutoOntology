@@ -35,7 +35,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import anyio
-from fastapi import APIRouter, FastAPI, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -54,6 +54,7 @@ from autoontology.web.api import (
     export_zip_response,
     ontology_summary,
 )
+from autoontology.web.projects import ProjectContext
 
 logger = logging.getLogger("autoontology.web")
 
@@ -807,12 +808,14 @@ class TokenIn(BaseModel):
 ONCE_NOTE = "This token is shown only once: copy it now."
 
 
-def add_management_routes(router: APIRouter, api: Api) -> None:
-    """``/api/agent/*`` on the ``/api`` router (the UI and :class:`~autoontology.cli_ops.
-    LocalApi` share it)."""
+def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> None:
+    """``/api/agent/*`` on a project router (the UI and :class:`~autoontology.cli_ops.
+    LocalApi` share it): the tokens and usage of the request's project (*ctx_dep*: the
+    :class:`~autoontology.web.projects.ProjectContext` dependency; None = the default
+    project). Another project's token id reads as unknown (404)."""
+    from autoontology.web.projects import default_project
 
-    def tokens() -> AgentTokens:
-        return AgentTokens(api.store)
+    Ctx = Depends(ctx_dep or default_project(api))  # noqa: N806
 
     def guard(fn: Callable[[], Any]) -> Any:
         try:
@@ -821,11 +824,12 @@ def add_management_routes(router: APIRouter, api: Api) -> None:
             raise ApiError(exc.status, exc.code, exc.message) from exc
 
     @router.get("/agent/tokens")
-    def list_agent_tokens() -> dict[str, Any]:
-        return {"tokens": [t.to_dict() for t in tokens().list_tokens()]}
+    def list_agent_tokens(ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        return {"tokens": [t.to_dict() for t in ctx.store.agent_tokens().list_tokens()]}
 
     @router.post("/agent/tokens", status_code=201)
-    def create_agent_token(body: dict[str, Any]) -> dict[str, Any]:
+    def create_agent_token(body: dict[str, Any], ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("agent.tokens")
         try:
             req = TokenIn.model_validate(body)
         except ValidationError as exc:
@@ -835,10 +839,10 @@ def add_management_routes(router: APIRouter, api: Api) -> None:
             raise ApiError(400, "invalid_request", "name: must not be blank")
         if (
             req.revision_pin is not None
-            and api.store.get_snapshot(req.revision_pin, with_model=False) is None
+            and ctx.store.get_snapshot(req.revision_pin, with_model=False) is None
         ):
             raise ApiError(404, "unknown_revision", f"unknown revision {req.revision_pin}")
-        raw, record = tokens().create(
+        raw, record = ctx.store.agent_tokens().create(
             name, revision_pin=req.revision_pin, expires_days=req.expires_days
         )
         return {"token": raw, "record": record.to_dict(), "note": ONCE_NOTE}
@@ -849,20 +853,28 @@ def add_management_routes(router: APIRouter, api: Api) -> None:
             service.forget(token_id)
 
     @router.post("/agent/tokens/{token_id}/rotate")
-    def rotate_agent_token(token_id: str, request: Request) -> dict[str, Any]:
-        raw, record = guard(lambda: tokens().rotate(token_id))
+    def rotate_agent_token(
+        token_id: str, request: Request, ctx: ProjectContext = Ctx
+    ) -> dict[str, Any]:
+        ctx.require("agent.tokens")
+        raw, record = guard(lambda: ctx.store.agent_tokens().rotate(token_id))
         forget(request, token_id)
         return {"token": raw, "record": record.to_dict(), "note": ONCE_NOTE}
 
     @router.delete("/agent/tokens/{token_id}")
-    def revoke_agent_token(token_id: str, request: Request) -> dict[str, Any]:
-        record = guard(lambda: tokens().revoke(token_id)).to_dict()
+    def revoke_agent_token(
+        token_id: str, request: Request, ctx: ProjectContext = Ctx
+    ) -> dict[str, Any]:
+        ctx.require("agent.tokens")
+        record = guard(lambda: ctx.store.agent_tokens().revoke(token_id)).to_dict()
         forget(request, token_id)
         return record
 
     @router.get("/agent/usage")
-    def agent_usage(days: int | None = Query(None, ge=1, le=365)) -> dict[str, Any]:
-        return tokens().usage(days)
+    def agent_usage(
+        days: int | None = Query(None, ge=1, le=365), ctx: ProjectContext = Ctx
+    ) -> dict[str, Any]:
+        return ctx.store.agent_tokens().usage(days)
 
     @router.get("/agent/tools")
     def agent_tools() -> dict[str, Any]:

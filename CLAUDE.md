@@ -37,8 +37,11 @@ uv run autoontology down                             # stop the services
 uv run autoontology ontology concepts -q 계약 --json   # every UI page has commands (--json):
 #   ontology revisions|diff|concept|graph, runs show|logs|cancel, source freshness,
 #   samples list|load, exports list|show|get|zip, playground chat|sql|sparql|index,
-#   settings show|test|set|restart, agent tokens list|create|rotate|revoke, agent usage
+#   settings show|test|set|restart, agent tokens list|create|rotate|revoke, agent usage,
+#   project list|show|create|rename|archive|unarchive
 #   (docs/GUIDE.md "The same from a terminal"; outside agents: POST /mcp, /agent/v1)
+uv run ao -p <slug> build                            # --project/-p (or AUTOONTOLOGY_PROJECT) picks
+#   the project for any command; API: /api/projects/<slug>/... (/api/... = the default project)
 
 uv run ruff check . && uv run ruff format --check . && uv run pytest -q   # unit tests
 AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration                   # real Postgres + Ollama

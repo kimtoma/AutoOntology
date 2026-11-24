@@ -9,6 +9,23 @@ behaviour).
 
 ### Added
 
+- **Projects** (schema v8; `autoontology/web/projects.py`): one installation holds several
+  projects, each with its own sources (the same name may exist in two projects), runs,
+  revisions (r1, r2, ... per project), review decisions, exports
+  (`exports/<slug>/rNNNN`), playground index and conversations, and agent tokens.
+  Existing data is the default project (slug = the workspace name). Every project-scoped
+  API route is canonical under `/api/projects/{project}/...` and stays under `/api/...`
+  as the default project's alias. Management: `GET/POST /api/projects`,
+  `GET/PATCH /api/projects/{project}` (a slug change renames the exports folder with the
+  store row, and is refused while a run of the project is active),
+  `POST /api/projects/{project}/archive|unarchive` (archived = read-only, 409
+  `project_archived`; no delete). Objects looked up by id (runs and their events and
+  cancel, sources, tokens, conversations, review items) answer 404 for another project's
+  id; `GET /api/runs` lists the project's runs only. The `ProjectContext` dependency
+  carries the caller (`actor`) and a `require(permission)` hook for future accounts.
+  CLI: a global `--project/-p` (or `AUTOONTOLOGY_PROJECT`) for every command, and
+  `project list|show|create|rename|archive|unarchive` (`--json`); `doctor` and `status`
+  list the projects. One build, export or apply runs at a time across the installation.
 - **`ao`, a short alias of the `autoontology` command** (`pyproject.toml` `[project.scripts]`): the same Typer app, so every command and option works as `ao …`.
 - **Outside agents can read the ontology** (`autoontology/web/agent_api.py`): an MCP
   endpoint `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, protocol `2025-06-18`, JSON

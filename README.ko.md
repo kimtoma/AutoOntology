@@ -420,6 +420,28 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 
 ![검토 페이지](docs/screenshots/review.ko.png)
 
+### 프로젝트
+
+한 설치에 **프로젝트**를 여러 개 둘 수 있습니다. 프로젝트마다 소스, 빌드, 리비전(프로젝트별 r1,
+r2, ...), 검토 결정, 내보내기(`exports/<slug>/r<rev>/`), 플레이그라운드 대화, 외부 에이전트 토큰을
+따로 가지며, 한 프로젝트의 빌드는 다른 프로젝트의 소스를 보지 않습니다. 프로젝트 이전의 모든 것은
+**기본 프로젝트**(슬러그는 작업공간 이름)에 들어 있으므로 기존 URL, 명령, 에이전트 토큰은 그대로
+동작합니다.
+
+```bash
+uv run ao project create contracts --name "계약"        # 슬러그: a-z, 0-9, '-', 2-24자
+uv run ao -p contracts source add ./data/contracts --name contracts
+uv run ao -p contracts build && uv run ao -p contracts export
+uv run ao project list                                  # 리비전, 소스 수, 마지막 빌드
+export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를 준 것과 같음
+```
+
+프로젝트는 이름을 바꿀 수 있고(`project rename <slug> --name N --slug S`; 새 슬러그는 내보내기 폴더도
+옮기며, 그 프로젝트의 실행이 진행 중이면 거부) 보관할 수 있습니다(`project archive <slug>`: 읽기
+전용이 되고 목록에서 숨겨지며 데이터는 유지, `unarchive`로 되돌림). 이번 버전에는 삭제가 없습니다.
+빌드·내보내기·적용은 설치 전체에서 한 번에 하나만 돌고(엔진 백엔드가 하나), 조회와 플레이그라운드는
+프로젝트별로 따로 돕니다. 같은 외부 데이터베이스를 두 프로젝트에 등록할 수는 없습니다.
+
 ## 레퍼런스
 
 ### 아키텍처
@@ -454,6 +476,10 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 
 `ao`는 `autoontology`의 짧은 별칭입니다. 아래 모든 명령을 `ao …`로도 실행할 수 있습니다(예: `uv run ao ontology concepts -q 계약 --json`).
 
+명령 앞의 `--project SLUG`(`-p`, 또는 `AUTOONTOLOGY_PROJECT`)는 아래 모든 명령이 다룰 프로젝트를
+고릅니다(`uv run ao -p contracts runs`). 없으면 기본 프로젝트입니다. `doctor`와 `status`는 설치
+전체를 보며 프로젝트 목록을 함께 보여 줍니다.
+
 | 명령 | 하는 일 |
 |---|---|
 | `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | 단계별 설정: Postgres 확인(`docker compose up -d` 후 재시도), 채팅 제공자·임베딩·문서 감지와 선택, `.env` 작성(다른 줄은 유지, 기존 파일은 백업), `setup` 실행. `.env`에 이미 있는 제공자·임베딩 선택은 유지합니다(추천은 힌트로만 표시). `--yes`는 아무것도 묻지 않으며, Postgres가 꺼져 있거나 고른 CLI가 로그인되지 않았으면 해결 방법과 함께 종료 코드 2로 끝납니다. |
@@ -485,11 +511,12 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | 설정 페이지: 현재 선택과 각 값의 출처(키는 표시 안 함), 후보 테스트(채팅 pong과 임베딩 차원), `.env` 저장(`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; 키는 표준 입력으로만), 서비스 자체 재시작. |
 | `autoontology agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90]` / `rotate <id>` / `revoke <id>` | 외부 에이전트용 베어러 토큰([외부 에이전트 연결](#외부-에이전트-연결) 참고): `create`와 `rotate`는 토큰을 한 번만 출력합니다(저장되는 것은 SHA-256뿐이고, 교체하면 이전 토큰은 즉시 멈춤). `revoke`는 토큰의 호출 기록을 남깁니다. `--revision`은 토큰을 스냅샷 하나에 고정합니다. |
 | `autoontology agent usage [--days N]` | 도구별·토큰별(MCP와 REST)·날짜별 에이전트 호출. |
-| `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
+| `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/<프로젝트 슬러그>/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
 | `autoontology tools build-ui` | 웹 UI를 `autoontology/web/static/dist`로 다시 빌드합니다(pnpm 필요). |
 | `autoontology tools status` | 사용 중인 kordoc 엔진과 Node 바이너리를 보여 줍니다. |
 | `autoontology tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | 데이터베이스가 사라진 `autoontology_src_*` 업스트림 연결을 지웁니다. 데이터베이스는 있지만 이 체크아웃의 소스가 소유하지 않은 연결은 목록에만 나오고 `--include-unowned`일 때만 지웁니다(카탈로그를 공유하는 다른 체크아웃이 쓸 수 있음). 그때 `--drop-db`는 그 데이터베이스도 삭제합니다. |
+| `autoontology project list [--no-archived]` / `show [SLUG]` / `create <slug> [--name N] [--description D]` / `rename <slug> [--name N] [--slug S] [--description D]` / `archive <slug>` / `unarchive <slug>` | 프로젝트 목록(최신 리비전, 소스 수, 마지막 빌드, 상태), 하나 보기(기본: `--project`, 없으면 기본 프로젝트), 만들기, 이름·설명·슬러그 변경(새 슬러그는 `exports/<slug>/`도 옮김, 실행 중이면 409), 보관(읽기 전용, 목록에서 숨김)과 되돌리기. 변경은 서비스가 켜져 있으면 서비스를 거칩니다. |
 | `autoontology version` | 버전을 출력합니다. |
 
 표를 출력하는 명령은 모두 `--json`(웹 API 응답 본문)도 받습니다. `ontology` 아래 명령,
@@ -513,8 +540,19 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 서비스는 `http://127.0.0.1:7800`에서 대기합니다. JSON 경로는 모두 `/api` 아래에 있습니다. 모든
 오류는 `{"error": <code>, "detail": <message>}` 형태입니다.
 
+**프로젝트.** 아래의 프로젝트 범위 경로(소스, 실행, 검토, 온톨로지, 신선도, 내보내기, 샘플,
+플레이그라운드, 에이전트 토큰과 사용량)는 모두 `/api/projects/{project}/...`가 정식 경로이고(예:
+`GET /api/projects/contracts/ontology/revisions`), `/api/...`는 기본 프로젝트의 별칭으로 남아
+있습니다. 없는 프로젝트는 404 `unknown_project`, 보관된 프로젝트에 대한 쓰기는 409
+`project_archived`(플레이그라운드 질문은 가능), 다른 프로젝트의 실행·토큰·대화·검토 항목 id는
+404입니다. `/api/status`, `/api/providers/test`, `/api/settings`는 설치 전체 경로입니다.
+
 | 메서드와 경로 | 용도 |
 |---|---|
+| `GET /api/projects[?include_archived=false]` | `{projects: [{id, slug, name, description, created_at, archived_at, archived, default, latest_revision, latest_revision_at, sources, last_build, last_run, active, api_base}], default}`. |
+| `POST /api/projects` | `{slug, name?, description?}`로 프로젝트를 만듭니다: 201과 그 행, 400 `invalid_slug`, 409 `project_exists`. |
+| `GET /api/projects/{project}`, `PATCH /api/projects/{project}` | 프로젝트 하나. `{name?, description?, slug?}`로 변경(새 슬러그는 `exports/<slug>/`도 옮김; 409 `run_active`, `project_exists`, `exports_conflict`). |
+| `POST /api/projects/{project}/archive`, `…/unarchive` | 보관(읽기 전용, `include_archived=false`에서 숨김; 기본 프로젝트는 409 `default_project`)과 되돌리기. |
 | `GET /api/status` | 버전, 백엔드와 Postgres 상태, Ollama 모델, `kordoc_available`, `ocr_ready`, `vision_model`, `formats`(소스 종류별로 지원하는 모든 확장자와 그 엔진), 그리고 제공자 요약(키는 절대 포함하지 않음): `providers.chat`(`name`, `model`, `available`, `logged_in`, `detail`, `remedy`, `last_test`)과 `providers.embed`. |
 | `POST /api/providers/test` | 현재 채팅 제공자로 테스트 호출 한 번(`{"answer": "pong"}`). 다른 테스트가 진행 중이면 409. 결과는 `last_test`로 보관됩니다. |
 | `GET /api/settings` | `.env`(와 셸)가 지금 고른 제공자, 키마다의 출처(`shell`, `.env`, `default`), `locked_keys`(셸이 설정한 키), CLI 로그인, Ollama 모델, 저장된 벡터, `running`(이 프로세스가 쓰는 설정), `restart_required`, `service_pid`. API 키는 절대 돌려주지 않고 `openai.api_key_set`만 줍니다. |

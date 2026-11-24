@@ -39,7 +39,7 @@ from typing import Any
 
 import anyio
 import httpx
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 from starlette.background import BackgroundTask
@@ -62,6 +62,7 @@ from autoontology.playground.sparql import (
 )
 from autoontology.store.db import ProjectStore
 from autoontology.web.api import PREFIX, Api, ApiError, mask
+from autoontology.web.projects import ProjectContext, default_project, path_project
 
 logger = logging.getLogger("autoontology.web")
 
@@ -253,7 +254,10 @@ async def _guarded(
 
 
 def build_router(api: Api, app: FastAPI) -> APIRouter:
-    router = APIRouter(prefix=f"{PREFIX}/playground")
+    """The playground routes, canonical (``/api/projects/{project}/playground/...``) and
+    the default project's alias (``/api/playground/...``), over one shared state: the
+    SPARQL workers, the SQL slots and the :class:`Playground` (its per-project scopes,
+    indexes and conversations)."""
     sparql = SparqlRunner()
     app.state.sparql = sparql  # closed by the app's lifespan (web.app.create_app)
     sql_slots = SqlSlots()
@@ -271,13 +275,32 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
             app.state.playground = found
         return found
 
-    def view() -> ProjectStore:
-        """The project the routes serve (the default project; T3 adds project routes)."""
-        return api.project()
+    router = APIRouter()
+    router.include_router(
+        _routes(api, pg, sparql, sql_slots, path_project(api)),
+        prefix=f"{PREFIX}/projects/{{project}}/playground",
+    )
+    router.include_router(
+        _routes(api, pg, sparql, sql_slots, default_project(api)), prefix=f"{PREFIX}/playground"
+    )
+    return router
 
-    def scope() -> Scope:
+
+def _routes(
+    api: Api,
+    pg: Callable[[], Playground],
+    sparql: SparqlRunner,
+    sql_slots: SqlSlots,
+    ctx_dep: Any,
+) -> APIRouter:
+    """The playground routes of the project *ctx_dep* resolves: scopes, conversations,
+    SQL targets and SPARQL snapshots are that project's only."""
+    router = APIRouter()
+    Ctx = Depends(ctx_dep)  # noqa: N806
+
+    def scope(view: ProjectStore) -> Scope:
         try:
-            return pg().scope(view())
+            return pg().scope(view)
         except PlaygroundError as exc:
             raise _api_error(exc) from exc
 
@@ -290,12 +313,13 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
     # --- index / chat -------------------------------------------------------------------
 
     @router.get("/index")
-    def index_status() -> dict[str, Any]:
-        return pg().index_status(scope())
+    def index_status(ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        return pg().index_status(scope(ctx.store))
 
     @router.post("/index")
-    async def index_build() -> dict[str, Any]:
-        s = scope()
+    async def index_build(ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("playground.ask")
+        s = scope(ctx.store)
         with hold(s):
             try:
                 await anyio.to_thread.run_sync(pg().index, s)
@@ -304,8 +328,9 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         return pg().index_status(s)
 
     @router.post("/chat")
-    async def chat(body: ChatIn) -> EventSourceResponse:
-        s = scope()
+    async def chat(body: ChatIn, ctx: ProjectContext = Ctx) -> EventSourceResponse:
+        ctx.require("playground.ask")
+        s = scope(ctx.store)
         if body.conversation_id:
             conv = s.pg.get_conversation(body.conversation_id)
             if conv is None or conv["scope"] != s.key:
@@ -338,37 +363,38 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         )
 
     @router.get("/conversations")
-    def conversations() -> dict[str, Any]:
-        s = scope()
+    def conversations(ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        s = scope(ctx.store)
         return {"conversations": s.pg.list_conversations(s.key)}
 
     @router.get("/conversations/{conversation_id}")
-    def conversation(conversation_id: str) -> dict[str, Any]:
-        store = pg().pg_for(view())
+    def conversation(conversation_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        store = pg().pg_for(ctx.store)  # another project's conversation reads as unknown
         conv = store.get_conversation(conversation_id)
         if conv is None:
             raise ApiError(404, "unknown_conversation", f"no conversation {conversation_id!r}")
         return mask({**conv, "messages": store.messages(conversation_id)})
 
     @router.delete("/conversations/{conversation_id}")
-    def delete_conversation(conversation_id: str) -> dict[str, Any]:
-        if not pg().pg_for(view()).delete_conversation(conversation_id):
+    def delete_conversation(conversation_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        if not pg().pg_for(ctx.store).delete_conversation(conversation_id):
             raise ApiError(404, "unknown_conversation", f"no conversation {conversation_id!r}")
         return {"deleted": conversation_id}
 
     # --- NL -> SQL (upstream) -----------------------------------------------------------
 
     @router.post("/sql")
-    async def sql(body: SqlIn) -> EventSourceResponse:
+    async def sql(body: SqlIn, ctx: ProjectContext = Ctx) -> EventSourceResponse:
+        ctx.require("playground.ask")
         target_db = None
         if body.source:  # a structured source of this project only
-            src = api.source(body.source, project=view())
+            src = api.source(body.source, project=ctx.store)
             if src.kind not in ("files", "database"):
                 raise ApiError(400, "not_structured", f"source {src.name!r} is a {src.kind} source")
             target_db = src.catalog_database_id
         else:  # the snapshot's first built structured source (none: upstream picks)
             try:
-                structured = scope().structured
+                structured = scope(ctx.store).structured
             except ApiError:
                 structured = []
             target_db = next((x.catalog_database_id for x in structured), None)
@@ -545,10 +571,11 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
         return {"examples": EXAMPLES}
 
     @router.post("/sparql")
-    async def run_sparql(body: SparqlIn) -> dict[str, Any]:
+    async def run_sparql(body: SparqlIn, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("playground.ask")
         try:
             return await anyio.to_thread.run_sync(
-                lambda: sparql_answer(api, sparql, body.query, limit=body.limit, project=view())
+                lambda: sparql_answer(api, sparql, body.query, limit=body.limit, project=ctx.store)
             )
         except SparqlError as exc:
             raise _api_error(exc) from exc

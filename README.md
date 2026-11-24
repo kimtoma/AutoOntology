@@ -458,6 +458,30 @@ see [Reviewing and applying decisions](#reviewing-and-applying-decisions).
 
 ![Review page](docs/screenshots/review.png)
 
+### Projects
+
+One installation can hold several **projects**. Each has its own sources, builds,
+revisions (r1, r2, ... per project), review decisions, exports (`exports/<slug>/r<rev>/`),
+playground conversations and outside-agent tokens; a build of one project never sees
+another project's sources. Everything from before projects is the **default project**
+(its slug is the workspace name), so existing URLs, commands and agent tokens keep
+working unchanged.
+
+```bash
+uv run ao project create contracts --name "Contracts"   # a slug: a-z, 0-9, '-', 2-24 chars
+uv run ao -p contracts source add ./data/contracts --name contracts
+uv run ao -p contracts build && uv run ao -p contracts export
+uv run ao project list                                  # revision, sources, last build
+export AUTOONTOLOGY_PROJECT=contracts                   # the same as -p for every command
+```
+
+A project can be renamed (`project rename <slug> --name N --slug S`; a new slug also
+moves its exports folder and is refused while one of its runs is active) and archived
+(`project archive <slug>`: read-only and hidden from lists, its data stays; `unarchive`
+undoes it). There is no delete in this version. One build, export or apply runs at a time
+across the installation (one engine backend); queries and the playground run per project.
+The same external database cannot be registered in two projects.
+
 ## Reference
 
 ### Architecture
@@ -492,6 +516,10 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 
 `ao` is a short alias of `autoontology`: every command below also runs as `ao …` (e.g. `uv run ao ontology concepts -q contract --json`).
 
+`--project SLUG` (`-p`, or `AUTOONTOLOGY_PROJECT`) before the command selects the
+project every command below works on (`uv run ao -p contracts runs`); without it, the
+default project. `doctor` and `status` are installation-wide and list the projects.
+
 | Command | What it does |
 |---|---|
 | `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | Step-by-step setup: checks Postgres (retry after `docker compose up -d`), detects and picks the chat provider, embeddings and documents, writes `.env` (other lines kept, previous file backed up) and runs `setup`. A provider and embeddings choice already in `.env` is kept (the recommendation is shown as a hint). `--yes` asks nothing; exits 2 with the fix when Postgres is down or the chosen CLI is not logged in. |
@@ -523,11 +551,12 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | The Settings page: the selection and where each value comes from (never the key), a candidate test (chat pong and embedding dimension), saving to `.env` (`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; the key only from stdin), and the service's self-restart. |
 | `autoontology agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90]` / `rotate <id>` / `revoke <id>` | Bearer tokens for outside agents (see [Connect outside agents](#connect-outside-agents)): `create` and `rotate` print the token once (only its SHA-256 is stored; rotating stops the old token at once), `revoke` keeps the token's call history. `--revision` pins the token to one snapshot. |
 | `autoontology agent usage [--days N]` | Agent calls by tool, by token (MCP and REST) and by day. |
-| `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
+| `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/<project slug>/r<rev>/` (or `DIR/r<rev>/`). |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
 | `autoontology tools build-ui` | Rebuilds the web UI into `autoontology/web/static/dist` (needs pnpm). |
 | `autoontology tools status` | Shows the kordoc engine and the Node binary in use. |
 | `autoontology tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | Deletes upstream connections named `autoontology_src_*` whose database is gone. Connections whose database exists but that no source in this checkout owns are listed and deleted only with `--include-unowned` (another checkout sharing the catalog may use them); `--drop-db` then also drops their databases. |
+| `autoontology project list [--no-archived]` / `show [SLUG]` / `create <slug> [--name N] [--description D]` / `rename <slug> [--name N] [--slug S] [--description D]` / `archive <slug>` / `unarchive <slug>` | Lists the projects (latest revision, sources, last build, state), shows one (default: `--project`, else the default project), creates one, changes its name, description or slug (a new slug renames `exports/<slug>/`; 409 while one of its runs is active), archives it (read-only, hidden from lists) or makes it writable again. Changes go through the running service when it is up. |
 | `autoontology version` | Prints the version. |
 
 Every command that prints a table also takes `--json` (the web API's body). The commands
@@ -552,8 +581,21 @@ run succeeds and exits 0.
 The service listens on `http://127.0.0.1:7800`. All JSON routes live under `/api`. Every
 error has the shape `{"error": <code>, "detail": <message>}`.
 
+**Projects.** Every project-scoped route below (sources, runs, review, ontology,
+freshness, exports, samples, playground, agent tokens and usage) is canonical under
+`/api/projects/{project}/...` (e.g. `GET /api/projects/contracts/ontology/revisions`) and
+kept under `/api/...` as an alias of the default project. An unknown project is 404
+`unknown_project`; a write to an archived project is 409 `project_archived` (the
+playground's questions still work); an id of another project's run, token, conversation
+or review item is 404. `/api/status`, `/api/providers/test` and `/api/settings` are
+installation-wide.
+
 | Method and path | Purpose |
 |---|---|
+| `GET /api/projects[?include_archived=false]` | `{projects: [{id, slug, name, description, created_at, archived_at, archived, default, latest_revision, latest_revision_at, sources, last_build, last_run, active, api_base}], default}`. |
+| `POST /api/projects` | `{slug, name?, description?}` creates a project: 201 with its row; 400 `invalid_slug`, 409 `project_exists`. |
+| `GET /api/projects/{project}`, `PATCH /api/projects/{project}` | One project; `{name?, description?, slug?}` changes it (a new slug renames `exports/<slug>/` too; 409 `run_active`, `project_exists`, `exports_conflict`). |
+| `POST /api/projects/{project}/archive`, `…/unarchive` | Archives a project (read-only, hidden with `include_archived=false`; 409 `default_project` for the default one) or undoes it. |
 | `GET /api/status` | Version, backend and Postgres health, Ollama models, `kordoc_available`, `ocr_ready`, `vision_model`, `formats` (every supported extension by source kind, with its engine) and a provider summary (never the key): `providers.chat` (`name`, `model`, `available`, `logged_in`, `detail`, `remedy`, `last_test`) and `providers.embed`. |
 | `POST /api/providers/test` | One test call (`{"answer": "pong"}`) through the active chat provider; 409 while another test runs. The result is kept as `last_test`. |
 | `GET /api/settings` | The provider choice `.env` (and the shell) hold now, with each key's origin (`shell`, `.env`, `default`), `locked_keys` (shell-set), the CLI logins, Ollama's models, the stored vectors, `running` (what this process uses), `restart_required` and `service_pid`. Never the API key: `openai.api_key_set`. |

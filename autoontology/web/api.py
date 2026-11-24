@@ -20,13 +20,14 @@ import threading
 import time
 import unicodedata
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import anyio
 import httpx
-from fastapi import APIRouter, FastAPI, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -38,6 +39,7 @@ from autoontology import __version__
 from autoontology.config import LOCAL_HOSTS, Settings, host_name
 from autoontology.engine.export_job import project_exports_dir
 from autoontology.store.db import ACTIVE_RUN_STATUSES, ProjectStore, Run, Source, Store
+from autoontology.web.projects import ProjectContext, default_project, path_project
 from autoontology.web.runs import (
     RUN_ID_RE,
     TOP_STEPS,
@@ -222,6 +224,17 @@ def upload_limit_bytes() -> int:
     return int(mb * 1024 * 1024)
 
 
+@dataclass
+class _Freshness:
+    """One project's freshness cache: (monotonic time, rows), the computation in progress
+    (concurrent callers wait for it) and a counter bumped by every finished computation
+    (a waiter shares only a newer result)."""
+
+    cached: tuple[float, list[dict[str, Any]]] | None = None
+    flight: threading.Event | None = None
+    gen: int = 0
+
+
 def _iso(ts: float) -> str:
     from datetime import datetime, timezone
 
@@ -247,13 +260,9 @@ class Api:
         self.providers: Any = None
         #: One provider test (``POST /api/providers/test``) at a time.
         self._provider_test_lock = threading.Lock()
-        #: ``GET /api/sources/freshness``: (monotonic time, rows), one computation at a time
-        self._freshness: tuple[float, list[dict[str, Any]]] | None = None
+        #: ``GET /api/sources/freshness`` per project id, one computation at a time each
+        self._fresh: dict[str, _Freshness] = {}
         self._freshness_lock = threading.Lock()
-        #: the computation in progress (concurrent callers wait for it), or None
-        self._freshness_flight: threading.Event | None = None
-        #: bumped by every finished computation (a waiter shares only a newer result)
-        self._freshness_gen = 0
 
     @property
     def store(self) -> Store:
@@ -274,6 +283,28 @@ class Api:
     def uploads_dir(self) -> Path:
         return Path(self.settings.home) / "uploads"
 
+    def uploads_root(self, project: ProjectStore | None = None) -> Path:
+        """Where the project's uploaded sources live: ``uploads/<name>`` for the default
+        project (as before projects), ``uploads/.projects/<project id>/<name>`` for the
+        others (an id never changes; no source name starts with ".")."""
+        view = self._view(project)
+        return self.uploads_dir if view.is_default else self.uploads_dir / ".projects" / view.id
+
+    def _fresh_state(self, project: ProjectStore | None = None) -> _Freshness:
+        """The project's freshness cache entry (caller holds ``_freshness_lock``)."""
+        return self._fresh.setdefault(self._view(project).id, _Freshness())
+
+    @property
+    def _freshness(self) -> tuple[float, list[dict[str, Any]]] | None:
+        """The default project's cached freshness (tests)."""
+        with self._freshness_lock:
+            return self._fresh_state().cached
+
+    @_freshness.setter
+    def _freshness(self, value: tuple[float, list[dict[str, Any]]] | None) -> None:
+        with self._freshness_lock:
+            self._fresh_state().cached = value
+
     def source(self, name: str, *, project: ProjectStore | None = None) -> Source:
         """The source *name* of *project* (None = the default project); 404 otherwise."""
         source = self._view(project).get_source(_any_name(name))
@@ -284,9 +315,16 @@ class Api:
     # --- serialisation ---------------------------------------------------------------
 
     def run_dict(
-        self, run: Run, *, names: dict[str, str] | None = None, steps: bool = True
+        self,
+        run: Run,
+        *,
+        names: dict[str, str] | None = None,
+        steps: bool = True,
+        project: ProjectStore | None = None,
     ) -> dict[str, Any]:
-        names = names if names is not None else {s.id: s.name for s in self.store.list_sources()}
+        """*run* (of *project*, None = the default project) for the API."""
+        view = self._view(project)
+        names = names if names is not None else {s.id: s.name for s in view.list_sources()}
         out: dict[str, Any] = {
             "id": run.id,
             "kind": run.kind,
@@ -299,17 +337,20 @@ class Api:
             "managed": self.runs.is_managed(run.id),
         }
         if steps:
-            out.update(self.step_state(run))
+            out.update(self.step_state(run, project=view))
         return out
 
-    def step_state(self, run: Run) -> dict[str, Any]:
+    def step_state(self, run: Run, *, project: ProjectStore | None = None) -> dict[str, Any]:
+        """The steps of *run*, a run of *project* (callers looked it up through the
+        project's view, so its steps are the project's)."""
         from autoontology.engine.build import is_top_step, registration_order, step_names
 
-        rows = self.store.get_steps(run.id)
+        view = self._view(project)
+        rows = view.get_steps(run.id)
         by_name = {s.name: s for s in rows}
         top = list(TOP_STEPS.get(run.kind, ()))
         if run.kind == "build" and run.status in ACTIVE_RUN_STATUSES:
-            top = step_names(registration_order(self.store))  # the plan, before it runs
+            top = step_names(registration_order(view))  # the plan, before it runs
         names = list(dict.fromkeys([*(s.name for s in rows if is_top_step(s.name)), *top]))
         if top:  # plan order first, then rows the plan does not know
             names = [n for n in top if n in names] + [n for n in names if n not in top]
@@ -333,14 +374,18 @@ class Api:
                     bucket[s.status] = bucket.get(s.status, 0) + 1
         return {"steps": steps, "progress": progress}
 
-    def source_dict(self, source: Source) -> dict[str, Any]:
+    def source_dict(self, source: Source, *, project: ProjectStore | None = None) -> dict[str, Any]:
+        """*source*, one of *project*'s sources (None = the default project)."""
         from autoontology.store.documents import DocumentStore
         from autoontology.structured import pipeline
 
-        last = self.store.latest_run(source.id) or next(
-            (r for r in self.store.list_runs(None, limit=50) if r.kind == "build"), None
+        view = self._view(project)
+        if view.get_source_by_id(source.id) is None:  # never describe another project's
+            raise ApiError(404, "unknown_source", f"unknown source {source.name!r}")
+        last = view.latest_run(source.id) or next(
+            (r for r in view.list_runs(None, limit=50) if r.kind == "build"), None
         )
-        active = self.runs.active_source(source.name)
+        active = self.runs.active_source(source.name, project=view.id)
         out: dict[str, Any] = {
             "name": source.name,
             "kind": source.kind,
@@ -349,7 +394,7 @@ class Api:
                 pipeline.catalog_database_name(source) if source.kind in STRUCTURED_KINDS else None
             ),
             "built": bool(source.catalog_database_id),
-            "uploaded": self._is_upload(source),
+            "uploaded": self._is_upload(source, view),
             "created_at": source.created_at,
             "last_run": (
                 {
@@ -364,19 +409,19 @@ class Api:
             "active_run": ({"id": active.run_id, "kind": active.kind} if active else None),
         }
         if source.kind == "documents":
-            docs = DocumentStore(self.store)
+            docs = DocumentStore(view)
             out["documents"] = len(docs.list_documents(source.id))
             out["concepts"] = len(docs.list_concepts(source.id))
         return out
 
-    def _is_upload(self, source: Source) -> bool:
+    def _is_upload(self, source: Source, project: ProjectStore | None = None) -> bool:
         if source.kind == "database":
             return False
         try:
             path = Path(json.loads(source.locator)["path"]).resolve()
         except (ValueError, KeyError, TypeError):
             return False
-        return path == (self.uploads_dir / source.name).resolve()
+        return path == (self.uploads_root(project) / source.name).resolve()
 
     # --- ontology snapshot ---------------------------------------------------------------
 
@@ -432,72 +477,82 @@ class Api:
                 self._concepts[key] = index
         return head, model, index
 
-    def freshness(self, refresh: bool = False) -> tuple[list[dict[str, Any]], float | None]:
-        """``(rows, age in seconds)`` of the per-source freshness, computed at most every
-        :data:`FRESHNESS_CACHE_S` (``refresh``: now). One computation at a time (file hashes,
-        database connections), outside the lock: only the caller that atomically takes the
-        producer role computes; a caller arriving meanwhile waits for it (at most
+    def freshness(
+        self, refresh: bool = False, *, project: ProjectStore | None = None
+    ) -> tuple[list[dict[str, Any]], float | None]:
+        """``(rows, age in seconds)`` of the per-source freshness of *project* (None = the
+        default project), computed at most every :data:`FRESHNESS_CACHE_S` (``refresh``:
+        now). One computation per project at a time (file hashes, database connections),
+        outside the lock: only the caller that atomically takes the producer role
+        computes; a caller arriving meanwhile waits for it (at most
         :data:`FRESHNESS_WAIT_S`) and shares its result. A wait that runs out while the
         producer is still active returns the cached rows however old, or ``([], None)``
         (still computing) -- it never starts a second computation."""
         from autoontology.web.freshness import freshness
 
+        view = self._view(project)
         deadline = time.monotonic() + FRESHNESS_WAIT_S
         waited_gen: int | None = None
         while True:
             with self._freshness_lock:
-                cached = self._freshness
+                state = self._fresh_state(view)
+                cached = state.cached
                 if cached and not refresh and time.monotonic() - cached[0] < FRESHNESS_CACHE_S:
                     return cached[1], time.monotonic() - cached[0]
-                if waited_gen is not None and self._freshness_gen != waited_gen and cached:
+                if waited_gen is not None and state.gen != waited_gen and cached:
                     # the producer this caller waited for finished: share its result
                     return cached[1], time.monotonic() - cached[0]
-                flight = self._freshness_flight
+                flight = state.flight
                 if flight is None:
-                    flight = self._freshness_flight = threading.Event()
+                    flight = state.flight = threading.Event()
                     break  # the producer role, taken under the lock
                 if waited_gen is None:
-                    waited_gen = self._freshness_gen
+                    waited_gen = state.gen
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not flight.wait(remaining):
-                done = self.cached_freshness()
+                done = self.cached_freshness(project=view)
                 return done if done is not None else ([], None)
         try:
-            rows = freshness(self.store, self.settings)
+            rows = freshness(view, self.settings)
             with self._freshness_lock:
-                self._freshness = (time.monotonic(), rows)
-                self._freshness_gen += 1
+                state.cached = (time.monotonic(), rows)
+                state.gen += 1
             return rows, 0.0
         finally:
             with self._freshness_lock:
-                self._freshness_flight = None
+                state.flight = None
             flight.set()
 
-    def cached_freshness(self) -> tuple[list[dict[str, Any]], float] | None:
-        """The last computed freshness and its age, never computing it (None: never)."""
+    def cached_freshness(
+        self, *, project: ProjectStore | None = None
+    ) -> tuple[list[dict[str, Any]], float] | None:
+        """The project's last computed freshness and its age, never computing it (None:
+        never)."""
         with self._freshness_lock:
-            cached = self._freshness
+            cached = self._fresh_state(project).cached
         return (cached[1], time.monotonic() - cached[0]) if cached else None
 
-    def inbox(self, *, sources: bool = False) -> Any:
-        """The review :class:`~autoontology.web.review.Inbox` over the latest snapshot.
-        Stale sources come from the freshness cache; *sources*: computed when it expired
-        (the badge and the other categories never pay for file hashing)."""
+    def inbox(self, *, sources: bool = False, project: ProjectStore | None = None) -> Any:
+        """The review :class:`~autoontology.web.review.Inbox` over the project's latest
+        snapshot (decisions, items and stale sources are the project's). Stale sources
+        come from the freshness cache; *sources*: computed when it expired (the badge and
+        the other categories never pay for file hashing)."""
         from autoontology.web.review import Inbox
 
+        view = self._view(project)
         model = previous = None
-        head = self.store.latest_snapshot(with_model=False)
+        head = view.latest_snapshot(with_model=False)
         if head is not None:
-            _, model = self.snapshot(head.revision)
-            older = self.store.previous_revision(head.revision)
+            _, model = self.snapshot(head.revision, project=view)
+            older = view.previous_revision(head.revision)
             if older is not None:
-                _, previous = self.snapshot(older)
+                _, previous = self.snapshot(older, project=view)
         if sources:
-            rows = self.freshness()[0]
+            rows = self.freshness(project=view)[0]
         else:
-            cached = self.cached_freshness()
+            cached = self.cached_freshness(project=view)
             rows = cached[0] if cached else []
-        return Inbox(self.store, model, previous, rows)
+        return Inbox(view, model, previous, rows)
 
     def decided_by(self, request: Request) -> str:
         """The tailnet login of a request that came through a configured tailnet hostname
@@ -704,16 +759,55 @@ def _short_detail(detail: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_router(api: Api) -> APIRouter:
-    router = APIRouter(prefix=PREFIX)
+    """Every ``/api`` route: the project-scoped ones twice (canonical
+    ``/api/projects/{project}/...`` and the default project's ``/api/...`` alias, see
+    :mod:`autoontology.web.projects`), the project management routes and the
+    installation-wide ones (status, provider test)."""
+    from autoontology.web import projects
+
+    router = APIRouter()
+    # the management routes first: ``/api/projects/{project}`` itself is theirs
+    router.include_router(projects.build_router(api, PREFIX))
+    router.include_router(
+        project_routes(api, path_project(api)), prefix=f"{PREFIX}/projects/{{project}}"
+    )
+    router.include_router(project_routes(api, default_project(api)), prefix=PREFIX)
+    router.include_router(installation_routes(api), prefix=PREFIX)
+    return router
+
+
+def installation_routes(api: Api) -> APIRouter:
+    """Routes without a project: the service status and the provider test."""
+    router = APIRouter()
+
+    @router.get("/status")
+    def status() -> dict[str, Any]:
+        return api.status()
+
+    @router.post("/providers/test")
+    async def test_provider(request: Request) -> dict[str, Any]:
+        return await api.test_provider(request.app)
+
+    return router
+
+
+def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
+    """The project-scoped routes (no prefix); *ctx_dep* resolves the
+    :class:`~autoontology.web.projects.ProjectContext` (from the path, or the default
+    project for the aliases). Every handler works on ``ctx.store`` only."""
+    router = APIRouter()
+    Ctx = Depends(ctx_dep)  # noqa: N806 - a dependency marker shared by the handlers
 
     # sources ------------------------------------------------------------------------
 
     @router.get("/sources")
-    def list_sources() -> dict[str, Any]:
-        return {"sources": [api.source_dict(s) for s in api.store.list_sources()]}
+    def list_sources(ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        view = ctx.store
+        return {"sources": [api.source_dict(s, project=view) for s in view.list_sources()]}
 
     @router.post("/sources", status_code=201)
-    async def add_source(request: Request) -> dict[str, Any]:
+    async def add_source(request: Request, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("sources.write")
         ctype = request.headers.get("content-type", "")
         if ctype.startswith("multipart/form-data"):
             limit = upload_limit_bytes()
@@ -729,27 +823,31 @@ def build_router(api: Api) -> APIRouter:
                 )
             form = await request.form()
             try:
-                return await _add_upload(api, form)
+                return await _add_upload(api, form, ctx.store)
             finally:
                 await form.close()
         try:
             body = SourceIn.model_validate(await request.json())
         except (ValidationError, ValueError) as exc:
             raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
-        return await anyio.to_thread.run_sync(_add_locator, api, body)
+        return await anyio.to_thread.run_sync(_add_locator, api, body, ctx.store)
 
     @router.delete("/sources/{name}")
-    def delete_source(name: str, drop_db: bool = False, force: bool = False) -> dict[str, Any]:
+    def delete_source(
+        name: str, drop_db: bool = False, force: bool = False, ctx: ProjectContext = Ctx
+    ) -> dict[str, Any]:
         from autoontology.structured.remove import RemoveError, remove_source
 
-        source = api.source(name)
-        if api.runs.active_source(source.name):
+        ctx.require("sources.write")
+        view = ctx.store
+        source = api.source(name, project=view)
+        if api.runs.active_source(source.name, project=view.id):
             raise ApiError(409, "run_active", f"source {name!r} has an active run")
         messages: list[str] = []
         try:
             remove_source(
                 api.settings,
-                api.store,
+                view,
                 source,
                 drop_db=drop_db,
                 force=force,
@@ -757,8 +855,8 @@ def build_router(api: Api) -> APIRouter:
             )
         except RemoveError as exc:
             raise ApiError(409, "remove_failed", mask(str(exc))) from exc
-        upload = api.uploads_dir / source.name
-        if api._is_upload(source) and upload.is_dir():
+        upload = api.uploads_root(view) / source.name
+        if api._is_upload(source, view) and upload.is_dir():
             shutil.rmtree(upload, ignore_errors=True)
             messages.append("deleted the uploaded files")
         return {"removed": source.name, "messages": messages}
@@ -766,14 +864,15 @@ def build_router(api: Api) -> APIRouter:
     # runs ---------------------------------------------------------------------------
 
     @router.post("/runs", status_code=202)
-    def start_run(body: dict[str, Any]) -> dict[str, Any]:
+    def start_run(body: dict[str, Any], ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("runs.start")
         try:
             req = RunIn.model_validate(body)
         except ValidationError as exc:
             raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
-        call = _job_call(api, req)
+        call = _job_call(api, req, ctx.store)
         try:
-            run_id = api.runs.start(req.kind, WORKSPACE, call)
+            run_id = api.runs.start(req.kind, WORKSPACE, call, project=ctx.id)
         except RunStartError as exc:
             code = {409: "run_active", 503: "backend_unavailable"}.get(
                 exc.status, "run_not_started"
@@ -782,26 +881,30 @@ def build_router(api: Api) -> APIRouter:
         return {"run_id": run_id}
 
     @router.get("/runs")
-    def list_runs(limit: int = Query(30, ge=1, le=200)) -> dict[str, Any]:
-        names = {s.id: s.name for s in api.store.list_sources()}
-        runs = api.store.list_runs(None, limit=limit)
-        return {"runs": [api.run_dict(r, names=names) for r in runs]}
+    def list_runs(
+        limit: int = Query(30, ge=1, le=200), ctx: ProjectContext = Ctx
+    ) -> dict[str, Any]:
+        view = ctx.store
+        names = {s.id: s.name for s in view.list_sources()}
+        runs = view.list_runs(None, limit=limit)  # this project's runs only
+        return {"runs": [api.run_dict(r, names=names, project=view) for r in runs]}
 
-    def _run(run_id: str) -> Run:
+    def _run(run_id: str, view: ProjectStore) -> Run:
         if not RUN_ID_RE.fullmatch(run_id):
             raise ApiError(400, "invalid_run_id", f"invalid run id {run_id!r}")
-        run = api.store.get_run(run_id)
+        run = view.get_run(run_id)  # another project's run reads as unknown
         if run is None:
             raise ApiError(404, "unknown_run", f"unknown run {run_id!r}")
         return run
 
     @router.get("/runs/{run_id}")
-    def get_run(run_id: str) -> dict[str, Any]:
-        return api.run_dict(_run(run_id))
+    def get_run(run_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        return api.run_dict(_run(run_id, ctx.store), project=ctx.store)
 
     @router.post("/runs/{run_id}/cancel", status_code=202)
-    def cancel_run(run_id: str) -> dict[str, Any]:
-        run = _run(run_id)
+    def cancel_run(run_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("runs.start")
+        run = _run(run_id, ctx.store)
         if run.status not in ACTIVE_RUN_STATUSES or not api.runs.cancel(run_id):
             raise ApiError(
                 409,
@@ -811,9 +914,11 @@ def build_router(api: Api) -> APIRouter:
         return {"run_id": run_id, "cancel_requested": True}
 
     @router.get("/runs/{run_id}/events")
-    async def run_events(run_id: str, request: Request) -> EventSourceResponse:
-        _run(run_id)
-        return EventSourceResponse(_events(api, run_id, request), ping=15)
+    async def run_events(
+        run_id: str, request: Request, ctx: ProjectContext = Ctx
+    ) -> EventSourceResponse:
+        _run(run_id, ctx.store)
+        return EventSourceResponse(_events(api, run_id, request, ctx.store), ping=15)
 
     # review inbox, revisions, freshness (living ontology operations) --------------------
 
@@ -832,6 +937,7 @@ def build_router(api: Api) -> APIRouter:
         page: int = Query(1, ge=1),
         size: int = Query(20, ge=1, le=100),
         sources: bool = False,
+        ctx: ProjectContext = Ctx,
     ) -> dict[str, Any]:
         from autoontology.web.review import CATEGORIES, STATUSES
 
@@ -841,16 +947,18 @@ def build_router(api: Api) -> APIRouter:
             )
         if status not in STATUSES:
             raise ApiError(400, "invalid_status", f"status must be one of {', '.join(STATUSES)}")
-        inbox = api.inbox(sources=sources or category == "stale_sources")
-        head = api.store.latest_snapshot(with_model=False)
+        inbox = api.inbox(sources=sources or category == "stale_sources", project=ctx.store)
+        head = ctx.store.latest_snapshot(with_model=False)
         return {
             "revision": head.revision if head else None,
             **inbox.listing(category=category, status=status, page=page, size=size),
         }
 
     @router.get("/review/pending-count")
-    def review_pending_count() -> dict[str, Any]:
-        listing = api.inbox().listing(category=None, status="pending", page=1, size=1)
+    def review_pending_count(ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        listing = api.inbox(project=ctx.store).listing(
+            category=None, status="pending", page=1, size=1
+        )
         return {
             "pending": listing["counts"]["total"],
             "counts": listing["counts"],
@@ -858,12 +966,15 @@ def build_router(api: Api) -> APIRouter:
         }
 
     @router.post("/review/{item_id:path}/decision")
-    def review_decide(item_id: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
+    def review_decide(
+        item_id: str, body: dict[str, Any], ctx: ProjectContext = Ctx
+    ) -> dict[str, Any]:
+        ctx.require("review.decide")
         try:
             req = DecisionIn.model_validate(body)
         except ValidationError as exc:
             raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
-        inbox = api.inbox()
+        inbox = api.inbox(project=ctx.store)  # items and decisions of this project only
         decision = _review(
             lambda: inbox.decide(
                 item_id,
@@ -871,38 +982,43 @@ def build_router(api: Api) -> APIRouter:
                 relation=req.relation,
                 term_id=req.term_id,
                 note=req.note.strip(),
-                decided_by=api.decided_by(request),
+                decided_by=ctx.actor,
             )
         )
         item = {**inbox.items[item_id], "decision": decision.to_dict()}
         return {"item": item, "decision": decision.to_dict()}
 
     @router.delete("/review/{item_id:path}/decision")
-    def review_undo(item_id: str) -> dict[str, Any]:
-        inbox = api.inbox()
+    def review_undo(item_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("review.decide")
+        inbox = api.inbox(project=ctx.store)
         if not _review(lambda: inbox.undo(item_id)):
             raise ApiError(404, "no_decision", f"no decision on {item_id[:80]!r}")
         return {"removed": item_id}
 
     @router.get("/ontology/revisions")
-    def ontology_revisions(limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
+    def ontology_revisions(
+        limit: int = Query(50, ge=1, le=500), ctx: ProjectContext = Ctx
+    ) -> dict[str, Any]:
         from autoontology.web.revisions import revision_list
 
-        return {"revisions": revision_list(api.store, limit)}
+        return {"revisions": revision_list(ctx.store, limit)}
 
     @router.get("/ontology/diff")
     def ontology_diff(
         from_: int | None = Query(None, alias="from", ge=1),
         to: int | None = Query(None, ge=1),
+        ctx: ProjectContext = Ctx,
     ) -> dict[str, Any]:
         from autoontology.web.revisions import diff
 
-        new_head, new = api.snapshot(to)
+        view = ctx.store
+        new_head, new = api.snapshot(to, project=view)
         if from_ is None:
-            from_ = api.store.previous_revision(new_head.revision)
+            from_ = view.previous_revision(new_head.revision)
         old_head = old = None
         if from_ is not None:
-            old_head, old = api.snapshot(from_)
+            old_head, old = api.snapshot(from_, project=view)
         return {
             "from": from_,
             "to": new_head.revision,
@@ -915,8 +1031,8 @@ def build_router(api: Api) -> APIRouter:
         }
 
     @router.get("/sources/freshness")
-    def sources_freshness(refresh: bool = False) -> dict[str, Any]:
-        rows, age = api.freshness(refresh)
+    def sources_freshness(refresh: bool = False, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        rows, age = api.freshness(refresh, project=ctx.store)
         return {
             "sources": rows,
             "stale": sum(bool(r.get("stale")) for r in rows),
@@ -928,18 +1044,23 @@ def build_router(api: Api) -> APIRouter:
     # ontology (the latest snapshot) -----------------------------------------------------
 
     @router.get("/ontology")
-    def ontology(revision: int | None = Query(None, ge=1)) -> dict[str, Any]:
-        return ontology_summary(api, revision)
+    def ontology(
+        revision: int | None = Query(None, ge=1), ctx: ProjectContext = Ctx
+    ) -> dict[str, Any]:
+        return ontology_summary(api, revision, project=ctx.store)
 
     @router.get("/ontology/graph")
     def ontology_graph(
-        layer: str = "all", evidence: bool = False, revision: int | None = Query(None, ge=1)
+        layer: str = "all",
+        evidence: bool = False,
+        revision: int | None = Query(None, ge=1),
+        ctx: ProjectContext = Ctx,
     ) -> dict[str, Any]:
         from autoontology.web.graph import LAYERS, max_nodes_from_env, to_view
 
         if layer not in LAYERS:
             raise ApiError(400, "invalid_layer", f"layer must be one of {', '.join(LAYERS)}")
-        head, model = api.snapshot(revision)
+        head, model = api.snapshot(revision, project=ctx.store)
         cap = max_nodes_from_env()
         return {
             **to_view(model, layer, evidence=evidence, max_nodes=cap),
@@ -957,6 +1078,7 @@ def build_router(api: Api) -> APIRouter:
         page: int = Query(1, ge=1),
         size: int = Query(50, ge=1, le=200),
         revision: int | None = Query(None, ge=1),
+        ctx: ProjectContext = Ctx,
     ) -> dict[str, Any]:
         return concept_listing(
             api,
@@ -967,33 +1089,36 @@ def build_router(api: Api) -> APIRouter:
             page=page,
             size=size,
             revision=revision,
+            project=ctx.store,
         )
 
     @router.get("/ontology/concepts/{concept_id}")
     def ontology_concept(
-        concept_id: str, revision: int | None = Query(None, ge=1)
+        concept_id: str, revision: int | None = Query(None, ge=1), ctx: ProjectContext = Ctx
     ) -> dict[str, Any]:
-        return concept_body(api, concept_id, revision)
+        return concept_body(api, concept_id, revision, project=ctx.store)
 
     # exports ----------------------------------------------------------------------------
 
     @router.get("/exports")
-    def list_exports() -> dict[str, Any]:
-        return {"exports": export_listing(api.settings, api.project())}
+    def list_exports(ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        return {"exports": export_listing(api.settings, ctx.store)}
 
     # no collision with the route below: ``{rev}`` never holds a ``/``
     @router.get("/exports/{rev}.zip")
-    def download_export_zip(rev: str) -> Response:
+    def download_export_zip(rev: str, ctx: ProjectContext = Ctx) -> Response:
         """The whole revision folder as one zip (:func:`export_zip_response`). Sync, so
         the zipping runs in the threadpool."""
-        return export_zip_response(api.settings, rev, api.project())
+        return export_zip_response(api.settings, rev, ctx.store)
 
     @router.get("/exports/{rev}/{file_path:path}")
-    def download_export(rev: str, file_path: str, inline: bool = False) -> Response:
+    def download_export(
+        rev: str, file_path: str, inline: bool = False, ctx: ProjectContext = Ctx
+    ) -> Response:
         rev = _export_dir(rev)
         if not _export_path_ok(file_path):
             raise ApiError(400, "invalid_path", "invalid export path")
-        root = project_exports_dir(api.settings, api.project()).resolve()
+        root = project_exports_dir(api.settings, ctx.store).resolve()
         candidate = (root / rev / unicodedata.normalize("NFC", file_path)).resolve()
         if candidate.is_file() and candidate.is_relative_to(root / rev):
             if inline:
@@ -1006,38 +1131,29 @@ def build_router(api: Api) -> APIRouter:
             return FileResponse(candidate, filename=candidate.name)
         raise ApiError(404, "unknown_export", f"no export file {rev}/{file_path}")
 
-    # status -----------------------------------------------------------------------------
-
-    @router.get("/status")
-    def status() -> dict[str, Any]:
-        return api.status()
-
-    @router.post("/providers/test")
-    async def test_provider(request: Request) -> dict[str, Any]:
-        return await api.test_provider(request.app)
-
     # sample sets ----------------------------------------------------------------------
 
     @router.get("/samples")
-    def list_samples() -> list[dict[str, Any]]:
+    def list_samples(ctx: ProjectContext = Ctx) -> list[dict[str, Any]]:
         from autoontology import onboarding
 
-        return onboarding.list_sample_sets(api.settings, api.store)
+        return onboarding.list_sample_sets(api.settings, ctx.store)
 
     @router.post("/samples/load")
-    async def load_samples(request: Request) -> dict[str, Any]:
+    async def load_samples(request: Request, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("sources.write")
         try:
             body = await request.json()
         except ValueError as exc:
             raise ApiError(400, "invalid_body", "the body must be a JSON object") from exc
         if not isinstance(body, dict):
             raise ApiError(400, "invalid_body", "the body must be a JSON object")
-        return await anyio.to_thread.run_sync(_load_samples, api, body)
+        return await anyio.to_thread.run_sync(_load_samples, api, body, ctx.store)
 
     # outside-agent tokens and usage (the agent surface itself: agent_api.install) ---------
     from autoontology.web.agent_api import add_management_routes
 
-    add_management_routes(router, api)
+    add_management_routes(router, api, ctx_dep)
     return router
 
 
@@ -1210,8 +1326,9 @@ def export_zip_response(settings: Settings, rev: str, project: Any) -> Response:
     )
 
 
-def _load_samples(api: Api, body: dict[str, Any]) -> dict[str, Any]:
-    """Register a sample set's sources exactly like ``autoontology demo``."""
+def _load_samples(api: Api, body: dict[str, Any], view: ProjectStore) -> dict[str, Any]:
+    """Register a sample set's sources in project *view* exactly like ``autoontology
+    demo``."""
     from autoontology import onboarding
     from autoontology.engine.jobs import JobError
     from autoontology.structured.loaders import LoadError
@@ -1233,13 +1350,13 @@ def _load_samples(api: Api, body: dict[str, Any]) -> dict[str, Any]:
     except RunStartError as exc:
         raise ApiError(409, "run_active", busy_text) from exc
     try:
-        if api.store.active_runs():  # a CLI run
+        if api.store.active_runs():  # a CLI run (of any project: the claim is global)
             raise ApiError(409, "run_active", busy_text)
         messages: list[str] = []
         try:
             registered = onboarding.register_sample_set(
                 api.settings,
-                api.store,
+                view,
                 name,
                 notify=lambda m: messages.append(mask(m)),
                 replace=replace,
@@ -1259,7 +1376,9 @@ def _load_samples(api: Api, body: dict[str, Any]) -> dict[str, Any]:
         api.runs.release(WORKSPACE)
     return {
         "set": name,
-        "sources": [{**api.source_dict(src), "action": action} for src, action in registered],
+        "sources": [
+            {**api.source_dict(src, project=view), "action": action} for src, action in registered
+        ],
         "messages": messages,
     }
 
@@ -1272,25 +1391,25 @@ def _validation_text(exc: Exception) -> str:
     return str(exc)[:600]
 
 
-def _add_locator(api: Api, body: SourceIn) -> dict[str, Any]:
+def _add_locator(api: Api, body: SourceIn, view: ProjectStore) -> dict[str, Any]:
     validate_name(body.name, body.kind)
     try:  # a sample load holds the workspace: it may remove a source of this name
-        api.runs.claim(body.name, "register")
+        api.runs.claim(body.name, "register", project=view.id)
     except RunStartError as exc:
         raise ApiError(409, "busy", f"{exc}; try again when it has finished") from exc
     try:
-        source = _add_locator_claimed(api, body)
+        source = _add_locator_claimed(api, body, view)
     finally:
-        api.runs.release(body.name)
-    return api.source_dict(source)
+        api.runs.release(body.name, project=view.id)
+    return api.source_dict(source, project=view)
 
 
-def _add_locator_claimed(api: Api, body: SourceIn) -> Any:
+def _add_locator_claimed(api: Api, body: SourceIn, view: ProjectStore) -> Any:
     from autoontology.engine.extract import ensure_documents_source
     from autoontology.structured import pipeline
     from autoontology.structured.loaders import LoadError
 
-    if api.store.get_source(body.name):
+    if view.get_source(body.name):
         raise ApiError(409, "source_exists", f"source {body.name!r} already exists")
     try:
         if body.kind == "documents":
@@ -1299,19 +1418,19 @@ def _add_locator_claimed(api: Api, body: SourceIn) -> Any:
                 raise ApiError(400, "invalid_locator", "use an absolute path")
             if not path.exists():
                 raise ApiError(400, "invalid_locator", f"no such file or directory: {path}")
-            source = ensure_documents_source(api.store, body.name, path, body.recursive)
+            source = ensure_documents_source(view, body.name, path, body.recursive)
         else:
             if body.kind == "files" and not Path(body.locator).expanduser().is_absolute():
                 raise ApiError(400, "invalid_locator", "use an absolute path")
             source = pipeline.add_source(
-                api.store, body.locator, name=body.name, kind=body.kind, recursive=body.recursive
+                view, body.locator, name=body.name, kind=body.kind, recursive=body.recursive
             )
     except (LoadError, ValueError) as exc:
         raise ApiError(400, "invalid_source", mask(str(exc))) from exc
     return source
 
 
-async def _add_upload(api: Api, form: Any) -> dict[str, Any]:
+async def _add_upload(api: Api, form: Any, view: ProjectStore) -> dict[str, Any]:
     name = str(form.get("name") or "")
     kind = str(form.get("kind") or "")
     if kind not in ("files", "documents"):
@@ -1320,30 +1439,33 @@ async def _add_upload(api: Api, form: Any) -> dict[str, Any]:
     from autoontology.store.db import SourceBusy
 
     try:
-        api.runs.claim(name, "upload")  # concurrent uploads of the same name: 409
+        # concurrent uploads of the same name in the project: 409
+        api.runs.claim(name, "upload", project=view.id)
     except RunStartError as exc:
         raise ApiError(409, "source_busy", str(exc)) from exc
     try:
         # the store lease also excludes CLI runs / removals of the same name
         token = await anyio.to_thread.run_sync(
-            lambda: api.store.acquire_leases([name], "upload", ttl=3600.0)
+            lambda: view.acquire_leases([name], "upload", ttl=3600.0)
         )
     except SourceBusy as exc:
-        api.runs.release(name)
+        api.runs.release(name, project=view.id)
         raise ApiError(409, "source_busy", str(exc)) from exc
     try:
-        return await _add_upload_claimed(api, form, name, kind)
+        return await _add_upload_claimed(api, form, name, kind, view)
     finally:
-        await anyio.to_thread.run_sync(api.store.release_lease, token)
-        api.runs.release(name)
+        await anyio.to_thread.run_sync(view.release_lease, token)
+        api.runs.release(name, project=view.id)
 
 
-async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict[str, Any]:
+async def _add_upload_claimed(
+    api: Api, form: Any, name: str, kind: str, view: ProjectStore
+) -> dict[str, Any]:
     from autoontology.structured import pipeline
     from autoontology.structured.loaders import SUPPORTED_SUFFIXES, LoadError
     from autoontology.unstructured.readers import SUPPORTED_EXTENSIONS
 
-    if api.store.get_source(name):
+    if view.get_source(name):
         raise ApiError(409, "source_exists", f"source {name!r} already exists")
     uploads = [f for f in form.getlist("files") if isinstance(f, UploadFile)]
     if not uploads:
@@ -1365,7 +1487,7 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
         if fname.casefold() in (n.casefold() for n in names):
             raise ApiError(400, "duplicate_file", f"duplicate file name {fname!r}")
         names.append(fname)
-    target = api.uploads_dir / name
+    target = api.uploads_root(view) / name
     if target.exists():  # left behind by an earlier failed upload (no source row)
         shutil.rmtree(target)
     target.mkdir(parents=True)
@@ -1388,8 +1510,8 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
             from autoontology.engine.extract import ensure_documents_source
 
             if kind == "documents":
-                return ensure_documents_source(api.store, name, target, False)
-            return pipeline.add_source(api.store, str(target), name=name, kind="files")
+                return ensure_documents_source(view, name, target, False)
+            return pipeline.add_source(view, str(target), name=name, kind="files")
 
         try:
             source = await anyio.to_thread.run_sync(register)
@@ -1398,7 +1520,7 @@ async def _add_upload_claimed(api: Api, form: Any, name: str, kind: str) -> dict
     except BaseException:
         shutil.rmtree(target, ignore_errors=True)
         raise
-    return {**api.source_dict(source), "files": names}
+    return {**api.source_dict(source, project=view), "files": names}
 
 
 def _export_dir(rev: str) -> str:
@@ -1432,29 +1554,33 @@ def _export_path_ok(path: str) -> bool:
     return 1 <= len(parts) <= EXPORT_PATH_DEPTH and all(EXPORT_FILE_RE.fullmatch(p) for p in parts)
 
 
-def _job_call(api: Api, req: RunIn):
-    """``call(job_fn, store)`` for the run manager, after validating the request."""
+def _job_call(api: Api, req: RunIn, view: ProjectStore):
+    """``call(job_fn, store)`` for the run manager, after validating the request: the job
+    gets project *view* over the manager's (tracking) store."""
     settings = api.settings
+    pid = view.id
     if req.force and req.kind != "apply":
         raise ApiError(400, "invalid_request", "`force` is for apply runs only")
     if req.kind == "build":
-        sources = [api.source(n).name for n in req.sources] if req.sources else None
-        if not api.store.list_sources():
+        sources = [api.source(n, project=view).name for n in req.sources] if req.sources else None
+        if not view.list_sources():
             raise ApiError(400, "no_sources", "no sources: add one first")
-        return lambda fn, store: fn(store, settings, sources=sources, resume=req.resume)
+        return lambda fn, store: fn(
+            store.project(pid), settings, sources=sources, resume=req.resume
+        )
     if req.kind == "apply":
         if req.sources or req.resume or req.revision or req.format:
             raise ApiError(400, "invalid_request", "apply takes only `force`")
-        api.snapshot()  # 404 no_snapshot before a thread starts
-        return lambda fn, store: fn(store, settings, force=req.force)
+        api.snapshot(project=view)  # 404 no_snapshot before a thread starts
+        return lambda fn, store: fn(store.project(pid), settings, force=req.force)
     if req.sources or req.resume:
         raise ApiError(400, "invalid_request", "export takes only `revision` and `format`")
-    api.snapshot(req.revision)  # 404 before a thread starts
+    api.snapshot(req.revision, project=view)  # 404 before a thread starts
     fmt = req.format or "all"
-    return lambda fn, store: fn(store, settings, revision=req.revision, format=fmt)
+    return lambda fn, store: fn(store.project(pid), settings, revision=req.revision, format=fmt)
 
 
-async def _events(api: Api, run_id: str, request: Request):
+async def _events(api: Api, run_id: str, request: Request, view: ProjectStore | None = None):
     """SSE: ``log`` (one line; its id is the byte offset after it, so a reconnect with
     ``Last-Event-ID`` resumes there), ``step`` / ``progress`` / ``status`` on change, ``end``."""
     path = run_log_path(api.settings, run_id)
@@ -1468,10 +1594,11 @@ async def _events(api: Api, run_id: str, request: Request):
     last_status: str | None = None
 
     next_stale_check = 0.0
+    view = api._view(view)
 
     def snapshot() -> tuple[Run | None, dict[str, Any]]:
         nonlocal next_stale_check
-        run = api.store.get_run(run_id)
+        run = view.get_run(run_id)
         if (
             run is not None
             and run.status in ACTIVE_RUN_STATUSES
@@ -1485,8 +1612,8 @@ async def _events(api: Api, run_id: str, request: Request):
             reason = jobs.stale_reason(api.store, run)
             if reason is not None:
                 jobs.reap_run(api.store, run, reason)
-                run = api.store.get_run(run_id)
-        return run, (api.step_state(run) if run else {"steps": [], "progress": {}})
+                run = view.get_run(run_id)
+        return run, (api.step_state(run, project=view) if run else {"steps": [], "progress": {}})
 
     def read_lines(final: bool = False):
         """New complete lines (all of them, and the trailing partial one, when *final*)."""

@@ -15,6 +15,10 @@ Two ways to reach the same handlers the UI calls:
 ``settings show|test|set`` use :mod:`autoontology.web.settings_api` (the Settings page's
 own functions: origin rule, shell-override refusal, dimension guard); ``show`` asks the
 service first so ``running``/``restart_required`` describe the running processes.
+
+Projects: with ``--project``/``-p`` (or ``AUTOONTOLOGY_PROJECT``) every project-scoped
+call goes to ``/api/projects/<project>/...``; without it, to the ``/api/...`` aliases of
+the default project. ``project list|show|create|rename|archive|unarchive`` manage them.
 """
 
 from __future__ import annotations
@@ -46,6 +50,19 @@ class _Cli:
 base = _Cli()
 
 PREFIX = "/api"
+#: API paths without a project (never under ``/api/projects/<project>``).
+INSTALLATION_PATHS = ("/settings", "/status", "/providers", "/projects")
+
+
+def api_path(path: str, project: str | None) -> str:
+    """The URL path of the API call *path* for *project* (None = the default project's
+    alias): ``/api/projects/<project>/runs`` or ``/api/runs``; installation-wide calls
+    (:data:`INSTALLATION_PATHS`) always ``/api/...``."""
+    if project is None or path.split("?", 1)[0].startswith(INSTALLATION_PATHS):
+        return PREFIX + path
+    return f"{PREFIX}/projects/{quote(project, safe='')}{path}"
+
+
 #: Seconds `settings restart --wait` waits for the restart to finish.
 RESTART_WAIT_S = 240.0
 RESTART_POLL_S = 1.0
@@ -123,11 +140,13 @@ def parse_sse(lines: Iterator[str]) -> Iterator[tuple[str, Any, str | None]]:
 class _Caller:
     client: httpx.Client
     url: str
+    #: the project the calls go to (None = the default project's ``/api`` aliases)
+    project: str | None = None
 
     def raw(self, method: str, path: str, **kw: Any) -> httpx.Response:
         """The response of a successful call (an error answer raises :class:`CallError`)."""
         try:
-            resp = self.client.request(method, PREFIX + path, **kw)
+            resp = self.client.request(method, api_path(path, self.project), **kw)
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise ServiceDown(self.url) from exc
         except httpx.HTTPError as exc:
@@ -141,7 +160,7 @@ class _Caller:
 
     def events(self, method: str, path: str, **kw: Any) -> Iterator[tuple[str, Any, str | None]]:
         try:
-            with self.client.stream(method, PREFIX + path, **kw) as resp:
+            with self.client.stream(method, api_path(path, self.project), **kw) as resp:
                 if resp.status_code >= 400:
                     resp.read()
                     _decode(resp)
@@ -162,9 +181,10 @@ def http_client(settings: Any) -> httpx.Client:
 class ServiceClient(_Caller):
     """Calls to the running service (local only: ``127.0.0.1:<port>``, no proxy)."""
 
-    def __init__(self, settings: Any) -> None:
+    def __init__(self, settings: Any, project: str | None = None) -> None:
         self.settings = settings
         self.url = settings.service_url
+        self.project = project
         self.client = http_client(settings)
 
 
@@ -199,10 +219,11 @@ def local_app(settings: Any) -> Any:
 class LocalApi(_Caller):
     """The UI's ``/api`` route functions run in this process (the service may be down)."""
 
-    def __init__(self, settings: Any) -> None:
+    def __init__(self, settings: Any, project: str | None = None) -> None:
         from fastapi.testclient import TestClient
 
         self.url = "local"
+        self.project = project
         self.client = TestClient(local_app(settings), base_url="http://127.0.0.1")
 
 
@@ -291,11 +312,11 @@ def _export_path(path: str) -> str:
 
 
 def _local(settings: Any | None = None) -> LocalApi:
-    return LocalApi(settings or base._settings())
+    return LocalApi(settings or base._settings(), project=base._project())
 
 
 def _service(settings: Any | None = None) -> ServiceClient:
-    return ServiceClient(settings or base._settings())
+    return ServiceClient(settings or base._settings(), project=base._project())
 
 
 def _short(value: Any, size: int = 60) -> str:
@@ -1640,6 +1661,157 @@ def agent_usage(
     typer.echo(base._table(("DAY", "CALLS"), [(d["day"], str(d["calls"])) for d in body["by_day"]]))
 
 
+# --- projects -----------------------------------------------------------------------
+
+project_app = typer.Typer(help=msg("help.project"), no_args_is_help=True)
+
+
+def _project_seg(ref: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", ref or ""):
+        _error("unknown_project", f"unknown project {ref!r}", 2)
+    return quote(ref, safe="")
+
+
+def _project_write(method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+    """A project change through the running service (its run manager sees the change),
+    or in this process when the service is down."""
+    kw = {"json": payload} if payload is not None else {}
+    try:
+        try:
+            return _service().call(method, path, **kw)
+        except ServiceDown:
+            return _local().call(method, path, **kw)
+    except CallError as exc:
+        _call_error(exc)
+
+
+def _project_rows(projects: list[dict[str, Any]], default: str | None = None) -> str:
+    rows = [
+        (
+            ("* " if p["slug"] == default or p.get("default") else "  ") + p["slug"],
+            p["name"],
+            f"r{p['latest_revision']}" if p["latest_revision"] else "-",
+            str(p["sources"]),
+            (
+                f"{p['last_build']['status']} {(p['last_build']['finished_at'] or '')[:19]}"
+                if p.get("last_build")
+                else "-"
+            ).strip(),
+            "archived" if p["archived"] else ("running" if p.get("active") else "-"),
+        )
+        for p in projects
+    ]
+    header = ("  PROJECT", "NAME", "REVISION", "SOURCES", "LAST BUILD", "STATE")
+    return base._table(header, rows)
+
+
+@project_app.command("list", help=msg("help.project.list"))
+def project_list(
+    archived: bool = typer.Option(
+        True, "--archived/--no-archived", help=msg("help.project.archived")
+    ),
+    as_json: bool = _JSON,
+) -> None:
+    params = {"include_archived": archived}
+    body = _guard(lambda: _local().call("GET", "/projects", params=params))
+    if as_json:
+        _json(body)
+        return
+    typer.echo(_project_rows(body["projects"], body.get("default")))
+
+
+@project_app.command("show", help=msg("help.project.show"))
+def project_show(
+    ref: str = typer.Argument(None, metavar="PROJECT", help=msg("help.project.ref_default")),
+    as_json: bool = _JSON,
+) -> None:
+    ref = ref or base._project()
+    if ref is None:
+        body = _guard(lambda: _local().call("GET", "/projects"))
+        ref = body["default"]
+    seg = _project_seg(ref)
+    p = _guard(lambda: _local().call("GET", f"/projects/{seg}"))
+    if as_json:
+        _json(p)
+        return
+    typer.echo(f"{p['slug']}  ({p['name']}, {p['id']})")
+    if p["description"]:
+        typer.echo(f"  {p['description']}")
+    typer.echo(msg("ops.project_revision", revision=p["latest_revision"] or "-"))
+    typer.echo(msg("ops.project_sources", sources=p["sources"]))
+    build = p.get("last_build")
+    typer.echo(
+        msg(
+            "ops.project_last_build",
+            build=f"{build['id']} {build['status']}" if build else "-",
+        )
+    )
+    if p["archived"]:
+        typer.echo(msg("ops.project_archived_at", at=p["archived_at"]))
+    typer.echo(f"API: {p['api_base']}")
+
+
+@project_app.command("create", help=msg("help.project.create"))
+def project_create(
+    slug: str = typer.Argument(..., help=msg("help.project.slug")),
+    name: str = typer.Option("", "--name", help=msg("help.project.name")),
+    description: str = typer.Option("", "--description", help=msg("help.project.description")),
+    as_json: bool = _JSON,
+) -> None:
+    payload = {"slug": slug, "name": name, "description": description}
+    body = _project_write("POST", "/projects", payload)
+    if as_json:
+        _json(body)
+        return
+    typer.echo(msg("ops.project_created", slug=body["slug"], name=body["name"]))
+
+
+@project_app.command("rename", help=msg("help.project.rename"))
+def project_rename(
+    ref: str = typer.Argument(..., metavar="PROJECT", help=msg("help.project.ref")),
+    name: str = typer.Option(None, "--name", help=msg("help.project.name")),
+    slug: str = typer.Option(None, "--slug", help=msg("help.project.new_slug")),
+    description: str = typer.Option(None, "--description", help=msg("help.project.description")),
+    as_json: bool = _JSON,
+) -> None:
+    payload = {
+        k: v
+        for k, v in {"name": name, "slug": slug, "description": description}.items()
+        if v is not None
+    }
+    if not payload:
+        _error("invalid_request", msg("ops.project_nothing_to_change"), 2)
+    body = _project_write("PATCH", f"/projects/{_project_seg(ref)}", payload)
+    if as_json:
+        _json(body)
+        return
+    typer.echo(msg("ops.project_renamed", slug=body["slug"], name=body["name"]))
+
+
+@project_app.command("archive", help=msg("help.project.archive"))
+def project_archive(
+    ref: str = typer.Argument(..., metavar="PROJECT", help=msg("help.project.ref")),
+    as_json: bool = _JSON,
+) -> None:
+    body = _project_write("POST", f"/projects/{_project_seg(ref)}/archive")
+    if as_json:
+        _json(body)
+        return
+    typer.echo(msg("ops.project_archived", slug=body["slug"]))
+
+
+@project_app.command("unarchive", help=msg("help.project.unarchive"))
+def project_unarchive(
+    ref: str = typer.Argument(..., metavar="PROJECT", help=msg("help.project.ref")),
+    as_json: bool = _JSON,
+) -> None:
+    body = _project_write("POST", f"/projects/{_project_seg(ref)}/unarchive")
+    if as_json:
+        _json(body)
+        return
+    typer.echo(msg("ops.project_unarchived", slug=body["slug"]))
+
+
 # --- registration -------------------------------------------------------------------
 
 
@@ -1652,6 +1824,7 @@ def register(app: typer.Typer, source_app: typer.Typer) -> None:
     app.add_typer(playground_app, name="playground")
     app.add_typer(settings_app, name="settings")
     app.add_typer(agent_app, name="agent")
+    app.add_typer(project_app, name="project")
     source_app.command("freshness", help=msg("help.sources.freshness"))(sources_freshness)
     # `sources freshness` (the UI's page name) is `source freshness`
     app.add_typer(source_app, name="sources", hidden=True)
