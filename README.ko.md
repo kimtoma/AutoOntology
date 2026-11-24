@@ -8,39 +8,28 @@ Ontology Ops는 그 지식을 계속 운영하는 흐름입니다. 변경 발견
 
 **현재 공개 개발 버전: `0.3.0a1`(alpha).** 최초 구축, 지속적인 검토와 질문 기능을 구현했습니다.
 조직 전체 권한 체계, 무인 에이전트 운영, 지식 OS 전체 범위는 아직 미완료입니다.
-이 README는 **2026-11-03의 공개 저장소 형상**을 기준으로 정리했습니다.
+이 README는 **2026-11-24의 공개 저장소 형상**을 기준으로 정리했습니다.
 
 ## 어떤 코드를 받으면 되나요?
 
 | 구분 | 포함된 내용 |
 | --- | --- |
-| `main` | 기본 브랜치. 앱 기준점은 `c4b7dca`이며 Ontology Ops UI·CLI를 포함합니다. |
-| [`codex/ontology-ops-local`](https://github.com/kimtoma/AutoOntology/tree/codex/ontology-ops-local) | 최신 공개 개발본. 소유자 등록·복구, 고정 데이터 비교, 백업 검증, 복원 후 읽기 연결 검토, 두 버전 선택 게이트웨이를 추가했습니다. 앱·배포 체크포인트는 `042637c`입니다. |
-| 공개 Classic | 비교를 위해 별도로 유지하는 이전 `0.2.0` 앱입니다. |
+| [`ops-ui`](https://github.com/kimtoma/AutoOntology/tree/ops-ui) | **실제 서비스를 운영하는 브랜치**(커밋 `dcdcf8c`, `0.2.0` 계열). 설치 하나에 여러 프로젝트를 두고 프로젝트마다 리비전을 따로 관리합니다. 선택적으로 계정 기능(이메일·비밀번호 로그인, 이메일 로그인 링크), 프로젝트별 역할(viewer·reviewer·editor·owner)과 설치 관리자(admin), 외부 에이전트 연결 화면(Connect, MCP·REST), CLI 단축 이름 `ao`, 1.3.x로 올린 NVIDIA Auto Ontology 엔진을 갖췄습니다. [README](https://github.com/kimtoma/AutoOntology/blob/ops-ui/README.ko.md)와 [가이드](https://github.com/kimtoma/AutoOntology/blob/ops-ui/docs/GUIDE.ko.md)를 참고하세요. |
+| `main` | 기본 브랜치. Codex로 개발한 지식 OS 계열입니다(`0.3.0a1`, 앱 기준점 `c4b7dca`, Ontology Ops UI·CLI 포함). 현재는 배포하지 않습니다. |
+| [`codex/ontology-ops-local`](https://github.com/kimtoma/AutoOntology/tree/codex/ontology-ops-local) | 지식 OS 계열의 최신 추가분. 소유자 등록·복구, 고정 데이터 비교, 백업 검증, 복원 후 읽기 연결 검토를 담았습니다. 체크포인트는 `042637c`입니다. 현재는 배포하지 않습니다. |
 
-README 변경만으로 두 브랜치의 앱 코드가 병합되지는 않습니다. 최신 공개 구현을 받으려면 아래
-빠른 시작의 개발 브랜치 클론 명령을 사용하세요.
+`ops-ui`와 지식 OS 계열(`main`, `codex/ontology-ops-local`)은 서로 갈라져 있으며 병합하지 않았습니다.
+README 변경만으로 두 브랜치의 앱 코드가 병합되지는 않습니다. 이 README의 나머지 내용은 지식 OS 계열을 설명합니다.
 [구현 체크포인트](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/docs/PUBLIC_CHECKPOINT.md)에서
 검증 범위와 남은 제약을 확인할 수 있습니다. 이전 인수인계·단계 기록은 각각 당시 시점을 보존합니다.
 
-## 배포된 두 버전 체험
+## 실제 서비스 체험
 
-| 주소 | 용도 |
-| --- | --- |
-| [버전 선택](https://autoontology.kimtoma.com/) | 비밀번호 로그인 후 두 버전의 차이를 보고 선택 |
-| [Classic](https://autoontology-classic.kimtoma.com/) | 기존 설치·구축·탐색·질문 흐름 |
-| [Ontology Ops](https://autoontology-next.kimtoma.com/) | 운영 홈, 검토함, 변경 이력, 저장 결과와 고정 데이터 비교 |
+실제 서비스 주소는 [autoontology.kimtoma.com](https://autoontology.kimtoma.com/)이며 `ops-ui` 브랜치로 운영합니다.
+로그인이 필요하고 계정은 초대제입니다. 작업 공간 소유자에게 초대를 요청하세요.
+소유자의 Mac mini에서 Cloudflare를 거쳐 서비스합니다. 개인 배포이므로 상시 가동이나 운영 환경 완성을 보장하지는 않습니다.
 
-접속 권한은 작업 공간 소유자에게 요청하세요. 공유 비밀번호는 저장소에 기록하지 않습니다.
-주소별로 한 번씩 로그인하면 두 탭을 함께 사용할 수 있습니다. 변경 가능한 데이터·설정·PostgreSQL은 서로 분리됩니다.
-앱·데이터베이스·Tunnel·Ollama는 소유자의 Mac mini에서 실행합니다.
-현재 배포는 채팅에 Codex(`gpt-6-astra`), 임베딩에 Ollama(`qwen3-embedding:4b`)를 사용합니다.
-이 값은 배포 환경의 선택이며 새 설치의 기본값과 구분됩니다.
-
-11월 1일 검증에서는 두 주소의 실제 질문 답변·인용 근거·그래프·SQL·파일 다운로드를 완료했습니다.
-새 버전은 원본 다운로드, 저장 결과 재열람, 가상 데이터 비교, 업로드 격리와 웹 재시작도 확인했습니다.
-해당 날짜의 검증 기록이며 상시 가동이나 운영 환경 완성을 보장하는 의미는 아닙니다.
-[버전별 구성과 실행·중지 방법](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/deploy/cloudflare/VERSIONS.md)을 참고하세요.
+이전의 두 버전 체험(Classic과 Ontology Ops를 각각 별도 주소로 제공)은 2026년 11월에 종료했습니다.
 
 ## 할 수 있는 일
 
@@ -80,6 +69,11 @@ OpenAI 호환 API 중 고르고, 임베딩은 Ollama 또는 OpenAI 호환 엔드
 현재 두 버전 구성은 위 최신 개발 브랜치의 운영 문서를 확인하세요.
 
 ## 빠른 시작
+
+실제 서비스와 같은 버전을 받으려면 아래 클론 명령에서 `--branch ops-ui`를 사용하고
+[`ops-ui` README](https://github.com/kimtoma/AutoOntology/blob/ops-ui/README.ko.md)의 빠른 시작을 따르세요.
+설치 명령은 같으며, 그 브랜치에서는 모든 `autoontology` 명령을 `ao`로도 실행할 수 있습니다.
+아래 명령은 지식 OS 계열을 설치합니다.
 
 ```
 git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
@@ -224,6 +218,7 @@ scripts/bootstrap.sh --yes --provider claude
 ```
 
 다른 폴더를 원하면 `git clone`의 대상 경로를 바꾸고 해당 폴더에서 bootstrap을 실행하세요.
+실제 서비스와 같은 버전을 받으려면 같은 명령에서 `--branch ops-ui`를 사용하세요.
 
 ## 모델 제공자 고르기
 

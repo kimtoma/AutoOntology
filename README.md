@@ -10,42 +10,32 @@ knowledge through the web UI and native CLI.
 **Current public development version: `0.3.0a1` (alpha).** Initial construction,
 ongoing review and question answering are implemented. Organization-wide authority,
 unattended agent operation and the complete Knowledge OS remain unfinished.
-This README was refreshed against the public source on **2026-11-03**.
+This README was refreshed against the public source on **2026-11-24**.
 
 ## Which code should I use?
 
 | Reference | What it contains |
 | --- | --- |
-| `main` | Default branch; application baseline `c4b7dca`, already including the Ontology Ops UI and CLI |
-| [`codex/ontology-ops-local`](https://github.com/kimtoma/AutoOntology/tree/codex/ontology-ops-local) | Latest public application additions: owner enrollment/recovery, frozen-data comparison, backup verification, reviewed restored reads and the two-version gateway; application/deployment checkpoint `042637c` |
-| Hosted Classic | Earlier `0.2.0` application, maintained separately for comparison |
+| [`ops-ui`](https://github.com/kimtoma/AutoOntology/tree/ops-ui) | **The branch that runs the live service** (commit `dcdcf8c`, version `0.2.0` line): several projects per installation, each with its own revisions; optional accounts with email/password sign-in and emailed sign-in links; per-project roles viewer, reviewer, editor and owner, plus installation admins; a Connect page for outside agents (MCP and REST); the `ao` short alias of the CLI; the NVIDIA Auto Ontology engine updated to 1.3.x. Read its [README](https://github.com/kimtoma/AutoOntology/blob/ops-ui/README.md) and [guide](https://github.com/kimtoma/AutoOntology/blob/ops-ui/docs/GUIDE.md) |
+| `main` | Default branch: the Knowledge OS line developed with Codex (`0.3.0a1`, application baseline `c4b7dca`, Ontology Ops UI and CLI). No longer deployed |
+| [`codex/ontology-ops-local`](https://github.com/kimtoma/AutoOntology/tree/codex/ontology-ops-local) | Latest Knowledge OS additions: owner enrollment/recovery, frozen-data comparison, backup verification and reviewed restored reads; checkpoint `042637c`. No longer deployed |
 
-Documentation updates do not merge application changes between branches. For the
-latest public implementation, use the development-branch clone in Quickstart.
-Read its [implementation checkpoint](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/docs/PUBLIC_CHECKPOINT.md)
+`ops-ui` and the Knowledge OS line (`main`, `codex/ontology-ops-local`) have diverged and
+are not merged; documentation updates do not merge application changes between branches.
+The rest of this README describes the Knowledge OS line. Read its
+[implementation checkpoint](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/docs/PUBLIC_CHECKPOINT.md)
 for tested scope and remaining limitations. Older handoff and ledger entries retain
 their original checkpoint dates.
 
-## Try the two deployed versions
+## Try the live service
 
-| Service | Purpose |
-| --- | --- |
-| [Version chooser](https://autoontology.kimtoma.com/) | Compare the two versions after password login |
-| [Classic](https://autoontology-classic.kimtoma.com/) | Earlier setup, build, exploration and query workflow |
-| [Ontology Ops](https://autoontology-next.kimtoma.com/) | Operations home, review inbox, history, saved results and frozen-data comparison |
+The live service is [autoontology.kimtoma.com](https://autoontology.kimtoma.com/) and runs
+the `ops-ui` branch. Sign-in is required and accounts are invite-only: ask the workspace
+owner for an invitation. It runs on the owner's Mac mini behind Cloudflare. It is a
+personal deployment, not a continuous uptime or production-readiness guarantee.
 
-Ask the workspace owner for access; the sharing password is not stored in this
-repository. Each host requires its own login, so both versions can remain open in
-separate tabs. Their mutable data, settings and PostgreSQL clusters are isolated.
-The app, database, tunnel and Ollama run on the owner's Mac mini. The deployed
-chat provider is Codex (`gpt-6-astra`) and embeddings use Ollama
-(`qwen3-embedding:4b`); these are deployment choices, not fresh-install defaults.
-
-The November 1 acceptance completed real chat, cited evidence, graph, SQL and file
-downloads on both hosts. The newer version also exercised original-file download,
-saved-result replay, fictional-data comparison, isolated uploads and web restart.
-These are dated verification results, not a continuous uptime or production-readiness
-guarantee. See the [version gateway and controls](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/deploy/cloudflare/VERSIONS.md).
+The earlier two-version demo (Classic and Ontology Ops on separate hosts) was retired in
+November 2026.
 
 ## What you can do
 
@@ -88,6 +78,11 @@ embeddings use Ollama or an OpenAI-compatible endpoint.
 documented on the latest development branch linked above.
 
 ## Quickstart
+
+For the version that matches the live service, use `--branch ops-ui` in the clone below
+and follow the [`ops-ui` README](https://github.com/kimtoma/AutoOntology/blob/ops-ui/README.md#quickstart);
+the setup commands are the same, and there every `autoontology` command also runs as `ao`.
+The commands below install the Knowledge OS line.
 
 ```
 git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
@@ -239,6 +234,7 @@ scripts/bootstrap.sh --yes --provider claude
 ```
 
 Choose a different destination in `git clone` if needed, then run bootstrap from that checkout.
+For the version behind the live service, use `--branch ops-ui` in the same command.
 
 ## Choose a provider
 
