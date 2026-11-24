@@ -15,6 +15,9 @@ Upstream sends the model name verbatim and uses ChatOpenAI only for names starti
 The router serves the one chat provider selected at service start: a CLI prefix for a
 provider that is not active is refused with 400 ``provider_not_active``. CLI answers to
 ``stream: true`` come back as one SSE chunk + ``[DONE]`` (no incremental streaming).
+Requests with several tools (or ``tool_choice`` "auto"/"required"/a named function) are
+answered with at most one ``tool_calls`` entry or a text answer per turn
+(``openai_compat`` tool mode).
 Errors are OpenAI-style ``{"error": {message, type, code, remedy?}}``.
 """
 

@@ -620,6 +620,10 @@ class CLIProvider:
             value = parse_json_answer(content)
         except ValueError:
             return f"not valid JSON: {content[:120]!r}"
+        if request.mode == "tools":
+            from autoontology.web.providers.openai_compat import tool_answer_problem
+
+            return tool_answer_problem(value, request)
         if request.mode in ("json_object", "tool") and not isinstance(value, dict):
             return "the answer must be a JSON object"
         return schema_problem(value, request.schema or {})

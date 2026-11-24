@@ -96,7 +96,7 @@ class ClaudeCLIProvider(CLIProvider):
             "--system-prompt-file",
             str(system_file),
         ]
-        if request.mode in ("json_schema", "tool") and request.schema:
+        if request.mode in ("json_schema", "tool", "tools") and request.schema:
             schema = json.dumps(request.schema, ensure_ascii=False)
             if len(schema.encode("utf-8")) > MAX_SCHEMA_ARG_BYTES:
                 raise ProviderError(
