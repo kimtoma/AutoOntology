@@ -74,8 +74,7 @@ embeddings use Ollama or an OpenAI-compatible endpoint.
 
 **New here?** Read the [step-by-step guide](docs/GUIDE.md)
 ([한국어](docs/GUIDE.ko.md)). For your own password-protected deployment, use the
-[Cloudflare guide](deploy/cloudflare/README.md); the current two-version setup is
-documented on the latest development branch linked above.
+[Cloudflare guide](deploy/cloudflare/README.md).
 
 ## Quickstart
 

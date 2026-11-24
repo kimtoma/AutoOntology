@@ -65,8 +65,7 @@ PostgreSQL 17 + pgvector와 로컬 파일에 저장합니다. 채팅 제공자�
 OpenAI 호환 API 중 고르고, 임베딩은 Ollama 또는 OpenAI 호환 엔드포인트를 사용합니다.
 
 **처음이라면 [단계별 가이드](docs/GUIDE.ko.md)**([English](docs/GUIDE.md))를 읽으세요.
-직접 공유 환경을 구성하려면 [Cloudflare 배포 안내](deploy/cloudflare/README.md)를 참고하고,
-현재 두 버전 구성은 위 최신 개발 브랜치의 운영 문서를 확인하세요.
+직접 공유 환경을 구성하려면 [Cloudflare 배포 안내](deploy/cloudflare/README.md)를 참고하세요.
 
 ## 빠른 시작
 
