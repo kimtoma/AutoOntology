@@ -94,17 +94,19 @@ def record_edit(
     action_run_id: str | None = None,
     edited_by: str = "",
     operational: bool | None = None,
+    conn: Any = None,
 ) -> ObjectEdit:
     """Write *value* over property *prop* of object *key*. *source_row*: the object's
     source row as read now (its value of *prop* is recorded, for conflict detection);
     ``operational`` defaults to "*prop* is no column of the type". ``old_value`` is the
-    value shown before (the previous edit's, else the source's)."""
+    value shown before (the previous edit's, else the source's). *conn*: write inside the
+    caller's open transaction (several edits and an action run atomically)."""
     columns = set(otype.column_names()) or set(source_row or {})
     if operational is None:
         operational = prop not in columns
     source_value = None if operational or source_row is None else source_row.get(prop)
     edits = view.object_edits()
-    previous = edits.current(otype.class_local, [str(key)]).get((str(key), prop))
+    previous = edits.current(otype.class_local, [str(key)], conn=conn).get((str(key), prop))
     old_value = previous.new_value if previous is not None else source_value
     return edits.add(
         otype.class_local,
@@ -116,11 +118,16 @@ def record_edit(
         operational=operational,
         action_run_id=action_run_id,
         edited_by=edited_by,
+        conn=conn,
     )
 
 
 def revert(
-    view: Any, *, edit_id: int | None = None, action_run_id: str | None = None
+    view: Any,
+    *,
+    edit_id: int | None = None,
+    action_run_id: str | None = None,
+    conn: Any = None,
 ) -> list[ObjectEdit]:
     """Revert one edit (*edit_id*) or every edit of an action run (*action_run_id*);
     returns the edits reverted now (empty: nothing left to revert)."""
@@ -128,6 +135,6 @@ def revert(
     if (edit_id is None) == (action_run_id is None):
         raise ValueError("give edit_id or action_run_id")
     if edit_id is not None:
-        done = edits.revert(edit_id)
+        done = edits.revert(edit_id, conn=conn)
         return [done] if done is not None else []
-    return edits.revert_run(str(action_run_id))
+    return edits.revert_run(str(action_run_id), conn=conn)

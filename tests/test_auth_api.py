@@ -381,11 +381,13 @@ def test_me_lists_memberships(env):
                 "functions.call",
                 "review.decide",
                 "review.apply",
+                "action.approve",
                 "sources.write",
                 "runs.start",
                 "agent.tokens",
                 "playground.manage",
                 "logic.edit",
+                "action.run",
             ],
         }
     ]

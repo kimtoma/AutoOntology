@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""Read-only access for outside agents (Claude Code, Claude Desktop, Cursor, scripts).
+"""Access for outside agents (Claude Code, Claude Desktop, Cursor, scripts): read the
+ontology and its objects, and -- with a token scope that allows it -- submit actions.
 
 One tool layer (:data:`TOOLS`, :meth:`AgentService.run_tool`) behind two surfaces:
 
@@ -17,7 +18,15 @@ served at that revision only (another explicit revision: ``revision_pinned``). T
 tools (``list_object_types``, ``search_objects``, ``get_object``, ``list_functions``,
 ``call_function``) read live source rows
 through the object types bound to the latest snapshot -- objects have no revisions -- so a
-pinned token may use them only while its pin is the latest revision. Per token
+pinned token may use them only while its pin is the latest revision. The action tools
+(``list_actions``, ``preview_action``, ``submit_action``, ``get_action_run``) run
+:mod:`autoontology.logic.actions` as the token's creator (their current role; accounts
+off or no creator: owner) with the token's scopes: ``read`` (every token) refuses
+``submit_action`` (``scope_required``); ``propose`` submits runs that always wait for
+approval; ``execute`` follows the action's approval rules; ``action:<name>`` entries limit
+both to those actions; an action's ``agent`` policy caps the mode (``none`` refuses).
+``submit_action`` is the only write tool: audited (``action.submit``, ``via: agent``,
+``token_id``) besides ``agent_calls``. Per token
 at most :func:`rate_per_min` requests a minute (429 + ``Retry-After``), request bodies up
 to :data:`MAX_BODY_BYTES` (413). Every tool call is recorded in ``agent_calls``; the raw
 token is never logged or stored.
@@ -46,7 +55,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from autoontology import __version__
 from autoontology.objects.reader import ObjectError
 from autoontology.playground.sparql import DEFAULT_LIMIT, MAX_LIMIT, MAX_QUERY_CHARS, SparqlError
-from autoontology.store.agent_tokens import AgentToken, AgentTokens, TokenError
+from autoontology.store.agent_tokens import (
+    AgentToken,
+    AgentTokens,
+    TokenError,
+    allowed_actions,
+    normalize_scopes,
+    write_mode,
+)
 from autoontology.store.db import ProjectNotFound, ProjectStore
 from autoontology.web.api import (
     CONCEPT_ID_RE,
@@ -152,10 +168,38 @@ class CallFunctionArgs(_Args):
     params: dict[str, Any] = Field(default_factory=dict, max_length=20)
 
 
+class ListActionsArgs(_Args):
+    type: str | None = Field(None, min_length=1, max_length=200)
+
+
+class PreviewActionArgs(_Args):
+    name: str = Field(min_length=1, max_length=200)
+    key: str = Field(min_length=1, max_length=200)
+    params: dict[str, Any] = Field(default_factory=dict, max_length=20)
+
+
+class SubmitActionArgs(PreviewActionArgs):
+    idempotency_key: str | None = Field(None, min_length=1, max_length=200)
+
+
+class GetActionRunArgs(_Args):
+    id: str = Field(min_length=1, max_length=80)
+
+
 _REVISION = {
     "type": "integer",
     "minimum": 1,
     "description": "Snapshot revision (default: the latest, or the token's pinned one).",
+}
+
+_ACTION_PROPS = {
+    "name": {"type": "string", "description": "Action name (from list_actions)."},
+    "key": {"type": "string", "description": "The object's key value."},
+    "params": {
+        "type": "object",
+        "maxProperties": 20,
+        "description": "Parameter values (defaults apply to the ones left out).",
+    },
 }
 
 #: name, description, input schema and argument model of every tool, in listing order
@@ -293,6 +337,45 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], type[_Args]]] = [
         },
         CallFunctionArgs,
     ),
+    (
+        "list_actions",
+        "List the active actions: operations on objects of a type (parameters, "
+        "preconditions, the properties they set, approval and agent policy). Read-only.",
+        {"type": {"type": "string", "description": "Only this object type (name or label)."}},
+        ListActionsArgs,
+    ),
+    (
+        "preview_action",
+        "Preview an action on one object without running it: parameters as coerced, each "
+        "precondition's result, the effects (old -> new value), whether approval is needed "
+        "and whether this token may submit it. Read-only.",
+        _ACTION_PROPS,
+        PreviewActionArgs,
+    ),
+    (
+        "submit_action",
+        "WRITE: submit an action on one object (needs a token with the propose or execute "
+        "scope, and an action whose agent policy allows it). With propose the run always "
+        "waits for a person's approval; with execute it follows the action's approval "
+        "rules. Values go to AutoOntology's edit layer (sources are never written) and "
+        "every run can be reverted. Pass idempotency_key to make retries safe.",
+        {
+            **_ACTION_PROPS,
+            "idempotency_key": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "A retry with the same key returns the first run.",
+            },
+        },
+        SubmitActionArgs,
+    ),
+    (
+        "get_action_run",
+        "One action run by id (from submit_action): its status (applied, pending_approval, "
+        "rejected, failed, reverted), approval, effects and notifications. Read-only.",
+        {"id": {"type": "string", "description": "The run id (act_...)."}},
+        GetActionRunArgs,
+    ),
 ]
 
 _REQUIRED = {
@@ -301,7 +384,12 @@ _REQUIRED = {
     "search_objects": ["type"],
     "get_object": ["type", "key"],
     "call_function": ["name", "key"],
+    "preview_action": ["name", "key"],
+    "submit_action": ["name", "key"],
+    "get_action_run": ["id"],
 }
+#: tools that change data (``agent/tools`` lists them; their calls are audited)
+WRITE_TOOLS = frozenset({"submit_action"})
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -340,9 +428,12 @@ class UnknownTool(Exception):
 class AgentService:
     """The tools over the API state, plus each token's rate window."""
 
-    def __init__(self, api: Api, sparql: Callable[[], Any]) -> None:
+    def __init__(
+        self, api: Api, sparql: Callable[[], Any], mailer: Callable[[], Any] | None = None
+    ) -> None:
         self.api = api
         self._sparql = sparql
+        self._mailer = mailer or (lambda: None)
         self._hits: dict[str, deque[float]] = {}
         self._hits_lock = threading.Lock()
 
@@ -373,6 +464,35 @@ class AgentService:
 
         user = Accounts(self.api.store).get(token.created_by)
         return member_role(self.api, token.project_id, user) is not None
+
+    def creator_role(self, token: AgentToken) -> str | None:
+        """The role a token acts with: its creator's current role in the token's project
+        (accounts off, or a token without a creator -- the CLI's -- : owner; None: the
+        creator lost access)."""
+        if not self.api.settings.accounts_enabled or not token.created_by:
+            return "owner"
+        from autoontology.store.accounts import Accounts
+        from autoontology.web.projects import member_role
+
+        user = Accounts(self.api.store).get(token.created_by)
+        return member_role(self.api, token.project_id, user)
+
+    def caller(self, token: AgentToken) -> Any:
+        """The :class:`~autoontology.logic.actions.Caller` of an action tool."""
+        from autoontology.logic.actions import Caller
+
+        role = self.creator_role(token)
+        if role is None:
+            raise ToolError(403, "forbidden", "the token's creator has no access any more")
+        return Caller(
+            name=f"agent:{token.id}",
+            role=role,
+            four_eyes=bool(self.api.settings.accounts_enabled),
+            via="agent",
+            token_id=token.id,
+            agent_mode=write_mode(token.scopes),
+            allowed_actions=allowed_actions(token.scopes),
+        )
 
     def retry_after(self, token_id: str) -> int | None:
         """None when *token_id* may make another request now (it is counted), else the
@@ -576,6 +696,54 @@ class AgentService:
         )
         return {"revision": self._served(token), **found}
 
+    def _tool_list_actions(self, token: AgentToken, args: ListActionsArgs) -> dict[str, Any]:
+        from autoontology.logic import actions
+
+        found = actions.list_actions(self._objects_view(token), args.type)
+        return {"revision": self._served(token), "actions": found}
+
+    def _tool_preview_action(self, token: AgentToken, args: PreviewActionArgs) -> dict[str, Any]:
+        from autoontology.logic import actions
+
+        found = actions.preview(
+            self.api.settings,
+            self._objects_view(token),
+            args.name,
+            args.key,
+            args.params,
+            self.caller(token),
+        )
+        return {"revision": self._served(token), "preview": found}
+
+    def _tool_submit_action(self, token: AgentToken, args: SubmitActionArgs) -> dict[str, Any]:
+        from autoontology.logic import actions
+
+        caller = self.caller(token)
+        run, created = actions.submit(
+            self.api.settings,
+            self._objects_view(token),
+            args.name,
+            args.key,
+            args.params,
+            caller,
+            idempotency_key=args.idempotency_key,
+            mailer=self._mailer(),
+        )
+        return {
+            "revision": self._served(token),
+            "run": actions.run_dict(run, caller),
+            "created": created,
+        }
+
+    def _tool_get_action_run(self, token: AgentToken, args: GetActionRunArgs) -> dict[str, Any]:
+        from autoontology.logic import actions
+
+        view = self.project(token)
+        run = view.action_runs().get(args.id)
+        if run is None:
+            raise ToolError(404, "unknown_run", f"no action run {args.id[:80]!r}")
+        return {"revision": self._served(token), "run": actions.run_dict(run, self.caller(token))}
+
     def instructions(self, token: AgentToken) -> str:
         ws = self.project(token).name
         latest = self.latest_revision(token)
@@ -589,12 +757,35 @@ class AgentService:
             text += f"The latest revision is r{latest}; tools answer from it by default. "
         else:
             text += "No ontology has been built yet. "
-        return text + (
-            "All tools are read-only. Start with get_ontology_summary or search_concepts, "
-            "then get_concept for definitions, relations and evidence; sparql_query runs "
-            "SPARQL over the RDF/OWL graph. list_object_types, search_objects and get_object "
-            "read the business objects (source rows) of bound classes; list_functions and "
-            "call_function evaluate their defined functions."
+        mode = write_mode(token.scopes)
+        if mode == "execute":
+            scope = (
+                "This token has the execute scope: submit_action runs an action under the "
+                "action's own approval rules. "
+            )
+        elif mode == "propose":
+            scope = (
+                "This token has the propose scope: submit_action creates a run that waits "
+                "for a person's approval. "
+            )
+        else:
+            scope = "This token is read-only: submit_action is refused. "
+        allowed = allowed_actions(token.scopes)
+        if allowed and mode:
+            scope += f"It may submit only these actions: {', '.join(allowed)}. "
+        return (
+            text + "Every tool reads, except submit_action, which writes (audited, revertible; "
+            "sources are never written). "
+            + scope
+            + (
+                "Start with get_ontology_summary or search_concepts, then get_concept for "
+                "definitions, relations and evidence; sparql_query runs SPARQL over the "
+                "RDF/OWL graph. list_object_types, search_objects and get_object read the "
+                "business objects (source rows) of bound classes; list_functions and "
+                "call_function evaluate their defined functions; list_actions, "
+                "preview_action, submit_action and get_action_run run their actions "
+                "(always preview first)."
+            )
         )
 
 
@@ -886,6 +1077,42 @@ def build_router(service: AgentService) -> APIRouter:
             return _error(exc.status, exc.code, exc.message)
         return JSONResponse(data)
 
+    async def rest_body(request: Request, tool: str, extra: dict[str, Any]) -> Response:
+        """A POST tool whose JSON body holds its arguments (plus *extra* from the path)."""
+        token = await gate(request)
+        if isinstance(token, Response):
+            return token
+        raw = await _read_body(request)
+        if raw is None:
+            return _too_large()
+        try:
+            body = json.loads(raw or b"{}")
+        except (ValueError, RecursionError):
+            return _error(400, "invalid_arguments", "the body must be a JSON object")
+        if not isinstance(body, dict):
+            return _error(400, "invalid_arguments", "the body must be a JSON object")
+        try:
+            data = await call(token, "rest", tool, {**body, **extra})
+        except ToolError as exc:
+            return _error(exc.status, exc.code, exc.message)
+        return JSONResponse(data)
+
+    @router.get(f"{REST_PREFIX}/actions", include_in_schema=False)
+    async def rest_actions(request: Request) -> Response:
+        return await rest(request, "list_actions", query(request))
+
+    @router.get(f"{REST_PREFIX}/actions/runs/{{run_id}}", include_in_schema=False)
+    async def rest_action_run(request: Request, run_id: str) -> Response:
+        return await rest(request, "get_action_run", lambda: {"id": run_id})
+
+    @router.post(f"{REST_PREFIX}/actions/{{name}}/preview", include_in_schema=False)
+    async def rest_preview_action(request: Request, name: str) -> Response:
+        return await rest_body(request, "preview_action", {"name": name})
+
+    @router.post(f"{REST_PREFIX}/actions/{{name}}/submit", include_in_schema=False)
+    async def rest_submit_action(request: Request, name: str) -> Response:
+        return await rest_body(request, "submit_action", {"name": name})
+
     @router.get(f"{REST_PREFIX}/exports", include_in_schema=False)
     async def rest_exports(request: Request) -> Response:
         return await rest(request, "list_exports", query(request))
@@ -940,7 +1167,10 @@ def openapi_schema() -> dict[str, Any]:
     revision = param("revision", "query", {"type": "integer", "minimum": 1})
     errors = {
         "401": {"description": "Missing, invalid, revoked or expired token."},
-        "403": {"description": "revision_pinned: the token serves another revision."},
+        "403": {
+            "description": "revision_pinned: the token serves another revision; scope_required, "
+            "agent_not_allowed, action_not_allowed, forbidden: the action tools' refusals."
+        },
         "404": {"description": "Unknown revision or concept, or no snapshot yet."},
         "429": {"description": "Rate limit; see Retry-After."},
     }
@@ -954,6 +1184,22 @@ def openapi_schema() -> dict[str, Any]:
         }
 
     tools = {t["name"]: t for t in TOOLS}
+
+    def action_body(tool: str) -> dict[str, Any]:
+        props = tools[tool]["inputSchema"]["properties"]
+        return {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {k: v for k, v in props.items() if k != "name"},
+                        "required": ["key"],
+                    }
+                }
+            },
+        }
+
     paths = {
         f"{REST_PREFIX}/revisions": {
             "get": op(
@@ -1061,6 +1307,32 @@ def openapi_schema() -> dict[str, Any]:
                 },
             )
         },
+        f"{REST_PREFIX}/actions": {
+            "get": op(
+                tools["list_actions"]["description"],
+                [param("type", "query", {"type": "string"})],
+            )
+        },
+        f"{REST_PREFIX}/actions/{{name}}/preview": {
+            "post": op(
+                tools["preview_action"]["description"],
+                [param("name", "path", {"type": "string"}, required=True)],
+                requestBody=action_body("preview_action"),
+            )
+        },
+        f"{REST_PREFIX}/actions/{{name}}/submit": {
+            "post": op(
+                tools["submit_action"]["description"],
+                [param("name", "path", {"type": "string"}, required=True)],
+                requestBody=action_body("submit_action"),
+            )
+        },
+        f"{REST_PREFIX}/actions/runs/{{id}}": {
+            "get": op(
+                tools["get_action_run"]["description"],
+                [param("id", "path", {"type": "string"}, required=True)],
+            )
+        },
         f"{REST_PREFIX}/exports/{{rev}}.zip": {
             "get": {
                 **op(
@@ -1083,8 +1355,10 @@ def openapi_schema() -> dict[str, Any]:
             "title": "AutoOntology agent API",
             "version": __version__,
             "description": (
-                "Read-only access to the built ontology. The same tools are served over "
-                f"MCP (Streamable HTTP, JSON-RPC 2.0) at POST {MCP_PATH}."
+                "Access to the built ontology and its objects. Every operation reads, except "
+                "POST /actions/{name}/submit (a token with the propose or execute scope). "
+                "The same tools are served over MCP (Streamable HTTP, JSON-RPC 2.0) at "
+                f"POST {MCP_PATH}."
             ),
         },
         "paths": paths,
@@ -1095,7 +1369,11 @@ def openapi_schema() -> dict[str, Any]:
 
 def install(app: FastAPI, api: Api) -> AgentService:
     """Mount ``POST /mcp`` and ``/agent/v1/*`` on *app*."""
-    service = AgentService(api, lambda: getattr(app.state, "sparql", None))
+    service = AgentService(
+        api,
+        lambda: getattr(app.state, "sparql", None),
+        lambda: getattr(getattr(app.state, "auth", None), "mailer", None),
+    )
     app.state.agent = service
     app.include_router(build_router(service))
     return service
@@ -1111,6 +1389,10 @@ class TokenIn(BaseModel):
     revision_pin: int | None = Field(None, ge=1)
     #: days until the token expires (None: never)
     expires_days: Literal[30, 90] | None = None
+    #: read (always) | propose | execute (owners only) | action:<name> (allow-list)
+    scopes: list[str] = Field(default_factory=lambda: ["read"], max_length=30)
+    #: action allow-list (each becomes an ``action:<name>`` scope)
+    actions: list[str] = Field(default_factory=list, max_length=29)
 
 
 ONCE_NOTE = "This token is shown only once: copy it now."
@@ -1130,6 +1412,17 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
             return fn()
         except TokenError as exc:
             raise ApiError(exc.status, exc.code, exc.message) from exc
+
+    def require_execute(ctx: ProjectContext, scopes: tuple[str, ...] | list[str]) -> None:
+        """An ``execute`` token runs actions without a person approving each one: only
+        owners create or rotate one (editors: read and propose)."""
+        if "execute" in scopes and not (ctx.is_admin or ctx.role == "owner"):
+            raise ApiError(
+                403,
+                "forbidden",
+                "a token with the execute scope needs the owner role",
+                permission="logic.activate",
+            )
 
     @router.get("/agent/tokens")
     def list_agent_tokens(ctx: ProjectContext = Ctx) -> dict[str, Any]:
@@ -1151,11 +1444,17 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
             and ctx.store.get_snapshot(req.revision_pin, with_model=False) is None
         ):
             raise ApiError(404, "unknown_revision", f"unknown revision {req.revision_pin}")
+        try:
+            scopes = normalize_scopes(req.scopes, req.actions)
+        except ValueError as exc:
+            raise ApiError(400, "invalid_scope", str(exc)) from exc
+        require_execute(ctx, scopes)
         raw, record = ctx.store.agent_tokens().create(
             name,
             revision_pin=req.revision_pin,
             expires_days=req.expires_days,
             created_by=ctx.user_id,
+            scopes=scopes,
         )
         ctx.audit(
             "token.create",
@@ -1164,6 +1463,7 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
                 "name": name,
                 "revision_pin": req.revision_pin,
                 "expires_days": req.expires_days,
+                "scopes": list(scopes),
             },
         )
         return {"token": raw, "record": record.to_dict(), "note": ONCE_NOTE}
@@ -1178,6 +1478,8 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
         token_id: str, request: Request, ctx: ProjectContext = Ctx
     ) -> dict[str, Any]:
         ctx.require("agent.tokens")
+        current = guard(lambda: ctx.store.agent_tokens()._require(token_id))
+        require_execute(ctx, current.scopes)
         raw, record = guard(
             lambda: ctx.store.agent_tokens().rotate(token_id, created_by=ctx.user_id)
         )
@@ -1206,6 +1508,8 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
     def agent_tools(ctx: ProjectContext = Ctx) -> dict[str, Any]:  # noqa: ARG001 - access
         return {
             "tools": TOOLS,
+            "write_tools": sorted(WRITE_TOOLS),
+            "scopes": ["read", "propose", "execute"],
             "protocol": PROTOCOL,
             "mcp_path": MCP_PATH,
             "rest_base": REST_PREFIX,

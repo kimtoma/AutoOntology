@@ -40,10 +40,13 @@ project) and puts the role on the context; ``ctx.actor`` is the user's email (wh
 permission of :data:`PROJECT_PERMISSIONS` (403 ``forbidden``, the body's ``permission``
 names it); installation-wide routes call :func:`require_installation` (admins only). The
 role table is :data:`PROJECT_PERMISSIONS`: viewer reads, downloads and asks the
-playground; reviewer also decides reviews and applies them; editor also changes sources,
-starts builds and exports, manages agent tokens, saves logic drafts and activates
-functions; owner also manages the project and its members, reads its audit log, binds
-object types (key and title columns) and activates actions and workflows.
+playground; reviewer also decides reviews and applies them and approves action runs;
+editor also changes sources, starts builds and exports, manages agent tokens, saves logic
+drafts, activates functions and runs actions; owner also manages the project and its
+members, reads its audit log, binds object types (key and title columns), activates
+actions and workflows and creates agent tokens with the ``execute`` scope. ``action.run``
+and ``action.approve`` are defaults: an action's ``permission.min_role`` and a run's
+approval role (enforced by :mod:`autoontology.logic.actions`) decide per action.
 
 Archived projects: playground questions (:func:`playground_question`) stay allowed unless
 ``AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`` (then 409 ``project_archived`` too).
@@ -87,11 +90,17 @@ PROJECT_PERMISSIONS: dict[str, str] = {
     "functions.call": "viewer",  # evaluate functions (computed values, call, test)
     "review.decide": "reviewer",  # decide and undo review items
     "review.apply": "reviewer",  # apply runs (decisions -> a new revision)
+    # approve / reject pending action runs: the default; each run's approval role decides
+    # (reviewer or owner, autoontology/logic/actions.py)
+    "action.approve": "reviewer",
     "sources.write": "editor",  # add / delete sources, load samples
     "runs.start": "editor",  # build and export runs (and cancelling runs)
     "agent.tokens": "editor",  # list / create / rotate / revoke agent tokens, their usage
     "playground.manage": "editor",  # delete playground conversations (no per-user owner yet)
     "logic.edit": "editor",  # save drafts; activate / retire functions
+    # submit / revert actions: the default; each action's permission.min_role decides
+    # (routes need objects.read, the action runner checks the role)
+    "action.run": "editor",
     "project.manage": "owner",  # rename, archive, unarchive
     "members.manage": "owner",  # add / change / remove members
     "audit.read": "owner",  # the project's audit log

@@ -101,6 +101,7 @@ def test_role_table_is_cumulative():
     assert set(role_permissions("reviewer")) - set(role_permissions("viewer")) == {
         "review.decide",
         "review.apply",
+        "action.approve",
     }
     assert set(role_permissions("editor")) - set(role_permissions("reviewer")) == {
         "sources.write",
@@ -108,6 +109,7 @@ def test_role_table_is_cumulative():
         "agent.tokens",
         "playground.manage",
         "logic.edit",
+        "action.run",
     }
     assert set(role_permissions("owner")) - set(role_permissions("editor")) == {
         "project.manage",
@@ -161,6 +163,15 @@ ROUTES = [
     ("POST", f"{BETA}/logic/test", {"spec": LOGIC_SPEC, "keys": ["k"]}, "functions.call"),
     ("POST", f"{BETA}/logic/functions/f1/test", {"keys": ["k"]}, "functions.call"),
     ("POST", f"{BETA}/logic/functions/f1/call", {"key": "k"}, "functions.call"),
+    # actions: the routes need objects.read; the runner checks each action's roles
+    ("GET", f"{BETA}/actions", None, "objects.read"),
+    ("GET", f"{BETA}/actions/runs", None, "objects.read"),
+    ("GET", f"{BETA}/actions/runs/act_x", None, "objects.read"),
+    ("POST", f"{BETA}/actions/a1/preview", {"key": "k"}, "objects.read"),
+    ("POST", f"{BETA}/actions/a1/submit", {"key": "k"}, "objects.read"),
+    ("POST", f"{BETA}/actions/runs/act_x/approve", None, "objects.read"),
+    ("POST", f"{BETA}/actions/runs/act_x/reject", {"note": "n"}, "objects.read"),
+    ("POST", f"{BETA}/actions/runs/act_x/revert", None, "objects.read"),
     (
         "POST",
         f"{BETA}/sources",

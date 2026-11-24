@@ -996,7 +996,10 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
         }
 
     @router.get("/review/pending-count")
-    def review_pending_count(ctx: ProjectContext = Ctx) -> dict[str, Any]:
+    def review_pending_count(request: Request, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        from autoontology.logic import actions
+        from autoontology.web.actions_api import caller_of
+
         listing = api.inbox(project=ctx.store).listing(
             category=None, status="pending", page=1, size=1
         )
@@ -1004,6 +1007,10 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
             "pending": listing["counts"]["total"],
             "counts": listing["counts"],
             "unapplied": listing["unapplied"],
+            # pending action runs the caller may approve
+            "approvals": actions.pending_approvals(
+                ctx.store, caller_of(request, ctx, api.settings)
+            ),
         }
 
     @router.post("/review/{item_id:path}/decision")
@@ -1234,6 +1241,11 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
     from autoontology.web.logic_api import add_logic_routes
 
     add_logic_routes(router, api, ctx_dep)
+
+    # actions: preview, submit, approve, revert (autoontology/web/actions_api.py) ---------
+    from autoontology.web.actions_api import add_action_routes
+
+    add_action_routes(router, api, ctx_dep)
 
     # outside-agent tokens and usage (the agent surface itself: agent_api.install) ---------
     from autoontology.web.agent_api import add_management_routes

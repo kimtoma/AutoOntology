@@ -204,6 +204,10 @@ def test_mcp_initialize_ping_and_tools_list(agent):
         "get_object",
         "list_functions",
         "call_function",
+        "list_actions",
+        "preview_action",
+        "submit_action",
+        "get_action_run",
     ]
     assert all(t["description"] and t["inputSchema"]["type"] == "object" for t in tools)
 
@@ -383,6 +387,10 @@ def test_openapi_lists_only_agent_routes(agent):
         f"{REST}/objects/{{type}}/{{key}}",
         f"{REST}/functions",
         f"{REST}/functions/{{name}}/call",
+        f"{REST}/actions",
+        f"{REST}/actions/{{name}}/preview",
+        f"{REST}/actions/{{name}}/submit",
+        f"{REST}/actions/runs/{{id}}",
     }
     assert spec["components"]["securitySchemes"]["bearer"]["scheme"] == "bearer"
     # the agent routes stay out of the service's own schema

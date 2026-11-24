@@ -1563,10 +1563,11 @@ def _token_rows(tokens: list[dict[str, Any]]) -> str:
             (t["expires_at"] or "-")[:19],
             (t["created_at"] or "-")[:19],
             (t["last_used_at"] or "-")[:19],
+            _short(",".join(t.get("scopes") or ["read"]), 40),
         )
         for t in tokens
     ]
-    header = ("ID", "NAME", "STATUS", "REVISION", "EXPIRES", "CREATED", "LAST USED")
+    header = ("ID", "NAME", "STATUS", "REVISION", "EXPIRES", "CREATED", "LAST USED", "SCOPES")
     return base._table(header, rows)
 
 
@@ -1600,11 +1601,23 @@ def agent_tokens_create(
     expires_days: int = typer.Option(
         None, "--expires-days", metavar="DAYS", help=msg("help.agent.tokens.create.expires")
     ),
+    scopes: list[str] = typer.Option(
+        None, "--scope", metavar="SCOPE", help=msg("help.agent.tokens.create.scope")
+    ),
+    allowed: list[str] = typer.Option(
+        None, "--action", metavar="NAME", help=msg("help.agent.tokens.create.action")
+    ),
     as_json: bool = _JSON,
 ) -> None:
     if expires_days is not None and expires_days not in (30, 90):
         _error("invalid_request", msg("ops.agent_bad_expiry", value=expires_days), 2)
-    payload = {"name": name, "revision_pin": revision, "expires_days": expires_days}
+    payload = {
+        "name": name,
+        "revision_pin": revision,
+        "expires_days": expires_days,
+        "scopes": list(scopes or ["read"]),
+        "actions": list(allowed or []),
+    }
     body = _guard(lambda: _local().call("POST", "/agent/tokens", json=payload))
     if as_json:
         _json(body)
@@ -2538,6 +2551,204 @@ def logic_retire(
     _logic_status(kind, name, "retired", as_json)
 
 
+# --- actions ------------------------------------------------------------------------
+
+action_app = typer.Typer(help=msg("help.action"), no_args_is_help=True)
+
+
+def _action_seg(name: str) -> str:
+    if not name or len(name) > 200:
+        _error("unknown_action", f"no action {name[:80]!r}", 2)
+    return quote(name, safe="")
+
+
+def _run_rows(runs: list[dict[str, Any]]) -> str:
+    rows = [
+        (
+            r["id"],
+            _short(r["action"], 24),
+            _short(r["object_key"], 20),
+            r["status"] + (f" ({r['approval_role']})" if r["status"] == "pending_approval" else ""),
+            r["via"],
+            _short(r["requested_by"], 24),
+            (r["created_at"] or "-")[:19],
+        )
+        for r in runs
+    ]
+    return base._table(("ID", "ACTION", "KEY", "STATUS", "VIA", "BY", "CREATED"), rows)
+
+
+def _print_preview(p: dict[str, Any]) -> None:
+    typer.echo(
+        f"{p['label'] or p['action']} (v{p['version']}) -> {p['object_type_label']} {p['key']}: {p['title']}"
+    )
+    if p["params"]:
+        typer.echo("  params: " + ", ".join(f"{k}={_jsonable(v)}" for k, v in p["params"].items()))
+    for c in p["preconditions"]:
+        mark = "ok" if c["ok"] else "FAILED"
+        extra = f" ({c['error']['message']})" if c.get("error") else ""
+        typer.echo(f"  [{mark}] {c['message']}{extra}")
+    for e in p["effects"]:
+        if e.get("error"):
+            typer.echo(f"  {e['property']}: ERROR {e['error']['message']}")
+        else:
+            note = " (operational)" if e["operational"] else ""
+            typer.echo(
+                f"  {e['property']}: {_jsonable(e['old_value'])} -> {_jsonable(e['new_value'])}{note}"
+            )
+    a = p["approval"]
+    if a["required"]:
+        typer.echo(f"  approval: {a['role']} ({a['reason']})")
+    for n in p["notify"]:
+        typer.echo(f"  notify {n['recipients']} recipient(s): {_short(n['subject'], 60)}")
+    if not p["permission"]["allowed"]:
+        typer.echo(f"  needs the {p['permission']['min_role']} role")
+
+
+@action_app.command("list", help=msg("help.action.list"))
+def action_list(
+    type_name: str = typer.Option(None, "--type", help=msg("help.action.type")),
+    as_json: bool = _JSON,
+) -> None:
+    params = {"type": type_name} if type_name else {}
+    body = _guard(lambda: _local().call("GET", "/actions", params=params))
+    if as_json:
+        _json(body)
+        return
+    if not body["actions"]:
+        typer.echo(msg("ops.action_none"))
+        return
+    rows = [
+        (
+            a["name"],
+            _short(a["label"], 24),
+            _short(a["object_type_label"], 20),
+            a["permission"]["min_role"],
+            a["approval"].get("role", "none") + (" (when)" if a["approval"].get("when") else ""),
+            a["agent"],
+        )
+        for a in body["actions"]
+    ]
+    typer.echo(base._table(("NAME", "LABEL", "OBJECT TYPE", "RUN", "APPROVAL", "AGENT"), rows))
+
+
+@action_app.command("preview", help=msg("help.action.preview"))
+def action_preview(
+    name: str = typer.Argument(..., help=msg("help.action.name")),
+    key: str = typer.Argument(..., help=msg("help.action.key")),
+    params: list[str] = typer.Option(None, "--param", help=msg("help.action.param")),
+    as_json: bool = _JSON,
+) -> None:
+    payload = {"key": key, "params": _params(params)}
+    seg = _action_seg(name)
+    body = _guard(lambda: _local().call("POST", f"/actions/{seg}/preview", json=payload))
+    if as_json:
+        _json(body)
+        return
+    _print_preview(body["preview"])
+
+
+@action_app.command("run", help=msg("help.action.run"))
+def action_run(
+    name: str = typer.Argument(..., help=msg("help.action.name")),
+    key: str = typer.Argument(..., help=msg("help.action.key")),
+    params: list[str] = typer.Option(None, "--param", help=msg("help.action.param")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=msg("help.action.yes")),
+    idempotency_key: str = typer.Option(
+        None, "--idempotency-key", help=msg("help.action.idempotency")
+    ),
+    as_json: bool = _JSON,
+) -> None:
+    seg = _action_seg(name)
+    payload: dict[str, Any] = {"key": key, "params": _params(params)}
+    if not yes:
+        if as_json:
+            _error("invalid_arguments", msg("ops.action_json_needs_yes"), 2)
+        shown = _guard(lambda: _local().call("POST", f"/actions/{seg}/preview", json=payload))
+        _print_preview(shown["preview"])
+        if not shown["preview"]["can_submit"]:
+            _error("not_submittable", msg("ops.action_not_submittable", key=key), 1)
+        if not typer.confirm(msg("ops.action_confirm", name=name, key=key)):
+            raise typer.Exit(1)
+    if idempotency_key:
+        payload["idempotency_key"] = idempotency_key
+    body = _guard(lambda: _local().call("POST", f"/actions/{seg}/submit", json=payload))
+    from autoontology.logic import actions as runner
+
+    runner.wait_notifications()
+    if as_json:
+        _json(body)
+        return
+    typer.echo(msg("ops.action_run", id=body["run"]["id"], status=body["run"]["status"]))
+
+
+@action_app.command("runs", help=msg("help.action.runs"))
+def action_runs(
+    status: str = typer.Option(None, "--status", help=msg("help.action.status")),
+    action: str = typer.Option(None, "--action", help=msg("help.action.name")),
+    key: str = typer.Option(None, "--key", help=msg("help.action.key")),
+    limit: int = typer.Option(50, "--limit", min=1, max=500, help=msg("help.opt.size")),
+    as_json: bool = _JSON,
+) -> None:
+    params: dict[str, Any] = {"limit": limit}
+    params.update({k: v for k, v in (("status", status), ("action", action), ("key", key)) if v})
+    body = _guard(lambda: _local().call("GET", "/actions/runs", params=params))
+    if as_json:
+        _json(body)
+        return
+    if not body["runs"]:
+        typer.echo(msg("ops.action_no_runs"))
+        return
+    typer.echo(_run_rows(body["runs"]))
+
+
+def _action_run_seg(run_id: str) -> str:
+    if not re.fullmatch(r"act_[0-9a-f]{1,32}", run_id):
+        _error("unknown_run", f"no action run {run_id[:80]!r}", 2)
+    return run_id
+
+
+def _run_decision(run_id: str, verb: str, payload: dict[str, Any], as_json: bool) -> None:
+    seg = _action_run_seg(run_id)
+    body = _guard(lambda: _local().call("POST", f"/actions/runs/{seg}/{verb}", json=payload))
+    from autoontology.logic import actions as runner
+
+    runner.wait_notifications()
+    if as_json:
+        _json(body)
+        return
+    run = body["run"]
+    typer.echo(msg("ops.action_run", id=run["id"], status=run["status"]))
+    if run.get("error"):
+        typer.echo(f"  {run['error']}")
+
+
+@action_app.command("approve", help=msg("help.action.approve"))
+def action_approve(
+    run_id: str = typer.Argument(..., help=msg("help.action.run_id")),
+    as_json: bool = _JSON,
+) -> None:
+    _run_decision(run_id, "approve", {}, as_json)
+
+
+@action_app.command("reject", help=msg("help.action.reject"))
+def action_reject(
+    run_id: str = typer.Argument(..., help=msg("help.action.run_id")),
+    note: str = typer.Option("", "--note", help=msg("help.action.note")),
+    as_json: bool = _JSON,
+) -> None:
+    _run_decision(run_id, "reject", {"note": note}, as_json)
+
+
+@action_app.command("revert", help=msg("help.action.revert"))
+def action_revert(
+    run_id: str = typer.Argument(..., help=msg("help.action.run_id")),
+    force: bool = typer.Option(False, "--force", help=msg("help.action.force")),
+    as_json: bool = _JSON,
+) -> None:
+    _run_decision(run_id, "revert", {"force": force}, as_json)
+
+
 def register(app: typer.Typer, source_app: typer.Typer) -> None:
     """Add the parity commands to the CLI (called at the end of :mod:`autoontology.cli`)."""
     app.add_typer(ontology_app, name="ontology")
@@ -2552,6 +2763,7 @@ def register(app: typer.Typer, source_app: typer.Typer) -> None:
     app.add_typer(member_app, name="member")
     app.add_typer(object_app, name="object")
     app.add_typer(logic_app, name="logic")
+    app.add_typer(action_app, name="action")
     app.command("audit", help=msg("help.audit"))(audit_cmd)
     source_app.command("freshness", help=msg("help.sources.freshness"))(sources_freshness)
     # `sources freshness` (the UI's page name) is `source freshness`

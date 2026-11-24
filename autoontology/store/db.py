@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from autoontology.playground.store import PlaygroundStore
+    from autoontology.store.actions import ActionRuns
     from autoontology.store.agent_tokens import AgentTokens
     from autoontology.store.decisions import DecisionStore
     from autoontology.store.logic import LogicDefs
@@ -2280,6 +2281,12 @@ class ProjectStore:
         from autoontology.store.objects import ObjectEdits
 
         return ObjectEdits(self.store, project_id=self.id)
+
+    def action_runs(self) -> ActionRuns:
+        """The project's :class:`~autoontology.store.actions.ActionRuns`."""
+        from autoontology.store.actions import ActionRuns
+
+        return ActionRuns(self.store, project_id=self.id)
 
     def logic_defs(self) -> LogicDefs:
         """The project's :class:`~autoontology.store.logic.LogicDefs`."""

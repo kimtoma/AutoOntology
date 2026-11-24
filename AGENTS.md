@@ -39,7 +39,9 @@ uv run autoontology ontology concepts -q 계약 --json   # every UI page has com
 #   samples list|load, exports list|show|get|zip, playground chat|sql|sparql|index,
 #   settings show|test|set|restart, agent tokens list|create|rotate|revoke, agent usage,
 #   project list|show|create|rename|archive|unarchive,
-#   user create|list|disable|enable|link, member list|add|role|remove, audit
+#   user create|list|disable|enable|link, member list|add|role|remove, audit,
+#   object types|bind|list|get, logic list|show|apply|validate|test|activate|retire,
+#   action list|preview|run|runs|approve|reject|revert
 #   (docs/GUIDE.md "The same from a terminal"; outside agents: POST /mcp, /agent/v1)
 uv run ao -p <slug> build                            # --project/-p (or AUTOONTOLOGY_PROJECT) picks
 #   the project for any command; API: /api/projects/<slug>/... (/api/... = the default project)

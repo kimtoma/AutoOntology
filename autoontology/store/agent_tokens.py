@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,48 @@ from autoontology.store.db import Store, now_iso
 TOKEN_PREFIX = "aok_"
 #: agent_calls keeps the newest rows only
 MAX_CALLS = 5000
+#: what a token may do: ``read`` (every token), ``propose`` (submit actions that always
+#: wait for approval), ``execute`` (submit actions under their own approval rules);
+#: ``action:<name>`` entries limit the write scopes to those actions
+SCOPES: tuple[str, ...] = ("read", "propose", "execute")
+ACTION_SCOPE = "action:"
+MAX_SCOPES = 30
+_ACTION_NAME = re.compile(r"^[^\W\d]\w{0,63}$")
+
+
+def normalize_scopes(scopes: Any, actions: Any = None) -> tuple[str, ...]:
+    """*scopes* (+ *actions* as ``action:<name>``) checked and ordered: ``read`` always,
+    then ``propose`` / ``execute``, then the action allow-list. ValueError when one is
+    unknown."""
+    items = [str(s).strip() for s in (scopes or [])]
+    items += [ACTION_SCOPE + str(a).strip() for a in (actions or [])]
+    if len(items) > MAX_SCOPES:
+        raise ValueError(f"at most {MAX_SCOPES} scopes")
+    named, allowed = {"read"}, []
+    for item in items:
+        if item in SCOPES:
+            named.add(item)
+        elif item.startswith(ACTION_SCOPE) and _ACTION_NAME.match(item[len(ACTION_SCOPE) :]):
+            if item not in allowed:
+                allowed.append(item)
+        else:
+            raise ValueError(
+                f"unknown scope {item[:80]!r} (read, propose, execute or action:<name>)"
+            )
+    return (*[s for s in SCOPES if s in named], *allowed)
+
+
+def write_mode(scopes: tuple[str, ...] | list[str]) -> str | None:
+    """``execute`` / ``propose`` (the highest write scope) or None (read only)."""
+    if "execute" in scopes:
+        return "execute"
+    return "propose" if "propose" in scopes else None
+
+
+def allowed_actions(scopes: tuple[str, ...] | list[str]) -> tuple[str, ...] | None:
+    """The action allow-list of *scopes* (None: every action)."""
+    names = tuple(s[len(ACTION_SCOPE) :] for s in scopes if s.startswith(ACTION_SCOPE))
+    return names or None
 
 
 def token_hash(raw: str) -> str:
@@ -54,8 +97,8 @@ class AgentToken:
     project_id: str = ""
     #: the user who created (or last rotated) it; None = before accounts / the CLI
     created_by: str | None = None
-    #: what the token may do (schema v10): ``read`` (every token), ``propose``,
-    #: ``execute`` -- enforced by the action tools
+    #: what the token may do (schema v10, :data:`SCOPES`): ``read`` (every token),
+    #: ``propose``, ``execute``, ``action:<name>`` -- enforced by the action tools
     scopes: tuple[str, ...] = ("read",)
 
     @property
@@ -130,8 +173,11 @@ class AgentTokens:
         revision_pin: int | None = None,
         expires_days: int | None = None,
         created_by: str | None = None,
+        scopes: Any = ("read",),
     ) -> tuple[str, AgentToken]:
-        """``(raw token, record)``; the raw token is not kept anywhere."""
+        """``(raw token, record)``; the raw token is not kept anywhere. *scopes*: see
+        :func:`normalize_scopes` (ValueError when invalid)."""
+        scope_list = normalize_scopes(scopes)
         raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
         created = datetime.now(timezone.utc)
         expires = (
@@ -143,7 +189,7 @@ class AgentTokens:
         with self.store._conn() as conn:
             conn.execute(
                 "INSERT INTO agent_tokens (id, name, token_hash, revision_pin, expires_at, "
-                "created_at, project_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "created_at, project_id, created_by, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     token_id,
                     name,
@@ -153,6 +199,7 @@ class AgentTokens:
                     created.isoformat(timespec="milliseconds"),
                     self.project_id,
                     created_by,
+                    json.dumps(list(scope_list)),
                 ),
             )
         found = self.get(token_id)

@@ -10,7 +10,9 @@ aliases), over :mod:`autoontology.objects.service`.
   type (``computed=1``: each with the values of the type's active functions);
 * ``GET /objects/{type}/{key}`` -- one object: values with the edit layer applied, the
   edit marks (conflicts, operational properties), links, history and ``computed`` (the
-  active functions' values: ``{name: {value, type, error?}}``, ``functions.call``);
+  active functions' values: ``{name: {value, type, error?}}``, ``functions.call``) and
+  ``actions`` (the type's active actions: ``[{name, label, available, reason?}]``,
+  available = the caller's role and the preconditions at default parameters);
 * ``GET /objects/{type}/{key}/links/{link}?then=&limit=&offset=`` -- the objects a link
   reaches (``then``: one more hop).
 
@@ -22,7 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 import anyio
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from autoontology.logic import functions
@@ -128,7 +130,12 @@ def add_object_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         return found
 
     @router.get("/objects/{type_name}/{key}")
-    def object_detail(type_name: str, key: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+    def object_detail(
+        type_name: str, key: str, request: Request, ctx: ProjectContext = Ctx
+    ) -> dict[str, Any]:
+        from autoontology.logic import actions
+        from autoontology.web.actions_api import caller_of
+
         ctx.require("objects.read")
         found = object_call(lambda: service.get_object(api.settings, ctx.store, type_name, key))
         if ctx.can("functions.call"):
@@ -137,6 +144,10 @@ def add_object_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
                     api.settings, ctx.store, found["type"]["name"], [found]
                 )
             )
+        caller = caller_of(request, ctx, api.settings)
+        found["actions"] = object_call(
+            lambda: actions.available(api.settings, ctx.store, found["type"]["name"], found, caller)
+        )
         return found
 
     @router.get("/objects/{type_name}/{key}/links/{link}")

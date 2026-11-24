@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -308,6 +310,16 @@ class ObjectEdits:
         self.store = store
         self.project_id = project_id or store.default_project_id
 
+    @contextmanager
+    def _use(self, conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
+        """*conn* (a caller's open transaction: the action runner writes several edits
+        and its run row atomically), else a connection of its own."""
+        if conn is not None:
+            yield conn
+        else:
+            with self.store._conn() as own:
+                yield own
+
     def add(
         self,
         object_type: str,
@@ -320,9 +332,10 @@ class ObjectEdits:
         operational: bool = False,
         action_run_id: str | None = None,
         edited_by: str = "",
+        conn: sqlite3.Connection | None = None,
     ) -> ObjectEdit:
-        with self.store._conn() as conn:
-            cur = conn.execute(
+        with self._use(conn) as db:
+            cur = db.execute(
                 "INSERT INTO object_edits (project_id, object_type, object_key, property, "
                 "old_value_json, new_value_json, source_value_json, operational, "
                 "action_run_id, edited_by, edited_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -341,9 +354,11 @@ class ObjectEdits:
                 ),
             )
             edit_id = cur.lastrowid
-        found = self.get(int(edit_id or 0))
-        assert found is not None
-        return found
+            row = db.execute(
+                "SELECT * FROM object_edits WHERE project_id = ? AND id = ?",
+                (self.project_id, edit_id),
+            ).fetchone()
+        return _edit(row)
 
     def get(self, edit_id: int) -> ObjectEdit | None:
         with self.store._conn() as conn:
@@ -354,7 +369,11 @@ class ObjectEdits:
         return _edit(row) if row else None
 
     def current(
-        self, object_type: str, keys: list[str] | None = None
+        self,
+        object_type: str,
+        keys: list[str] | None = None,
+        *,
+        conn: sqlite3.Connection | None = None,
     ) -> dict[tuple[str, str], ObjectEdit]:
         """The newest edit that is not reverted per ``(object key, property)`` of
         *object_type* (only *keys*, when given)."""
@@ -368,8 +387,8 @@ class ObjectEdits:
                 return {}
             sql += f" AND object_key IN ({', '.join('?' * len(keys))})"
             args += [str(k) for k in keys]
-        with self.store._conn() as conn:
-            rows = conn.execute(sql + " ORDER BY id", args).fetchall()
+        with self._use(conn) as db:
+            rows = db.execute(sql + " ORDER BY id", args).fetchall()
         out: dict[tuple[str, str], ObjectEdit] = {}
         for row in rows:  # ascending id: the newest wins
             edit = _edit(row)
@@ -386,26 +405,37 @@ class ObjectEdits:
             ).fetchall()
         return [_edit(r) for r in rows]
 
-    def by_run(self, action_run_id: str) -> list[ObjectEdit]:
-        with self.store._conn() as conn:
-            rows = conn.execute(
+    def by_run(
+        self, action_run_id: str, *, conn: sqlite3.Connection | None = None
+    ) -> list[ObjectEdit]:
+        with self._use(conn) as db:
+            rows = db.execute(
                 "SELECT * FROM object_edits WHERE project_id = ? AND action_run_id = ? ORDER BY id",
                 (self.project_id, action_run_id),
             ).fetchall()
         return [_edit(r) for r in rows]
 
-    def revert(self, edit_id: int) -> ObjectEdit | None:
+    def revert(self, edit_id: int, *, conn: sqlite3.Connection | None = None) -> ObjectEdit | None:
         """Mark one edit reverted (the property shows its previous edit, or the source
         value, again); None when there is no such edit or it was already reverted."""
-        with self.store._conn() as conn:
-            cur = conn.execute(
+        with self._use(conn) as db:
+            cur = db.execute(
                 "UPDATE object_edits SET reverted_at = ? "
                 "WHERE project_id = ? AND id = ? AND reverted_at IS NULL",
                 (now_iso(), self.project_id, edit_id),
             )
-        return self.get(edit_id) if cur.rowcount else None
+            if not cur.rowcount:
+                return None
+            row = db.execute(
+                "SELECT * FROM object_edits WHERE project_id = ? AND id = ?",
+                (self.project_id, edit_id),
+            ).fetchone()
+        return _edit(row)
 
-    def revert_run(self, action_run_id: str) -> list[ObjectEdit]:
+    def revert_run(
+        self, action_run_id: str, *, conn: sqlite3.Connection | None = None
+    ) -> list[ObjectEdit]:
         """Revert every edit an action run made; returns the edits reverted now."""
-        pending = [e for e in self.by_run(action_run_id) if e.reverted_at is None]
-        return [r for r in (self.revert(e.id) for e in pending) if r is not None]
+        pending = [e for e in self.by_run(action_run_id, conn=conn) if e.reverted_at is None]
+        done = (self.revert(e.id, conn=conn) for e in pending)
+        return [r for r in done if r is not None]
