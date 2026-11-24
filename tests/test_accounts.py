@@ -60,7 +60,7 @@ def _v8_store(tmp_path, monkeypatch) -> Store:
 
 def test_v8_store_migrates_to_v9_without_touching_its_rows(tmp_path, monkeypatch):
     store = _v8_store(tmp_path, monkeypatch)
-    assert store.migrate() == 9 == db.MIGRATIONS[-1][0]
+    assert store.migrate() == db.MIGRATIONS[-1][0] >= 9
     with sqlite3.connect(store.path) as conn:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"users", "sessions", "login_tokens", "memberships", "audit_log"} <= tables
@@ -78,8 +78,8 @@ def test_v9_is_idempotent_when_rerun(tmp_path, monkeypatch):
     store.migrate()
     Accounts(store).create_user("a@example.com")
     with sqlite3.connect(store.path) as conn:  # a downgraded schema_version re-runs v9
-        conn.execute("DELETE FROM schema_version WHERE version = 9")
-    assert store.migrate() == 9
+        conn.execute("DELETE FROM schema_version WHERE version >= 9")
+    assert store.migrate() == db.MIGRATIONS[-1][0]
     assert [u.email for u in Accounts(store).list_users()] == ["a@example.com"]
 
 

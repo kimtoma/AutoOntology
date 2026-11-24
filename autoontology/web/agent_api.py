@@ -13,7 +13,10 @@ One tool layer (:data:`TOOLS`, :meth:`AgentService.run_tool`) behind two surface
 
 Every request needs ``Authorization: Bearer aok_...`` -- from localhost too -- and is
 answered 401 without a valid (unrevoked, unexpired) token. A token with a revision pin is
-served at that revision only (another explicit revision: ``revision_pinned``). Per token
+served at that revision only (another explicit revision: ``revision_pinned``). The object
+tools (``list_object_types``, ``search_objects``, ``get_object``) read live source rows
+through the object types bound to the latest snapshot -- objects have no revisions -- so a
+pinned token may use them only while its pin is the latest revision. Per token
 at most :func:`rate_per_min` requests a minute (429 + ``Retry-After``), request bodies up
 to :data:`MAX_BODY_BYTES` (413). Every tool call is recorded in ``agent_calls``; the raw
 token is never logged or stored.
@@ -40,6 +43,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from autoontology import __version__
+from autoontology.objects.reader import ObjectError
 from autoontology.playground.sparql import DEFAULT_LIMIT, MAX_LIMIT, MAX_QUERY_CHARS, SparqlError
 from autoontology.store.agent_tokens import AgentToken, AgentTokens, TokenError
 from autoontology.store.db import ProjectNotFound, ProjectStore
@@ -119,6 +123,23 @@ class ExportsArgs(_Args):
     pass
 
 
+class ObjectTypesArgs(_Args):
+    status: Literal["active", "proposed", "broken", "retired", "all"] = "active"
+
+
+class SearchObjectsArgs(_Args):
+    type: str = Field(min_length=1, max_length=200)
+    query: str = Field("", max_length=200)
+    filters: dict[str, str] = Field(default_factory=dict, max_length=5)
+    limit: int = Field(10, ge=1, le=50)
+    offset: int = Field(0, ge=0, le=1_000_000)
+
+
+class GetObjectArgs(_Args):
+    type: str = Field(min_length=1, max_length=200)
+    key: str = Field(min_length=1, max_length=200)
+
+
 _REVISION = {
     "type": "integer",
     "minimum": 1,
@@ -193,9 +214,57 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], type[_Args]]] = [
         {},
         ExportsArgs,
     ),
+    (
+        "list_object_types",
+        "List the object types: classes bound to a source table, with their key and title "
+        "columns, columns and links. Objects are the table's rows; only active types can "
+        "be read.",
+        {
+            "status": {
+                "type": "string",
+                "enum": ["active", "proposed", "broken", "retired", "all"],
+                "default": "active",
+            }
+        },
+        ObjectTypesArgs,
+    ),
+    (
+        "search_objects",
+        "Search the objects (source rows) of an object type by key or title text, with "
+        "optional exact column filters. Values include edits made by actions; edited "
+        "properties are marked (conflict: the source changed after the edit).",
+        {
+            "type": {"type": "string", "description": "Object type name, e.g. term-t-1."},
+            "query": {"type": "string", "maxLength": 200, "description": "Key or title text."},
+            "filters": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "maxProperties": 5,
+                "description": "Column = value filters (compared as text).",
+            },
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+            "offset": {"type": "integer", "minimum": 0, "default": 0},
+        },
+        SearchObjectsArgs,
+    ),
+    (
+        "get_object",
+        "One object by its key: values (with edits), the source values, edit marks, its "
+        "links to other object types and the edit history.",
+        {
+            "type": {"type": "string", "description": "Object type name."},
+            "key": {"type": "string", "description": "The object's key value."},
+        },
+        GetObjectArgs,
+    ),
 ]
 
-_REQUIRED = {"sparql_query": ["query"], "search_concepts": ["query"]}
+_REQUIRED = {
+    "sparql_query": ["query"],
+    "search_concepts": ["query"],
+    "search_objects": ["type"],
+    "get_object": ["type", "key"],
+}
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -321,6 +390,8 @@ class AgentService:
             raise ToolError(exc.status, exc.error, exc.detail) from exc
         except SparqlError as exc:
             raise ToolError(exc.status, exc.code, exc.message) from exc
+        except ObjectError as exc:
+            raise ToolError(exc.status, exc.code, exc.message) from exc
 
     def _revision(self, token: AgentToken, asked: int | None) -> int | None:
         pin = token.revision_pin
@@ -404,6 +475,50 @@ class AgentService:
             exports = [e for e in exports if e["revision"] == token.revision_pin]
         return {"revision": self._served(token), "exports": exports}
 
+    def _objects_view(self, token: AgentToken) -> ProjectStore:
+        """The token's project for an object tool: objects are live (bound to the latest
+        snapshot), so a pinned token may read them only while its pin is the latest."""
+        view = self.project(token)
+        latest = view.latest_revision()
+        if token.revision_pin is not None and token.revision_pin != latest:
+            raise ToolError(
+                403,
+                "revision_pinned",
+                f"this token is pinned to revision {token.revision_pin}; objects are read "
+                f"live through the latest revision (r{latest})",
+            )
+        return view
+
+    def _tool_list_object_types(self, token: AgentToken, args: ObjectTypesArgs) -> dict[str, Any]:
+        from autoontology.objects import service as objects
+
+        view = self._objects_view(token)
+        status = None if args.status == "all" else args.status
+        types = objects.list_types(view, status=status)
+        return {"revision": self._served(token), "types": [t.to_dict() for t in types]}
+
+    def _tool_search_objects(self, token: AgentToken, args: SearchObjectsArgs) -> dict[str, Any]:
+        from autoontology.objects import service as objects
+
+        found = objects.search(
+            self.api.settings,
+            self._objects_view(token),
+            args.type,
+            q=args.query,
+            filters=args.filters,
+            limit=args.limit,
+            offset=args.offset,
+        )
+        return {"revision": self._served(token), **found}
+
+    def _tool_get_object(self, token: AgentToken, args: GetObjectArgs) -> dict[str, Any]:
+        from autoontology.objects import service as objects
+
+        found = objects.get_object(
+            self.api.settings, self._objects_view(token), args.type, args.key
+        )
+        return {"revision": self._served(token), **found}
+
     def instructions(self, token: AgentToken) -> str:
         ws = self.project(token).name
         latest = self.latest_revision(token)
@@ -420,7 +535,8 @@ class AgentService:
         return text + (
             "All tools are read-only. Start with get_ontology_summary or search_concepts, "
             "then get_concept for definitions, relations and evidence; sparql_query runs "
-            "SPARQL over the RDF/OWL graph."
+            "SPARQL over the RDF/OWL graph. list_object_types, search_objects and get_object "
+            "read the business objects (source rows) of bound classes."
         )
 
 
@@ -661,6 +777,33 @@ def build_router(service: AgentService) -> APIRouter:
             return _error(exc.status, exc.code, exc.message)
         return JSONResponse(data)
 
+    @router.get(f"{REST_PREFIX}/objects/types", include_in_schema=False)
+    async def rest_object_types(request: Request) -> Response:
+        return await rest(request, "list_object_types", query(request))
+
+    @router.get(f"{REST_PREFIX}/objects/{{type_name}}", include_in_schema=False)
+    async def rest_objects(request: Request, type_name: str) -> Response:
+        def build() -> dict[str, Any]:
+            params: dict[str, Any] = {"type": type_name}
+            filters: dict[str, str] = {}
+            for name, value in request.query_params.multi_items():
+                if name == "filter":
+                    column, _, wanted = value.partition("=")
+                    filters[column] = wanted
+                elif name == "q":
+                    params["query"] = value
+                else:
+                    params[name] = value
+            if filters:
+                params["filters"] = filters
+            return _ints(params, "limit", "offset")
+
+        return await rest(request, "search_objects", build)
+
+    @router.get(f"{REST_PREFIX}/objects/{{type_name}}/{{key}}", include_in_schema=False)
+    async def rest_object(request: Request, type_name: str, key: str) -> Response:
+        return await rest(request, "get_object", lambda: {"type": type_name, "key": key})
+
     @router.get(f"{REST_PREFIX}/exports", include_in_schema=False)
     async def rest_exports(request: Request) -> Response:
         return await rest(request, "list_exports", query(request))
@@ -768,6 +911,44 @@ def openapi_schema() -> dict[str, Any]:
             )
         },
         f"{REST_PREFIX}/exports": {"get": op(tools["list_exports"]["description"])},
+        f"{REST_PREFIX}/objects/types": {
+            "get": op(
+                tools["list_object_types"]["description"],
+                [
+                    param(
+                        "status",
+                        "query",
+                        tools["list_object_types"]["inputSchema"]["properties"]["status"],
+                    )
+                ],
+            )
+        },
+        f"{REST_PREFIX}/objects/{{type}}": {
+            "get": op(
+                tools["search_objects"]["description"],
+                [
+                    param("type", "path", {"type": "string"}, required=True),
+                    param("q", "query", {"type": "string", "maxLength": 200}),
+                    param(
+                        "filter",
+                        "query",
+                        {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+                        description="column=value (repeatable)",
+                    ),
+                    param("limit", "query", {"type": "integer", "minimum": 1, "maximum": 50}),
+                    param("offset", "query", {"type": "integer", "minimum": 0}),
+                ],
+            )
+        },
+        f"{REST_PREFIX}/objects/{{type}}/{{key}}": {
+            "get": op(
+                tools["get_object"]["description"],
+                [
+                    param("type", "path", {"type": "string"}, required=True),
+                    param("key", "path", {"type": "string"}, required=True),
+                ],
+            )
+        },
         f"{REST_PREFIX}/exports/{{rev}}.zip": {
             "get": {
                 **op(

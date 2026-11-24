@@ -12,6 +12,10 @@ Categories, in this order:
   no Term (concepts new since the previous revision first);
 * ``aliases`` (``alias:<term id>|<alias>``): names of folded concepts the alias policy
   kept off a Term (instance-like names, column names);
+* ``objects`` (``ob:<class local>``): object types inferred from the latest snapshot (a
+  class backed by one table, its key and title columns, :mod:`autoontology.objects`);
+  accepting verifies the key on the source and makes the type active at once (no apply
+  run), rejecting retires it;
 * ``stale_sources`` (``src:<source name>``): sources whose inputs changed since the last
   build (``web/freshness.py``); the action is a build, not a decision.
 * ``folds`` (``fold:<concept id>``), listed only when asked for (``category=folds``): the
@@ -31,7 +35,7 @@ from __future__ import annotations
 from typing import Any
 
 from autoontology.store.alignments import AlignmentRecord, AlignmentStore
-from autoontology.store.db import Store
+from autoontology.store.db import Store, scoped
 from autoontology.store.decisions import ACCEPT_RELATIONS, Decision, DecisionStore, alias_key
 from autoontology.store.documents import DocumentStore
 
@@ -40,6 +44,7 @@ CATEGORIES: tuple[str, ...] = (
     "axioms",
     "unaligned",
     "aliases",
+    "objects",
     "stale_sources",
     "folds",
 )
@@ -51,6 +56,7 @@ PREFIX_OF: dict[str, str] = {
     "axioms": "ax",
     "unaligned": "un",
     "aliases": "alias",
+    "objects": "ob",
     "stale_sources": "src",
 }
 CATEGORY_OF: dict[str, str] = {v: k for k, v in PREFIX_OF.items()}
@@ -61,6 +67,7 @@ KIND_OF: dict[str, str] = {
     "axioms": "alignment",
     "unaligned": "concept",
     "aliases": "alias",
+    "objects": "object",
 }
 AXIOM_RELATIONS: tuple[str, ...] = ("related", "narrower", "broader")
 AXIOM_MIN_CONFIDENCE = 0.6
@@ -133,7 +140,7 @@ class Inbox:
         self.decisions = DecisionStore(store)
         self.items: dict[str, dict[str, Any]] = {}
         self._decided: dict[tuple[str, str], Decision] = {
-            (d.kind, d.subject_key): d for d in self.decisions.list()
+            (d.kind, d.subject_key): d for d in self.decisions.list(actionable=True)
         }
         self._collect()
 
@@ -280,6 +287,8 @@ class Inbox:
                     alias=alias,
                     suggested="reject",
                 )
+        for otype in scoped(self.store).object_types().list("proposed"):
+            self._add_object(otype)
         for f in self.freshness:
             if f.get("stale"):
                 self.items[f"src:{f['name']}"] = {
@@ -305,6 +314,23 @@ class Inbox:
             ):
                 continue
             self.items[item["id"]] = {**item, "decision": d.to_dict()}
+
+    def _add_object(self, otype: Any) -> None:
+        item_id = f"ob:{otype.class_local}"
+        decision = self._decided.get(("object", otype.class_local))
+        self.items[item_id] = {
+            "id": item_id,
+            "category": "objects",
+            "concept": None,
+            "term": None,
+            "relation": None,
+            "confidence": None,
+            "rationale": "",
+            "evidence": [],
+            "suggested_action": "accept" if otype.key else "reject",
+            "object_type": otype.to_dict(),
+            "decision": decision.to_dict() if decision else None,
+        }
 
     def _add(
         self,
@@ -437,9 +463,11 @@ class Inbox:
             )
         item = self.item(item_id)
         kind = KIND_OF[category]
-        allowed = {"alignment": ("accept", "reject"), "alias": ("accept", "reject")}.get(
-            kind, ("acknowledge",)
-        )
+        allowed = {
+            "alignment": ("accept", "reject"),
+            "alias": ("accept", "reject"),
+            "object": ("accept", "reject"),
+        }.get(kind, ("acknowledge",))
         if decision not in allowed:
             raise ReviewError(
                 400, "invalid_decision", f"a {category} item takes {' or '.join(allowed)}"
@@ -481,6 +509,8 @@ class Inbox:
             payload.update(term_id=subject.partition("|")[0], alias=item.get("alias", ""))
         if kind == "concept":
             payload["concept_name"] = (item["concept"] or {}).get("name", "")
+        if kind == "object":
+            payload["class"] = subject
         return self.decisions.put(
             Decision(kind, subject, decision, payload, note=note, decided_by=decided_by)
         )

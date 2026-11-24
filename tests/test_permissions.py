@@ -90,7 +90,12 @@ def env(isolated_env, monkeypatch):
 
 
 def test_role_table_is_cumulative():
-    assert role_permissions("viewer") == ["project.read", "exports.read", "playground.ask"]
+    assert role_permissions("viewer") == [
+        "project.read",
+        "exports.read",
+        "playground.ask",
+        "objects.read",
+    ]
     assert set(role_permissions("reviewer")) - set(role_permissions("viewer")) == {
         "review.decide",
         "review.apply",
@@ -100,6 +105,12 @@ def test_role_table_is_cumulative():
         "runs.start",
         "agent.tokens",
         "playground.manage",
+    }
+    assert set(role_permissions("owner")) - set(role_permissions("editor")) == {
+        "project.manage",
+        "members.manage",
+        "audit.read",
+        "objects.manage",
     }
     assert set(role_permissions("owner")) == set(PROJECT_PERMISSIONS)
     assert role_permissions(None) == role_permissions("god") == []
@@ -120,6 +131,14 @@ ROUTES = [
     ("POST", f"{BETA}/review/x:1/decision", {"decision": "accept"}, "review.decide"),
     ("DELETE", f"{BETA}/review/x:1/decision", None, "review.decide"),
     ("POST", f"{BETA}/runs", {"kind": "apply"}, "review.apply"),
+    ("GET", f"{BETA}/objects/types", None, "objects.read"),
+    ("GET", f"{BETA}/objects/types/term-x", None, "objects.read"),
+    ("GET", f"{BETA}/objects/term-x", None, "objects.read"),
+    ("GET", f"{BETA}/objects/term-x/k1", None, "objects.read"),
+    ("GET", f"{BETA}/objects/term-x/k1/links/l1", None, "objects.read"),
+    ("PUT", f"{BETA}/objects/types/term-x", {"key": "id"}, "objects.manage"),
+    ("POST", f"{BETA}/review/ob:term-x/decision", {"decision": "accept"}, "objects.manage"),
+    ("DELETE", f"{BETA}/review/ob:term-x/decision", None, "objects.manage"),
     (
         "POST",
         f"{BETA}/sources",

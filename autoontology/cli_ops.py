@@ -2186,6 +2186,136 @@ def audit_cmd(
 # --- registration -------------------------------------------------------------------
 
 
+# --- objects ------------------------------------------------------------------------
+
+object_app = typer.Typer(help=msg("help.object"), no_args_is_help=True)
+
+
+def _object_type(name: str) -> str:
+    """*name* (a type's name ``term-...``, or its label) as one URL path segment."""
+    if not name or len(name) > 200:
+        _error("unknown_object_type", f"no object type {name[:80]!r}", 2)
+    if not re.fullmatch(r"(term|concept|ot)[-_][A-Za-z0-9_-]+", name):
+        body = _guard(lambda: _local().call("GET", "/objects/types"))
+        wanted = name.strip().casefold()
+        match = [t["name"] for t in body["types"] if str(t["label"]).casefold() == wanted]
+        if len(match) == 1:
+            name = match[0]
+    return quote(name, safe="")
+
+
+def _type_rows(types: list[dict[str, Any]]) -> str:
+    rows = [
+        (
+            t["name"],
+            _short(t["label"], 30),
+            t["status"] + (f" ({_short(t['broken_reason'], 40)})" if t["broken_reason"] else ""),
+            _short(f"{t['source']}:{t['schema'] + '.' if t['schema'] else ''}{t['table']}", 40),
+            t["key"] or "-",
+            t["title_column"] or "-",
+            "yes" if t["key_checked"] else "no",
+        )
+        for t in types
+    ]
+    return base._table(("NAME", "LABEL", "STATUS", "TABLE", "KEY", "TITLE", "CHECKED"), rows)
+
+
+@object_app.command("types", help=msg("help.object.types"))
+def object_types(
+    status: str = typer.Option(None, "--status", help=msg("help.object.types.status")),
+    as_json: bool = _JSON,
+) -> None:
+    params = {"status": status} if status else {}
+    body = _guard(lambda: _local().call("GET", "/objects/types", params=params))
+    if as_json:
+        _json(body)
+        return
+    if not body["types"]:
+        typer.echo(msg("ops.object_no_types"))
+        return
+    typer.echo(_type_rows(body["types"]))
+
+
+@object_app.command("bind", help=msg("help.object.bind"))
+def object_bind(
+    name: str = typer.Argument(..., help=msg("help.object.type")),
+    key: str = typer.Option(None, "--key", help=msg("help.object.bind.key")),
+    title: str = typer.Option(None, "--title", help=msg("help.object.bind.title")),
+    as_json: bool = _JSON,
+) -> None:
+    payload = {k: v for k, v in (("key", key), ("title", title)) if v is not None}
+    seg = _object_type(name)
+    body = _guard(lambda: _local().call("PUT", f"/objects/types/{seg}", json=payload))
+    if as_json:
+        _json(body)
+        return
+    typer.echo(_type_rows([body["type"]]))
+
+
+@object_app.command("list", help=msg("help.object.list"))
+def object_list(
+    name: str = typer.Argument(..., help=msg("help.object.type")),
+    q: str = typer.Option("", "-q", "--query", help=msg("help.object.list.q")),
+    filters: list[str] = typer.Option(None, "--filter", help=msg("help.object.list.filter")),
+    limit: int = typer.Option(50, "--limit", min=1, max=200, help=msg("help.opt.size")),
+    offset: int = typer.Option(0, "--offset", min=0, help=msg("help.object.list.offset")),
+    as_json: bool = _JSON,
+) -> None:
+    params: list[tuple[str, Any]] = [("limit", limit), ("offset", offset)]
+    if q:
+        params.append(("q", q))
+    params += [("filter", f) for f in filters or []]
+    seg = _object_type(name)
+    body = _guard(lambda: _local().call("GET", f"/objects/{seg}", params=params))
+    if as_json:
+        _json(body)
+        return
+    rows = [
+        (
+            item["key"],
+            _short(item["title"], 50),
+            ", ".join(p + ("!" if m["conflict"] else "") for p, m in sorted(item["edits"].items()))
+            or "-",
+        )
+        for item in body["items"]
+    ]
+    if rows:
+        typer.echo(base._table(("KEY", "TITLE", "EDITED"), rows))
+    else:
+        typer.echo(msg("ops.object_none"))
+    typer.echo(msg("ops.object_page", shown=len(rows), total=body["total"], offset=body["offset"]))
+
+
+@object_app.command("get", help=msg("help.object.get"))
+def object_get(
+    name: str = typer.Argument(..., help=msg("help.object.type")),
+    key: str = typer.Argument(..., help=msg("help.object.get.key")),
+    as_json: bool = _JSON,
+) -> None:
+    seg = _object_type(name)
+    body = _guard(lambda: _local().call("GET", f"/objects/{seg}/{quote(key, safe='')}"))
+    if as_json:
+        _json(body)
+        return
+    typer.echo(f"{body['type']['label']} {body['key']}: {body['title']}")
+    for prop, value in body["values"].items():
+        mark = body["edits"].get(prop)
+        note = ""
+        if mark:
+            note = "  (" + ("operational" if mark["operational"] else "edited")
+            note += (
+                f", source: {_jsonable(mark['source_value'])}" if not mark["operational"] else ""
+            )
+            note += ", CONFLICT" if mark["conflict"] else ""
+            note += ")"
+        typer.echo(f"  {prop}: {_jsonable(value)}{note}")
+    for link in body["links"]:
+        typer.echo(
+            f"  -> {link['name']} ({link['direction']}): {link['target_label']} "
+            f"[{link['target_status']}]"
+        )
+
+
 def register(app: typer.Typer, source_app: typer.Typer) -> None:
     """Add the parity commands to the CLI (called at the end of :mod:`autoontology.cli`)."""
     app.add_typer(ontology_app, name="ontology")
@@ -2198,6 +2328,7 @@ def register(app: typer.Typer, source_app: typer.Typer) -> None:
     app.add_typer(project_app, name="project")
     app.add_typer(user_app, name="user")
     app.add_typer(member_app, name="member")
+    app.add_typer(object_app, name="object")
     app.command("audit", help=msg("help.audit"))(audit_cmd)
     source_app.command("freshness", help=msg("help.sources.freshness"))(sources_freshness)
     # `sources freshness` (the UI's page name) is `source freshness`

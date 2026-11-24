@@ -197,6 +197,9 @@ def test_mcp_initialize_ping_and_tools_list(agent):
         "get_concept",
         "sparql_query",
         "list_exports",
+        "list_object_types",
+        "search_objects",
+        "get_object",
     ]
     assert all(t["description"] and t["inputSchema"]["type"] == "object" for t in tools)
 
@@ -371,6 +374,9 @@ def test_openapi_lists_only_agent_routes(agent):
         f"{REST}/sparql",
         f"{REST}/exports",
         f"{REST}/exports/{{rev}}.zip",
+        f"{REST}/objects/types",
+        f"{REST}/objects/{{type}}",
+        f"{REST}/objects/{{type}}/{{key}}",
     }
     assert spec["components"]["securitySchemes"]["bearer"]["scheme"] == "bearer"
     # the agent routes stay out of the service's own schema

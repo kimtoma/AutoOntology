@@ -376,6 +376,7 @@ def test_me_lists_memberships(env):
                 "project.read",
                 "exports.read",
                 "playground.ask",
+                "objects.read",
                 "review.decide",
                 "review.apply",
                 "sources.write",

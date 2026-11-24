@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -53,6 +54,9 @@ class AgentToken:
     project_id: str = ""
     #: the user who created (or last rotated) it; None = before accounts / the CLI
     created_by: str | None = None
+    #: what the token may do (schema v10): ``read`` (every token), ``propose``,
+    #: ``execute`` -- enforced by the action tools
+    scopes: tuple[str, ...] = ("read",)
 
     @property
     def expired(self) -> bool:
@@ -77,17 +81,30 @@ class AgentToken:
             "revoked_at": self.revoked_at,
             "status": self.status,
             "created_by": self.created_by,
+            "scopes": list(self.scopes),
         }
 
 
 _COLUMNS = (
     "id, name, revision_pin, expires_at, created_at, last_used_at, revoked_at, project_id, "
-    "created_by"
+    "created_by, scopes"
 )
 
 
+def _scopes(raw: Any) -> tuple[str, ...]:
+    try:
+        value = json.loads(raw) if raw else ["read"]
+    except ValueError:
+        value = ["read"]
+    if not isinstance(value, list):
+        value = ["read"]
+    return tuple(str(v) for v in value) or ("read",)
+
+
 def _token(row: Any) -> AgentToken:
-    return AgentToken(**{k: row[k] for k in row.keys() if k != "token_hash"})
+    data = {k: row[k] for k in row.keys() if k != "token_hash"}
+    data["scopes"] = _scopes(data.get("scopes"))
+    return AgentToken(**data)
 
 
 class TokenError(Exception):

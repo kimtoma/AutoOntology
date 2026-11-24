@@ -557,6 +557,10 @@ class Api:
         else:
             cached = self.cached_freshness(project=view)
             rows = cached[0] if cached else []
+        if head is not None:
+            from autoontology.objects.binding import ensure_synced
+
+            ensure_synced(view, model, head.revision)  # object type proposals
         return Inbox(view, model, previous, rows)
 
     def decided_by(self, request: Request) -> str:
@@ -1006,12 +1010,27 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
     def review_decide(
         item_id: str, body: dict[str, Any], ctx: ProjectContext = Ctx
     ) -> dict[str, Any]:
-        ctx.require("review.decide")
+        # an object type proposal binds the type: the owner's (objects.manage)
+        ctx.require("objects.manage" if item_id.startswith("ob:") else "review.decide")
         try:
             req = DecisionIn.model_validate(body)
         except ValidationError as exc:
             raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
         inbox = api.inbox(project=ctx.store)  # items and decisions of this project only
+        if item_id.startswith("ob:"):  # an object type: verified and bound at once
+            from autoontology.objects import service as objects
+
+            _review(lambda: inbox.item(item_id))
+            if req.decision not in ("accept", "reject"):
+                raise ApiError(400, "invalid_decision", "an objects item takes accept or reject")
+            if req.relation or req.term_id:
+                raise ApiError(400, "invalid_request", "relation/term_id are for alignment items")
+            otype = object_call(
+                lambda: objects.decide(
+                    api.settings, ctx.store, item_id[3:], req.decision, ctx.actor
+                )
+            )
+            inbox.items[item_id]["object_type"] = otype.to_dict()
         decision = _review(
             lambda: inbox.decide(
                 item_id,
@@ -1035,10 +1054,14 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
 
     @router.delete("/review/{item_id:path}/decision")
     def review_undo(item_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
-        ctx.require("review.decide")
+        ctx.require("objects.manage" if item_id.startswith("ob:") else "review.decide")
         inbox = api.inbox(project=ctx.store)
         if not _review(lambda: inbox.undo(item_id)):
             raise ApiError(404, "no_decision", f"no decision on {item_id[:80]!r}")
+        if item_id.startswith("ob:"):
+            from autoontology.objects import service as objects
+
+            objects.undo(ctx.store, item_id[3:])  # a proposal again
         ctx.audit("review.undo", target=item_id[:300])
         return {"removed": item_id}
 
@@ -1202,6 +1225,11 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
         )
         return loaded
 
+    # object types and objects (autoontology/web/objects_api.py) -------------------------
+    from autoontology.web.objects_api import add_object_routes
+
+    add_object_routes(router, api, ctx_dep)
+
     # outside-agent tokens and usage (the agent surface itself: agent_api.install) ---------
     from autoontology.web.agent_api import add_management_routes
 
@@ -1210,6 +1238,17 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
 
 
 # --- route bodies shared with the agent API (autoontology/web/agent_api.py) -------------
+
+
+def object_call(call: Any) -> Any:
+    """*call*'s result; an :class:`~autoontology.objects.reader.ObjectError` as an
+    :class:`ApiError` with the same status and code."""
+    from autoontology.objects.reader import ObjectError
+
+    try:
+        return call()
+    except ObjectError as exc:
+        raise ApiError(exc.status, exc.code, exc.message, **exc.extra) from exc
 
 
 def ontology_summary(

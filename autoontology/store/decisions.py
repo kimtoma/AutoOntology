@@ -31,13 +31,21 @@ from typing import Any
 
 from autoontology.store.db import Store, now_iso
 
-KINDS: tuple[str, ...] = ("alignment", "alias", "concept")
+#: the kinds an ``apply`` run reflects in the next snapshot
+ONTOLOGY_KINDS: tuple[str, ...] = ("alignment", "alias", "concept")
+#: schema v10: kinds that take effect at once and never go through an apply run --
+#: ``object`` (``subject_key`` = the class's local name: accept an object type proposal)
+#: and ``logic`` (an extracted logic candidate)
+ACTIONABLE_KINDS: tuple[str, ...] = ("object", "logic")
+KINDS: tuple[str, ...] = (*ONTOLOGY_KINDS, *ACTIONABLE_KINDS)
 DECISIONS: tuple[str, ...] = ("accept", "reject", "acknowledge")
 #: decisions each kind takes
 ALLOWED: dict[str, tuple[str, ...]] = {
     "alignment": ("accept", "reject"),
     "alias": ("accept", "reject"),
     "concept": ("acknowledge",),
+    "object": ("accept", "reject"),
+    "logic": ("accept", "reject"),
 }
 #: relations an accepted alignment may take
 ACCEPT_RELATIONS: tuple[str, ...] = ("same", "related", "narrower", "broader")
@@ -172,13 +180,25 @@ class DecisionStore:
             )
         return cur.rowcount > 0
 
-    def list(self, kind: str | None = None, *, pending: bool | None = None) -> list[Decision]:
-        """Every decision (of *kind*); *pending* True/False: only unapplied/applied ones."""
+    def list(
+        self,
+        kind: str | None = None,
+        *,
+        pending: bool | None = None,
+        actionable: bool = False,
+    ) -> list[Decision]:
+        """Every decision (of *kind*); *pending* True/False: only unapplied/applied ones.
+        Without *kind* only the ontology kinds (what apply and build read), plus the
+        actionable ones (``object``, ``logic``) when *actionable*."""
         sql = "SELECT * FROM review_decisions WHERE project_id = ?"
         args: list[Any] = [self.project_id]
         if kind is not None:
             sql += " AND kind = ?"
             args.append(kind)
+        else:
+            kinds = KINDS if actionable else ONTOLOGY_KINDS
+            sql += f" AND kind IN ({', '.join('?' * len(kinds))})"
+            args += list(kinds)
         if pending is True:
             sql += " AND applied_revision IS NULL"
         elif pending is False:

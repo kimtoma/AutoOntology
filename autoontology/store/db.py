@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from autoontology.playground.store import PlaygroundStore
     from autoontology.store.agent_tokens import AgentTokens
     from autoontology.store.decisions import DecisionStore
+    from autoontology.store.objects import ObjectEdits, ObjectTypes
 
 SourceKind = Literal["files", "database", "documents"]
 RunStatus = Literal["pending", "running", "succeeded", "failed", "cancelled"]
@@ -467,6 +468,9 @@ MIGRATIONS: list[tuple[int, Migration]] = [
     (8, lambda conn: _migrate_v8(conn)),
     # Schema v9: accounts (:func:`_migrate_v9`; ``autoontology/store/accounts.py``).
     (9, lambda conn: _migrate_v9(conn)),
+    # Schema v10: the actionable ontology (:func:`_migrate_v10`; ``autoontology/objects/``,
+    # ``autoontology/store/objects.py``).
+    (10, lambda conn: _migrate_v10(conn)),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
@@ -865,6 +869,203 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
     if "created_by" not in _columns(conn, "agent_tokens"):
         conn.execute("ALTER TABLE agent_tokens ADD COLUMN created_by TEXT")
+
+
+#: Schema v10 tables: the actionable ontology. Every table is per project and every
+#: statement is idempotent (a downgraded ``schema_version`` re-runs the migration).
+_V10_STATEMENTS = (
+    # object_types: a class of the snapshot bound to one source table (key and title
+    # columns, links from foreign-key properties). ``proposed`` (inferred, waiting in the
+    # review inbox) -> ``active`` (accepted) | ``retired`` (rejected); an active type whose
+    # class, table or columns are gone is ``broken`` (broken_reason) until they are back.
+    # columns_json = the table's columns [{name, type}] as last read; key_origin = pk |
+    # inferred | manual; key_checked = the key was verified unique and non-null on the
+    # source; validated_revision = the snapshot it was last checked against.
+    """CREATE TABLE IF NOT EXISTS object_types (
+        project_id TEXT NOT NULL REFERENCES projects (id),
+        id TEXT PRIMARY KEY,
+        class_local TEXT NOT NULL,
+        label TEXT NOT NULL DEFAULT '',
+        source_name TEXT NOT NULL DEFAULT '',
+        schema_name TEXT NOT NULL DEFAULT '',
+        table_name TEXT NOT NULL DEFAULT '',
+        key_columns_json TEXT NOT NULL DEFAULT '[]',
+        title_column TEXT NOT NULL DEFAULT '',
+        links_json TEXT NOT NULL DEFAULT '[]',
+        columns_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'proposed'
+            CHECK (status IN ('proposed', 'active', 'broken', 'retired')),
+        broken_reason TEXT NOT NULL DEFAULT '',
+        key_origin TEXT NOT NULL DEFAULT 'inferred'
+            CHECK (key_origin IN ('pk', 'inferred', 'manual')),
+        key_checked INTEGER NOT NULL DEFAULT 0,
+        validated_revision INTEGER,
+        decided_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (project_id, class_local)
+    )""",
+    # logic_defs: function / action / workflow definitions (spec_json), versioned
+    # (logic_def_history keeps every version), governed draft -> active -> retired, and
+    # broken while a reference of the spec is missing from the ontology.
+    """CREATE TABLE IF NOT EXISTS logic_defs (
+        project_id TEXT NOT NULL REFERENCES projects (id),
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('function', 'action', 'workflow')),
+        name TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'draft'
+            CHECK (status IN ('draft', 'active', 'retired', 'broken')),
+        spec_json TEXT NOT NULL DEFAULT '{}',
+        origin TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual', 'extracted')),
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        broken_reason TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (project_id, kind, name)
+    )""",
+    """CREATE TABLE IF NOT EXISTS logic_def_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL REFERENCES projects (id),
+        def_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        spec_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        changed_by TEXT NOT NULL DEFAULT '',
+        changed_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS logic_def_history_def_idx ON logic_def_history (def_id, version)",
+    # logic_candidates: definitions a `logic` run extracted from documents (errors_json:
+    # what failed validation; evidence_json: the quotes they rest on).
+    """CREATE TABLE IF NOT EXISTS logic_candidates (
+        project_id TEXT NOT NULL REFERENCES projects (id),
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL CHECK (kind IN ('function', 'action', 'workflow')),
+        name TEXT NOT NULL,
+        spec_json TEXT NOT NULL DEFAULT '{}',
+        errors_json TEXT NOT NULL DEFAULT '[]',
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        confidence REAL,
+        source_id TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS logic_candidates_project_idx "
+    "ON logic_candidates (project_id, kind, name)",
+    # action_runs: one action invocation, from preview to apply / revert.
+    """CREATE TABLE IF NOT EXISTS action_runs (
+        project_id TEXT NOT NULL REFERENCES projects (id),
+        id TEXT PRIMARY KEY,
+        action_name TEXT NOT NULL,
+        action_version INTEGER NOT NULL DEFAULT 1,
+        object_type TEXT NOT NULL DEFAULT '',
+        object_key TEXT NOT NULL DEFAULT '',
+        params_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL CHECK (status IN ('previewed', 'pending_approval', 'approved',
+            'rejected', 'applied', 'failed', 'reverted')),
+        requested_by TEXT NOT NULL DEFAULT '',
+        via TEXT NOT NULL DEFAULT 'ui' CHECK (via IN ('ui', 'cli', 'agent', 'workflow')),
+        token_id TEXT,
+        workflow_run_id TEXT,
+        approver TEXT,
+        approval_role TEXT,
+        preview_json TEXT NOT NULL DEFAULT '{}',
+        result_json TEXT NOT NULL DEFAULT '{}',
+        error TEXT,
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        decided_at TEXT,
+        applied_at TEXT,
+        reverted_at TEXT,
+        UNIQUE (project_id, idempotency_key)
+    )""",
+    "CREATE INDEX IF NOT EXISTS action_runs_project_idx "
+    "ON action_runs (project_id, status, created_at)",
+    "CREATE INDEX IF NOT EXISTS action_runs_object_idx "
+    "ON action_runs (project_id, object_type, object_key)",
+    # object_edits: the edit layer over source rows (sources are never written).
+    # source_value_json = the source's value when the edit was made (a different current
+    # value is a conflict); operational = a property that is no source column.
+    """CREATE TABLE IF NOT EXISTS object_edits (
+        project_id TEXT NOT NULL REFERENCES projects (id),
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        object_type TEXT NOT NULL,
+        object_key TEXT NOT NULL,
+        property TEXT NOT NULL,
+        old_value_json TEXT NOT NULL DEFAULT 'null',
+        new_value_json TEXT NOT NULL DEFAULT 'null',
+        source_value_json TEXT NOT NULL DEFAULT 'null',
+        operational INTEGER NOT NULL DEFAULT 0,
+        action_run_id TEXT,
+        edited_by TEXT NOT NULL DEFAULT '',
+        edited_at TEXT NOT NULL,
+        reverted_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS object_edits_object_idx "
+    "ON object_edits (project_id, object_type, object_key, property, id)",
+    "CREATE INDEX IF NOT EXISTS object_edits_run_idx ON object_edits (action_run_id)",
+    # workflow_runs: one firing of a workflow; (workflow, fire_slot) unique so a schedule
+    # slot fires once however many ticks see it.
+    """CREATE TABLE IF NOT EXISTS workflow_runs (
+        project_id TEXT NOT NULL REFERENCES projects (id),
+        id TEXT PRIMARY KEY,
+        workflow_name TEXT NOT NULL,
+        workflow_version INTEGER NOT NULL DEFAULT 1,
+        trigger TEXT NOT NULL CHECK (trigger IN ('schedule', 'on_action', 'manual')),
+        fire_slot TEXT NOT NULL,
+        status TEXT NOT NULL
+            CHECK (status IN ('running', 'paused', 'succeeded', 'failed', 'cancelled')),
+        started_by TEXT NOT NULL DEFAULT '',
+        steps_json TEXT NOT NULL DEFAULT '[]',
+        summary_json TEXT NOT NULL DEFAULT '{}',
+        error TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        UNIQUE (project_id, workflow_name, fire_slot)
+    )""",
+)
+
+#: review_decisions as of v10: the kinds ``object`` (an object type proposal) and
+#: ``logic`` (an extracted logic candidate) join the ontology kinds.
+_V10_REVIEW_DECISIONS = """CREATE TABLE {t} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL
+        CHECK (kind IN ('alignment', 'alias', 'concept', 'object', 'logic')),
+    subject_key TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('accept', 'reject', 'acknowledge')),
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    note TEXT NOT NULL DEFAULT '',
+    decided_by TEXT NOT NULL DEFAULT 'local',
+    decided_at TEXT NOT NULL,
+    applied_revision INTEGER,
+    project_id TEXT NOT NULL REFERENCES projects (id),
+    UNIQUE (project_id, kind, subject_key)
+)"""
+
+
+def _migrate_v10(conn: sqlite3.Connection) -> None:
+    """Schema v10: the actionable ontology. ``object_types``, ``logic_defs`` (+
+    ``logic_def_history``), ``logic_candidates``, ``action_runs``, ``object_edits``,
+    ``workflow_runs``; ``agent_tokens.scopes`` (a JSON list, ``["read"]`` for every
+    existing token); ``review_decisions`` rebuilt with the kinds ``object`` and ``logic``
+    (rows kept). Safe to re-run."""
+    for statement in _V10_STATEMENTS:
+        conn.execute(statement)
+    if "scopes" not in _columns(conn, "agent_tokens"):
+        conn.execute(
+            "ALTER TABLE agent_tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT '[\"read\"]'"
+        )
+    current = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'review_decisions'"
+    ).fetchone()
+    if current is None or "'object'" not in (current[0] or ""):
+        _rebuild(
+            conn,
+            "review_decisions",
+            _V10_REVIEW_DECISIONS,
+            project_expr=repr(DEFAULT_PROJECT_ID),
+        )
 
 
 def _ensure_indexes(conn: sqlite3.Connection, version: int) -> None:
@@ -2066,6 +2267,18 @@ class ProjectStore:
         from autoontology.store.agent_tokens import AgentTokens
 
         return AgentTokens(self.store, project_id=self.id)
+
+    def object_types(self) -> ObjectTypes:
+        """The project's :class:`~autoontology.store.objects.ObjectTypes`."""
+        from autoontology.store.objects import ObjectTypes
+
+        return ObjectTypes(self.store, project_id=self.id)
+
+    def object_edits(self) -> ObjectEdits:
+        """The project's :class:`~autoontology.store.objects.ObjectEdits`."""
+        from autoontology.store.objects import ObjectEdits
+
+        return ObjectEdits(self.store, project_id=self.id)
 
     def playground(self) -> PlaygroundStore:
         """The project's :class:`~autoontology.playground.store.PlaygroundStore`."""

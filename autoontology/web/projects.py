@@ -42,7 +42,7 @@ names it); installation-wide routes call :func:`require_installation` (admins on
 role table is :data:`PROJECT_PERMISSIONS`: viewer reads, downloads and asks the
 playground; reviewer also decides reviews and applies them; editor also changes sources,
 starts builds and exports and manages agent tokens; owner also manages the project and its
-members and reads its audit log.
+members, reads its audit log and binds object types (key and title columns).
 
 Archived projects: playground questions (:func:`playground_question`) stay allowed unless
 ``AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`` (then 409 ``project_archived`` too).
@@ -81,6 +81,7 @@ PROJECT_PERMISSIONS: dict[str, str] = {
     "project.read": "viewer",  # every GET of the project: sources, runs, ontology, review list
     "exports.read": "viewer",  # download exports
     "playground.ask": "viewer",  # chat / SQL / SPARQL, the index, reading conversations
+    "objects.read": "viewer",  # object types, objects (source rows + edits) and their links
     "review.decide": "reviewer",  # decide and undo review items
     "review.apply": "reviewer",  # apply runs (decisions -> a new revision)
     "sources.write": "editor",  # add / delete sources, load samples
@@ -90,6 +91,7 @@ PROJECT_PERMISSIONS: dict[str, str] = {
     "project.manage": "owner",  # rename, archive, unarchive
     "members.manage": "owner",  # add / change / remove members
     "audit.read": "owner",  # the project's audit log
+    "objects.manage": "owner",  # accept / reject object type proposals, bind key and title
 }
 
 #: Installation-wide permissions (no project): admins only.
