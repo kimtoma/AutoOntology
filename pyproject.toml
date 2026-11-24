@@ -33,6 +33,8 @@ dependencies = [
 
 [project.scripts]
 autoontology = "autoontology.cli:app"
+# Short alias of the same CLI.
+ao = "autoontology.cli:app"
 
 [build-system]
 requires = ["hatchling"]

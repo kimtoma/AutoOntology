@@ -9,6 +9,7 @@ behaviour).
 
 ### Added
 
+- **`ao`, a short alias of the `autoontology` command** (`pyproject.toml` `[project.scripts]`): the same Typer app, so every command and option works as `ao …`.
 - **Outside agents can read the ontology** (`autoontology/web/agent_api.py`): an MCP
   endpoint `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, protocol `2025-06-18`, JSON
   answers; `initialize`, `ping`, `tools/list`, `tools/call`, batches, notifications) and a

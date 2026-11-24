@@ -32,6 +32,7 @@ uv run autoontology init --yes --provider claude     # writes .env, runs setup (
 uv run autoontology demo --set quickstart --no-open  # up, register samples, build, export
 uv run autoontology ui                               # http://127.0.0.1:7800/ui/ (AUTOONTOLOGY_PORT)
 uv run autoontology doctor                           # every check with a remedy
+uv run ao doctor                                     # `ao` is a short alias of `autoontology`
 uv run autoontology down                             # stop the services
 uv run autoontology ontology concepts -q 계약 --json   # every UI page has commands (--json):
 #   ontology revisions|diff|concept|graph, runs show|logs|cancel, source freshness,

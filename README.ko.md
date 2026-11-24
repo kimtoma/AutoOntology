@@ -452,6 +452,8 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 
 ### CLI 레퍼런스
 
+`ao`는 `autoontology`의 짧은 별칭입니다. 아래 모든 명령을 `ao …`로도 실행할 수 있습니다(예: `uv run ao ontology concepts -q 계약 --json`).
+
 | 명령 | 하는 일 |
 |---|---|
 | `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | 단계별 설정: Postgres 확인(`docker compose up -d` 후 재시도), 채팅 제공자·임베딩·문서 감지와 선택, `.env` 작성(다른 줄은 유지, 기존 파일은 백업), `setup` 실행. `.env`에 이미 있는 제공자·임베딩 선택은 유지합니다(추천은 힌트로만 표시). `--yes`는 아무것도 묻지 않으며, Postgres가 꺼져 있거나 고른 CLI가 로그인되지 않았으면 해결 방법과 함께 종료 코드 2로 끝납니다. |

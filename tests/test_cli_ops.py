@@ -961,3 +961,13 @@ def test_agent_usage(isolated_env):
     assert body["total"] == 2 and body["ok"] == 1 and body["days"] == 7
     empty = AgentTokens(Store.for_home(settings.home))
     assert empty.usage(1)["total"] == 2
+
+
+def test_ao_is_a_short_alias_of_the_autoontology_command():
+    import tomllib
+
+    root = Path(__file__).resolve().parent.parent
+    scripts = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "scripts"
+    ]
+    assert scripts["ao"] == scripts["autoontology"] == "autoontology.cli:app"

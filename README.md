@@ -490,6 +490,8 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 
 ### CLI reference
 
+`ao` is a short alias of `autoontology`: every command below also runs as `ao …` (e.g. `uv run ao ontology concepts -q contract --json`).
+
 | Command | What it does |
 |---|---|
 | `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | Step-by-step setup: checks Postgres (retry after `docker compose up -d`), detects and picks the chat provider, embeddings and documents, writes `.env` (other lines kept, previous file backed up) and runs `setup`. A provider and embeddings choice already in `.env` is kept (the recommendation is shown as a hint). `--yes` asks nothing; exits 2 with the fix when Postgres is down or the chosen CLI is not logged in. |
