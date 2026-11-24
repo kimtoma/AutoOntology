@@ -62,6 +62,8 @@ PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 MCP_PATH = "/mcp"
 REST_PREFIX = "/agent/v1"
 MAX_BODY_BYTES = 1024 * 1024
+#: JSON-RPC messages one MCP request may batch
+MAX_BATCH = 20
 DEFAULT_RATE_PER_MIN = 120
 RATE_WINDOW_S = 60.0
 RATE_ENV = "AUTOONTOLOGY_AGENT_RATE_PER_MIN"
@@ -156,7 +158,8 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], type[_Args]]] = [
         "get_concept",
         "One concept by id (term-... / concept-..., from search_concepts) or by exact "
         "name or synonym: definition, synonyms, relations, evidence quotes with their "
-        "documents, alignments and review decisions.",
+        "documents, alignments and review decisions (decisions show the current review "
+        "state, also for an older revision).",
         {
             "id": {"type": "string", "description": "Concept id, e.g. term-t-1."},
             "name": {"type": "string", "description": "Exact name or synonym (any case)."},
@@ -261,6 +264,11 @@ class AgentService:
             hits.append(now)
         return None
 
+    def forget(self, token_id: str) -> None:
+        """Drop *token_id*'s rate window (the token was rotated or revoked)."""
+        with self._hits_lock:
+            self._hits.pop(token_id, None)
+
     # --- tools ------------------------------------------------------------------------
 
     def latest_revision(self) -> int | None:
@@ -299,12 +307,11 @@ class AgentService:
         return token.revision_pin if token.revision_pin is not None else self.latest_revision()
 
     def _tool_list_revisions(self, token: AgentToken, args: ListRevisionsArgs) -> dict[str, Any]:
-        from autoontology.web.revisions import revision_list
+        from autoontology.web.revisions import revision_list, revision_row
 
         if token.revision_pin is not None:
-            rows = [
-                r for r in revision_list(self.api.store, 500) if r["revision"] == token.revision_pin
-            ]
+            snap = self.api.store.get_snapshot(token.revision_pin, with_model=False)
+            rows = [revision_row(self.api.store, snap)] if snap is not None else []
         else:
             rows = revision_list(self.api.store, args.limit)
         return {"revision": self._served(token), "revisions": rows}
@@ -482,18 +489,30 @@ def build_router(service: AgentService) -> APIRouter:
             return _too_large()
         try:
             msg = json.loads(raw)
-        except ValueError:
+        except (ValueError, RecursionError):  # RecursionError: absurdly deep nesting
             return JSONResponse(_rpc_error(None, -32700, "parse error"))
         if isinstance(msg, list):
             if not msg:
                 return JSONResponse(_rpc_error(None, -32600, "empty batch"))
-            replies = [await rpc(token, m) for m in msg]
-            out = [r for r in replies if r is not None]
+            if len(msg) > MAX_BATCH:
+                return JSONResponse(
+                    _rpc_error(None, -32600, f"batch too large (at most {MAX_BATCH} messages)")
+                )
+            # gate() charged the request once, which covers its first tool call; every
+            # further tool call of the batch is charged on its own
+            charged = [False]
+            out = []
+            for m in msg:
+                if await request.is_disconnected():
+                    break  # nobody reads the answer: run nothing more
+                reply = await rpc(token, m, charged)
+                if reply is not None:
+                    out.append(reply)
             return JSONResponse(out) if out else Response(status_code=202)
-        reply = await rpc(token, msg)
+        reply = await rpc(token, msg, [False])
         return JSONResponse(reply) if reply is not None else Response(status_code=202)
 
-    async def rpc(token: AgentToken, m: Any) -> dict[str, Any] | None:
+    async def rpc(token: AgentToken, m: Any, charged: list[bool]) -> dict[str, Any] | None:
         if not isinstance(m, dict) or not isinstance(m.get("method"), str):
             mid = m.get("id") if isinstance(m, dict) else None
             return _rpc_error(mid, -32600, "invalid request")
@@ -520,6 +539,11 @@ def build_router(service: AgentService) -> APIRouter:
             if not isinstance(name, str) or name not in _MODELS:
                 return _rpc_error(mid, -32602, f"unknown tool: {str(name)[:80]}")
             try:
+                if charged[0] and service.retry_after(token.id) is not None:
+                    raise ToolError(
+                        429, "rate_limited", f"at most {rate_per_min()} requests a minute per token"
+                    )
+                charged[0] = True
                 data = await call(token, "mcp", name, params.get("arguments"))
             except ToolError as exc:
                 text = json.dumps(exc.body(), ensure_ascii=False)
@@ -597,7 +621,7 @@ def build_router(service: AgentService) -> APIRouter:
             return _too_large()
         try:
             body = json.loads(raw or b"{}")
-        except ValueError:
+        except (ValueError, RecursionError):
             return _error(400, "invalid_arguments", "the body must be a JSON object")
         try:
             data = await call(token, "rest", "sparql_query", body)
@@ -801,14 +825,22 @@ def add_management_routes(router: APIRouter, api: Api) -> None:
         )
         return {"token": raw, "record": record.to_dict(), "note": ONCE_NOTE}
 
+    def forget(request: Request, token_id: str) -> None:
+        service = getattr(request.app.state, "agent", None)
+        if service is not None:  # the CLI's in-process app has no agent surface
+            service.forget(token_id)
+
     @router.post("/agent/tokens/{token_id}/rotate")
-    def rotate_agent_token(token_id: str) -> dict[str, Any]:
+    def rotate_agent_token(token_id: str, request: Request) -> dict[str, Any]:
         raw, record = guard(lambda: tokens().rotate(token_id))
+        forget(request, token_id)
         return {"token": raw, "record": record.to_dict(), "note": ONCE_NOTE}
 
     @router.delete("/agent/tokens/{token_id}")
-    def revoke_agent_token(token_id: str) -> dict[str, Any]:
-        return guard(lambda: tokens().revoke(token_id)).to_dict()
+    def revoke_agent_token(token_id: str, request: Request) -> dict[str, Any]:
+        record = guard(lambda: tokens().revoke(token_id)).to_dict()
+        forget(request, token_id)
+        return record
 
     @router.get("/agent/usage")
     def agent_usage(days: int | None = Query(None, ge=1, le=365)) -> dict[str, Any]:

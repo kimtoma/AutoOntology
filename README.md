@@ -627,6 +627,9 @@ example your Tailscale hostname). The tools, the same over MCP and REST, are
 `list_revisions`, `get_ontology_summary`, `search_concepts`, `get_concept` (by id, name or
 synonym), `sparql_query` (the Playground's read-only SPARQL checks, timeout and row cap)
 and `list_exports`; every result carries the `revision` it was answered from.
+`get_concept`'s `decisions` show the current review state, also when an older revision is
+asked. An MCP request may batch at most 20 messages, and every tool call in a batch counts
+towards the token's rate limit.
 
 | Method and path | Tool |
 |---|---|

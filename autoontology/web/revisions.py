@@ -30,26 +30,27 @@ NODE_FIELDS: tuple[str, ...] = (
 
 def revision_list(store: Store, limit: int = 50) -> list[dict[str, Any]]:
     """Newest first: revision, time, the run that wrote it (and its kind), counts, sources."""
-    out = []
     kinds: dict[str, str] = {}
-    for snap in store.list_snapshots(limit):
-        if snap.run_id not in kinds:
-            run = store.get_run(snap.run_id)
-            kinds[snap.run_id] = run.kind if run is not None else ""
-        out.append(
-            {
-                "revision": snap.revision,
-                "created_at": snap.created_at,
-                "run_id": snap.run_id,
-                "run_kind": kinds[snap.run_id] or None,
-                "counts": {k: v for k, v in snap.counts.items() if k != "by_source"},
-                "sources": [
-                    {"name": s.get("name"), "kind": s.get("kind"), "included": s.get("included")}
-                    for s in snap.sources
-                ],
-            }
-        )
-    return out
+    return [revision_row(store, snap, kinds) for snap in store.list_snapshots(limit)]
+
+
+def revision_row(store: Store, snap: Any, kinds: dict[str, str] | None = None) -> dict[str, Any]:
+    """One row of :func:`revision_list` for snapshot *snap* (*kinds*: run kind cache)."""
+    kinds = {} if kinds is None else kinds
+    if snap.run_id not in kinds:
+        run = store.get_run(snap.run_id)
+        kinds[snap.run_id] = run.kind if run is not None else ""
+    return {
+        "revision": snap.revision,
+        "created_at": snap.created_at,
+        "run_id": snap.run_id,
+        "run_kind": kinds[snap.run_id] or None,
+        "counts": {k: v for k, v in snap.counts.items() if k != "by_source"},
+        "sources": [
+            {"name": s.get("name"), "kind": s.get("kind"), "included": s.get("included")}
+            for s in snap.sources
+        ],
+    }
 
 
 def _nodes(model: Any) -> dict[str, dict[str, Any]]:

@@ -587,6 +587,8 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 도구는 MCP와 REST에서 같으며 `list_revisions`, `get_ontology_summary`, `search_concepts`,
 `get_concept`(id, 이름 또는 동의어로), `sparql_query`(플레이그라운드와 같은 읽기 전용 검사,
 시간 제한, 행 상한), `list_exports`입니다. 모든 결과에는 답한 리비전 `revision`이 들어 있습니다.
+`get_concept`의 `decisions`는 이전 리비전을 물어도 현재 검토 상태를 보여 줍니다. MCP 요청 하나에는
+메시지를 최대 20개까지 묶을 수 있고, 묶음 안의 도구 호출도 하나하나 토큰의 요청 수 제한에 들어갑니다.
 
 | 메서드와 경로 | 도구 |
 |---|---|

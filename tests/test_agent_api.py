@@ -472,3 +472,73 @@ def test_the_host_guard_still_covers_the_agent_routes(agent):
         headers={**_auth(made["token"]), "origin": "https://evil.example"},
     )
     assert cross.status_code == 403
+
+
+# --- review fixes: batches, nesting, pinned history, buckets ----------------------------
+
+
+def _call_msg(mid, name="list_revisions"):
+    return {
+        "jsonrpc": "2.0",
+        "id": mid,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": {}},
+    }
+
+
+def test_batch_tool_calls_are_charged_to_the_rate_limit(agent, monkeypatch):
+    c, _, made = agent
+    monkeypatch.setenv("AUTOONTOLOGY_AGENT_RATE_PER_MIN", "2")
+    out = c.post(MCP, json=[_call_msg(i) for i in range(5)], headers=_auth(made["token"])).json()
+    assert [m["id"] for m in out] == list(range(5))
+    results = [m["result"] for m in out]
+    assert [r["isError"] for r in results] == [False, False, True, True, True]
+    for r in results[2:]:
+        assert json.loads(r["content"][0]["text"])["error"] == "rate_limited"
+    # the window is spent: the next request is refused before it runs
+    assert c.post(MCP, json=_call_msg(9), headers=_auth(made["token"])).status_code == 429
+
+
+def test_oversized_batch_is_refused(agent):
+    c, _, made = agent
+    batch = [_call_msg(i) for i in range(agent_api.MAX_BATCH + 1)]
+    out = c.post(MCP, json=batch, headers=_auth(made["token"])).json()
+    assert out["error"]["code"] == -32600 and "batch" in out["error"]["message"]
+    usage = c.get("/api/agent/usage").json()
+    assert usage["total"] == 0  # nothing ran
+
+
+def test_deeply_nested_json_is_a_parse_error(agent):
+    c, _, made = agent
+    deep = b"[" * 100_000 + b"]" * 100_000
+    h = {**_auth(made["token"]), "content-type": "application/json"}
+    resp = c.post(MCP, content=deep, headers=h)
+    assert resp.status_code == 200 and resp.json()["error"]["code"] == -32700
+    rest = c.post(f"{REST}/sparql", content=deep, headers=h)
+    assert rest.status_code == 400 and rest.json()["error"] == "invalid_arguments"
+
+
+def test_pinned_list_revisions_finds_an_old_revision(agent, monkeypatch):
+    c, _, _ = agent
+    pinned = c.post("/api/agent/tokens", json={"name": "old", "revision_pin": 1}).json()
+    real = Store.list_snapshots
+    # as if r1 were older than any listing limit
+    monkeypatch.setattr(Store, "list_snapshots", lambda self, limit=50: real(self, 1))
+    revs = _tool(c, pinned["token"], "list_revisions")["structuredContent"]
+    assert [r["revision"] for r in revs["revisions"]] == [1]
+    assert revs["revisions"][0]["run_id"] and "counts" in revs["revisions"][0]
+
+
+def test_rate_buckets_are_dropped_on_rotate_and_revoke(agent):
+    c, _, made = agent
+    tid = made["record"]["id"]
+    service = c.app.state.agent
+    assert c.get(f"{REST}/revisions", headers=_auth(made["token"])).status_code == 200
+    assert tid in service._hits
+    c.post(f"/api/agent/tokens/{tid}/rotate")
+    assert tid not in service._hits
+    new = c.post(f"/api/agent/tokens/{tid}/rotate").json()["token"]
+    assert c.get(f"{REST}/revisions", headers=_auth(new)).status_code == 200
+    assert tid in service._hits
+    c.delete(f"/api/agent/tokens/{tid}")
+    assert tid not in service._hits
