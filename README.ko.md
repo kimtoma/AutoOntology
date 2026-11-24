@@ -444,7 +444,7 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
   +-----------------------+   +-----------------------+   +-------------------------+
 ```
 
-엔진은 수정하지 않은 git 서브모듈입니다. AutoOntology는 연결, 내보내기, 자연어→SQL은 HTTP로
+엔진은 수정하지 않은 git 서브모듈입니다(NVIDIA Auto Ontology `c96048c`, 1.3.x). AutoOntology는 연결, 내보내기, 자연어→SQL은 HTTP로
 엔진을 호출하고, 적재, 시맨틱 컴파일, 벡터 테이블은 엔진을 프로세스 안에서 import해 실행합니다.
 백엔드와 서비스 모두 채팅 호출을 서비스의 `/v1` 라우터로 보내고, 라우터가 이를 Ollama,
 설정된 OpenAI 호환 엔드포인트, 또는 로그인된 `claude` / `codex` CLI로 전달합니다. 자세한 내용은
@@ -766,6 +766,12 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
   삭제하고, 업그레이드 후 첫 `build --resume`은 모든 소스를 한 번 다시 빌드합니다. 저장소 스키마
   v3 이전에 기록된 별칭 레코드에는 소스가 없으므로, `source rm`은 그 레코드가 추가한 동의어를
   지우지 않습니다. 필요하면 엔진에서 직접 지우세요.
+- **엔진 1.3(`c96048c`)으로 업데이트할 때:** `git submodule update --init`과 `uv sync` 뒤에
+  `uv run autoontology setup`을 한 번 실행하세요. 엔진의 새 카탈로그 마이그레이션 세 개(용어 패밀리,
+  컬럼 고유값 비율과 고유값)를 적용합니다(그 전까지 `doctor`는 `alembic` WARN을 보여 줍니다).
+  컴파일은 용어가 없는 테이블만 다루므로, 이전 엔진이 만든 용어(예: 한글로만 된 테이블 이름의 빈
+  용어 이름)는 그 소스를 처음부터 다시 빌드할 때까지 남습니다(`source rm <이름> --drop-db`,
+  `source add`, `build`).
 - 이름은 원래 언어로 유지됩니다. 한국어 개념 이름은 Ossie 식별자와 OKF 파일 이름에 그대로
   남습니다.
 

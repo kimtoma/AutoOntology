@@ -26,7 +26,8 @@ binds them to 127.0.0.1, writes PID files under `<home>/run/` and logs under
 ## How the engine is embedded
 
 The engine is pinned as an **unmodified** git submodule (`vendor/auto-ontology`, commit
-`eb8dd06`) and installed as an editable path dependency (`auto-ontology-server`).
+`c96048c`, package 1.3.0) and installed as an editable path dependency
+(`auto-ontology-server>=1.3.0`).
 AutoOntology uses it in two ways:
 
 - **Over HTTP** (`engine/client.py`): it creates and updates connections, reads the
@@ -65,7 +66,13 @@ merge -> snapshot
   - `register` creates or updates the engine connection.
   - `ingest` runs the engine's catalog ingest and embeds the catalog.
   - `compile` runs the engine's semantic compilation, which produces Terms, column
-    attributes and semantic foreign keys.
+    attributes and semantic foreign keys. Since engine 1.3 it also groups tables repeated
+    under several prefixes into term families, attaches suspected FK columns that found no
+    target, and ends with one LLM pass that writes a sentence onto every column attribute
+    (batches of 15 per Term and table). AutoOntology's snapshot keeps the column's own
+    description first (a source comment or the compiler's column description, often
+    Korean) and uses that engine sentence only for a column without one
+    (`structured/semantic.py`).
 - **Documents path.**
   - `read` uses the native readers (`.md`, `.txt`, `.html`, `.csv`/`.tsv` as one table
     section, Word 97-2003 `.doc` through olefile) or kordoc (with `--ocr` for PDFs; images
@@ -254,7 +261,12 @@ The scope is always the latest snapshot. The retrieval index (`elements.py`, `in
 embeds one text per Term, concept, rule, process, relation, axiom and evidence node. It is
 rebuilt when the snapshot changes. Chat (`service.py`) retrieves the top-k elements,
 quotes them inside a delimited context block and streams the answer with citations. SQL
-is relayed to the engine. SPARQL (`sparql.py`) evaluates against the snapshot's Turtle
+is relayed to the engine, whose text-to-SQL is a ReAct agent since 1.3 (steps
+`react_sql_agent`, then `format_and_respond` or `unconstructable_sql_response`; up to
+`TEXT_TO_SQL_REACT_MAX_TOOL_CALLS`, default 24, tool calls per question, each one chat
+call through the `/v1` router). The SSE events keep the `step` / `sql` / `result` /
+`error` shape; an answer that needs no query has `sql_code: ""` and
+`sql_response_from_db: null`. SPARQL (`sparql.py`) evaluates against the snapshot's Turtle
 with rdflib in up to two spawn-context worker processes, with a semaphore of 2 and a row
 cap. Past the 10 s deadline the worker is killed (408), so a query that never reads the
 graph also stops; a worker above 1024 MB resident memory exits and the query answers 413

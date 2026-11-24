@@ -482,7 +482,7 @@ see [Reviewing and applying decisions](#reviewing-and-applying-decisions).
   +-----------------------+   +-----------------------+   +-------------------------+
 ```
 
-The engine is an unmodified git submodule. AutoOntology calls it over HTTP for
+The engine is an unmodified git submodule (NVIDIA Auto Ontology `c96048c`, 1.3.x). AutoOntology calls it over HTTP for
 connections, exports and NL-to-SQL, and imports it in-process for ingest, semantic
 compilation and the vector tables. Both the backend and the service send their chat calls
 through the service's `/v1` router, which forwards them to Ollama, to the configured
@@ -814,6 +814,12 @@ are overridden.
   conversations, and the first `build --resume` after upgrading rebuilds every source once.
   Alias records written before store schema v3 carry no source, so `source rm` does not
   remove the synonyms they added; remove those by hand in the engine if needed.
+- **Updating to engine 1.3 (`c96048c`):** after `git submodule update --init` and `uv sync`,
+  run `uv run autoontology setup` once: it applies the engine's three new catalog
+  migrations (term families, column distinct ratio and values; `doctor` shows `alembic`
+  WARN until then). Compile only visits tables without a Term, so Terms an older engine
+  wrote (for example an empty name for a table named only in Hangul) stay until that
+  source is rebuilt from scratch (`source rm <name> --drop-db`, `source add`, `build`).
 - Names stay in the source language: Korean concept names are kept in Ossie identifiers
   and OKF file names.
 

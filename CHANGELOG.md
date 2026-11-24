@@ -118,6 +118,34 @@ behaviour).
 
 ### Changed
 
+- **Engine updated to NVIDIA auto-ontology c96048c4 (1.3.x)**, from `eb8dd062` (1.1.0),
+  89 upstream commits. `pyproject.toml` now needs `auto-ontology-server>=1.3.0`.
+  - Key upstream improvements: text-to-SQL is a ReAct agent (`react_sql_agent`,
+    `format_and_respond`, `unconstructable_sql_response`); compile adds term families
+    (tables repeated under several prefixes), attaches suspected FK columns that found no
+    target, prunes semantic FKs from empty or disjoint columns and ends with one LLM pass
+    describing every column attribute; Hangul and other non-Latin table names and labels
+    are kept in Term names (`5fc3e2b2`; `고객` used to become an empty Term name);
+    a table whose key column has no values is no longer skipped (`67f5bd54`); PII column
+    values are withheld from sampling, probes and embeddings; Postgres foreign keys to
+    other schemas and SQLite implicit foreign keys are read.
+  - Migrations: `7d864cacef9c` (term families) -> `84dd4f50dbba`
+    (`catalog_column.distinct_ratio`) -> `caee572fa81c` (`catalog_column.distinct_values`).
+    Run `uv run autoontology setup` once after updating; `doctor` shows `alembic` WARN
+    until then.
+  - Dependencies: the Ossie converter now installs from `apache/ossie-converters`
+    (`cb4b46b9`, subdirectory `nvidia`; module `ossie_nvidia_auto_ontology` unchanged);
+    `langgraph` and its packages are gone from the lock; the engine now accepts
+    `openai>=2.44,<3` and an uncapped `langchain-openai` (the lock keeps openai 2.44.0
+    and langchain-openai 1.3.4); `regex` is declared by the engine.
+  - Behaviour: a build makes more LLM calls in `compile` (one attribute-description call
+    per 15 attributes of a Term and table; for unmatched FK columns, a column-description
+    call and, for a table without a Term, a term call; term families only re-embed) and a playground SQL question may take up to 24 tool calls.
+    Column attributes in the exports keep the column's own description (a source comment
+    or the compiler's column description, often Korean) and fall back to the engine's new
+    English attribute sentence only when the column has none (`structured/semantic.py`,
+    one extra `GET /api/columns/{table_id}` per table). Informational SQL answers arrive
+    with `sql_code: ""` and `sql_response_from_db: null`; the CLI prints just the answer.
 - The `/settings` UI route is the Settings page (it used to redirect to `/status`).
 - The sidebar reads Overview, Review, Sources, Build, Ontology, Graph, Playground,
   Exports, Status, Settings. The first-run **Get started** checklist left it: `/ui/`
