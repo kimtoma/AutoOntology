@@ -16,13 +16,13 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { keys, useProjects } from "@/hooks/queries"
 import { useT } from "@/i18n"
-import { api, SLUG_RE, type Project, type ProjectChange } from "@/lib/api"
+import { api, RESERVED_SLUG_RE, SLUG_RE, type Project, type ProjectChange } from "@/lib/api"
 import { freeSlug, projectErrorMessage, projectName, rememberProject, suggestSlug } from "@/lib/project"
 
 type SlugProblem = "format" | "taken" | null
 
 function slugProblem(slug: string, taken: Set<string>, own?: string): SlugProblem {
-  if (!SLUG_RE.test(slug)) return "format"
+  if (!SLUG_RE.test(slug) || RESERVED_SLUG_RE.test(slug)) return "format"
   if (slug !== own && taken.has(slug)) return "taken"
   return null
 }

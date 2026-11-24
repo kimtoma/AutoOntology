@@ -7,7 +7,10 @@ import { Toaster } from "sonner"
 import App from "@/App"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { keys } from "@/hooks/queries"
-import { api, ApiError, errorMessage, getCurrentProject, setCurrentProject, type Project } from "@/lib/api"
+import {
+  api, ApiError, errorMessage, getCurrentProject, RESERVED_SLUG_RE, setCurrentProject, setImplicitProject,
+  type Project,
+} from "@/lib/api"
 import { pagePathname, projectPath, suggestSlug } from "@/lib/project"
 import FORMATS from "@/test/fixtures/formats.json"
 import { mockFetch } from "@/test/utils"
@@ -91,7 +94,7 @@ beforeEach(() => {
   vi.stubGlobal("EventSource", FakeEventSource)
   setCurrentProject(null)
 })
-afterEach(() => setCurrentProject(null))
+afterEach(() => { setCurrentProject(null); setImplicitProject(null) })
 
 describe("project paths", () => {
   it("put app paths under a project and read them back", () => {
@@ -106,6 +109,9 @@ describe("project paths", () => {
     expect(pagePathname("/projects")).toBe("/projects")
     expect(suggestSlug("Contracts 2026")).toBe("contracts-2026")
     expect(suggestSlug("계약 관리")).toBe("")
+    // legacy export folder names (r0001) are not project slugs
+    expect(["r0001", "r20261"].every((x) => RESERVED_SLUG_RE.test(x))).toBe(true)
+    expect(["r12", "rx2026", "main"].some((x) => RESERVED_SLUG_RE.test(x))).toBe(false)
   })
 })
 
@@ -142,9 +148,47 @@ describe("API base", () => {
     expect(keys.projects).toEqual(["projects"])
   })
 
+  it("says in the UI language that a project has no structured source for data questions", () => {
+    const err = new ApiError("this project has no built structured source", 400, "no_structured_source")
+    expect(errorMessage(err)).toMatch(/no built structured source .*Sources page/)
+  })
+
   it("says in the UI language that an archived project is read-only", () => {
     const err = new ApiError("project 'old' is archived: unarchive it to change it", 409, "project_archived")
     expect(errorMessage(err)).toMatch(/archived \(read-only\)/)
+  })
+})
+
+describe("a gateway that serves only the routes from before projects", () => {
+  const refused = () => new Response("Forbidden", { status: 403, headers: { "content-type": "text/plain" } })
+
+  it("falls back to one implicit default project on the /api/... aliases", async () => {
+    const { calls } = mockFetch({ "GET /projects": refused, "GET /sources": { sources: [] } })
+    const list = await api.projects.list()
+    expect(list.implicit).toBe(true)
+    expect(list.projects.map((p) => p.slug)).toEqual([list.default])
+    setCurrentProject(list.default)
+    await api.sources()
+    expect(calls.map((c) => c.url)).toEqual(["/api/projects", "/api/sources"])
+    expect(api.runEventsUrl("run-1")).toBe("/api/runs/run-1/events")
+    expect(api.exportZipUrl("r0003")).toBe("/api/exports/r0003.zip")
+  })
+
+  it("opens the pages of the implicit project (404 too), its calls on the aliases", async () => {
+    const notFound = () => new Response("Not Found", { status: 404 })
+    const { calls } = mockFetch(routes([], { "GET /projects": notFound }))
+    renderApp("/sources")
+    await waitFor(() => expect(where()).toBe("/p/default/sources"))
+    await waitFor(() => expect(calls.some((c) => c.url === "/api/sources")).toBe(true))
+    expect(calls.filter((c) => c.url.startsWith("/api/projects/"))).toEqual([])
+  })
+
+  it("keeps the real project list (and its canonical routes) when the service answers", async () => {
+    mockFetch({ "GET /projects": { projects: [MAIN], default: "main" }, "GET /sources": { sources: [] } })
+    setImplicitProject("default")
+    expect((await api.projects.list()).implicit).toBeUndefined()
+    setCurrentProject("default")
+    expect(api.runEventsUrl("run-1")).toBe("/api/projects/default/runs/run-1/events")
   })
 })
 

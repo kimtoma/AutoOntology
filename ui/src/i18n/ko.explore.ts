@@ -190,6 +190,7 @@ export const koExplore: Record<keyof typeof enExplore, string> = {
   "playground.sql.label": "데이터 질문",
   "playground.sql.placeholder": "예: 고객은 몇 명인가요? / 계약금액이 가장 큰 계약 5건",
   "playground.sql.hint": "업스트림 text-to-SQL 에이전트가 정형 소스의 시맨틱 레이어로 SQL을 작성하고 실행합니다. 로컬 모델은 몇 분 걸릴 수 있습니다.",
+  "playground.sql.noStructuredSource": "이 프로젝트에 빌드된 정형 데이터 소스(CSV, Excel, Parquet, 데이터베이스)가 없습니다. 소스 페이지에서 추가하고 프로젝트를 빌드한 뒤 데이터 질문을 하세요.",
   "playground.sql.ask": "질문하기",
   "playground.sql.steps": "에이전트 단계 · {q}",
   "playground.sql.starting": "에이전트를 시작하는 중…",

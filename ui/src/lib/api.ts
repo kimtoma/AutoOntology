@@ -16,9 +16,16 @@ let currentProject: string | null = null
 export function setCurrentProject(slug: string | null) { currentProject = slug }
 export function getCurrentProject(): string | null { return currentProject }
 
-/** The API base of *slug* (default: the current project): `/api/projects/<slug>`. */
+/** The slug of the implicit default project when `GET /api/projects` was refused (a gateway
+    that serves only the `/api/...` routes from before projects): its pages use those aliases. */
+let implicitProject: string | null = null
+
+export function setImplicitProject(slug: string | null) { implicitProject = slug }
+
+/** The API base of *slug* (default: the current project): `/api/projects/<slug>`, or the
+    `/api` alias of the default project (no slug, or the implicit project). */
 export function projectApiBase(slug: string | null = currentProject): string {
-  return slug ? `${API}/projects/${encodeURIComponent(slug)}` : API
+  return slug && slug !== implicitProject ? `${API}/projects/${encodeURIComponent(slug)}` : API
 }
 
 /** Installation-wide routes: no project prefix. */
@@ -795,12 +802,51 @@ export interface Project {
   api_base: string
 }
 
-export interface ProjectList { projects: Project[]; default: string }
+export interface ProjectList {
+  projects: Project[]
+  default: string
+  /** true when the list is the implicit default project only (`GET /api/projects` refused) */
+  implicit?: boolean
+}
+
+/** The slug of the implicit default project (its URL segment, `/ui/p/default/...`). */
+export const IMPLICIT_PROJECT = "default"
+
+/** The project list when the service (or a gateway in front of it) refuses
+    `GET /api/projects` with 403/404: one default project, served by the `/api/...` aliases. */
+export function implicitProjectList(): ProjectList {
+  const project: Project = {
+    id: IMPLICIT_PROJECT, slug: IMPLICIT_PROJECT, name: "", description: "", created_at: "",
+    archived_at: null, archived: false, default: true, latest_revision: null,
+    latest_revision_at: null, sources: 0, last_build: null, last_run: null, active: false,
+    api_base: API,
+  }
+  return { projects: [project], default: IMPLICIT_PROJECT, implicit: true }
+}
+
+/** `GET /api/projects`; a 403/404 without a project error code (a gateway that allows only
+    the routes from before projects, an older service) falls back to the implicit default
+    project and points its API calls at the `/api/...` aliases. */
+async function listProjects(): Promise<ProjectList> {
+  try {
+    const list = await request<ProjectList>("/projects")
+    setImplicitProject(null)
+    return list
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 403 || err.status === 404) && err.code !== "unknown_project") {
+      setImplicitProject(IMPLICIT_PROJECT)
+      return implicitProjectList()
+    }
+    throw err
+  }
+}
 
 export interface ProjectChange { name?: string; description?: string; slug?: string }
 
 /** A project slug: a lowercase letter, then 1-23 of a-z, 0-9, "-". */
 export const SLUG_RE = /^[a-z][a-z0-9-]{1,23}$/
+/** Slugs a project may not take: "r" + 4 or more digits names a legacy export folder. */
+export const RESERVED_SLUG_RE = /^r\d{4,}$/
 
 export interface ConceptQuery {
   q?: string
@@ -895,7 +941,7 @@ export const api = {
     tools: () => request<AgentTools>("/agent/tools"),
   },
   projects: {
-    list: () => request<ProjectList>("/projects"),
+    list: listProjects,
     create: (body: { slug: string; name?: string; description?: string }) =>
       request<Project>("/projects", json("POST", body)),
     update: (slug: string, body: ProjectChange) => request<Project>(`/projects/${enc(slug)}`, json("PATCH", body)),
@@ -920,6 +966,8 @@ export const api = {
 export function errorMessage(err: unknown): string {
   // a write to an archived project: say so in the UI language
   if (err instanceof ApiError && err.code === "project_archived") return t("projects.error.project_archived")
+  // a data question in a project without a built structured source
+  if (err instanceof ApiError && err.code === "no_structured_source") return t("playground.sql.noStructuredSource")
   return err instanceof Error ? err.message : String(err)
 }
 

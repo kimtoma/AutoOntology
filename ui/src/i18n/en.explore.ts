@@ -188,6 +188,7 @@ export const enExplore = {
   "playground.sql.label": "Data question",
   "playground.sql.placeholder": "e.g. How many customers are there? / The 5 largest contracts by amount (the 계약금액 column)",
   "playground.sql.hint": "The upstream text-to-SQL agent writes SQL from the structured source's semantic layer and runs it. Local models can take a few minutes.",
+  "playground.sql.noStructuredSource": "This project has no built structured source (CSV, Excel, Parquet or a database). Add one on the Sources page and build the project to ask questions about data.",
   "playground.sql.ask": "Ask",
   "playground.sql.steps": "Agent steps · {q}",
   "playground.sql.starting": "Starting the agent…",
