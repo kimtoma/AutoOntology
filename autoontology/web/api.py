@@ -998,7 +998,12 @@ def build_router(api: Api) -> APIRouter:
         root = Path(api.settings.exports_dir)
         folders = (
             sorted(
-                (p for p in root.iterdir() if p.is_dir() and EXPORT_DIR_RE.fullmatch(p.name)),
+                (
+                    p
+                    for p in root.iterdir()
+                    # a symlinked folder is refused by the downloads, so it is not listed
+                    if p.is_dir() and not p.is_symlink() and EXPORT_DIR_RE.fullmatch(p.name)
+                ),
                 key=lambda p: int(p.name[1:]),
                 reverse=True,
             )
@@ -1036,16 +1041,29 @@ def build_router(api: Api) -> APIRouter:
         folder = Path(api.settings.exports_dir).resolve() / rev
         if not folder.is_dir() or folder.is_symlink():
             raise ApiError(404, "unknown_export", f"no export {rev}")
-        spool = tempfile.SpooledTemporaryFile(max_size=EXPORT_ZIP_SPOOL_BYTES)
-        try:
-            with zipfile.ZipFile(spool, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as zf:
-                for name, path in _export_files(folder):
-                    zf.write(path, f"{rev}/{unicodedata.normalize('NFC', name)}")
-            size = spool.tell()
-            spool.seek(0)
-        except BaseException:
+        # A re-export of the same revision swaps the folder by rename (export_job._install):
+        # a zip that straddles the swap would mix old and new files, so it is built again.
+        for _attempt in range(2):
+            spool = tempfile.SpooledTemporaryFile(max_size=EXPORT_ZIP_SPOOL_BYTES)
+            try:
+                before = folder.stat().st_ino
+                with zipfile.ZipFile(
+                    spool, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False
+                ) as zf:
+                    for name, path in _export_files(folder):
+                        zf.write(path, f"{rev}/{unicodedata.normalize('NFC', name)}")
+                if folder.stat().st_ino == before:
+                    break
+            except FileNotFoundError:
+                pass
+            except BaseException:
+                spool.close()
+                raise
             spool.close()
-            raise
+        else:
+            raise ApiError(409, "export_changed", f"export {rev} changed while zipping: retry")
+        size = spool.tell()
+        spool.seek(0)
 
         def chunks():
             try:

@@ -879,6 +879,61 @@ def test_export_zip_holds_exactly_the_listed_files(env):
     assert c.get(f"{API}/exports/r0003/bundle.zip").content == b"PK"
 
 
+def test_export_zip_is_built_again_when_a_re_export_swaps_the_folder(env, monkeypatch):
+    import io
+    import zipfile
+
+    c, settings, _, _ = env
+    exports = Path(settings.exports_dir)
+    rev_dir = exports / "r0003"
+    rev_dir.mkdir(parents=True)
+    (rev_dir / "export.json").write_text("old", encoding="utf-8")
+    (rev_dir / "ontology.ttl").write_text("old", encoding="utf-8")
+    real_files = web_api._export_files
+    swaps = []
+
+    def files_then_swap(folder):
+        found = real_files(folder)
+        for i, item in enumerate(found):
+            if i == 1 and not swaps:  # after the first file is zipped, a re-export installs
+                rev_dir.rename(exports / "r0003.bak")  # export_job._install: final -> backup
+                rev_dir.mkdir()  # work -> final
+                for name in ("export.json", "ontology.ttl"):
+                    (rev_dir / name).write_text("new", encoding="utf-8")
+                swaps.append(1)
+            yield item
+
+    monkeypatch.setattr(web_api, "_export_files", files_then_swap)
+    resp = c.get(f"{API}/exports/r0003.zip")
+    assert resp.status_code == 200 and swaps == [1]
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        assert {zf.read(n) for n in zf.namelist()} == {b"new"}  # never a mix
+
+    def always_swapping(folder):
+        found = real_files(folder)
+        rev_dir.rename(exports / f"r0003.bak{len(swaps)}")
+        rev_dir.mkdir()
+        (rev_dir / "export.json").write_text("newer", encoding="utf-8")
+        swaps.append(1)
+        return found
+
+    monkeypatch.setattr(web_api, "_export_files", always_swapping)
+    gone = c.get(f"{API}/exports/r0003.zip")
+    assert gone.status_code == 409 and gone.json()["error"] == "export_changed"
+
+
+def test_exports_list_skips_a_symlinked_revision_folder(env):
+    import os
+
+    c, settings, _, _ = env
+    exports = Path(settings.exports_dir)
+    (exports / "elsewhere").mkdir(parents=True)
+    (exports / "elsewhere" / "ontology.ttl").write_text("x", encoding="utf-8")
+    os.symlink(exports / "elsewhere", exports / "r0004")
+    assert c.get(f"{API}/exports").json()["exports"] == []
+    assert c.get(f"{API}/exports/r0004.zip").status_code == 404
+
+
 def test_status_reports_backend_postgres_ollama_kordoc_and_providers(env, monkeypatch):
     c, settings, _, _ = env
     import httpx
