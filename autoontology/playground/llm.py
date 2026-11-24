@@ -32,12 +32,21 @@ class LLMError(Exception):
         self.message = message
 
 
+class LLMTruncated(LLMError):
+    """The answer stopped at ``max_tokens`` (``finish_reason`` "length"); raised only for a
+    caller that asked (``stream(..., fail_on_length=True)``), after the partial text."""
+
+
 class PlaygroundLLM(Protocol):
     provider: str
     model: str
 
     def stream(
-        self, messages: list[dict[str, str]], *, max_tokens: int | None = None
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int | None = None,
+        fail_on_length: bool = False,
     ) -> AsyncIterator[str]: ...
 
     async def structured(
@@ -82,8 +91,23 @@ class RouterLLM:
         )
 
     async def stream(
-        self, messages: list[dict[str, str]], *, max_tokens: int | None = None
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int | None = None,
+        fail_on_length: bool = False,
     ) -> AsyncIterator[str]:
+        """Token deltas. With *fail_on_length*, an answer the router ended with
+        ``finish_reason`` "length" (cut at *max_tokens*) raises :class:`LLMTruncated`
+        after its partial text; other callers keep the partial text as before."""
+
+        def cut() -> LLMTruncated:
+            return LLMTruncated(
+                502,
+                "answer_truncated",
+                f"the {self.provider} answer stopped at max_tokens ({max_tokens})",
+            )
+
         body: dict[str, Any] = {
             "model": self.model_name,
             "messages": messages,
@@ -103,13 +127,19 @@ class RouterLLM:
                         )
                     if "text/event-stream" not in resp.headers.get("content-type", ""):
                         data = json.loads(await resp.aread())
-                        yield data["choices"][0]["message"].get("content") or ""
+                        choice = data["choices"][0]
+                        yield choice["message"].get("content") or ""
+                        if fail_on_length and choice.get("finish_reason") == "length":
+                            raise cut()
                         return
+                    length = False
                     async for line in resp.aiter_lines():
                         if not line.startswith("data:"):
                             continue
                         payload = line[5:].strip()
                         if payload == "[DONE]":
+                            if length:
+                                raise cut()
                             return  # the only normal end of an SSE answer
                         try:
                             chunk = json.loads(payload)
@@ -123,6 +153,8 @@ class RouterLLM:
                             ).get("content")
                             if text:
                                 yield text
+                            if fail_on_length and choice.get("finish_reason") == "length":
+                                length = True
                     # EOF without [DONE]: a cut connection or proxy, never a full answer
                     raise LLMError(
                         502,

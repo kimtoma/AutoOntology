@@ -263,8 +263,11 @@ rebuilt when the snapshot changes. Chat (`service.py`) retrieves the top-k eleme
 quotes them inside a delimited context block and streams the answer with citations. SQL
 is relayed to the engine, whose text-to-SQL is a ReAct agent since 1.3 (steps
 `react_sql_agent`, then `format_and_respond` or `unconstructable_sql_response`; up to
-`TEXT_TO_SQL_REACT_MAX_TOOL_CALLS`, default 24, tool calls per question, each one chat
-call through the `/v1` router). The SSE events keep the `step` / `sql` / `result` /
+`TEXT_TO_SQL_REACT_MAX_TOOL_CALLS` tool calls per question, each one chat call through
+the `/v1` router; the engine's default is 24, AutoOntology exports
+`AUTOONTOLOGY_SQL_MAX_TOOL_CALLS`, default 12, unless the user set the engine variable).
+At most `AUTOONTOLOGY_SQL_CONCURRENCY` (default 2) SQL streams run at once (429
+`sql_busy`); a slot is released when the stream ends or the client leaves. The SSE events keep the `step` / `sql` / `result` /
 `error` shape; an answer that needs no query has `sql_code: ""` and
 `sql_response_from_db: null`. SPARQL (`sparql.py`) evaluates against the snapshot's Turtle
 with rdflib in up to two spawn-context worker processes, with a semaphore of 2 and a row

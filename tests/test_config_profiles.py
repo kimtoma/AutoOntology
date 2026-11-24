@@ -199,3 +199,46 @@ def test_unit_tests_never_see_the_developer_env():
     assert leaked == []
     s = Settings.from_env()
     assert (s.chat_provider, s.postgres_port, s.backend_port) == ("ollama", 5432, 3101)
+
+
+# --- engine 1.3 ReAct SQL agent: tool-call budget (public-site cost) ------------------------
+
+
+def test_sql_agent_tool_calls_default_to_12(isolated_env):
+    """Upstream's TEXT_TO_SQL_REACT_MAX_TOOL_CALLS (react/config.py, default 24) resends the
+    whole transcript every turn: AutoOntology halves it unless the user set it."""
+    s = Settings.from_env()
+    assert s.sql_max_tool_calls == 12
+    assert expand_model_profile(s)["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "12"
+
+
+def test_sql_agent_tool_calls_follow_autoontology_setting(isolated_env, monkeypatch):
+    monkeypatch.setenv("AUTOONTOLOGY_SQL_MAX_TOOL_CALLS", "6")
+    assert expand_model_profile(Settings.from_env())["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "6"
+    monkeypatch.setenv("AUTOONTOLOGY_SQL_MAX_TOOL_CALLS", "0")  # floor of one call
+    assert expand_model_profile(Settings.from_env())["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "1"
+
+
+def test_sql_agent_tool_calls_set_by_the_user_stay(isolated_env, monkeypatch):
+    monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "30")
+    assert "TEXT_TO_SQL_REACT_MAX_TOOL_CALLS" not in expand_model_profile(Settings.from_env())
+    # a value a parent process derived is not the user's: re-derived from the setting
+    monkeypatch.setenv("AUTOONTOLOGY_DERIVED_ENV", "TEXT_TO_SQL_REACT_MAX_TOOL_CALLS")
+    monkeypatch.setenv("AUTOONTOLOGY_SQL_MAX_TOOL_CALLS", "8")
+    assert expand_model_profile(Settings.from_env())["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "8"
+
+
+def test_backend_child_gets_the_sql_tool_call_budget(isolated_env):
+    from autoontology.engine.supervisor import child_env
+
+    env = child_env(Settings.from_env(), base={})
+    assert env["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "12"
+    assert "TEXT_TO_SQL_REACT_MAX_TOOL_CALLS" in env["AUTOONTOLOGY_DERIVED_ENV"].split(",")
+
+
+def test_sql_concurrency_setting(isolated_env, monkeypatch):
+    assert Settings.from_env().sql_concurrency == 2
+    monkeypatch.setenv("AUTOONTOLOGY_SQL_CONCURRENCY", "5")
+    assert Settings.from_env().sql_concurrency == 5
+    monkeypatch.setenv("AUTOONTOLOGY_SQL_CONCURRENCY", "0")
+    assert Settings.from_env().sql_concurrency == 1

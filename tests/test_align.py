@@ -497,8 +497,12 @@ def test_snapshot_prefers_the_column_text_over_the_engine_attribute_sentence():
     onto every ColumnAttribute and, by its prompt, never copies the column's own text.
     Before 1.3 the attribute carried the column's description (a source comment or the
     compiler's column description), often Korean. The snapshot keeps that: the catalog
-    column text (``GET /api/columns/{table_id}``, which itself falls back to the
-    attribute's) first, the engine's attribute sentence only when the column has none."""
+    column text first. ``GET /api/columns/{table_id}`` already coalesces
+    (``dal/sql_fragments.py`` ``column_description_expr``: the column's own non-blank
+    description, else a HAS_ATTRIBUTE attribute's, else a SEMANTIC_FK one's), so a column
+    without text of its own comes back with the attribute sentence, never blank while an
+    attribute has one. The attribute's own description is only the fallback for a column
+    the listing does not return."""
     from autoontology.store.db import Source
     from autoontology.structured.semantic import fetch_snapshot
 
@@ -506,13 +510,18 @@ def test_snapshot_prefers_the_column_text_over_the_engine_attribute_sentence():
     client.attrs["t-contract"][0]["description"] = "Identifies the contract."
     client.attrs["t-customer"][0]["description"] = "Identifies the customer."
     client.columns = {
+        # own text (a source comment): wins over the engine's sentence
         "tb-c": [{"column_name": "계약id", "description": "계약 식별자"}],
-        "tb-k": [{"column_name": "고객id", "description": "  "}],
+        # no own text: upstream's coalesce returns the attribute's sentence
+        "tb-k": [{"column_name": "고객id", "description": "Identifies the customer."}],
     }
     src = Source("id", "hanbit", "files", "{}", "autoontology_src_hanbit", "db1", "", "")
-    snap = fetch_snapshot(client, src)
-    terms = snap.term_map()
+    terms = fetch_snapshot(client, src).term_map()
     assert terms["t-contract"].attributes[0]["description"] == "계약 식별자"
+    assert terms["t-customer"].attributes[0]["description"] == "Identifies the customer."
+    # a column missing from the listing: the attribute's own description
+    client.columns = {"tb-c": [{"column_name": "계약id", "description": "계약 식별자"}]}
+    terms = fetch_snapshot(client, src).term_map()
     assert terms["t-customer"].attributes[0]["description"] == "Identifies the customer."
 
 

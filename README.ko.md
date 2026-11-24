@@ -711,7 +711,9 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 | `AUTOONTOLOGY_KORDOC_TIMEOUT` | `300` | 문서당 초(kordoc은 항상 오프라인으로 실행). |
 | `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS` | `200` | CSV/TSV 문서가 담는 행 수. |
 | `AUTOONTOLOGY_DOC_MAX_BYTES` | `52428800`(50 MB) | 기본 리더가 받아들이는 CSV/TSV, 텍스트, Markdown, HTML, `.doc` 문서의 최대 크기. 이보다 큰 파일은 `FILE_TOO_LARGE`로 실패합니다. |
-| `AUTOONTOLOGY_SQL_TRANSLATE` | `1` | 플레이그라운드 SQL: 한국어 질문에 영어로 답하면 채팅 프로바이더가 한국어로 옮깁니다(한 번 호출, 30초 제한, 원문 유지). `0`이면 끕니다. |
+| `AUTOONTOLOGY_SQL_TRANSLATE` | `1` | 플레이그라운드 SQL: 한국어 질문에 영어로 답하면 채팅 프로바이더가 한국어로 옮깁니다(한 번 호출, 30초 제한, 원문 유지. 1500자를 넘는 답이나 토큰 한도에서 잘린 번역은 영어로 둡니다). `0`이면 끕니다. |
+| `AUTOONTOLOGY_SQL_MAX_TOOL_CALLS` | `12` | 엔진의 ReAct SQL 에이전트가 질문 하나에 쓸 수 있는 도구 호출 수(호출마다 전체 대화를 다시 보내는 채팅 호출). 엔진의 `TEXT_TO_SQL_REACT_MAX_TOOL_CALLS`(엔진 기본값 24)로 넘기며, 그 값을 직접 설정했다면 그대로 둡니다. |
+| `AUTOONTOLOGY_SQL_CONCURRENCY` | `2` | 서비스에서 동시에 실행되는 플레이그라운드 SQL 질문 수. 초과하면 429 `sql_busy`로 답합니다. |
 | `AUTOONTOLOGY_SAMPLES_DIR` | `<repo>/samples` | `demo`와 `/api/samples`가 쓰는 샘플 세트 폴더. |
 | `AUTOONTOLOGY_LANG` | 한국어 로캘이면 `ko`, 아니면 `en` | CLI 메시지 언어(`en` 또는 `ko`). 웹 UI는 따로 바꿉니다. |
 | `AUTOONTOLOGY_VISION_MODEL` | 설정 안 됨 | 이미지 문서를 OCR 텍스트 앞에서 설명하는 Ollama 비전 모델(예: `gemma4:e4b`). `setup`이 받습니다. 설정하지 않으면 OCR 텍스트만 씁니다. |

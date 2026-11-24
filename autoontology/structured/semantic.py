@@ -114,7 +114,11 @@ def fetch_snapshot(client: BackendClient, source: Source) -> StructuredSnapshot:
         # Engine 1.3 writes a generated English sentence onto every ColumnAttribute
         # (semantic/attribute_descriptions.py) that never copies the column's own text.
         # Keep the pre-1.3 output: the column's description (a source comment or the
-        # compiler's column description) first, the attribute sentence as the fallback.
+        # compiler's column description) first. GET /api/columns/{table_id} already
+        # coalesces (dal/sql_fragments.py column_description_expr: the column's own
+        # non-blank text, else a HAS_ATTRIBUTE then a SEMANTIC_FK attribute's), so a
+        # column without text of its own comes back with the attribute sentence; the
+        # attribute's own description below only covers a column the listing lacks.
         if not table_id:
             return ""
         key = str(table_id)

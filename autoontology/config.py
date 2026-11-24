@@ -112,6 +112,17 @@ def cli_llm_limits(provider_timeout_s: float) -> dict[str, str]:
     return {"LLM_INVOKE_TIMEOUT_S": str(int(2 * provider_timeout_s + 30)), **CLI_LLM_LIMITS}
 
 
+#: Engine 1.3's ReAct SQL agent (retrieval/text_to_sql/react/config.py) reads its tool-call
+#: budget from this variable (an integer count, upstream default 24) and resends the whole
+#: transcript every turn: AutoOntology sets AUTOONTOLOGY_SQL_MAX_TOOL_CALLS (default 12)
+#: there unless the user set the upstream variable themselves.
+SQL_REACT_TOOL_CALLS_VAR = "TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"
+DEFAULT_SQL_MAX_TOOL_CALLS = 12
+#: ``POST /api/playground/sql`` streams running at once per service
+#: (AUTOONTOLOGY_SQL_CONCURRENCY); one more gets 429 ``sql_busy``.
+DEFAULT_SQL_CONCURRENCY = 2
+
+
 #: Key upstream sends to the service's /v1 router when chat uses the ``openai`` provider
 #: (upstream refuses empty keys; the router replaces it with AUTOONTOLOGY_OPENAI_API_KEY).
 ROUTER_API_KEY = "autoontology-router"
@@ -473,6 +484,12 @@ class Settings:
     provider_timeout_s: float = DEFAULT_PROVIDER_TIMEOUT_S
     #: LLM_* limits the user set explicitly (shell or .env); the provider never overrides them.
     llm_limits: dict[str, str] = field(default_factory=dict)
+    #: The ReAct SQL agent's tool-call budget (AUTOONTOLOGY_SQL_MAX_TOOL_CALLS), exported as
+    #: TEXT_TO_SQL_REACT_MAX_TOOL_CALLS unless the user set that (``sql_tool_calls_user``).
+    sql_max_tool_calls: int = DEFAULT_SQL_MAX_TOOL_CALLS
+    sql_tool_calls_user: str = ""
+    #: Concurrent playground SQL streams (AUTOONTOLOGY_SQL_CONCURRENCY).
+    sql_concurrency: int = DEFAULT_SQL_CONCURRENCY
     #: The workspace = the one ontology this home builds (AUTOONTOLOGY_WORKSPACE); its name
     #: is the ontology's name.
     workspace: str = DEFAULT_WORKSPACE
@@ -538,6 +555,13 @@ class Settings:
                 "AUTOONTOLOGY_PROVIDER_TIMEOUT_S", DEFAULT_PROVIDER_TIMEOUT_S
             ),
             llm_limits={k: env[k] for k in OLLAMA_LLM_LIMITS if env.get(k, "").strip()},
+            sql_max_tool_calls=max(
+                1, _int_env("AUTOONTOLOGY_SQL_MAX_TOOL_CALLS", DEFAULT_SQL_MAX_TOOL_CALLS)
+            ),
+            sql_tool_calls_user=env.get(SQL_REACT_TOOL_CALLS_VAR, "").strip(),
+            sql_concurrency=max(
+                1, _int_env("AUTOONTOLOGY_SQL_CONCURRENCY", DEFAULT_SQL_CONCURRENCY)
+            ),
             workspace=_workspace(env.get("AUTOONTOLOGY_WORKSPACE", "")),
             base_iri=_base_iri(env.get("AUTOONTOLOGY_BASE_IRI", "")),
             doc_table_max_rows=max(1, _int_env("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", 200)),
@@ -647,7 +671,8 @@ def expand_model_profile(settings: Settings) -> dict[str, str]:
       ``openai/chatgpt:<m>`` (the router runs the user's logged-in CLI).
 
     Plus the provider's LLM_* limits (Ollama's, or ``cli_llm_limits`` for the CLI
-    providers) for any limit the user has not set.
+    providers) for any limit the user has not set, and the SQL agent's tool-call budget
+    (``TEXT_TO_SQL_REACT_MAX_TOOL_CALLS`` = ``sql_max_tool_calls``) unless the user set it.
     """
     key = OLLAMA_API_KEY if settings.chat_provider == "ollama" else ROUTER_API_KEY
     env: dict[str, str] = {}
@@ -672,6 +697,8 @@ def expand_model_profile(settings: Settings) -> dict[str, str]:
     for name, value in limits.items():
         if name not in settings.llm_limits:
             env[name] = value
+    if not settings.sql_tool_calls_user:
+        env[SQL_REACT_TOOL_CALLS_VAR] = str(settings.sql_max_tool_calls)
     return env
 
 

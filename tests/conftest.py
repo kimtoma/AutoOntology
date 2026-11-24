@@ -36,7 +36,14 @@ _ISOLATED_VARS = [
 
 #: Every developer/shell variable the package or upstream reads, by prefix: unit tests
 #: start from none of them (integration tests keep the real environment).
-_SCRUBBED_PREFIXES = ("AUTOONTOLOGY_", "KORDOC_", "POSTGRES_", "LLM_", "SEMANTIC_LLM_")
+_SCRUBBED_PREFIXES = (
+    "AUTOONTOLOGY_",
+    "KORDOC_",
+    "POSTGRES_",
+    "LLM_",
+    "SEMANTIC_LLM_",
+    "TEXT_TO_SQL_",
+)
 _SCRUBBED_NAMES = {"BACKEND_PORT", "INGESTION_SERVICE_URL", "APP_URL", *_ISOLATED_VARS}
 _KEPT = {"AUTOONTOLOGY_INTEGRATION"}
 

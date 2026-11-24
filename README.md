@@ -757,7 +757,9 @@ then `.env`, then the built-in default.
 | `AUTOONTOLOGY_KORDOC_TIMEOUT` | `300` | Seconds per document (kordoc always runs offline). |
 | `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS` | `200` | Rows a CSV/TSV document keeps. |
 | `AUTOONTOLOGY_DOC_MAX_BYTES` | `52428800` (50 MB) | Largest CSV/TSV, text, Markdown, HTML or `.doc` document the native readers accept; larger files fail with `FILE_TOO_LARGE`. |
-| `AUTOONTOLOGY_SQL_TRANSLATE` | `1` | Playground SQL: an English answer to a Korean question is translated into Korean by the chat provider (one call, 30 s limit; the original is kept). `0` turns it off. |
+| `AUTOONTOLOGY_SQL_TRANSLATE` | `1` | Playground SQL: an English answer to a Korean question is translated into Korean by the chat provider (one call, 30 s limit; the original is kept; answers over 1500 characters or a translation cut at its token budget stay in English). `0` turns it off. |
+| `AUTOONTOLOGY_SQL_MAX_TOOL_CALLS` | `12` | Tool calls the engine's ReAct SQL agent may make per question (each one a chat call that resends the whole transcript); exported as the engine's `TEXT_TO_SQL_REACT_MAX_TOOL_CALLS` (engine default 24) unless you set that yourself. |
+| `AUTOONTOLOGY_SQL_CONCURRENCY` | `2` | Playground SQL questions running at once in the service; one more answers 429 `sql_busy`. |
 | `AUTOONTOLOGY_SAMPLES_DIR` | `<repo>/samples` | Folder holding the sample sets that `demo` and `/api/samples` use. |
 | `AUTOONTOLOGY_LANG` | `ko` for a Korean locale, else `en` | Language of the CLI messages (`en` or `ko`). The web UI has its own switch. |
 | `AUTOONTOLOGY_VISION_MODEL` | unset | Ollama vision model (for example `gemma4:e4b`) that describes image documents before their OCR text; `setup` pulls it. Unset: OCR text only. |
