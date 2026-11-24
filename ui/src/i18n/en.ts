@@ -1,6 +1,7 @@
 /* English UI strings. Keys are grouped by page; `{name}` is a placeholder. The Korean
    dictionary (ko.ts) must have exactly these keys (tsc checks it, i18n.test.ts too). */
 
+import { enConnect } from "@/i18n/en.connect"
 import { enExplore } from "@/i18n/en.explore"
 import { enOps } from "@/i18n/en.ops"
 
@@ -533,4 +534,4 @@ const enCore = {
   "nav.settings.hint": "Models and API keys",
 } as const
 
-export const en = { ...enCore, ...enExplore, ...enOps }
+export const en = { ...enCore, ...enExplore, ...enOps, ...enConnect }

@@ -465,10 +465,10 @@ describe("Revision changes, paging, labels", () => {
 describe("Navigation", () => {
   it("lists Overview and Review first and Settings last; Get started is gone", () => {
     expect(NAV.map((n) => n.id)).toEqual(
-      ["overview", "review", "sources", "build", "ontology", "graph", "playground", "exports", "status", "settings"])
+      ["overview", "review", "sources", "build", "ontology", "graph", "playground", "exports", "connect", "status", "settings"])
     setLang("ko", false)
     expect(NAV.map((n) => n.label)).toEqual(
-      ["개요", "검토", "소스", "빌드", "온톨로지", "그래프", "플레이그라운드", "내보내기", "상태", "설정"])
+      ["개요", "검토", "소스", "빌드", "온톨로지", "그래프", "플레이그라운드", "내보내기", "연결", "상태", "설정"])
   })
 
   it("badges Review with the pending count", async () => {

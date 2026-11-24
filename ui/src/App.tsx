@@ -6,6 +6,7 @@ import { CommandMenu } from "@/components/command-menu"
 import { EmptyState } from "@/components/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import BuildPage from "@/pages/build"
+import ConnectPage from "@/pages/connect"
 import ExportsPage from "@/pages/exports"
 import HomePage from "@/pages/home"
 import IndexPage from "@/pages/overview"
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="graph" element={lazyPage(GraphPage)} />
           <Route path="playground" element={lazyPage(PlaygroundPage)} />
           <Route path="exports" element={<ExportsPage />} />
+          <Route path="connect" element={<ConnectPage />} />
           <Route path="status" element={<StatusPage />} />
           <Route path="runs" element={<LegacyRedirect />} />
           <Route path="concepts" element={<LegacyRedirect />} />

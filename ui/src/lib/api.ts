@@ -201,6 +201,54 @@ export interface ConceptDecision {
   item_id: string
 }
 
+/* --- outside agents (web/agent_api.py, store/agent_tokens.py) ------------------------------ */
+
+export type AgentTokenStatus = "active" | "revoked" | "expired"
+
+export interface AgentToken {
+  id: string
+  name: string
+  status: AgentTokenStatus
+  /** serve only this revision; null = follow the latest snapshot */
+  revision_pin: number | null
+  expires_at: string | null
+  created_at: string
+  last_used_at: string | null
+  revoked_at: string | null
+}
+
+/** `POST /api/agent/tokens` and `.../rotate`: the raw token, shown only once. */
+export interface AgentTokenIssued { token: string; record: AgentToken; note: string }
+
+export interface AgentTokenIn { name: string; revision_pin?: number | null; expires_days?: 30 | 90 | null }
+
+export interface AgentUsage {
+  days: number | null
+  total: number
+  ok: number
+  by_tool: { tool: string; calls: number; ok: number; avg_ms: number | null }[]
+  by_day: { day: string; calls: number }[]
+  by_token: {
+    token_id: string; name: string | null; calls: number; ok: number
+    by_surface: { mcp: number; rest: number }; last_call_at: string | null
+  }[]
+}
+
+export interface AgentTool {
+  name: string
+  description: string
+  inputSchema: { type: string; properties?: Record<string, { type?: string; description?: string }>; required?: string[] }
+}
+
+export interface AgentTools {
+  tools: AgentTool[]
+  protocol: string
+  mcp_path: string
+  rest_base: string
+  rate_per_min: number
+  max_body_bytes: number
+}
+
 /* --- review inbox, revisions, freshness (web/review.py, revisions.py, freshness.py) -------- */
 
 export type ReviewCategory = "proposals" | "axioms" | "unaligned" | "aliases" | "stale_sources" | "folds"
@@ -779,6 +827,14 @@ export const api = {
   exportZipUrl: (dir: string) => `${API}/exports/${enc(dir)}.zip`,
   exportText: (dir: string, file: string) =>
     requestText(`/exports/${enc(dir)}/${encPath(file)}?inline=true`),
+  agent: {
+    tokens: () => request<{ tokens: AgentToken[] }>("/agent/tokens").then((r) => r.tokens),
+    create: (body: AgentTokenIn) => request<AgentTokenIssued>("/agent/tokens", json("POST", body)),
+    rotate: (id: string) => request<AgentTokenIssued>(`/agent/tokens/${enc(id)}/rotate`, { method: "POST" }),
+    revoke: (id: string) => request<AgentToken>(`/agent/tokens/${enc(id)}`, { method: "DELETE" }),
+    usage: (days = 30) => request<AgentUsage>(`/agent/usage?days=${days}`),
+    tools: () => request<AgentTools>("/agent/tools"),
+  },
   playground: {
     index: () => request<IndexStatus>("/playground/index"),
     chat: (body: { question: string; history?: ChatTurn[]; top_k?: number; conversation_id?: string | null },

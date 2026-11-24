@@ -23,7 +23,14 @@ behaviour).
   5000 calls) and managed through `GET/POST /api/agent/tokens`,
   `POST /api/agent/tokens/{id}/rotate`, `DELETE /api/agent/tokens/{id}`,
   `GET /api/agent/usage`, `GET /api/agent/tools`, and from the CLI with
-  `agent tokens list|create|rotate|revoke` and `agent usage`. The web UI page comes next.
+  `agent tokens list|create|rotate|revoke` and `agent usage`.
+- **Connect page in the web UI** (`/ui/connect`, after Exports in the sidebar): the MCP,
+  REST and OpenAPI addresses with copy buttons and the rate limit; the tokens with status,
+  revision pin, expiry, last use and 30-day call count; create (name, latest or a pinned
+  revision, 30/90 days or no expiry), rotate and revoke with confirmations; the raw token
+  shown once with Claude Code, Claude Desktop / Cursor and curl settings filled in (the same
+  settings with a `<TOKEN>` placeholder below the tokens); the tools with their parameters;
+  and the last 30 days of calls by tool and by day.
 - **Download a whole export revision as one zip**: `GET /api/exports/{rev}.zip` (`3` or
   `r0003`) packs exactly the files `GET /api/exports` lists under `r0003/`, as
   `autoontology-r0003.zip`; the Exports page has a **Download all (zip)** button on every

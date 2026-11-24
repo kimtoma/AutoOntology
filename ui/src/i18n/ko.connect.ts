@@ -1,0 +1,116 @@
+/* Korean strings of the Connect page (the same keys as en.connect.ts). */
+import type { enConnect } from "@/i18n/en.connect"
+
+export const koConnect: Record<keyof typeof enConnect, string> = {
+  "nav.connect": "연결",
+  "nav.connect.hint": "외부 에이전트가 MCP·REST로 온톨로지를 조회",
+
+  "connect.title": "연결",
+  "connect.description":
+    "Claude Code, Claude Desktop, Cursor나 직접 만든 스크립트가 온톨로지를 읽게 합니다. 에이전트는 읽기만 합니다. "
+    + "개념을 검색하고 정의와 근거를 열어 보고 SPARQL을 실행할 뿐, 아무것도 바꾸지 않습니다. "
+    + "에이전트마다 토큰을 하나씩 주세요. 토큰은 한 번만 보이며 언제든 폐기할 수 있습니다.",
+
+  "connect.endpoints": "엔드포인트",
+  "connect.endpoints.hint": "모든 요청에 토큰이 필요합니다: Authorization: Bearer aok_…",
+  "connect.endpoint.mcp": "MCP (Streamable HTTP)",
+  "connect.endpoint.rest": "REST 기본 주소",
+  "connect.endpoint.openapi": "OpenAPI",
+  "connect.endpoint.openapiNote": "이것도 토큰이 필요",
+  "connect.rate": "토큰마다 분당 최대 {n}회 요청할 수 있습니다.",
+  "connect.copy": "복사",
+  "connect.copied": "복사됨",
+  "connect.copyLabel": "{what} 복사",
+  "connect.copyFailed": "복사하지 못했습니다. 텍스트를 선택해 직접 복사하세요.",
+
+  "connect.tokens": "토큰",
+  "connect.tokens.hint": "에이전트마다 토큰 하나. 호출 수는 최근 30일 기준입니다.",
+  "connect.create": "토큰 만들기",
+  "connect.empty.title": "아직 토큰이 없습니다",
+  "connect.empty.hint": "온톨로지를 읽을 에이전트마다 토큰을 만드세요.",
+  "connect.col.name": "이름",
+  "connect.col.status": "상태",
+  "connect.col.revision": "리비전",
+  "connect.col.expires": "만료",
+  "connect.col.lastUsed": "마지막 사용",
+  "connect.col.calls": "호출",
+  "connect.col.actions": "작업",
+  "connect.status.active": "사용 중",
+  "connect.status.revoked": "폐기됨",
+  "connect.status.expired": "만료됨",
+  "connect.revision.latest": "최신 따라감",
+  "connect.revision.pinned": "리비전 {n} 고정",
+  "connect.never": "없음",
+  "connect.notUsed": "아직 사용 안 함",
+  "connect.rotate": "재발급",
+  "connect.revoke": "폐기",
+  "connect.rotateLabel": "{name} 토큰 재발급",
+  "connect.revokeLabel": "{name} 토큰 폐기",
+  "connect.rotate.title": "“{name}” 토큰을 재발급할까요?",
+  "connect.rotate.body":
+    "새 토큰이 바로 발급되고 이전 토큰은 즉시 멈춥니다. 이 토큰을 쓰는 에이전트는 모두 새 토큰으로 바꿔야 합니다.",
+  "connect.rotate.go": "토큰 재발급",
+  "connect.revoke.title": "“{name}” 토큰을 폐기할까요?",
+  "connect.revoke.body": "토큰이 즉시 멈추며 다시 켤 수 없습니다. 지난 호출 기록은 사용량에 남습니다.",
+  "connect.revoke.go": "토큰 폐기",
+  "connect.revoked": "“{name}” 토큰을 폐기했습니다",
+  "connect.failed": "실패: {error}",
+
+  "connect.dialog.title": "토큰 만들기",
+  "connect.dialog.description": "쓸 에이전트 이름으로 지으세요. 예: claude-code 또는 스크립트 이름.",
+  "connect.field.name": "이름",
+  "connect.field.namePlaceholder": "claude-code",
+  "connect.field.revision": "리비전",
+  "connect.field.revision.latest": "최신 리비전 따라가기",
+  "connect.field.revision.pin": "리비전 {n} ({date})",
+  "connect.field.revision.hint": "검토를 마친 리비전을 고정하면 계속 빌드하는 동안에도 에이전트는 그 리비전만 봅니다.",
+  "connect.field.expiry": "만료",
+  "connect.expiry.30": "30일",
+  "connect.expiry.90": "90일",
+  "connect.expiry.never": "만료 없음",
+  "connect.creating": "만드는 중…",
+
+  "connect.once.title": "“{name}” 토큰",
+  "connect.once.rotatedTitle": "“{name}”의 새 토큰",
+  "connect.once.description": "지금 토큰을 복사하세요. 이번 한 번만 보이며 AutoOntology에는 해시만 남습니다.",
+  "connect.once.warning": "이 토큰은 다시 보이지 않습니다. 잃어버리면 재발급하세요.",
+  "connect.once.token": "토큰",
+  "connect.once.snippets": "에이전트에 추가하기",
+
+  "connect.howto": "연결 방법",
+  "connect.howto.hint": "<TOKEN>을 내 토큰으로 바꾸세요. 토큰을 만든 직후 보이는 설정에는 토큰이 채워져 있습니다.",
+  "connect.snippet.claudeCode": "Claude Code",
+  "connect.snippet.desktop": "Claude Desktop·Cursor",
+  "connect.snippet.curl": "REST (curl)",
+  "connect.snippet.claudeCode.hint": "터미널에서 실행하세요.",
+  "connect.snippet.desktop.hint": "claude_desktop_config.json(Claude Desktop) 또는 .cursor/mcp.json(Cursor)에 추가하세요.",
+  "connect.snippet.curl.hint": "개념을 검색한 다음 SPARQL 질의를 실행합니다.",
+  "connect.snippet.sampleQuery": "계약",
+
+  "connect.tools": "도구",
+  "connect.tools.hint": "에이전트가 호출할 수 있는 도구(읽기 전용). 프로토콜 {protocol}.",
+  "connect.tools.params": "매개변수",
+  "connect.tools.noParams": "매개변수 없음",
+  "connect.tools.required": "필수",
+  "connect.tool.list_revisions": "온톨로지 리비전 목록(최신순): 시각, 만든 실행, 개수, 포함된 소스.",
+  "connect.tool.get_ontology_summary":
+    "리비전 하나의 요약: 워크스페이스, 기본 IRI, 소스, 클래스·개체·속성 개수, 매칭 개수.",
+  "connect.tool.search_concepts":
+    "개념(표의 용어와 문서 개념)을 이름·동의어·정의로 검색합니다. 검색어가 비면 순서대로 나열합니다.",
+  "connect.tool.get_concept":
+    "id 또는 정확한 이름으로 개념 하나: 정의, 동의어, 관계, 근거 인용과 문서, 매칭, 검토 결정.",
+  "connect.tool.sparql_query":
+    "리비전의 RDF/OWL 그래프에 읽기 전용 SPARQL 질의를 실행합니다. SERVICE·FROM·LOAD는 거부되고 행 수는 제한됩니다.",
+  "connect.tool.list_exports":
+    "리비전별 내보내기 폴더(RDF/OWL, GraphML, Ossie, OKF) 목록. REST로는 zip 하나로 내려받을 수 있습니다.",
+
+  "connect.usage": "사용량",
+  "connect.usage.hint": "최근 {days}일 동안의 도구 호출.",
+  "connect.usage.total": "호출",
+  "connect.usage.ok": "성공",
+  "connect.usage.none": "아직 호출이 없습니다.",
+  "connect.usage.byTool": "도구별",
+  "connect.usage.byDay": "일별",
+  "connect.usage.avg": "평균 {ms}ms",
+  "connect.usage.dayCalls": "{day}: {n}회",
+}

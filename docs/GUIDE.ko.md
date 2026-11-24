@@ -418,8 +418,12 @@ claude mcp add --transport http autoontology http://127.0.0.1:7800/mcp \
 토큰은 한 번만 보입니다. `agent tokens rotate <id>`는 새 토큰을 주고(이전 토큰은 즉시 멈춤),
 `agent tokens revoke <id>`는 토큰을 끄며, `agent usage`는 에이전트별로 무엇을 물었는지 보여
 줍니다. `--revision R`을 주면 계속 빌드하는 동안에도 에이전트는 검토를 마친 리비전 하나만 봅니다.
-같은 일을 하고 바로 복사할 설정을 보여 주는 웹 UI의 **연결** 페이지는 다음에 나옵니다. 자세한
-내용은 README의 [외부 에이전트 연결](../README.ko.md#외부-에이전트-연결)에 있습니다.
+
+웹 UI의 **연결** 페이지는 이 모든 일을 터미널 없이 합니다. MCP·REST 주소를 복사 버튼과 함께
+보여 주고, 토큰마다 리비전·만료·마지막 사용·호출 수를 나열하며, 확인을 거쳐 토큰을 만들고
+재발급하고 폐기합니다. 토큰을 만들거나 재발급한 직후에는 토큰을 한 번만 보여 주고, Claude Code,
+Claude Desktop·Cursor, curl용 설정에 그 토큰을 채워 바로 복사할 수 있게 합니다. 그 아래에는
+에이전트가 호출할 수 있는 도구와 최근 30일 사용량이 있습니다. 자세한 내용은 README의 [외부 에이전트 연결](../README.ko.md#외부-에이전트-연결)에 있습니다.
 
 ## 8. 살아있는 온톨로지 운영하기
 
@@ -513,7 +517,7 @@ quickstart 샘플에서 1초 미만입니다(큰 온톨로지에서는 약 1분,
 | 내보내기 | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F`, `exports zip <rev> --out F` |
 | 상태 | `uv run autoontology status`, `doctor`, `provider status` |
 | 설정 | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(서비스)* |
-| 연결 *(곧 추가)* | `uv run autoontology agent tokens create <name> [--revision R] [--expires-days 30\|90]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage` |
+| 연결 | `uv run autoontology agent tokens create <name> [--revision R] [--expires-days 30\|90]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage` |
 
 API 키는 명령줄 인수로 받지 않습니다. `settings set --api-key-stdin`은 터미널에서 화면에 표시하지
 않고 읽거나, 파이프(예: 비밀번호 관리자 출력)로 받습니다.

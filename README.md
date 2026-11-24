@@ -648,8 +648,9 @@ one (403 `revision_pinned`). Each token may make 120 requests a minute
 (`AUTOONTOLOGY_AGENT_RATE_PER_MIN`; then 429 with `Retry-After`), and request bodies are
 capped at 1 MB (413). Every tool call is recorded (`agent usage`); tokens are never logged
 and only their SHA-256 is stored. The Host and cross-origin checks of the service still
-apply. A **Connect** page in the web UI for creating tokens and copying these snippets
-comes next; until then use `autoontology agent tokens create`.
+apply. The web UI's **Connect** page (`/ui/connect`) does the same without a terminal:
+it shows these endpoints, creates, rotates and revokes tokens, and fills these snippets with
+a new token the one time it is shown.
 
 ### Export formats
 

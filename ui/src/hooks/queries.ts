@@ -20,6 +20,9 @@ export const keys = {
   revisions: ["revisions"] as const,
   diff: (from: number | null | undefined, to: number | null | undefined) => ["diff", from ?? null, to ?? null] as const,
   freshness: ["freshness"] as const,
+  agentTokens: ["agent-tokens"] as const,
+  agentUsage: ["agent-usage"] as const,
+  agentTools: ["agent-tools"] as const,
 }
 
 /** The review inbox and its badge poll this often (and refresh after decisions and runs). */

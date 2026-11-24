@@ -1,6 +1,6 @@
 import { t, type MessageKey } from "@/i18n/core"
 import {
-  Activity, BookOpen, Database, Download, FlaskConical, Hammer, Inbox, LayoutDashboard, Network, Rocket,
+  Activity, BookOpen, Database, Download, FlaskConical, Hammer, Inbox, LayoutDashboard, Network, Plug, Rocket,
   Settings, type LucideIcon,
 } from "lucide-react"
 
@@ -24,6 +24,7 @@ export const NAV: NavItem[] = [
   item("/graph", Network, "graph"),
   item("/playground", FlaskConical, "playground"),
   item("/exports", Download, "exports"),
+  item("/connect", Plug, "connect"),
   item("/status", Activity, "status"),
   item("/settings", Settings, "settings"),
 ]
