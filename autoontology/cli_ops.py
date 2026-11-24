@@ -20,6 +20,7 @@ service first so ``running``/``restart_required`` describe the running processes
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -1437,6 +1438,139 @@ def settings_restart(
         raise typer.Exit(code=1)
 
 
+# --- outside agents -----------------------------------------------------------------
+
+agent_app = typer.Typer(help=msg("help.agent"), no_args_is_help=True)
+agent_tokens_app = typer.Typer(help=msg("help.agent.tokens"), no_args_is_help=True)
+agent_app.add_typer(agent_tokens_app, name="tokens")
+
+
+def _token_seg(token_id: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", token_id):
+        _error("unknown_token", f"unknown token {token_id!r}", 2)
+    return quote(token_id, safe="")
+
+
+def _token_rows(tokens: list[dict[str, Any]]) -> str:
+    rows = [
+        (
+            t["id"],
+            t["name"],
+            t["status"],
+            f"r{t['revision_pin']}" if t["revision_pin"] else "latest",
+            (t["expires_at"] or "-")[:19],
+            (t["created_at"] or "-")[:19],
+            (t["last_used_at"] or "-")[:19],
+        )
+        for t in tokens
+    ]
+    header = ("ID", "NAME", "STATUS", "REVISION", "EXPIRES", "CREATED", "LAST USED")
+    return base._table(header, rows)
+
+
+def _print_new_token(body: dict[str, Any]) -> None:
+    typer.echo(_token_rows([body["record"]]))
+    typer.echo("")
+    typer.echo(body["token"])
+    typer.echo("")
+    typer.echo(msg("ops.agent_token_once"))
+    typer.echo(msg("ops.agent_connect_hint"))
+
+
+@agent_tokens_app.command("list", help=msg("help.agent.tokens.list"))
+def agent_tokens_list(as_json: bool = _JSON) -> None:
+    body = _guard(lambda: _local().call("GET", "/agent/tokens"))
+    if as_json:
+        _json(body)
+        return
+    if not body["tokens"]:
+        typer.echo(msg("ops.agent_no_tokens"))
+        return
+    typer.echo(_token_rows(body["tokens"]))
+
+
+@agent_tokens_app.command("create", help=msg("help.agent.tokens.create"))
+def agent_tokens_create(
+    name: str = typer.Argument(..., help=msg("help.agent.tokens.create.name")),
+    revision: int = typer.Option(
+        None, "--revision", min=1, metavar="N", help=msg("help.agent.tokens.create.revision")
+    ),
+    expires_days: int = typer.Option(
+        None, "--expires-days", metavar="DAYS", help=msg("help.agent.tokens.create.expires")
+    ),
+    as_json: bool = _JSON,
+) -> None:
+    if expires_days is not None and expires_days not in (30, 90):
+        _error("invalid_request", msg("ops.agent_bad_expiry", value=expires_days), 2)
+    payload = {"name": name, "revision_pin": revision, "expires_days": expires_days}
+    body = _guard(lambda: _local().call("POST", "/agent/tokens", json=payload))
+    if as_json:
+        _json(body)
+        return
+    _print_new_token(body)
+
+
+@agent_tokens_app.command("rotate", help=msg("help.agent.tokens.rotate"))
+def agent_tokens_rotate(
+    token_id: str = typer.Argument(..., help=msg("help.agent.tokens.id")),
+    as_json: bool = _JSON,
+) -> None:
+    seg = _token_seg(token_id)
+    body = _guard(lambda: _local().call("POST", f"/agent/tokens/{seg}/rotate"))
+    if as_json:
+        _json(body)
+        return
+    _print_new_token(body)
+
+
+@agent_tokens_app.command("revoke", help=msg("help.agent.tokens.revoke"))
+def agent_tokens_revoke(
+    token_id: str = typer.Argument(..., help=msg("help.agent.tokens.id")),
+    as_json: bool = _JSON,
+) -> None:
+    seg = _token_seg(token_id)
+    body = _guard(lambda: _local().call("DELETE", f"/agent/tokens/{seg}"))
+    if as_json:
+        _json(body)
+        return
+    typer.echo(msg("ops.agent_revoked", id=body["id"], name=body["name"]))
+
+
+@agent_app.command("usage", help=msg("help.agent.usage"))
+def agent_usage(
+    days: int = typer.Option(None, "--days", min=1, max=365, help=msg("help.agent.usage.days")),
+    as_json: bool = _JSON,
+) -> None:
+    params = {"days": days} if days else {}
+    body = _guard(lambda: _local().call("GET", "/agent/usage", params=params))
+    if as_json:
+        _json(body)
+        return
+    if not body["total"]:
+        typer.echo(msg("ops.agent_no_calls"))
+        return
+    typer.echo(msg("ops.agent_usage_total", total=body["total"], ok=body["ok"]))
+    typer.echo("")
+    rows = [(r["tool"], str(r["calls"]), str(r["ok"]), str(r["avg_ms"])) for r in body["by_tool"]]
+    typer.echo(base._table(("TOOL", "CALLS", "OK", "AVG MS"), rows))
+    typer.echo("")
+    rows = [
+        (
+            t["token_id"],
+            t["name"] or "-",
+            str(t["calls"]),
+            str(t["ok"]),
+            str(t["by_surface"]["mcp"]),
+            str(t["by_surface"]["rest"]),
+            (t["last_call_at"] or "-")[:19],
+        )
+        for t in body["by_token"]
+    ]
+    typer.echo(base._table(("TOKEN", "NAME", "CALLS", "OK", "MCP", "REST", "LAST CALL"), rows))
+    typer.echo("")
+    typer.echo(base._table(("DAY", "CALLS"), [(d["day"], str(d["calls"])) for d in body["by_day"]]))
+
+
 # --- registration -------------------------------------------------------------------
 
 
@@ -1448,6 +1582,7 @@ def register(app: typer.Typer, source_app: typer.Typer) -> None:
     app.add_typer(exports_app, name="exports")
     app.add_typer(playground_app, name="playground")
     app.add_typer(settings_app, name="settings")
+    app.add_typer(agent_app, name="agent")
     source_app.command("freshness", help=msg("help.sources.freshness"))(sources_freshness)
     # `sources freshness` (the UI's page name) is `source freshness`
     app.add_typer(source_app, name="sources", hidden=True)

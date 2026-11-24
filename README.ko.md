@@ -481,6 +481,8 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` / `zip <rev> --out FILE` | 내보내기 폴더 목록; 리비전의 파일 목록 또는 텍스트 파일 출력(예: `ossie/validation.json`, `okf/validation.json`); 파일 저장; 리비전 폴더 전체를 zip 하나로 저장(`--out`이 디렉터리면 `autoontology-r0003.zip`). |
 | `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F\|--examples [--limit N]` / `index [--rebuild]` | 실행 중인 서비스로 플레이그라운드 사용: 인용과 함께 스트리밍되는 RAG 답변, 자연어 SQL 에이전트, 최신 스냅샷에 대한 SPARQL, 채팅 인덱스. |
 | `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | 설정 페이지: 현재 선택과 각 값의 출처(키는 표시 안 함), 후보 테스트(채팅 pong과 임베딩 차원), `.env` 저장(`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; 키는 표준 입력으로만), 서비스 자체 재시작. |
+| `autoontology agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90]` / `rotate <id>` / `revoke <id>` | 외부 에이전트용 베어러 토큰([외부 에이전트 연결](#외부-에이전트-연결) 참고): `create`와 `rotate`는 토큰을 한 번만 출력합니다(저장되는 것은 SHA-256뿐이고, 교체하면 이전 토큰은 즉시 멈춤). `revoke`는 토큰의 호출 기록을 남깁니다. `--revision`은 토큰을 스냅샷 하나에 고정합니다. |
+| `autoontology agent usage [--days N]` | 도구별·토큰별(MCP와 REST)·날짜별 에이전트 호출. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
 | `autoontology tools build-ui` | 웹 UI를 `autoontology/web/static/dist`로 다시 빌드합니다(pnpm 필요). |
@@ -489,7 +491,7 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `autoontology version` | 버전을 출력합니다. |
 
 표를 출력하는 명령은 모두 `--json`(웹 API 응답 본문)도 받습니다. `ontology` 아래 명령,
-`source freshness`, `samples`, `exports`, `settings show|test|set`, `runs logs`(`--follow` 없이)는
+`source freshness`, `samples`, `exports`, `agent`, `settings show|test|set`, `runs logs`(`--follow` 없이)는
 로컬 저장소와 파일을 읽으므로 서비스가 꺼져 있어도 동작합니다. 나머지는 실행 중인 서비스를
 호출하며, 서비스가 없으면 안내와 함께 종료 코드 2로 끝납니다. `--json`일 때 실패하면 stdout에도
 `{"error": <code>, "detail": <text>, ...}`를 출력합니다(API 오류는 1, 사용법 오류나 서비스 꺼짐은 2).
@@ -545,9 +547,65 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
 | `POST /api/playground/sql` | 엔진을 통한 자연어→SQL(SSE): `{question, source?}`. |
 | `GET /api/playground/sparql/examples` | 예시 쿼리. |
 | `POST /api/playground/sparql` | `{query, limit?}`로 스냅샷에 읽기 전용 SPARQL 쿼리를 실행합니다. |
+| `GET /api/agent/tokens` | 외부 에이전트 토큰: `{tokens: [{id, name, status: active\|revoked\|expired, revision_pin, expires_at, created_at, last_used_at, revoked_at}]}`(토큰 값이나 해시는 절대 없음). |
+| `POST /api/agent/tokens` | `{name, revision_pin?, expires_days?: 30\|90\|null}`로 토큰을 만듭니다: 201 `{token, record, note}`. 원본 `token`은 여기서만 돌려줍니다. 없는 리비전에 고정하면 404 `unknown_revision`. |
+| `POST /api/agent/tokens/{id}/rotate`, `DELETE /api/agent/tokens/{id}` | 같은 레코드에 새 토큰 발급(`{token, record, note}`, 이전 토큰은 즉시 멈춤, 409 `token_revoked`/`token_expired`), 또는 폐기(레코드와 호출 기록은 남음). |
+| `GET /api/agent/usage[?days=]` | 에이전트 호출: `{days, total, ok, by_tool: [{tool, calls, ok, avg_ms}], by_day: [{day, calls}], by_token: [{token_id, name, calls, ok, by_surface: {mcp, rest}, last_call_at}]}`. |
+| `GET /api/agent/tools` | 에이전트 도구와 설명·입력 스키마, `mcp_path`, `rest_base`, `rate_per_min`. |
+| `POST /mcp`, `/agent/v1/*` | 외부 에이전트용 경로(베어러 토큰 필요): [외부 에이전트 연결](#외부-에이전트-연결) 참고. |
 | `POST /v1/chat/completions`, `GET /v1/models` | 엔진이 쓰는 모델 라우터. 클라이언트용이 아닙니다. |
 | `POST /ingest`, `POST /ingest/delete?database_name=` | 내부용: 연결이 등록되거나 삭제될 때 엔진이 호출하는 콜백. 적재나 그래프 삭제를 큐에 넣습니다. 클라이언트용이 아닙니다. |
 | `GET /health/live`, `GET /health` | 생존 확인과 준비 상태 확인. |
+
+### 외부 에이전트 연결
+
+다른 에이전트(Claude Code, Claude Desktop, Cursor, 직접 만든 스크립트)는 MCP 엔드포인트와
+작은 REST API로 빌드된 온톨로지를 읽을 수 있습니다. 둘 다 읽기 전용이며, `localhost`에서도
+베어러 토큰이 필요합니다.
+
+```bash
+uv run autoontology agent tokens create claude-code          # aok_...를 한 번만 출력
+claude mcp add --transport http autoontology http://127.0.0.1:7800/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 이렇게 적습니다.
+
+```json
+{
+  "mcpServers": {
+    "autoontology": {
+      "type": "http",
+      "url": "http://127.0.0.1:7800/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+`http://127.0.0.1:7800`은 에이전트가 서비스에 닿는 주소(예: Tailscale 호스트 이름)로 바꾸세요.
+도구는 MCP와 REST에서 같으며 `list_revisions`, `get_ontology_summary`, `search_concepts`,
+`get_concept`(id, 이름 또는 동의어로), `sparql_query`(플레이그라운드와 같은 읽기 전용 검사,
+시간 제한, 행 상한), `list_exports`입니다. 모든 결과에는 답한 리비전 `revision`이 들어 있습니다.
+
+| 메서드와 경로 | 도구 |
+|---|---|
+| `POST /mcp` | Streamable HTTP MCP(JSON-RPC 2.0, 프로토콜 `2025-06-18`, JSON 응답, SSE 스트림·세션 없음): `initialize`, `ping`, `tools/list`, `tools/call`. |
+| `GET /agent/v1/revisions[?limit=]` | `list_revisions` |
+| `GET /agent/v1/ontology[?revision=]` | `get_ontology_summary` |
+| `GET /agent/v1/concepts?q=&limit=&kind=&revision=` | `search_concepts`(`limit` 최대 50) |
+| `GET /agent/v1/concepts/{id}[?revision=]` | `get_concept` |
+| `POST /agent/v1/sparql` | `sparql_query`: `{query, limit?, revision?}` |
+| `GET /agent/v1/exports`, `GET /agent/v1/exports/{rev}.zip` | `list_exports`; 리비전 폴더 하나를 zip으로 |
+| `GET /agent/v1/openapi.json` | 이 경로들의 OpenAPI 설명 |
+
+토큰이 없거나 틀렸거나 폐기·만료되었으면 401 `{"error": "unauthorized"}`로 답합니다.
+`--revision R`로 만든 토큰은 모든 호출을 그 리비전으로 답하고 다른 리비전은 거부합니다(403
+`revision_pinned`). 토큰마다 분당 120회까지 요청할 수 있고(`AUTOONTOLOGY_AGENT_RATE_PER_MIN`,
+넘으면 429와 `Retry-After`), 요청 본문은 1 MB까지입니다(413). 도구 호출은 모두 기록되며
+(`agent usage`), 토큰은 로그에 남지 않고 SHA-256만 저장됩니다. 서비스의 Host·교차 출처 검사도
+그대로 적용됩니다. 토큰을 만들고 이 설정을 복사하는 웹 UI의 **연결** 페이지는 다음에 나옵니다.
+그때까지는 `autoontology agent tokens create`를 쓰세요.
 
 ### 내보내기 형식
 
@@ -715,6 +773,9 @@ cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoont
   스키마로 검증하며(fail-closed), OKF 번들은 추출한 텍스트의 Markdown과 HTML을 이스케이프합니다.
   `.md` 파일을 다른 곳에서 HTML로 렌더링한다면 직접 정화(sanitize)하세요.
 - SPARQL 콘솔은 읽기 전용이며 `SERVICE`, `FROM`, `LOAD`를 거부합니다.
+- 외부 에이전트 경로(`/mcp`, `/agent/v1`)만 인증이 있습니다. 항상 베어러 토큰이 필요하고,
+  읽기 전용이며, 토큰마다 요청 수가 제한됩니다. 토큰은 비밀번호처럼 다루고
+  `autoontology agent tokens rotate` / `revoke`로 교체하거나 폐기하세요.
 - API 키는 로그, 상태 응답, 업스트림에서 전달되는 오류 본문에서 마스킹됩니다.
 - 데이터베이스 이름은 `autoontology`와 `autoontology_src_*`로 제한되므로, 공유 Postgres 서버의
   다른 데이터베이스는 절대 건드리지 않습니다.

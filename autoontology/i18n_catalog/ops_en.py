@@ -166,4 +166,29 @@ MESSAGES: dict[str, str] = {
     ),
     "ops.restart_done": "restart {id} done: the service runs again (pid {pid})",
     "ops.restart_not_done": "restart {id}: {state} (logs in {log})",
+    "help.agent": (
+        "Outside agents (Claude Code, Cursor, scripts): bearer tokens for the MCP endpoint "
+        "(/mcp) and the REST API (/agent/v1), and their usage."
+    ),
+    "help.agent.tokens": "Agent tokens: list, create, rotate, revoke.",
+    "help.agent.tokens.list": "List the tokens (never the token itself).",
+    "help.agent.tokens.create": "Create a token; it is printed once.",
+    "help.agent.tokens.create.name": "A name for the agent, e.g. claude-code.",
+    "help.agent.tokens.create.revision": "Serve only this revision (default: the latest).",
+    "help.agent.tokens.create.expires": "Expire after 30 or 90 days (default: never).",
+    "help.agent.tokens.rotate": "Replace a token: the old one stops at once.",
+    "help.agent.tokens.revoke": "Revoke a token (its call history stays).",
+    "help.agent.tokens.id": "Token id (tok_..., see `agent tokens list`).",
+    "help.agent.usage": "Agent calls: totals by tool, by token and by day.",
+    "help.agent.usage.days": "Only the last N days (default: every kept call).",
+    "ops.agent_token_once": "This token is shown only once: copy it now.",
+    "ops.agent_connect_hint": (
+        "connect Claude Code: claude mcp add --transport http autoontology "
+        '<origin>/mcp --header "Authorization: Bearer <token>"'
+    ),
+    "ops.agent_no_tokens": "no agent tokens yet: `uv run autoontology agent tokens create <name>`",
+    "ops.agent_no_calls": "no agent calls yet",
+    "ops.agent_revoked": "revoked {id} ({name})",
+    "ops.agent_bad_expiry": "--expires-days must be 30 or 90, got {value}",
+    "ops.agent_usage_total": "{total} call(s), {ok} ok",
 }

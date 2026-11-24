@@ -426,6 +426,26 @@ whole folder as one `autoontology-r<revision>.zip`.
 
 ![Exports page](screenshots/exports.png)
 
+### Connect other agents
+
+Your own AI assistants can read the ontology too: Claude Code, Claude Desktop, Cursor or a
+script asks it questions ("what does 계약 mean, and where is that written?") through MCP or
+a small REST API. They can only read; they never change anything. Each agent gets its own
+token:
+
+```bash
+uv run autoontology agent tokens create claude-code      # copy the aok_... token it prints
+claude mcp add --transport http autoontology http://127.0.0.1:7800/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+The token is shown only once. `agent tokens rotate <id>` gives a new one (the old one stops
+working at once), `agent tokens revoke <id>` switches it off, and `agent usage` shows what
+each agent asked. `--revision R` keeps an agent on one reviewed revision while you keep
+building. A **Connect** page in the web UI that does the same and shows ready-to-copy
+settings comes next. The README's
+[Connect outside agents](../README.md#connect-outside-agents) has the details.
+
 ## 8. Operating a living ontology
 
 The first build is the beginning. Your organisation keeps writing documents and changing
@@ -525,6 +545,7 @@ need `uv run autoontology up`; the others read the local data and work with it d
 | Exports | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F`, `exports zip <rev> --out F` |
 | Status | `uv run autoontology status`, `doctor`, `provider status` |
 | Settings | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(service)* |
+| Connect *(coming next)* | `uv run autoontology agent tokens create <name> [--revision R] [--expires-days 30\|90]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage` |
 
 The API key is never a command-line argument: `settings set --api-key-stdin` reads it from
 the terminal without showing it (or from a pipe, e.g. a password manager's output).

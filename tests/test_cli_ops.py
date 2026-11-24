@@ -702,6 +702,13 @@ NEW_COMMANDS = [
     ["settings", "set"],
     ["settings", "restart"],
     ["review", "list"],
+    ["agent"],
+    ["agent", "tokens"],
+    ["agent", "tokens", "list"],
+    ["agent", "tokens", "create"],
+    ["agent", "tokens", "rotate"],
+    ["agent", "tokens", "revoke"],
+    ["agent", "usage"],
     [],
 ]
 
@@ -899,3 +906,58 @@ def test_playground_sparql_examples(isolated_env, monkeypatch):
     assert json.loads(_ok(["playground", "sparql", "--examples", "--json"]).stdout) == {
         "examples": examples
     }
+
+
+# --- agent tokens ---------------------------------------------------------------------
+
+
+def test_agent_tokens_create_list_rotate_revoke(isolated_env):
+    import hashlib
+    import sqlite3
+
+    from tests.test_web_api import _seed_snapshot
+
+    settings = Settings.from_env()
+    _seed_snapshot(settings)
+    out = _ok(["agent", "tokens", "create", "cursor", "--revision", "1", "--expires-days", "30"])
+    token = re.search(r"aok_[A-Za-z0-9_-]+", out.output)[0]
+    assert out.output.count(token) == 1 and "only once" in out.output
+    db = sqlite3.connect(Path(settings.home) / "autoontology.db")
+    assert db.execute("SELECT token_hash, revision_pin FROM agent_tokens").fetchall() == [
+        (hashlib.sha256(token.encode()).hexdigest(), 1)
+    ]
+    listed = _ok(["agent", "tokens", "list"]).output
+    assert "cursor" in listed and "r1" in listed and "active" in listed and token not in listed
+    rows = json.loads(_ok(["agent", "tokens", "list", "--json"]).output)["tokens"]
+    tid = rows[0]["id"]
+    assert rows[0]["revision_pin"] == 1 and "token_hash" not in rows[0]
+
+    made = json.loads(_ok(["agent", "tokens", "create", "script", "--json"]).output)
+    assert made["token"].startswith("aok_") and made["record"]["expires_at"] is None
+    rotated = json.loads(_ok(["agent", "tokens", "rotate", tid, "--json"]).output)
+    assert rotated["token"] != token and rotated["record"]["id"] == tid
+    assert "revoked" in _ok(["agent", "tokens", "revoke", tid]).output
+    gone = runner.invoke(app, ["agent", "tokens", "rotate", tid, "--json"])
+    assert gone.exit_code == 1 and json.loads(gone.stdout)["error"] == "token_revoked"
+    unknown = runner.invoke(app, ["agent", "tokens", "revoke", "tok_nope"])
+    assert unknown.exit_code == 1 and "unknown_token" in unknown.output
+    bad = runner.invoke(app, ["agent", "tokens", "create", "x", "--expires-days", "7"])
+    assert bad.exit_code == 2
+    pin = runner.invoke(app, ["agent", "tokens", "create", "x", "--revision", "9"])
+    assert pin.exit_code == 1 and "unknown_revision" in pin.output
+
+
+def test_agent_usage(isolated_env):
+    from autoontology.store.agent_tokens import AgentTokens
+
+    settings = Settings.from_env()
+    tokens = AgentTokens(Store.for_home(settings.home))
+    _, rec = tokens.create("claude")
+    tokens.record_call(rec.id, "mcp", "search_concepts", True, 12)
+    tokens.record_call(rec.id, "rest", "get_concept", False, 3)
+    out = _ok(["agent", "usage"]).output
+    assert "search_concepts" in out and "get_concept" in out and "claude" in out
+    body = json.loads(_ok(["agent", "usage", "--days", "7", "--json"]).output)
+    assert body["total"] == 2 and body["ok"] == 1 and body["days"] == 7
+    empty = AgentTokens(Store.for_home(settings.home))
+    assert empty.usage(1)["total"] == 2

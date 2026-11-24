@@ -148,4 +148,31 @@ MESSAGES: dict[str, str] = {
     ),
     "ops.restart_done": "재시작 {id} 완료: 서비스가 다시 실행 중입니다 (pid {pid})",
     "ops.restart_not_done": "재시작 {id}: {state} (로그: {log})",
+    "help.agent": (
+        "외부 에이전트(Claude Code, Cursor, 스크립트): MCP 엔드포인트(/mcp)와 "
+        "REST API(/agent/v1)용 토큰과 사용량."
+    ),
+    "help.agent.tokens": "에이전트 토큰: 목록, 만들기, 교체, 폐기.",
+    "help.agent.tokens.list": "토큰 목록 (토큰 값은 보이지 않음).",
+    "help.agent.tokens.create": "토큰을 만듭니다. 토큰은 한 번만 출력됩니다.",
+    "help.agent.tokens.create.name": "에이전트 이름, 예: claude-code.",
+    "help.agent.tokens.create.revision": "이 리비전만 제공 (기본: 최신).",
+    "help.agent.tokens.create.expires": "30 또는 90일 후 만료 (기본: 없음).",
+    "help.agent.tokens.rotate": "토큰 교체: 이전 토큰은 즉시 멈춥니다.",
+    "help.agent.tokens.revoke": "토큰 폐기 (호출 기록은 남음).",
+    "help.agent.tokens.id": "토큰 id (tok_..., `agent tokens list` 참고).",
+    "help.agent.usage": "에이전트 호출: 도구·토큰·날짜별 합계.",
+    "help.agent.usage.days": "최근 N일만 (기본: 보관된 전체).",
+    "ops.agent_token_once": "이 토큰은 지금 한 번만 보입니다: 바로 복사하세요.",
+    "ops.agent_connect_hint": (
+        "Claude Code 연결: claude mcp add --transport http autoontology "
+        '<origin>/mcp --header "Authorization: Bearer <token>"'
+    ),
+    "ops.agent_no_tokens": (
+        "에이전트 토큰이 없습니다: `uv run autoontology agent tokens create <name>`"
+    ),
+    "ops.agent_no_calls": "아직 에이전트 호출이 없습니다",
+    "ops.agent_revoked": "{id} ({name}) 폐기됨",
+    "ops.agent_bad_expiry": "--expires-days는 30 또는 90이어야 합니다 (받은 값 {value})",
+    "ops.agent_usage_total": "호출 {total}건, 성공 {ok}건",
 }

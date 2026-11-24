@@ -519,6 +519,8 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` / `zip <rev> --out FILE` | Lists the export folders; lists one revision's files or prints a text file (e.g. `ossie/validation.json`, `okf/validation.json`); saves a file; saves the whole revision folder as one zip (`--out` a directory: `autoontology-r0003.zip`). |
 | `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F\|--examples [--limit N]` / `index [--rebuild]` | The Playground through the running service: the RAG answer streamed with its citations, the NL-to-SQL agent, a SPARQL query over the latest snapshot, the chat index. |
 | `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | The Settings page: the selection and where each value comes from (never the key), a candidate test (chat pong and embedding dimension), saving to `.env` (`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; the key only from stdin), and the service's self-restart. |
+| `autoontology agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90]` / `rotate <id>` / `revoke <id>` | Bearer tokens for outside agents (see [Connect outside agents](#connect-outside-agents)): `create` and `rotate` print the token once (only its SHA-256 is stored; rotating stops the old token at once), `revoke` keeps the token's call history. `--revision` pins the token to one snapshot. |
+| `autoontology agent usage [--days N]` | Agent calls by tool, by token (MCP and REST) and by day. |
 | `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | Writes a snapshot to `exports/r<rev>/` (or `DIR/r<rev>/`). |
 | `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | Installs kordoc into `<home>/kordoc` with npm, then downloads its OCR models (PP-OCRv5 korean, about 18 MB, into kordoc's model cache; the only kordoc call allowed to use the network). Running it again fetches missing models. |
 | `autoontology tools build-ui` | Rebuilds the web UI into `autoontology/web/static/dist` (needs pnpm). |
@@ -527,7 +529,7 @@ OpenAI-compatible endpoint, or to the logged-in `claude` / `codex` CLI. Details 
 | `autoontology version` | Prints the version. |
 
 Every command that prints a table also takes `--json` (the web API's body). The commands
-under `ontology`, `source freshness`, `samples`, `exports`, `settings show|test|set` and
+under `ontology`, `source freshness`, `samples`, `exports`, `agent`, `settings show|test|set` and
 `runs logs` (without `--follow`) read the local store and files, so they work with the
 service down; the others call the running service and exit 2 with a hint when it is not
 up. With `--json` a failure also prints `{"error": <code>, "detail": <text>, ...}` on stdout
@@ -584,9 +586,67 @@ error has the shape `{"error": <code>, "detail": <message>}`.
 | `POST /api/playground/sql` | Natural language to SQL through the engine (SSE): `{question, source?}`. |
 | `GET /api/playground/sparql/examples` | Example queries. |
 | `POST /api/playground/sparql` | `{query, limit?}` runs a read-only SPARQL query against the snapshot. |
+| `GET /api/agent/tokens` | The outside-agent tokens: `{tokens: [{id, name, status: active\|revoked\|expired, revision_pin, expires_at, created_at, last_used_at, revoked_at}]}` (never a token or its hash). |
+| `POST /api/agent/tokens` | `{name, revision_pin?, expires_days?: 30\|90\|null}` creates a token: 201 `{token, record, note}`; the raw `token` is returned only here. 404 `unknown_revision` for a pin no snapshot has. |
+| `POST /api/agent/tokens/{id}/rotate`, `DELETE /api/agent/tokens/{id}` | A new token for the same record (`{token, record, note}`; the old one stops at once; 409 `token_revoked`/`token_expired`), or revoke it (the record, with its call history, stays). |
+| `GET /api/agent/usage[?days=]` | Agent calls: `{days, total, ok, by_tool: [{tool, calls, ok, avg_ms}], by_day: [{day, calls}], by_token: [{token_id, name, calls, ok, by_surface: {mcp, rest}, last_call_at}]}`. |
+| `GET /api/agent/tools` | The agent tools with their descriptions and input schemas, `mcp_path`, `rest_base`, `rate_per_min`. |
+| `POST /mcp`, `/agent/v1/*` | The outside-agent surface (bearer token required): see [Connect outside agents](#connect-outside-agents). |
 | `POST /v1/chat/completions`, `GET /v1/models` | The model router used by the engine; not meant for clients. |
 | `POST /ingest`, `POST /ingest/delete?database_name=` | Internal: callbacks from the engine when a connection is registered or deleted. They queue an ingest or a graph deletion; not meant for clients. |
 | `GET /health/live`, `GET /health` | Liveness and readiness. |
+
+### Connect outside agents
+
+Other agents -- Claude Code, Claude Desktop, Cursor or your own scripts -- can read the
+built ontology through an MCP endpoint and a small REST API. Both are read-only and need a
+bearer token, also from `localhost`:
+
+```bash
+uv run autoontology agent tokens create claude-code          # prints aok_... once
+claude mcp add --transport http autoontology http://127.0.0.1:7800/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+For clients configured with JSON (`mcpServers`), the same server is:
+
+```json
+{
+  "mcpServers": {
+    "autoontology": {
+      "type": "http",
+      "url": "http://127.0.0.1:7800/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+Replace `http://127.0.0.1:7800` with the origin the agent reaches the service on (for
+example your Tailscale hostname). The tools, the same over MCP and REST, are
+`list_revisions`, `get_ontology_summary`, `search_concepts`, `get_concept` (by id, name or
+synonym), `sparql_query` (the Playground's read-only SPARQL checks, timeout and row cap)
+and `list_exports`; every result carries the `revision` it was answered from.
+
+| Method and path | Tool |
+|---|---|
+| `POST /mcp` | MCP over Streamable HTTP (JSON-RPC 2.0, protocol `2025-06-18`, JSON answers, no SSE stream or session): `initialize`, `ping`, `tools/list`, `tools/call`. |
+| `GET /agent/v1/revisions[?limit=]` | `list_revisions` |
+| `GET /agent/v1/ontology[?revision=]` | `get_ontology_summary` |
+| `GET /agent/v1/concepts?q=&limit=&kind=&revision=` | `search_concepts` (`limit` at most 50) |
+| `GET /agent/v1/concepts/{id}[?revision=]` | `get_concept` |
+| `POST /agent/v1/sparql` | `sparql_query`: `{query, limit?, revision?}` |
+| `GET /agent/v1/exports`, `GET /agent/v1/exports/{rev}.zip` | `list_exports`; one revision folder as a zip |
+| `GET /agent/v1/openapi.json` | The OpenAPI description of these routes |
+
+A missing, wrong, revoked or expired token is answered 401 `{"error": "unauthorized"}`. A
+token created with `--revision R` answers every call from that revision and refuses another
+one (403 `revision_pinned`). Each token may make 120 requests a minute
+(`AUTOONTOLOGY_AGENT_RATE_PER_MIN`; then 429 with `Retry-After`), and request bodies are
+capped at 1 MB (413). Every tool call is recorded (`agent usage`); tokens are never logged
+and only their SHA-256 is stored. The Host and cross-origin checks of the service still
+apply. A **Connect** page in the web UI for creating tokens and copying these snippets
+comes next; until then use `autoontology agent tokens create`.
 
 ### Export formats
 
@@ -761,6 +821,9 @@ are overridden.
   Markdown and HTML in extracted text. If you render the `.md` files as HTML elsewhere,
   sanitize them.
 - The SPARQL console is read-only and refuses `SERVICE`, `FROM` and `LOAD`.
+- The outside-agent endpoints (`/mcp`, `/agent/v1`) are the only authenticated routes:
+  they always need a bearer token, are read-only, and are rate-limited per token. Treat a
+  token like a password; rotate or revoke it with `autoontology agent tokens rotate` / `revoke`.
 - API keys are masked in logs, status responses and error bodies relayed from upstream.
 - Database names are restricted to `autoontology` and `autoontology_src_*`, so
   AutoOntology never touches other databases on a shared Postgres server.

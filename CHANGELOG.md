@@ -9,6 +9,21 @@ behaviour).
 
 ### Added
 
+- **Outside agents can read the ontology** (`autoontology/web/agent_api.py`): an MCP
+  endpoint `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, protocol `2025-06-18`, JSON
+  answers; `initialize`, `ping`, `tools/list`, `tools/call`, batches, notifications) and a
+  REST API under `/agent/v1` (`revisions`, `ontology`, `concepts`, `concepts/{id}`,
+  `sparql`, `exports`, `exports/{rev}.zip`, `openapi.json`) share six read-only tools:
+  `list_revisions`, `get_ontology_summary`, `search_concepts`, `get_concept`,
+  `sparql_query`, `list_exports`. Every request needs `Authorization: Bearer aok_...`,
+  from localhost too (401 otherwise); a token may be pinned to one revision
+  (`revision_pinned`), is limited to 120 requests a minute
+  (`AUTOONTOLOGY_AGENT_RATE_PER_MIN`, 429 + `Retry-After`) and 1 MB bodies (413). Tokens
+  are stored as SHA-256 only (schema v7: `agent_tokens`, `agent_calls` with the newest
+  5000 calls) and managed through `GET/POST /api/agent/tokens`,
+  `POST /api/agent/tokens/{id}/rotate`, `DELETE /api/agent/tokens/{id}`,
+  `GET /api/agent/usage`, `GET /api/agent/tools`, and from the CLI with
+  `agent tokens list|create|rotate|revoke` and `agent usage`. The web UI page comes next.
 - **Download a whole export revision as one zip**: `GET /api/exports/{rev}.zip` (`3` or
   `r0003`) packs exactly the files `GET /api/exports` lists under `r0003/`, as
   `autoontology-r0003.zip`; the Exports page has a **Download all (zip)** button on every
