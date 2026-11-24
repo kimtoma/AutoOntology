@@ -184,9 +184,6 @@ function EditorBody({ target, onSaved }: { target: EditorTarget; onSaved?: (kind
   const archived = useArchived()
   const canEdit = useCan("logic.edit")
   const editDenied = useDenied("logic.edit")
-  const statusPerm = target.kind === "function" ? "logic.edit" : "logic.activate"
-  const canStatus = useCan(statusPerm)
-  const statusDenied = useDenied(statusPerm)
   const canTest = useCan("functions.call")
   const def = useQuery({
     queryKey: keys.logicDef(target.kind, target.name ?? ""),
@@ -194,6 +191,15 @@ function EditorBody({ target, onSaved }: { target: EditorTarget; onSaved?: (kind
     enabled: !!target.name,
   })
   const loaded = def.data?.definition
+  // a function an active action or workflow uses is the owner's to activate or retire
+  const usedBy = def.data?.used_by ?? []
+  const statusPerm = target.kind === "function" && usedBy.length === 0 ? "logic.edit" : "logic.activate"
+  const canStatus = useCan(statusPerm)
+  const denied = useDenied(statusPerm)
+  const ownerOnly = target.kind === "function" && usedBy.length > 0 && !canStatus
+    ? t("logic.editor.usedBy", { names: usedBy.map((u) => u.replace(/^[a-z]+:/, "")).join(", ") })
+    : undefined
+  const statusDenied = ownerOnly ?? denied
   // null: not edited yet (shows the stored definition once it is loaded)
   const [text, setText] = useState<string | null>(target.name ? null : templateSpec(target.kind))
   const original = loaded ? toYaml(loaded.spec) : null
@@ -250,9 +256,11 @@ function EditorBody({ target, onSaved }: { target: EditorTarget; onSaved?: (kind
             <>
               {loaded?.broken_reason && (
                 <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive" id="broken-reason">
-                  {t("logic.editor.broken", { reason: loaded.broken_reason })}
+                  {t(loaded.needs_reactivation ? "logic.editor.needsReactivation" : "logic.editor.broken",
+                     { reason: loaded.broken_reason })}
                 </p>
               )}
+              {ownerOnly && <p className="text-xs text-muted-foreground" id="used-by-hint">{ownerOnly}</p>}
               <YamlArea id="spec-text" label={t("logic.editor.spec")} value={value} onChange={setText} readOnly={!canEdit || archived} />
               <ValidationLine v={validation} />
               {saveError && <SpecErrors errors={saveError} id="save-errors" />}

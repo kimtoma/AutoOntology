@@ -505,6 +505,27 @@ describe("Logic page", () => {
     expect(act).toHaveAttribute("title", "Your role (Editor) cannot do this")
   })
 
+  it("leaves a function an active action uses to owners and says why a draft needs an owner", async () => {
+    mockFetch(routes({
+      "GET /logic/function/overdue_days": { definition: DEF({ status: "active" }), history: [], used_by: ["action:remind"] },
+      "GET /logic/action/remind": {
+        definition: { ...ACT_DEF, needs_reactivation: true, broken_reason: "function overdue_days changed (v2 -> v3): an owner must activate it again" },
+        history: [],
+      },
+    }))
+    const { unmount } = renderAt(<LogicPage />, "/logic?tab=functions&def=overdue_days", "editor")
+    const editor = await screen.findByRole("dialog", { name: /Overdue days/ })
+    const retire = await within(editor).findByRole("button", { name: "Retire" })
+    await waitFor(() => expect(retire).toBeDisabled())
+    expect(retire).toHaveAttribute("title", "Used by remind: only an owner may activate or retire it.")
+    expect(editor.querySelector("#used-by-hint")).toHaveTextContent("Used by remind")
+    unmount()
+    renderAt(<LogicPage />, "/logic?tab=actions&def=remind", "owner")
+    const actionEditor = await screen.findByRole("dialog", { name: /Record reminder/ })
+    expect(await within(actionEditor).findByText(/^Needs an owner: function overdue_days changed/)).toBeInTheDocument()
+    await waitFor(() => expect(within(actionEditor).getByRole("button", { name: "Activate" })).toBeEnabled())
+  })
+
   it("runs a workflow now and follows its run", async () => {
     const user = userEvent.setup()
     const WF = DEF({ id: "ld_3", kind: "workflow", name: "dunning", label: "Dunning", status: "active", origin: "manual", evidence: [],

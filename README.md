@@ -501,10 +501,13 @@ current data and the current version of the action; a run whose precondition no 
 holds fails instead of being applied. Who may approve: the run's approval role
 (`reviewer` or `owner`). With accounts on, a person never approves their own request
 (four-eyes; 403 `self_approval`); with accounts off there is one local user, so
-self-approval is allowed. **An agent's proposal may be approved by the person who created
-the agent's token**: the request belongs to the agent (`agent:<token id>`), and the token's
-creator stays the human in the loop. The requester may withdraw (reject) their own
-request. A revert needs an editor (or the action's `min_role`, if higher); when a later
+self-approval is allowed. **With accounts on, an agent's proposal may not be approved by
+the person who created the agent's token**: the run records that person
+(`requested_for`), so another reviewer or owner must approve it (accounts off: the local
+user approves). A workflow's requests may be approved by the owner who activated it: it is
+owner-activated automation editors cannot change. The requester (or the token's creator)
+may withdraw (reject) their own request. An approval fails (`function_changed`) when a
+function the action uses changed since the submit. A revert needs an editor (or the action's `min_role`, if higher); when a later
 edit changed the same property, only an owner can force it.
 
 #### Workflows
@@ -853,8 +856,9 @@ their own approval rules. An allow-list (`--action NAME`, or the action checkbox
 Connect page) limits the write scopes to those actions. A token can never do more than an
 action's agent policy allows (`none` refuses, `propose` always waits for approval) nor
 more than its creator's current role. `submit_action` calls are also written to the audit
-log. The agent's request is recorded as `agent:<token id>`, so the token's creator may
-approve it (see [Approvals](#approvals)). Objects are read live through the latest
+log. The agent's request is recorded as `agent:<token id>` for the token's creator, who
+may not approve it with accounts on (see [Approvals](#approvals)). Archived projects
+refuse `submit_action` (409 `project_archived`). Objects are read live through the latest
 revision, so a token pinned to an older revision gets 403 `revision_pinned` from the
 object, function and action tools.
 

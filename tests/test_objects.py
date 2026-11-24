@@ -286,7 +286,7 @@ def _v9_store(tmp_path, monkeypatch) -> Store:
 
 def test_v9_store_migrates_to_v10_keeping_review_decisions(tmp_path, monkeypatch):
     store = _v9_store(tmp_path, monkeypatch)
-    assert store.migrate() == 11 == db.MIGRATIONS[-1][0]
+    assert store.migrate() == 12 == db.MIGRATIONS[-1][0]
     with sqlite3.connect(store.path) as conn:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert V10_TABLES <= tables
@@ -334,7 +334,7 @@ def test_v10_is_idempotent_when_rerun(tmp_path, monkeypatch):
     )
     with sqlite3.connect(store.path) as conn:
         conn.execute("DELETE FROM schema_version WHERE version >= 10")
-    assert store.migrate() == 11
+    assert store.migrate() == 12
     assert len(store.project().object_types().list()) == 1
     assert len(DecisionStore(store).list()) == 2
 

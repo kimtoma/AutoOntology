@@ -225,6 +225,8 @@ export const enLogic = {
   "logic.editor.status.retired": "{name} is retired",
   "logic.editor.status.drafted": "{name} is a draft again",
   "logic.editor.broken": "Broken: {reason}. It does not run until fixed and activated again.",
+  "logic.editor.needsReactivation": "Needs an owner: {reason}. It stays a draft until an owner activates it again.",
+  "logic.editor.usedBy": "Used by {names}: only an owner may activate or retire it.",
   "logic.editor.history": "Versions",
   "logic.editor.view": "View",
   "logic.editor.hide": "Hide",

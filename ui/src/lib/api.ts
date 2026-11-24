@@ -1049,6 +1049,10 @@ export interface LogicDef {
   spec: Record<string, unknown>
   evidence: LogicEvidence[]
   broken_reason: string
+  /** a draft that came back from broken because a function it uses changed */
+  needs_reactivation?: boolean
+  /** {function: version} an action or workflow was activated with */
+  function_pins?: Record<string, number> | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -1341,7 +1345,7 @@ export const api = {
     list: (kind?: LogicKind) =>
       request<{ definitions: LogicDef[] }>(`/logic${kind ? `?kind=${kind}` : ""}`).then((r) => r.definitions),
     get: (kind: LogicKind, name: string) =>
-      request<{ definition: LogicDef; history: LogicHistoryEntry[] }>(`/logic/${kind}/${enc(name)}`),
+      request<{ definition: LogicDef; history: LogicHistoryEntry[]; used_by?: string[] }>(`/logic/${kind}/${enc(name)}`),
     validate: (spec: string) => request<ValidateResult>("/logic/validate", json("POST", { spec })),
     save: (spec: string) => request<{ definition: LogicDef }>("/logic", json("POST", { spec })),
     setStatus: (kind: LogicKind, name: string, status: "active" | "retired" | "draft") =>

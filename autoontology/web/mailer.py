@@ -123,12 +123,18 @@ class Mailer:
         caller's answer must not depend on the mail server)."""
         if not self.enabled:
             return False
-        message = EmailMessage()
-        message["From"] = formataddr(("AutoOntology", self.sender))
-        message["To"] = to
-        message["Subject"] = subject
-        message["Message-ID"] = make_msgid(domain=self.sender.rpartition("@")[2] or None)
-        message.set_content(body)
+        # a rendered subject may carry line breaks from data: one header line, always
+        subject = " ".join(str(subject).splitlines()).replace("\r", " ").replace("\n", " ")
+        try:
+            message = EmailMessage()
+            message["From"] = formataddr(("AutoOntology", self.sender))
+            message["To"] = to
+            message["Subject"] = subject
+            message["Message-ID"] = make_msgid(domain=self.sender.rpartition("@")[2] or None)
+            message.set_content(body)
+        except Exception as exc:  # noqa: BLE001 - a malformed recipient or header
+            log.warning("mail to a recipient could not be composed: %s", type(exc).__name__)
+            return False
         try:
             if self.port == 465:
                 client: smtplib.SMTP = smtplib.SMTP_SSL(

@@ -17,6 +17,18 @@ status, and keep them valid as the ontology moves.
   its previous status back. An active definition whose references are not active is
   broken too. Repeated until nothing changes, so a chain of references settles.
 
+Function pins
+-------------
+Activating an action or workflow pins the versions of every function it calls,
+transitively (``function_pins``). Running it (:func:`check_pins`: submit, approve, a
+workflow run starting or resuming) is refused with 409 ``function_changed`` while an
+active function's version differs from its pin, so an edited function never changes what
+an owner activated. A broken action or workflow whose pinned functions changed is
+restored to ``draft`` (reason kept: an owner must activate it again), never to
+``active``. Activating or retiring a function that an active (or broken-from-active)
+action or workflow uses needs ``logic.activate`` (:func:`used_by_active`, enforced by
+the route).
+
 Errors are :class:`~autoontology.objects.reader.ObjectError` (the API maps them).
 """
 
@@ -131,6 +143,93 @@ def activation_errors(spec: Spec, ctx: LogicContext) -> list[dict[str, Any]]:
     return out
 
 
+# --- function pins ---------------------------------------------------------------------
+
+
+def function_closure(spec: Spec, ctx: LogicContext) -> list[str]:
+    """The functions *spec* calls, and the functions those call, sorted (an action a
+    workflow runs is not followed: it has its own pins)."""
+    seen: set[str] = set()
+    todo = [name for kind, name in specs.references(spec, ctx) if kind == "function"]
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        called = ctx.functions.get(name)
+        if called is not None:
+            todo += [n for k, n in specs.references(called, ctx) if k == "function"]
+    return sorted(seen)
+
+
+def function_pins(view: Any, spec: Spec, ctx: LogicContext) -> dict[str, int]:
+    """``{function: version}`` of the functions *spec* uses now (:func:`function_closure`;
+    a missing function is pinned at version 0)."""
+    versions = {d.name: d.version for d in view.logic_defs().list("function")}
+    return {name: versions.get(name, 0) for name in function_closure(spec, ctx)}
+
+
+def pin_changes(pinned: dict[str, int] | None, current: dict[str, int]) -> list[str]:
+    """What differs between *pinned* and *current* pins, readably (``[]``: nothing)."""
+    if pinned is None:
+        return ["the function versions were never pinned"]
+    out = []
+    for name in sorted(set(pinned) | set(current)):
+        before, now = pinned.get(name), current.get(name)
+        if before != now:
+            if before is None:
+                out.append(f"function {name} is new (v{now})")
+            elif now is None:
+                out.append(f"function {name} is no longer used")
+            else:
+                out.append(f"function {name} changed (v{before} -> v{now})")
+    return out
+
+
+def check_pins(view: Any, kind: str, name: str, ctx: LogicContext | None = None) -> None:
+    """409 ``function_changed`` when the functions action/workflow *name* uses are not
+    the versions it was activated with. A definition activated before pins existed is
+    pinned now (its first use after the upgrade)."""
+    d = view.logic_defs().get(kind, name)
+    if d is None:
+        return
+    ctx = ctx or context(view)
+    spec = getattr(ctx, kind + "s").get(name)
+    if spec is None:
+        return
+    current = function_pins(view, spec, ctx)
+    if d.function_pins is None:
+        view.logic_defs().set_pins(kind, name, current)
+        return
+    changes = pin_changes(d.function_pins, current)
+    if changes:
+        raise LogicError(
+            409,
+            "function_changed",
+            f"{kind} {name}: " + "; ".join(changes)[:400] + ": an owner must activate it again",
+            changes=changes,
+        )
+
+
+def used_by_active(view: Any, function: str) -> list[str]:
+    """The actions and workflows (``kind:name``) that are active, or broken while
+    meant to be active, and use *function* (transitively)."""
+    ensure_validated(view)
+    defs = view.logic_defs()
+    ctx = context(view, validated=False)
+    out = []
+    for kind in ("action", "workflow"):
+        for d in defs.list(kind, ("active", "broken")):
+            if d.status == "broken" and defs.status_before_broken(kind, d.name) != "active":
+                continue
+            spec = _parsed(d)
+            pinned = set(d.function_pins or {})
+            uses = set(function_closure(spec, ctx)) if spec is not None else set()
+            if function in uses | pinned:
+                out.append(f"{kind}:{d.name}")
+    return out
+
+
 def _summary(errors: list[dict[str, Any]]) -> str:
     text = "; ".join(
         (f"{e['path']}: " if e.get("path") else "") + str(e["message"]) for e in errors[:3]
@@ -187,6 +286,8 @@ def set_status(view: Any, kind: str, name: str, status: str, *, actor: str = "lo
         errors = activation_errors(spec, ctx)
         if errors:
             raise LogicError(409, "reference_not_active", _summary(errors), errors=errors)
+        if kind in ("action", "workflow"):
+            defs.set_pins(kind, name, function_pins(view, spec, ctx))
     # a person activating an already active definition becomes its activator (a workflow
     # acts with its activator's role): record it unless they already are
     again = (
@@ -265,7 +366,17 @@ def revalidate(view: Any) -> dict[str, int]:
                     counts["broken"] += d.status != "broken"
                     changed = True
             elif d.status == "broken":
-                defs.set_status(d.kind, d.name, target, actor=SYSTEM_ACTOR)
+                reason = ""
+                if target == "active" and d.kind in ("action", "workflow") and spec is not None:
+                    changes = pin_changes(d.function_pins, function_pins(view, spec, ctx))
+                    if changes:
+                        # an edited function never re-activates what an owner activated
+                        target = "draft"
+                        reason = (
+                            _summary([{"path": "", "message": c} for c in changes])
+                            + ": an owner must activate it again"
+                        )
+                defs.set_status(d.kind, d.name, target, actor=SYSTEM_ACTOR, reason=reason)
                 counts["restored"] += 1
                 changed = True
         if not changed:

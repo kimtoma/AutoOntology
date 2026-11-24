@@ -7,6 +7,12 @@ whose spec no longer validates against the ontology is ``broken`` (``broken_reas
 and goes back to the status it had once it validates again (the newest non-broken
 status in its history). Every save (a new version) and every status change writes a
 history row.
+
+``function_pins`` (schema v12, ``function_pins_json``): for an action or workflow, the
+versions of the functions it uses (transitively) as of its last activation
+(:mod:`autoontology.logic.registry`); None when it was never pinned. A draft that came
+back from ``broken`` because a pinned function changed keeps that reason in
+``broken_reason`` (``needs_reactivation`` in :meth:`LogicDef.to_dict`).
 """
 
 from __future__ import annotations
@@ -52,6 +58,7 @@ class LogicDef:
     updated_at: str = ""
     id: str = ""
     project_id: str = ""
+    function_pins: dict[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +74,8 @@ class LogicDef:
             "spec": self.spec,
             "evidence": self.evidence,
             "broken_reason": self.broken_reason,
+            "needs_reactivation": self.status == "draft" and bool(self.broken_reason),
+            "function_pins": self.function_pins,
             "created_by": self.created_by,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -88,7 +97,18 @@ def _def(row: sqlite3.Row) -> LogicDef:
         created_by=row["created_by"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        function_pins=_pins(row),
     )
+
+
+def _pins(row: sqlite3.Row) -> dict[str, int] | None:
+    raw = row["function_pins_json"] if "function_pins_json" in row.keys() else None
+    if raw is None:
+        return None
+    value = _loads(raw, None)
+    if not isinstance(value, dict):
+        return None
+    return {str(k): int(v) for k, v in value.items() if isinstance(v, int)}
 
 
 class LogicDefs:
@@ -215,7 +235,8 @@ class LogicDefs:
         reason: str = "",
         record_same: bool = False,
     ) -> LogicDef | None:
-        """Change the status (``broken`` with *reason*); a history row records it.
+        """Change the status (``broken`` with *reason*; ``draft`` may keep a *reason* too:
+        why it needs to be activated again); a history row records it.
         *record_same*: record a history row even when the status does not change (an
         owner activating an already active workflow becomes its activator)."""
         if status not in STATUSES:
@@ -228,7 +249,7 @@ class LogicDefs:
             if row is None:
                 return None
             d = _def(row)
-            reason = reason if status == "broken" else ""
+            reason = reason if status in ("broken", "draft") else ""
             if d.status == status and d.broken_reason == reason:
                 if record_same:
                     self._history(conn, d, actor, f"status {status} (again)")
@@ -240,6 +261,15 @@ class LogicDefs:
             )
             self._history(conn, d, actor, reason or f"status {status}")
         return self.get(kind, name)
+
+    def set_pins(self, kind: str, name: str, pins: dict[str, int]) -> None:
+        """Record the function versions *kind* *name* was activated with."""
+        with self.store._conn() as conn:
+            conn.execute(
+                "UPDATE logic_defs SET function_pins_json = ? "
+                "WHERE project_id = ? AND kind = ? AND name = ?",
+                (_dumps(pins), self.project_id, kind, name),
+            )
 
     def history(self, kind: str, name: str) -> list[dict[str, Any]]:
         """Every saved version and status change, newest first."""

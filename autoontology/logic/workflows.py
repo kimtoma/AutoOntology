@@ -122,7 +122,7 @@ from autoontology.objects import reader, service
 from autoontology.objects.reader import ObjectError
 from autoontology.store.actions import ActionRun
 from autoontology.store.db import now_iso
-from autoontology.store.workflows import OPEN, UNCHANGED, WorkflowRun
+from autoontology.store.workflows import OPEN, UNCHANGED, RunActive, WorkflowRun
 
 logger = logging.getLogger("autoontology.workflows")
 
@@ -137,6 +137,10 @@ MAX_SCAN = 50_000
 #: a continuation being resumed, or a running run without a heartbeat, for this long
 #: was interrupted (the process stopped)
 STALE_SECONDS = 15 * 60
+#: recipients the notify steps of one run reach at most, over all its objects (the rest
+#: are dropped and counted in ``notifications_capped``; actions have their own cap,
+#: :data:`autoontology.logic.actions.MAX_RUN_RECIPIENTS`)
+MAX_RUN_RECIPIENTS = 500
 COUNTERS = (
     "matched",
     "completed",
@@ -390,6 +394,7 @@ def _env(
     that started the run, its object type is not active or its activator lost the role."""
     ctx = registry.context(view)
     spec, version = _active_workflow(ctx, view, run.workflow_name)
+    registry.check_pins(view, "workflow", run.workflow_name, ctx)
     if version != run.workflow_version:
         raise _err(
             409,
@@ -464,7 +469,7 @@ def _send(env: _Env, messages: list[dict[str, Any]]) -> dict[str, Any]:
             return {"status": "mail_disabled", "sent": 0, "failed": 0}
         for msg in messages:
             for to in msg["recipients"]:
-                if m.send(to, msg["subject"], msg["body"]):
+                if actions.send_one(m, to, msg["subject"], msg["body"]):
                     sent += 1
                 else:
                     failed += 1
@@ -561,7 +566,10 @@ def _step_notify(env: _Env, ev: Any, o: _Object, step: StepSpec, path: Path) -> 
         "body": ev.template(n.body, o.obj, {})[:8000],
         **actions._recipients(n, ev, o.obj, {}, env.recipients_members()),
     }
+    capped = _reserve(env, message)
     outcome = _send(env, [message])
+    if capped:
+        outcome["capped"] = capped
     o.notified += 1
     o.note(
         {
@@ -575,6 +583,29 @@ def _step_notify(env: _Env, ev: Any, o: _Object, step: StepSpec, path: Path) -> 
         }
     )
     return True
+
+
+def _reserve(env: _Env, message: dict[str, Any]) -> int:
+    """Take *message*'s recipients from the run's budget (:data:`MAX_RUN_RECIPIENTS`,
+    kept in ``summary.recipients_notified``): drops those over it, returns how many."""
+    wanted = len(message["recipients"])
+    if not wanted:
+        return 0
+
+    def take(run: WorkflowRun) -> Any:
+        used = int(run.summary.get("recipients_notified") or 0)
+        allowed = max(0, min(wanted, MAX_RUN_RECIPIENTS - used))
+        run.summary["recipients_notified"] = used + allowed
+        if allowed < wanted:
+            run.summary["notifications_capped"] = (
+                int(run.summary.get("notifications_capped") or 0) + wanted - allowed
+            )
+        return allowed
+
+    _, allowed = env.view.workflow_runs().mutate(env.run_id, take)
+    allowed = int(allowed or 0)
+    message["recipients"] = message["recipients"][:allowed]
+    return wanted - allowed
 
 
 def _run_steps(
@@ -772,27 +803,48 @@ def start(
 ) -> tuple[WorkflowRun, bool]:
     """Insert the run of active workflow *name* for *fire_slot*: ``(run, created)``
     (``created`` False: the slot already has a run, returned as it is). 404
-    ``unknown_workflow``, 409 ``workflow_not_active``."""
+    ``unknown_workflow``, 409 ``workflow_not_active``, ``function_changed`` (a function
+    it uses is not the pinned version), ``project_archived``, and for a manual run
+    ``run_active`` while another run of it is ``running``."""
+    if archived(view):
+        raise _err(409, "project_archived", f"project {view.project.slug!r} is archived")
     ctx = registry.context(view)
     _, version = _active_workflow(ctx, view, name)
+    registry.check_pins(view, "workflow", name, ctx)
     summary: dict[str, Any] = {k: 0 for k in COUNTERS}
     summary.update(depth=depth, truncated=False, iterated=False, heartbeat=now_iso())
     if object_key is not None:
         summary["object_key"] = str(object_key)
-    run, created = view.workflow_runs().start(
-        workflow_name=name,
-        workflow_version=version,
-        trigger=trigger,
-        fire_slot=fire_slot,
-        started_by=started_by,
-        summary=summary,
-        state={"objects": [], "paused": {}, "resuming": {}},
-    )
+    try:
+        run, created = view.workflow_runs().start(
+            workflow_name=name,
+            workflow_version=version,
+            trigger=trigger,
+            fire_slot=fire_slot,
+            started_by=started_by,
+            summary=summary,
+            state={"objects": [], "paused": {}, "resuming": {}},
+            exclusive=trigger == "manual",
+        )
+    except RunActive as exc:
+        raise _err(
+            409,
+            "run_active",
+            f"workflow {name} is running ({exc.run_id}): wait for it to finish or cancel it",
+            run_id=exc.run_id,
+        ) from exc
     if created:
         detail = {"trigger": trigger, "fire_slot": fire_slot, "version": version}
         actor = started_by if trigger == "manual" else None
         _audit(view, "workflow.run", run, detail, actor=actor, user_id=user_id, via=via, ip=ip)
     return run, created
+
+
+def archived(view: Any) -> bool:
+    """Whether *view*'s project is archived now (read from the store, not the view's
+    copy)."""
+    found = view.store.get_project(view.id)
+    return bool(found is not None and found.archived)
 
 
 def manual_slot() -> str:
@@ -989,7 +1041,7 @@ def on_action(
     settings: Any, view: Any, action_run: ActionRun, *, mailer: Any = None
 ) -> list[WorkflowRun]:
     """Start the active workflows triggered by applied *action_run* (module docstring)."""
-    if not _enabled(settings) or action_run.status != "applied":
+    if not _enabled(settings) or action_run.status != "applied" or archived(view):
         return []
     depth = 1
     if action_run.workflow_run_id:

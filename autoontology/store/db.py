@@ -478,6 +478,9 @@ MIGRATIONS: list[tuple[int, Migration]] = [
     # Schema v11: what a `logic` run stores per candidate besides v10's columns
     # (:func:`_migrate_v11`; ``autoontology/store/logic_candidates.py``).
     (11, lambda conn: _migrate_v11(conn)),
+    # Schema v12: function pins of activated actions / workflows and the person an action
+    # run was requested for (:func:`_migrate_v12`).
+    (12, lambda conn: _migrate_v12(conn)),
 ]
 
 #: Indexes a store may lack although it reached their schema version (added to a migration
@@ -1092,6 +1095,24 @@ def _migrate_v11(conn: sqlite3.Connection) -> None:
     for name, decl in _V11_CANDIDATE_COLUMNS:
         if name not in have:
             conn.execute(f"ALTER TABLE logic_candidates ADD COLUMN {name} {decl}")
+
+
+def _migrate_v12(conn: sqlite3.Connection) -> None:
+    """Schema v12: ``logic_defs.function_pins_json`` (the versions of the functions an
+    action or workflow used when it was activated; NULL: never pinned, pinned on first use)
+    and ``action_runs.requested_for`` (the person a run was requested for: the requester,
+    or an agent token's creator -- four-eyes compares it too). Existing runs get their
+    requester, agent runs their token creator's email. Safe to re-run."""
+    if "function_pins_json" not in _columns(conn, "logic_defs"):
+        conn.execute("ALTER TABLE logic_defs ADD COLUMN function_pins_json TEXT")
+    if "requested_for" not in _columns(conn, "action_runs"):
+        conn.execute("ALTER TABLE action_runs ADD COLUMN requested_for TEXT NOT NULL DEFAULT ''")
+        conn.execute("UPDATE action_runs SET requested_for = requested_by WHERE via != 'agent'")
+        conn.execute(
+            "UPDATE action_runs SET requested_for = coalesce((SELECT lower(u.email) "
+            "FROM agent_tokens t JOIN users u ON u.id = t.created_by "
+            "WHERE t.id = action_runs.token_id), '') WHERE via = 'agent'"
+        )
 
 
 def _ensure_indexes(conn: sqlite3.Connection, version: int) -> None:

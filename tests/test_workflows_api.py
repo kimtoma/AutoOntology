@@ -211,7 +211,15 @@ def test_accounts_roles_on_workflow_routes(accounts_env):
     assert viewer.get(f"{API}/workflows").status_code == 200
     resp = viewer.post(f"{API}/workflows/{WORKFLOW}/run", json={"wait": True})
     assert resp.status_code == 403 and resp.json()["permission"] == "workflow.run"
-    # an editor runs it; the run acts as the owner who activated it
+    # a scheduled workflow is fired at will only by an owner
+    refused = editor.post(f"{API}/workflows/{WORKFLOW}/run", json={"wait": True})
+    assert refused.status_code == 403 and refused.json()["permission"] == "logic.activate"
+    view = store.project()
+    registry.save(
+        view, {**sample_workflow(), "trigger": {"manual": True}}, actor="boss@example.com"
+    )
+    registry.set_status(view, "workflow", WORKFLOW, "active", actor="boss@example.com")
+    # an editor runs a manual one; the run acts as the owner who activated it
     run = editor.post(f"{API}/workflows/{WORKFLOW}/run", json={"wait": True}).json()["run"]
     assert run["status"] == "paused" and run["started_by"] == "e@example.com"
     pending = next(a for a in run["action_runs"] if a["status"] == "pending_approval")

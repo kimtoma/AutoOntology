@@ -218,6 +218,8 @@ export const koLogic: Record<keyof typeof enLogic, string> = {
   "logic.editor.status.retired": "{name} 중지됨",
   "logic.editor.status.drafted": "{name} 초안으로 돌아감",
   "logic.editor.broken": "깨짐: {reason}. 고쳐서 다시 활성화하기 전까지 실행되지 않습니다.",
+  "logic.editor.needsReactivation": "소유자 확인 필요: {reason}. 소유자가 다시 활성화할 때까지 초안으로 남습니다.",
+  "logic.editor.usedBy": "{names}에서 사용 중: 소유자만 활성화하거나 중지할 수 있습니다.",
   "logic.editor.history": "버전",
   "logic.editor.view": "보기",
   "logic.editor.hide": "숨기기",

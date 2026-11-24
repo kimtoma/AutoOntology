@@ -141,8 +141,10 @@ when accounts are on and it is unset or not https. **Mail** (`web/mailer.py`, st
   `audit.read`).
 - Installation routes call `require_installation` (admins only): `project.create`,
   `settings.manage` (settings, provider test, restart), `users.manage`, `audit.read_all`.
-- Archived projects refuse writes (409 `project_archived`) except archive/unarchive and
-  playground questions; `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny` refuses those too.
+- Archived projects refuse writes (409 `project_archived`) except archive/unarchive,
+  playground questions and the read-only POSTs (`/logic/validate`, `/logic/test`,
+  `/logic/functions/{name}/test|call`, `/actions/{name}/preview`);
+  `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny` refuses the playground questions too.
 - Outside agents keep their bearer tokens; with accounts on a token stops working when
   its `created_by` user is disabled or no longer a member of the token's project (tokens
   without a creator keep working).
@@ -467,9 +469,9 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 | `playground_conversations`, `playground_messages` | Stored chats, keyed by project. |
 | `agent_tokens`, `agent_calls` | Outside-agent tokens (SHA-256 only) of a project, and their calls. `agent_tokens.created_by` (v9) is the user who created or last rotated the token (NULL for older tokens and the CLI's). `agent_tokens.scopes` (v10) is a JSON list: `read` always, `propose` / `execute`, `action:<name>` entries (`["read"]` for every older token). |
 | `object_types` (v10) | A snapshot class bound to one source table: `class_local` (unique per project), label, source, schema and table, key and title columns, links, the table's columns as last read, `status` (`proposed`, `active`, `broken`, `retired`) with `broken_reason`, `key_origin` (`pk`, `inferred`, `manual`), `key_checked`, `validated_revision`. |
-| `logic_defs`, `logic_def_history` (v10) | Function / action / workflow definitions (unique per project, kind and name): `spec_json`, `version`, `status` (`draft`, `active`, `retired`, `broken`) with `broken_reason`, `origin` (`manual`, `extracted`), `evidence_json`; the history keeps every version and status change. |
+| `logic_defs`, `logic_def_history` (v10) | Function / action / workflow definitions (unique per project, kind and name): `spec_json`, `version`, `status` (`draft`, `active`, `retired`, `broken`) with `broken_reason`, `origin` (`manual`, `extracted`), `evidence_json`; the history keeps every version and status change. v12: `function_pins_json`, the function versions an action or workflow was activated with (NULL: never pinned). |
 | `logic_candidates` (v10, v11) | What a `logic` run proposed: kind, name, spec, validation errors, evidence quotes, confidence, the run and source; v11 adds the rationale, `spec_hash` (dedupe), `evidence_verified` and the document. |
-| `action_runs` (v10) | One action invocation: action name and version, object type and key, parameters, `status` (`pending_approval`, `applied`, `rejected`, `failed`, `reverted`; the CHECK also allows `previewed`, `approved`), requester, `via` (`ui`, `cli`, `agent`, `workflow`), token or workflow run, approver and approval role, the preview, the result, `idempotency_key` (unique per project). |
+| `action_runs` (v10) | One action invocation: action name and version, object type and key, parameters, `status` (`pending_approval`, `applied`, `rejected`, `failed`, `reverted`; the CHECK also allows `previewed`, `approved`), requester, `via` (`ui`, `cli`, `agent`, `workflow`), token or workflow run, approver and approval role, the preview, the result, `idempotency_key` (unique per project). v12: `requested_for`, the person behind the request (the requester, or an agent token's creator; four-eyes compares it). |
 | `object_edits` (v10) | The edit layer: per object and property the old, new and source value at edit time, `operational`, the action run, who and when, `reverted_at`. Sources are never written. |
 | `workflow_runs` (v10) | One firing of a workflow: version, `trigger` (`schedule`, `on_action`, `manual`), `fire_slot` (unique per project and workflow), `status` (`running`, `paused`, `succeeded`, `failed`, `cancelled`), steps (object outcomes and continuations) and summary. |
 | `users` | Accounts: email (unique, case-insensitive, stored lower-cased), name, PBKDF2 `pw_hash` (NULL until a password is set), `is_admin`, `disabled_at`, `last_login_at`. |
@@ -517,7 +519,8 @@ Accepting (or binding by hand, `PUT /objects/types/{type}`, `objects.manage`) ve
 type against the source in a read-only transaction (`binding.verify`): the table's current
 columns; a one-column primary key is taken as the key unless one was set by hand,
 otherwise the key must be unique and never null (`key_stats`), else 409 `key_not_unique`.
-The type becomes `active`.
+The type becomes `active`. The key cannot change while the type has live (not reverted)
+edits, which are matched by key value (409 `edits_exist`: revert them first).
 
 A type is **broken** for one of two reasons, and comes back by itself when the cause goes:
 
@@ -624,18 +627,32 @@ chains of references settle. History rows record each change (`system` for reval
   `idempotency_key` (1-200 characters, unique per project) returns the first run; 409
   `idempotency_conflict` when it was for another action or object.
 - **Approval**: the approver needs the run's approval role (`reviewer` or `owner`). With
-  accounts on the requester may not approve their own run (four-eyes, 403
-  `self_approval`); accounts off has one local user, so self-approval is allowed. The
-  requester may reject (withdraw) their own request. Approving re-checks the preconditions
-  and the action's current active version: otherwise the run becomes `failed`.
+  accounts on neither the requester nor the person the run was requested for
+  (`action_runs.requested_for`, schema v12: an agent token's creator) may approve it
+  (four-eyes, 403 `self_approval`); accounts off has one local user, so self-approval is
+  allowed. Either may reject (withdraw) the request. Approving re-checks the
+  preconditions, the action's current active version and the function versions recorded
+  at submit (`preview.functions`): otherwise the run becomes `failed` (`function_changed`).
+- **Function pins**: activating an action or workflow stores the versions of every
+  function it calls, transitively (`logic_defs.function_pins_json`, v12; NULL for older
+  rows, pinned on first use). Submit, approve and workflow start/resume refuse with 409
+  `function_changed` while an active function differs from its pin; revalidation restores
+  a broken action or workflow whose pinned functions changed to `draft`
+  (`needs_reactivation`, reason kept), never to `active`; activating or retiring a
+  function used by an active (or broken-from-active) action or workflow needs
+  `logic.activate`. Editing an active action or workflow itself returns it to draft and
+  fails its pending approvals (accepted: an editor can stop owner-activated logic, never
+  change what it does).
 - **Revert** reverses an applied run's edits: editor or the action's `min_role`, whichever
   is higher; 409 `superseded` when a later edit changed one of the same properties, unless
   an owner passes `force`.
 - **Permissions**: routes need `objects.read`; submitting needs the spec's
   `permission.min_role` (default editor), deciding the run's approval role.
-- **Notifications** are sent after the commit from a daemon thread (at most 50 recipients;
-  role recipients need accounts); a mail failure never fails the run, and the outcome
-  (counts only) is merged into the run's `result`.
+- **Notifications** are sent after the commit from a daemon thread (at most 50 recipients
+  per message and 200 per run, the rest counted in `notifications_capped`; role
+  recipients need accounts); a mail failure (also one recipient's) never fails the run or
+  stops the other recipients, subjects are folded to one line, and the outcome (counts
+  only) is merged into the run's `result`.
 - **Audit**: `action.submit`, `action.approve`, `action.reject`, `action.apply`,
   `action.revert`, `action.fail`, with the run id as target. Callbacks registered with
   `on_run_decided` run after a run reached `applied`, `rejected`, `failed` or `reverted`.
@@ -644,9 +661,12 @@ chains of references settle. History rows record each change (`system` for reval
 owner) and the token's scopes. The effective mode is the lower of the token's write scope
 and the spec's `agent` policy: `none` refuses (403 `agent_not_allowed`), `propose` always
 creates a `pending_approval` run (approval role: the spec's, else `reviewer`), `execute`
-follows the spec's approval rules. The requester of an agent's run is `agent:<token id>`,
-so four-eyes does not stop the token's creator from approving it: the creator is the
-human in the loop. A person's own request still cannot be approved by that person.
+follows the spec's approval rules. The requester of an agent's run is `agent:<token id>`
+and `requested_for` its creator's email, so with accounts on the creator cannot approve
+what their token proposed. A workflow's runs (`workflow:<name>`) may be approved by the
+owner who activated it: the workflow is owner-activated and, with function pins, editors
+cannot change what it does. `submit_action` is refused on an archived project (409
+`project_archived`).
 
 ### Workflows
 
@@ -692,7 +712,12 @@ workflow (`daily HH:MM`, `hourly` at minute 0, `weekly MON HH:MM`) in `AUTOONTOL
 (an IANA zone) or the system zone. Only the most recent slot is considered: it fires when
 at most 6 h old and not older than the activation, so downtime fires the latest missed slot
 once and never backfills. With `AUTOONTOLOGY_WORKFLOWS=off` the thread only reconciles and
-`on_action` triggers are off; manual runs (`workflow.run`, editor) still work.
+`on_action` triggers are off; manual runs still work. A manual run (`POST
+/workflows/{name}/run`) needs `workflow.run` (editor) for a workflow with
+`trigger.manual: true` and `logic.activate` (owner) for any other, and is refused (409
+`run_active`) while another run of the workflow is `running`. The notify steps of one run
+reach at most 500 recipients (`summary.notifications_capped`). Archived projects start no
+workflow runs (`on_action` skips them, a start is 409 `project_archived`).
 
 ### Logic extraction
 

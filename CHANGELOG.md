@@ -354,6 +354,20 @@ behaviour).
 
 ### Fixed
 
+- **Governance of the actionable ontology** (security review; schema v12). Activating an
+  action or workflow pins the versions of the functions it uses (transitively); submit,
+  approve and workflow runs refuse a changed function (409 `function_changed`), a broken
+  action or workflow whose pinned function changed comes back as a draft that needs an
+  owner (not active), a waiting approval fails when a function changed since the submit,
+  and activating or retiring a function an active action or workflow uses needs
+  `logic.activate`. Four-eyes covers agent tokens: a run records the person behind it
+  (`requested_for`, the token's creator), who may not approve it with accounts on.
+  Archived projects refuse `submit_action` and start no workflow runs. Editors may run only
+  `trigger.manual` workflows by hand, one run at a time (409 `run_active`); notifications
+  are capped per run (actions 200, workflows 500 recipients, `notifications_capped`).
+  Line breaks in a subject and a failing recipient no longer stop the remaining mail. An
+  object type's key cannot change while live edits exist (409 `edits_exist`). Validate,
+  test, call and preview work on archived projects.
 - `provider use --base-url` refuses an endpoint on another origin (scheme, host, port)
   while an API key is saved, in `.env` or the shell, like the Settings page: the key is
   never carried to another endpoint. Change both on the Settings page, or drop a `.env` key

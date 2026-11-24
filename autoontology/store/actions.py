@@ -3,7 +3,8 @@
 
 One row per submitted action (previews are not stored): what was asked (action, its
 version, the object, the parameters), by whom and through which surface (``via``: ui,
-cli, agent, workflow; ``token_id`` / ``workflow_run_id``), the preview the requester saw
+cli, agent, workflow; ``token_id`` / ``workflow_run_id``; ``requested_for``, schema v12:
+the person behind the request -- the requester, or an agent token's creator), the preview the requester saw
 (``preview_json``), the approval (``approval_role``, ``approver``, ``decided_at``) and
 the outcome (``result_json``: the effects written and the notifications sent, ``error``).
 
@@ -63,6 +64,7 @@ class ActionRun:
     status: str
     params: dict[str, Any] = field(default_factory=dict)
     requested_by: str = ""
+    requested_for: str = ""
     via: str = "ui"
     token_id: str | None = None
     workflow_run_id: str | None = None
@@ -88,6 +90,7 @@ class ActionRun:
             "params": self.params,
             "status": self.status,
             "requested_by": self.requested_by,
+            "requested_for": self.requested_for,
             "via": self.via,
             "token_id": self.token_id,
             "workflow_run_id": self.workflow_run_id,
@@ -115,6 +118,7 @@ def _run(row: sqlite3.Row) -> ActionRun:
         params=_loads(row["params_json"], {}),
         status=row["status"],
         requested_by=row["requested_by"],
+        requested_for=row["requested_for"] if "requested_for" in row.keys() else "",
         via=row["via"],
         token_id=row["token_id"],
         workflow_run_id=row["workflow_run_id"],
@@ -170,6 +174,7 @@ class ActionRuns:
         params: dict[str, Any],
         status: str,
         requested_by: str,
+        requested_for: str = "",
         via: str = "ui",
         token_id: str | None = None,
         workflow_run_id: str | None = None,
@@ -186,9 +191,9 @@ class ActionRuns:
         with self._use(conn) as db:
             db.execute(
                 "INSERT INTO action_runs (project_id, id, action_name, action_version, "
-                "object_type, object_key, params_json, status, requested_by, via, token_id, "
-                "workflow_run_id, approval_role, preview_json, idempotency_key, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "object_type, object_key, params_json, status, requested_by, requested_for, via, "
+                "token_id, workflow_run_id, approval_role, preview_json, idempotency_key, "
+                "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     self.project_id,
                     run_id,
@@ -199,6 +204,7 @@ class ActionRuns:
                     _dumps(params),
                     status,
                     requested_by,
+                    requested_for,
                     via,
                     token_id,
                     workflow_run_id,

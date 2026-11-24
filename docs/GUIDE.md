@@ -844,9 +844,14 @@ Runs**). Open one to see the preview it was submitted with, then **Approve** or 
   person who asked may not approve their own run (four-eyes rule); they may reject it to
   withdraw it. With accounts off there is one local user, so you approve your own runs.
 - **Agents' proposals**: an agent with a *propose* token submits runs that always wait for a
-  person. The request is recorded as the agent's, not as the token creator's, so the person
-  who created the token may approve it: a human looks at every proposal, which is the point.
-  Agents themselves can never approve.
+  person. With accounts on, the person who created the token counts as the requester: they
+  may withdraw the proposal but not approve it, so someone else looks at it. Agents
+  themselves can never approve. A workflow's requests may be approved by the owner who
+  activated the workflow.
+- **Changed functions**: an action or workflow keeps the function versions it was activated
+  with. When an editor changes such a function, the action goes back to draft ("Needs an
+  owner") until an owner activates it again, and a waiting run fails with the reason;
+  activating or retiring a function an active action uses is the owner's call.
 - **When approved**, the preconditions are checked again on today's data and the action's
   current version. If one no longer holds, or the action was changed or retired meanwhile,
   the run becomes **Failed** with the reason instead of applying.
@@ -882,7 +887,9 @@ steps:
   latest missed slot runs once (if it is at most 6 hours old); older ones are not caught up.
   `AUTOONTOLOGY_WORKFLOWS=off` in `.env` switches scheduled and after-action triggers off;
   the Workflows tab then says so and workflows run only with **Run now**.
-- **Run now** starts one by hand (editor role). The run page counts the objects that
+- **Run now** starts one by hand: an editor may run a workflow with `manual: true`, other
+  workflows only an owner; one run at a time (while a run is going, **Run now** says so).
+  A run notifies at most 500 recipients in all. The run page counts the objects that
   matched, completed, were skipped or failed, and the actions applied.
 - **Pause and resume**: when an action step waits for approval, that object's steps pause
   (the run shows **Paused**) and continue after the decision: approved continues with the

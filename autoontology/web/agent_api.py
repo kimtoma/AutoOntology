@@ -490,6 +490,16 @@ class AgentService:
         user = Accounts(self.api.store).get(token.created_by)
         return member_role(self.api, token.project_id, user)
 
+    def creator_email(self, token: AgentToken) -> str:
+        """The email of *token*'s creator ("" when it has none: accounts off, the CLI's) --
+        the person behind its action runs, for the four-eyes rule."""
+        if not self.api.settings.accounts_enabled or not token.created_by:
+            return ""
+        from autoontology.store.accounts import Accounts
+
+        user = Accounts(self.api.store).get(token.created_by)
+        return (user.email or "").strip().lower() if user is not None else ""
+
     def caller(self, token: AgentToken) -> Any:
         """The :class:`~autoontology.logic.actions.Caller` of an action tool."""
         from autoontology.logic.actions import Caller
@@ -499,6 +509,7 @@ class AgentService:
             raise ToolError(403, "forbidden", "the token's creator has no access any more")
         return Caller(
             name=f"agent:{token.id}",
+            requested_for=self.creator_email(token),
             role=role,
             four_eyes=bool(self.api.settings.accounts_enabled),
             via="agent",
@@ -732,9 +743,17 @@ class AgentService:
         from autoontology.logic import actions
 
         caller = self.caller(token)
+        view = self._objects_view(token)
+        current = self.api.store.get_project(view.id)
+        if current is not None and current.archived:
+            raise ToolError(
+                409,
+                "project_archived",
+                f"project {view.project.slug!r} is archived: unarchive it to change it",
+            )
         run, created = actions.submit(
             self.api.settings,
-            self._objects_view(token),
+            view,
             args.name,
             args.key,
             args.params,

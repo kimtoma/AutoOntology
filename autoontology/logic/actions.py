@@ -17,15 +17,25 @@ Flow
   ``applied`` one with its edits. The same ``idempotency_key`` returns the first run
   (409 ``idempotency_conflict`` when it was for another action or object).
 * :func:`approve` / :func:`reject` -- a pending run. The approver needs the run's
-  approval role and, with accounts on, must not be the requester (four-eyes; accounts
-  off: one local user, so self-approval is allowed). The requester may reject (withdraw)
-  their own request. Approving evaluates the preconditions again on the current data and
-  the current active version of the action: a run whose precondition no longer holds, or
-  whose action changed or is no longer active, becomes ``failed`` (with ``error``)
-  instead of applied.
+  approval role and, with accounts on, must not be the person behind the request
+  (four-eyes: neither ``requested_by`` nor ``requested_for`` -- an agent token's creator
+  may not approve what their token proposed; accounts off: one local user, so
+  self-approval is allowed). The requester (or the token's creator) may reject
+  (withdraw) their own request. A workflow's runs (``requested_by: workflow:<name>``)
+  may be approved by the owner who activated the workflow: it is owner-activated
+  automation that editors cannot change (function pins). Approving evaluates the
+  preconditions again on the current data and the current active version of the action:
+  a run whose precondition no longer holds, whose action changed or is no longer active,
+  or one of whose functions changed since the submit (``function_changed``), becomes
+  ``failed`` (with ``error``) instead of applied.
 * :func:`revert` -- an applied run's edits reverted (the run becomes ``reverted``):
   needs editor or the action's ``min_role``, whichever is higher; 409 ``superseded`` when
   a later edit changed one of the same properties, unless an owner passes ``force``.
+
+Function pins: an action runs only while the functions it uses are the versions it was
+activated with (:func:`autoontology.logic.registry.check_pins`, 409
+``function_changed``); a submit records those versions in the run's preview
+(``functions``).
 
 Permissions are the engine's: routes only need ``objects.read``; :class:`Caller` carries
 the role (admins and accounts-off callers are owners). Submitting needs the action's
@@ -89,6 +99,9 @@ MAX_IDEMPOTENCY_CHARS = 200
 MAX_ATTEMPTS = 3
 #: recipients one notification is sent to at most
 MAX_RECIPIENTS = 50
+#: recipients one action run notifies at most, over all its messages (the rest are
+#: dropped and the run records ``notifications_capped``)
+MAX_RUN_RECIPIENTS = 200
 MAX_NOTE_CHARS = 1000
 TERMINAL = ("applied", "rejected", "failed", "reverted")
 AGENT_MODES = ("none", "propose", "execute")
@@ -117,6 +130,15 @@ class Caller:
     agent_mode: str | None = None
     allowed_actions: tuple[str, ...] | None = None
     workflow_run_id: str | None = None
+    #: the person behind an agent call (the token creator's email; "" none)
+    requested_for: str | None = None
+
+    @property
+    def person(self) -> str:
+        """Who the four-eyes rule treats as the requester."""
+        if self.requested_for is not None:
+            return self.requested_for
+        return "" if self.via == "agent" else self.name
 
     @classmethod
     def from_context(cls, ctx: Any, settings: Any, *, via: str = "ui") -> Caller:
@@ -203,6 +225,10 @@ class _Plan:
     approval_reason: str = ""
     #: [{subject, body, to: [kinds], recipients: [emails], invalid, skipped_roles}]
     messages: list[dict[str, Any]] = field(default_factory=list)
+    #: {function: version} the action uses now (its pins)
+    functions: dict[str, int] = field(default_factory=dict)
+    #: recipients dropped by :data:`MAX_RUN_RECIPIENTS`
+    capped: int = 0
 
     @property
     def failures(self) -> list[dict[str, Any]]:
@@ -367,6 +393,7 @@ def _plan(
 ) -> _Plan:
     ctx = ctx or registry.context(view)
     spec, version = _active_action(ctx, view, name)
+    registry.check_pins(view, "action", name, ctx)
     info = ctx.type_of(spec.object_type)
     if info is None:
         raise _err(409, "action_not_active", f"the object type of {name} is not active")
@@ -375,6 +402,7 @@ def _plan(
     marker = _marker(None, view, otype.class_local, str(key))
     record = _read(settings, view, otype, str(key))
     plan = _Plan(name, version, spec, info, otype, record, coerced, marker)
+    plan.functions = registry.function_pins(view, spec, ctx)
     full = {p.name: coerced.get(p.name) for p in spec.params}
     obj = ex.Obj(info, dict(record["values"]))
     with ExitStack() as stack:
@@ -432,7 +460,20 @@ def _plan(
                         **_recipients(n, ev, obj_after, full, members),
                     }
                 )
+            plan.capped = cap_recipients(plan.messages, MAX_RUN_RECIPIENTS)
     return plan
+
+
+def cap_recipients(messages: list[dict[str, Any]], budget: int) -> int:
+    """Keep at most *budget* recipients over *messages* (in order; the rest dropped):
+    the number dropped."""
+    dropped = 0
+    for m in messages:
+        keep = max(0, min(len(m["recipients"]), budget))
+        dropped += len(m["recipients"]) - keep
+        m["recipients"] = m["recipients"][:keep]
+        budget -= keep
+    return dropped
 
 
 # --- permission -------------------------------------------------------------------------
@@ -475,7 +516,16 @@ def may_decide(run: ActionRun, caller: Caller) -> bool:
         return False
     if rank(caller.role) < rank(run.approval_role or "reviewer"):
         return False
-    return not (caller.four_eyes and caller.name == run.requested_by)
+    return not (caller.four_eyes and _own(run, caller))
+
+
+def _own(run: ActionRun, caller: Caller) -> bool:
+    """Whether *run* was requested by *caller*, directly or through their agent token."""
+    me = caller.name.strip().lower()
+    return bool(me) and me in (
+        run.requested_by.strip().lower(),
+        (run.requested_for or "").strip().lower(),
+    )
 
 
 # --- views ------------------------------------------------------------------------------
@@ -527,6 +577,7 @@ def _preview_dict(plan: _Plan, caller: Caller) -> dict[str, Any]:
             **({"refused": refusal} if refusal else {}),
         },
         "ok": not plan.failures and not plan.effect_errors,
+        "functions": plan.functions,
     }
     out["can_submit"] = bool(out["ok"] and allowed)
     return out
@@ -685,13 +736,16 @@ def _write_effects(view: Any, plan: _Plan, run_id: str, edited_by: str, conn: An
 
 
 def _queued(plan: _Plan) -> dict[str, Any]:
-    return {
+    out = {
         "messages": len(plan.messages),
         "recipients": sum(len(m["recipients"]) for m in plan.messages),
         "invalid": sum(m["invalid"] for m in plan.messages),
         "skipped_roles": any(m["skipped_roles"] for m in plan.messages),
         "status": "queued" if plan.messages else "none",
     }
+    if plan.capped:
+        out["notifications_capped"] = plan.capped
+    return out
 
 
 def _notify(settings: Any, view: Any, run_id: str, plan: _Plan, mailer: Any) -> None:
@@ -715,7 +769,7 @@ def _notify(settings: Any, view: Any, run_id: str, plan: _Plan, mailer: Any) -> 
             else:
                 for msg in messages:
                     for to in msg["recipients"]:
-                        if m.send(to, msg["subject"], msg["body"]):
+                        if send_one(m, to, msg["subject"], msg["body"]):
                             sent += 1
                         else:
                             failed += 1
@@ -740,6 +794,16 @@ def _notify(settings: Any, view: Any, run_id: str, plan: _Plan, mailer: Any) -> 
         _threads[:] = [x for x in _threads if x.is_alive()]
         _threads.append(t)
     t.start()
+
+
+def send_one(mailer: Any, to: str, subject: str, body: str) -> bool:
+    """One message through *mailer*; an exception is a failed recipient, never the end of
+    the remaining ones."""
+    try:
+        return bool(mailer.send(to, subject, body))
+    except Exception:  # noqa: BLE001 - one recipient never stops the others
+        logger.warning("notification to one recipient failed", exc_info=True)
+        return False
 
 
 def _check_idempotency(existing: ActionRun, name: str, key: str) -> ActionRun:
@@ -811,6 +875,7 @@ def submit(
                 "object_key": plan.record["key"],
                 "params": plan.params,
                 "requested_by": caller.name,
+                "requested_for": caller.person,
                 "via": caller.via,
                 "token_id": caller.token_id,
                 "workflow_run_id": caller.workflow_run_id,
@@ -895,6 +960,12 @@ def approve(
                 f"action {run.action_name} changed (v{run.action_version} -> v{plan.version})",
                 "action_changed",
             )
+        submitted = run.preview.get("functions")
+        if isinstance(submitted, dict):
+            changes = registry.pin_changes(submitted, plan.functions)
+            if changes:
+                reason = "; ".join(changes) + " since the run was submitted"
+                return _fail(view, run, caller, reason, "function_changed")
         if plan.failures:
             reason = "; ".join(f["message"] for f in plan.failures)
             return _fail(view, run, caller, reason, "precondition_failed")
@@ -934,8 +1005,13 @@ def _require_decide(run: ActionRun, caller: Caller) -> None:
     role = run.approval_role or "reviewer"
     if rank(caller.role) < rank(role):
         raise _forbidden("action.approve", f"approving this run needs the {role} role", role=role)
-    if caller.four_eyes and caller.name == run.requested_by:
-        raise _err(403, "self_approval", "you requested this run: someone else must approve it")
+    if caller.four_eyes and _own(run, caller):
+        raise _err(
+            403,
+            "self_approval",
+            "you requested this run (directly or through your agent token): someone else "
+            "must approve it",
+        )
 
 
 def reject(view: Any, run_id: str, caller: Caller, note: str = "") -> ActionRun:
@@ -943,7 +1019,7 @@ def reject(view: Any, run_id: str, caller: Caller, note: str = "") -> ActionRun:
     run = _pending(view, run_id)
     if run.status != "pending_approval":
         raise _err(409, "not_pending", f"the run is {run.status}")
-    if caller.name != run.requested_by or caller.via == "agent":
+    if caller.via == "agent" or not _own(run, caller):
         _require_decide(run, caller)
     note = (note or "").strip()[:MAX_NOTE_CHARS]
     runs = view.action_runs()

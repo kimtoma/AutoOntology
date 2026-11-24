@@ -377,8 +377,14 @@ def test_accounts_execute_tokens_and_creator_role(aenv):
     err, proposed = _rpc(anon, proposer["token"], "submit_action", {"name": ACTION, "key": "INV-2"})
     assert not err and proposed["run"]["status"] == "pending_approval"
     assert proposed["run"]["approval_role"] == "reviewer"
-    # the token creator (the editor) approves the agent's proposal: another identity
-    ok = editor.post(f"{API}/actions/runs/{proposed['run']['id']}/approve")
+    # the token's creator is the person behind the proposal: four-eyes refuses them
+    assert proposed["run"]["requested_for"] == "e@x.io"
+    listed = editor.get(f"{API}/actions/runs/{proposed['run']['id']}").json()["run"]
+    assert listed["can_approve"] is False
+    mine = editor.post(f"{API}/actions/runs/{proposed['run']['id']}/approve")
+    assert mine.status_code == 403 and mine.json()["error"] == "self_approval"
+    # another reviewer (here the owner) approves it
+    ok = owner.post(f"{API}/actions/runs/{proposed['run']['id']}/approve")
     assert ok.json()["run"]["status"] == "applied"
     # the creator demoted below the action's role: the token is refused
     user = aenv.accounts.by_email("e@x.io")

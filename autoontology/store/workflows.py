@@ -110,6 +110,15 @@ def _run(row: sqlite3.Row) -> WorkflowRun:
     )
 
 
+class RunActive(Exception):
+    """The workflow already has a ``running`` run (:meth:`WorkflowRuns.start` with
+    ``exclusive``)."""
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(run_id)
+        self.run_id = run_id
+
+
 class WorkflowRuns:
     """The workflow runs of one project (``store.project(...).workflow_runs()``)."""
 
@@ -134,9 +143,12 @@ class WorkflowRuns:
         started_by: str,
         summary: dict[str, Any] | None = None,
         state: dict[str, Any] | None = None,
+        exclusive: bool = False,
     ) -> tuple[WorkflowRun, bool]:
         """Insert a ``running`` run: ``(run, True)``; ``(the existing run, False)`` when
-        this workflow already has a run for *fire_slot*."""
+        this workflow already has a run for *fire_slot*. *exclusive*: raise
+        :class:`RunActive` instead when the workflow has a ``running`` run (checked in the
+        same transaction)."""
         if trigger not in TRIGGERS:
             raise ValueError(f"invalid trigger {trigger!r}")
         run_id = RUN_ID_PREFIX + secrets.token_hex(8)
@@ -148,6 +160,14 @@ class WorkflowRuns:
             ).fetchone()
             if found is not None:
                 return _run(found), False
+            if exclusive:
+                busy = conn.execute(
+                    "SELECT id FROM workflow_runs WHERE project_id = ? AND workflow_name = ? "
+                    "AND status = 'running' LIMIT 1",
+                    (self.project_id, workflow_name),
+                ).fetchone()
+                if busy is not None:
+                    raise RunActive(str(busy[0]))
             try:
                 conn.execute(
                     "INSERT INTO workflow_runs (project_id, id, workflow_name, "

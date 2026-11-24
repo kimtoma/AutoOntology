@@ -4,9 +4,11 @@ aliases), over :mod:`autoontology.logic.workflows`.
 
 * ``GET /workflows`` -- the active workflows with their trigger, the next scheduled slot
   and the latest run (``logic.read``);
-* ``POST /workflows/{name}/run`` ``{wait?}`` -- fire it now (``workflow.run``): 202 with
+* ``POST /workflows/{name}/run`` ``{wait?}`` -- fire it now (``workflow.run``; a workflow
+  without ``trigger.manual: true`` needs ``logic.activate``, i.e. an owner): 202 with
   the ``running`` run, whose objects are processed on a worker thread; ``wait: true``
   processes them in the request and answers 200 with the run as it ended (or paused);
+  409 ``run_active`` while another run of the workflow is ``running``;
 * ``GET /workflows/runs?workflow=&status=&limit=`` -- runs, newest first (``logic.read``);
 * ``GET /workflows/runs/{id}`` -- one run with its objects and its action runs
   (``logic.read``);
@@ -95,6 +97,11 @@ def add_workflow_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         ctx: ProjectContext = Ctx,
     ) -> JSONResponse:
         ctx.require("workflow.run")
+        found = ctx.store.logic_defs().get("workflow", name) if len(name) <= 200 else None
+        if found is not None and (found.spec.get("trigger") or {}).get("manual") is not True:
+            # a scheduled or on_action workflow runs by itself; firing it at will is an
+            # owner's decision (each run may notify many people)
+            ctx.require("logic.activate")
         try:
             req = RunIn.model_validate(body or {})
         except ValidationError as exc:

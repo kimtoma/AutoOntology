@@ -3,15 +3,18 @@
 aliases), over :mod:`autoontology.logic.registry` and :mod:`autoontology.logic.functions`.
 
 * ``GET /logic?kind=&status=`` -- the definitions (``logic.read``);
-* ``GET /logic/{kind}/{name}`` -- one definition and its history (``logic.read``);
+* ``GET /logic/{kind}/{name}`` -- one definition and its history (``logic.read``); a
+  function also lists ``used_by``: the active actions and workflows that use it;
 * ``POST /logic/validate`` ``{spec}`` -- parse and validate, save nothing
   (``logic.read``): ``{valid, kind, name, errors}``; ``{specs: [...]}`` checks several
   together (each with the others in place): ``{valid, results: [...]}``;
 * ``POST /logic`` ``{spec}`` -- save a valid spec as a draft (a new version when the name
   exists; ``logic.edit``), 400 ``invalid_spec`` with ``errors`` otherwise;
 * ``POST /logic/{kind}/{name}/status`` ``{status: active|retired|draft}`` -- functions
-  need ``logic.edit``, actions and workflows ``logic.activate``; ``active`` needs a valid
-  spec whose references are active (409 otherwise);
+  need ``logic.edit`` (``logic.activate`` when an active action or workflow uses the
+  function: :func:`~autoontology.logic.registry.used_by_active`), actions and workflows
+  ``logic.activate``; ``active`` needs a valid spec whose references are active (409
+  otherwise);
 * ``POST /logic/functions/{name}/test`` ``{keys, params?}`` and ``POST /logic/test``
   ``{spec, keys, params?}`` -- evaluate a stored (draft or active) or unsaved function on
   chosen objects (``functions.call``);
@@ -38,7 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from autoontology.logic import functions, registry
 from autoontology.logic.specs import MAX_SPEC_CHARS
 from autoontology.store.logic import KINDS, STATUSES
-from autoontology.web.projects import ProjectContext
+from autoontology.web.projects import ProjectContext, allowed_when_archived
 
 MAX_KEYS = functions.MAX_TEST_KEYS
 
@@ -156,6 +159,7 @@ def add_logic_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         }
 
     @router.post("/logic/validate")
+    @allowed_when_archived
     def logic_validate(body: dict[str, Any], ctx: ProjectContext = Ctx) -> dict[str, Any]:
         ctx.require("logic.read")
         req = body_of(ValidateIn, body)
@@ -169,6 +173,7 @@ def add_logic_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         return result(spec, errors)
 
     @router.post("/logic/test")
+    @allowed_when_archived
     def logic_test(body: dict[str, Any], ctx: ProjectContext = Ctx) -> dict[str, Any]:
         ctx.require("functions.call")
         req = body_of(TestIn, body)
@@ -194,10 +199,13 @@ def add_logic_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
     def logic_get(kind: str, name: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
         ctx.require("logic.read")
         found = object_call(lambda: registry.get(ctx.store, kind_of(kind), name))
-        return {
+        out: dict[str, Any] = {
             "definition": found.to_dict(),
             "history": ctx.store.logic_defs().history(kind, name)[:100],
         }
+        if kind == "function":
+            out["used_by"] = object_call(lambda: registry.used_by_active(ctx.store, name))
+        return out
 
     @router.post("/logic/{kind}/{name}/status")
     def logic_status(
@@ -206,6 +214,17 @@ def add_logic_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         ctx.require("logic.edit" if kind_of(kind) == "function" else "logic.activate")
         req = body_of(StatusIn, body)
         before = object_call(lambda: registry.get(ctx.store, kind, name))
+        if kind == "function" and not ctx.can("logic.activate"):
+            users = object_call(lambda: registry.used_by_active(ctx.store, name))
+            if users:
+                raise ApiError(
+                    403,
+                    "forbidden",
+                    f"function {name} is used by {', '.join(users[:5])}: changing its "
+                    "status needs the 'logic.activate' permission (owner)",
+                    permission="logic.activate",
+                    used_by=users,
+                )
         updated = object_call(
             lambda: registry.set_status(ctx.store, kind, name, req.status, actor=ctx.actor)
         )
@@ -217,6 +236,7 @@ def add_logic_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         return {"definition": updated.to_dict()}
 
     @router.post("/logic/functions/{name}/test")
+    @allowed_when_archived
     def function_test(name: str, body: dict[str, Any], ctx: ProjectContext = Ctx) -> dict[str, Any]:
         ctx.require("functions.call")
         req = body_of(TestIn, body)
@@ -228,6 +248,7 @@ def add_logic_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         )
 
     @router.post("/logic/functions/{name}/call")
+    @allowed_when_archived
     def function_call(name: str, body: dict[str, Any], ctx: ProjectContext = Ctx) -> dict[str, Any]:
         ctx.require("functions.call")
         req = body_of(CallIn, body)

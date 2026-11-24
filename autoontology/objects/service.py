@@ -328,11 +328,42 @@ def bind(
     otype = find_type(view, name)
     if otype.status == "broken" and otype.broken_reason.startswith(binding.SNAPSHOT_REASON):
         raise ObjectError(409, "object_type_not_active", otype.broken_reason)
+    if key is not None:
+        _refuse_key_change(view, otype, key)
     with _open(settings, view, otype) as backend:
         checked = binding.verify(backend, otype, key=key, title=title)
+    _refuse_key_change(view, otype, checked.key)
     return view.object_types().save(
         replace(checked, status="active", broken_reason="", decided_by=actor)
     )
+
+
+def _refuse_key_change(view: Any, otype: ObjectType, key: str) -> None:
+    """409 ``edits_exist`` when *key* is not *otype*'s key while live edits exist: edits
+    are matched to source rows by key value, so a new key would attach them to other
+    objects."""
+    if not otype.key or key == otype.key:
+        return
+    live = _live_edits(view, otype.class_local)
+    if live:
+        raise ObjectError(
+            409,
+            "edits_exist",
+            f"{live} live edit(s) on {otype.label or otype.class_local} are keyed by the "
+            "current key: revert them (an owner) before changing the key",
+            edits=live,
+        )
+
+
+def _live_edits(view: Any, class_local: str) -> int:
+    """The edits of type *class_local* that are not reverted."""
+    with view.store._conn() as conn:
+        row = conn.execute(
+            "SELECT count(*) FROM object_edits WHERE project_id = ? AND object_type = ? "
+            "AND reverted_at IS NULL",
+            (view.id, class_local),
+        ).fetchone()
+    return int(row[0])
 
 
 def decide(settings: Any, view: Any, name: str, decision: str, actor: str) -> ObjectType:

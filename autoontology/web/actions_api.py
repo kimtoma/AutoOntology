@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from autoontology.logic import actions
 from autoontology.logic.actions import Caller
 from autoontology.store.actions import MAX_LIST, STATUSES
-from autoontology.web.projects import ProjectContext
+from autoontology.web.projects import ProjectContext, allowed_when_archived
 
 
 class PreviewIn(BaseModel):
@@ -117,6 +117,7 @@ def add_action_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         return {"run": actions.run_dict(run, caller), "edits": edits}
 
     @router.post("/actions/{name}/preview")
+    @allowed_when_archived
     def preview(
         name: str, body: dict[str, Any], request: Request, ctx: ProjectContext = Ctx
     ) -> dict[str, Any]:
