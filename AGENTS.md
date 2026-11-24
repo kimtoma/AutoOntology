@@ -38,10 +38,14 @@ uv run autoontology ontology concepts -q 계약 --json   # every UI page has com
 #   ontology revisions|diff|concept|graph, runs show|logs|cancel, source freshness,
 #   samples list|load, exports list|show|get|zip, playground chat|sql|sparql|index,
 #   settings show|test|set|restart, agent tokens list|create|rotate|revoke, agent usage,
-#   project list|show|create|rename|archive|unarchive
+#   project list|show|create|rename|archive|unarchive,
+#   user create|list|disable|enable|link, member list|add|role|remove, audit
 #   (docs/GUIDE.md "The same from a terminal"; outside agents: POST /mcp, /agent/v1)
 uv run ao -p <slug> build                            # --project/-p (or AUTOONTOLOGY_PROJECT) picks
 #   the project for any command; API: /api/projects/<slug>/... (/api/... = the default project)
+uv run ao user create you@example.com --admin       # first admin (prints an invite link), then
+#   AUTOONTOLOGY_AUTH=accounts + AUTOONTOLOGY_PUBLIC_URL in .env and `ao down && ao up`;
+#   `ao -p <slug> member add <email> --role viewer|reviewer|editor|owner`, `ao --as <email>` for audit
 
 uv run ruff check . && uv run ruff format --check . && uv run pytest -q   # unit tests
 AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration                   # real Postgres + Ollama
@@ -73,4 +77,9 @@ uv run autoontology tools build-ui                   # rebuild the committed bun
   and `.env.bak-*` are git-ignored. The claude/codex providers use the user's own CLI login,
   never an API key.
 - Tests first for behaviour changes; integration tests stay behind `AUTOONTOLOGY_INTEGRATION=1`.
+- Accounts (`AUTOONTOLOGY_AUTH=off|accounts`, default off) must leave off mode unchanged. A
+  new route needs a permission from `PROJECT_PERMISSIONS` in `autoontology/web/projects.py`
+  (`ctx.require`) or `require_installation`, covered in `tests/test_permissions.py`
+  (sign-in: `tests/test_auth_api.py`, store: `tests/test_accounts.py`, CLI:
+  `tests/test_cli_users.py`). Never log passwords, session ids or login links.
 - If `ui/` changes, rebuild and commit the bundle in the same change.

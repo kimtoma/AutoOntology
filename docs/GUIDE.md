@@ -20,9 +20,10 @@ Contents:
 6. [Bring your own data](#6-bring-your-own-data)
 7. [Reading the results](#7-reading-the-results)
 8. [Operating a living ontology](#8-operating-a-living-ontology)
-9. [When results look wrong](#9-when-results-look-wrong)
-10. [Troubleshooting](#10-troubleshooting)
-11. [FAQ](#11-faq)
+9. [Sign-in and accounts](#9-sign-in-and-accounts) (shared installations)
+10. [When results look wrong](#10-when-results-look-wrong)
+11. [Troubleshooting](#11-troubleshooting)
+12. [FAQ](#12-faq)
 
 ## Start with one prompt
 
@@ -366,6 +367,18 @@ Then build: `uv run autoontology build`, or **Build → Start**. Export with
 
 ## 7. Reading the results
 
+### Finding your way
+
+The sidebar starts with the **project switcher**: the project you are looking at. Click it
+to switch to another project, start a **New project** or open **All projects** (with
+accounts on, only admins create projects, and owners also find the project's **Members**
+and **Audit log** here). Below it are the pages, each for
+the current project: **Overview**, **Review** (with the number of items waiting),
+**Sources**, **Build**, **Ontology**, **Graph**, **Playground**, **Exports**, **Connect**
+(outside agents), **Status** and **Settings**. With accounts on (chapter 9), Settings and
+**Users** are shown to admins only. The globe menu in the header switches between English
+and Korean.
+
 ### Ontology page
 
 One searchable list of every concept. Each row has an **origin** badge:
@@ -456,7 +469,9 @@ REST addresses with copy buttons, lists every token with its revision, expiry, l
 call count, and creates, rotates or revokes one after a confirmation. Right after you create
 or rotate a token it shows the token once, with ready-to-copy settings for Claude Code,
 Claude Desktop / Cursor and curl already filled in. Below that are the tools an agent can
-call and the last 30 days of usage. The README's
+call and the last 30 days of usage. With accounts on (chapter 9), managing tokens needs the
+editor role or higher, and a token stops working when the person who created it is disabled
+or leaves the project. The README's
 [Connect outside agents](../README.md#connect-outside-agents) has the details.
 
 ## 8. Operating a living ontology
@@ -507,8 +522,8 @@ sidebar). The categories, in plain words:
 Each card shows the concept and its definition, the candidate, the model's confidence and
 reasoning, and up to three sentences from the documents with the document and page. Use
 the keyboard for long lists: `j`/`k` move, `a` accepts, `r` rejects. **Undo** removes a
-decision. Your decision is recorded with your name (the tailnet login when you come in over
-Tailscale, else `local`) and the time, and a later build never overrides it: the model is
+decision. Your decision is recorded with your name (your email when you are signed in with
+an account, the tailnet login when you come in over Tailscale, else `local`) and the time, and a later build never overrides it: the model is
 not asked again about a concept a person decided.
 
 ![Review page](screenshots/review.png)
@@ -559,6 +574,7 @@ need `uv run autoontology up`; the others read the local data and work with it d
 | Status | `uv run autoontology status`, `doctor`, `provider status` |
 | Settings | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(service)* |
 | Connect | `uv run autoontology agent tokens create <name> [--revision R] [--expires-days 30\|90]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage` |
+| Accounts | `uv run ao user create <email> [--admin]`, `user list`, `user disable\|enable <email>`, `user link <email> --purpose magic\|reset\|invite`, `member list`, `member add <email> --role R`, `member role <email> R`, `member remove <email>`, `audit` (chapter 9) |
 | Projects | `uv run autoontology project list`, `project show [slug]`, `project create <slug> --name N`, `project rename <slug> [--name N] [--slug S]`, `project archive <slug>`, `project unarchive <slug>` |
 
 Every command works on the default project unless you name another one before it:
@@ -567,7 +583,125 @@ Every command works on the default project unless you name another one before it
 The API key is never a command-line argument: `settings set --api-key-stdin` reads it from
 the terminal without showing it (or from a pipe, e.g. a password manager's output).
 
-## 9. When results look wrong
+## 9. Sign-in and accounts
+
+A local installation has no sign-in. With the default `AUTOONTOLOGY_AUTH=off`, everyone who
+can reach the service (this computer, and your tailnet if you set that up) may do
+everything, and decisions are recorded as `local` or the tailnet login. When a team shares
+one installation, its administrator sets `AUTOONTOLOGY_AUTH=accounts` (the README's
+[Accounts](../README.md#accounts) section has the setup). From then on everybody signs in
+with their own account and gets a role in each project. This chapter is what each person
+sees then; with accounts off none of it appears.
+
+### Signing in
+
+- **The first time**: open the invitation link your administrator sent you (by email, or
+  passed on by hand). Type the password you want twice (at least 12 characters) and press
+  **Set password and sign in**. An invitation link works once, for 7 days.
+- **After that**: open the address of the installation. When you are signed out it shows
+  **Sign in to AutoOntology**; enter your email and password and press **Sign in**. You
+  land on the page you asked for.
+- A sign-in lasts 12 hours (the administrator can change this with
+  `AUTOONTOLOGY_SESSION_HOURS`); then you sign in again.
+- **Email me a sign-in link** appears on the sign-in page only when the installation can
+  send mail (SMTP is configured). Type your email and press it: if the address has an
+  account, a link arrives that works once, for 15 minutes. Opening it shows a **Continue to
+  sign in** button; press it to sign in. The page never says whether an address has an
+  account.
+- Over Tailscale, on a hostname the administrator configured, your tailnet login signs you
+  in as the user with the same email.
+
+**Your password.** The account menu (your initials, top right) has **Change password**:
+type the current password and the new one twice. Your other sessions (other browsers and
+devices) are signed out. Forgot it? Ask an administrator for a **password reset link**; it
+works once, for 15 minutes, and setting a new password there signs you in and signs out
+everywhere else. (An emailed sign-in link gets you in too, but changing the password
+afterwards still asks for the current one.)
+
+Too many wrong passwords in a short time (20 a minute from one address, or 5 for one email
+from one address) and the page says "Too many attempts. Try again in N seconds." Wait a
+minute and try again.
+
+### Roles
+
+Each person has a role per project. A project you are not a member of does not appear at
+all: not in the project switcher, not on the Projects page.
+
+| Role | Can |
+|---|---|
+| **Viewer** | Read everything in the project (Overview, Review list, Sources, Build, Ontology, Graph), download exports, ask the playground (chat, SQL, SPARQL) and read its conversations |
+| **Reviewer** | Everything a viewer can, plus accept and reject review items (and undo) and **Apply** them |
+| **Editor** | Everything a reviewer can, plus add and remove sources, load samples, start and cancel builds and exports, manage agent tokens on **Connect**, delete playground conversations |
+| **Owner** | Everything an editor can, plus rename and archive the project, manage its members, read its audit log |
+| **Admin** | Owner of every project, plus create projects, change **Settings** and restart, invite and manage users, read the whole audit log |
+
+Buttons your role cannot use are disabled (with the reason on hover) or hidden, and pages
+say so, for example "Your role (Viewer) can read the review items but not decide or apply
+them." **Settings** and **Users** are in the sidebar for admins only. The server checks
+every action again, so a hidden button is a convenience, not the protection.
+
+The **account menu** shows your name and email, your role in the current project, **Change
+password** and **Sign out**; admins also see an **Admin** badge and a link to **Users**.
+
+### Members (owners)
+
+An owner opens **Members** from the project switcher or from the Projects page
+(`/ui/p/<project>/members`). It lists who can open the project, with their role.
+
+- **Add a member**: type the email, pick the role, press **Add**. An owner can add only
+  people who already have an account; for someone new, ask an administrator to invite them.
+  When an administrator adds an unknown email, the account is created at once with an
+  invitation link (emailed when mail is set up, otherwise shown to pass on yourself).
+- **Change a role** in the member's role box; it applies at once.
+- **Remove** a member after a confirmation: they can no longer open the project, and the
+  agent tokens they created for it stop working.
+- A project always keeps at least one owner: the last owner cannot be removed or demoted.
+
+### Users and invitations (admins)
+
+**Users** in the sidebar (`/ui/users`) lists every account of the installation: email,
+name, state (Active, Invited, Disabled), last sign-in and projects.
+
+1. Press **Invite user**, type the email (the name is optional) and tick **Administrator**
+   if this person should manage settings, users and every project.
+2. Press **Create invitation**. With mail set up the invitation is emailed; the link is
+   also shown, to pass on yourself when no email arrives. It works once, for 7 days.
+3. Add the person to projects as a member (above). Without a membership they see no
+   project.
+
+Per user you can **Make admin** / **Remove admin**, **Disable** / **Enable**, and **Create
+sign-in link**: a sign-in link (15 minutes), a password reset link (15 minutes) or a new
+invitation link (7 days). A new link of a kind replaces the earlier unused one. Disabling
+an account signs the person out at once, cancels their unused links and stops the agent
+tokens they created. The installation always keeps one active admin.
+
+Treat these links like passwords: whoever has one can enter that account. Send them to the
+person only, never to a shared channel or document.
+
+The same from a terminal on the server (the CLI acts as an admin and is recorded as `cli`;
+`ao --as <email> ...` records your email instead):
+
+```bash
+uv run ao user create colleague@example.com --name "Colleague"   # prints the invitation link
+uv run ao user list
+uv run ao user link colleague@example.com --purpose reset         # or magic, invite
+uv run ao user disable colleague@example.com                      # enable undoes it
+uv run ao -p contracts member add colleague@example.com --role reviewer
+uv run ao -p contracts member list                                # role <email> R, remove <email>
+```
+
+### Audit log
+
+Who did what, and when: sign-ins (and failed attempts), changes to users and members,
+agent tokens, started and cancelled builds, exports and applies, review decisions and
+undos, sources and samples, settings changes and restarts, and project changes, each with
+the person, the project and the client address. Owners read their project's log from the
+Members page (**Audit log**, `/ui/p/<project>/audit`); admins read everything under
+**Users → Audit log** (`/ui/users/audit`). Filter by action and by email; **Load more**
+fetches older entries. From a terminal: `uv run ao audit [--project P] [--user EMAIL]
+[--action A]`.
+
+## 10. When results look wrong
 
 **Rebuild or resume?** `uv run autoontology build --resume` continues the last build and
 keeps every step whose inputs did not change (files, kordoc and OCR availability, the
@@ -611,7 +745,7 @@ document chunk, finds fewer concepts, and its judgments are more often `related`
 `same`. That is safe (nothing is merged wrongly) but leaves more suggestions. Use it to
 keep data local; use a subscription or a larger endpoint for the best ontology.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 `uv run autoontology doctor` checks everything and prints a REMEDY column; `init` prints
 `fix:` lines. The commands below are the ones doctor and init suggest, with a few extra
@@ -654,8 +788,14 @@ same).
 | A document fails with `FILE_TOO_LARGE` | Over 50 MB of text (`AUTOONTOLOGY_DOC_MAX_BYTES`) | Split the file, or raise the limit in `.env` |
 | `/ui/` answers 503 `ui_not_built` | The web UI files are missing (a source archive) | `uv run autoontology tools build-ui` (needs Node and pnpm) |
 | A build seems stuck | Local models are slow | `uv run autoontology runs` shows the step and chunk counts; logs are in `data/logs/` |
+| "Wrong email or password." or "Too many attempts. Try again in N seconds." (accounts on) | A typo, or too many failed attempts within a minute (HTTP 429) | Wait a minute and try again; if you forgot the password, ask an administrator for a reset link |
+| The sign-in page keeps coming back | The sign-in expired (after 12 hours by default), or the browser blocks cookies (some private windows) | Sign in again; allow cookies for the site |
+| "That sign-in link is invalid, used or expired." | Links work once: sign-in and reset links for 15 minutes, invitations for 7 days; a newer link replaces an older one | Ask for a new link (an administrator: **Users → Create sign-in link**, or `uv run ao user link <email> --purpose reset`) |
+| No **Email me a sign-in link** on the sign-in page | The installation has no outgoing mail (`AUTOONTOLOGY_SMTP_*`) | Sign in with the password, or get a link from an administrator |
+| A project is missing, or "You are not in any project yet" | You are not a member of it | Ask its owner or an administrator to add you (**Members**) |
+| A button is greyed out, or "Your role (...) cannot do this" / "You do not have permission (...)" | Your role in this project does not include that action (chapter 9, Roles) | Ask a project owner for a higher role |
 
-## 11. FAQ
+## 12. FAQ
 
 **Is my data private?** With Ollama for chat and embeddings, nothing leaves your computer:
 the services listen only on 127.0.0.1 and reject other machines. With a Claude or ChatGPT
@@ -668,11 +808,18 @@ refreshed token back).
 `tailscale serve --bg --https=8444 http://127.0.0.1:7800` on the computer that runs
 AutoOntology, set `AUTOONTOLOGY_TAILSCALE_HOSTS` (and optionally
 `AUTOONTOLOGY_TAILSCALE_LOGINS`) in `.env`, and restart with `down && up`. The README's
-"Remote access over Tailscale" section has the details. Never use `tailscale funnel`, which
+"Remote access over Tailscale" section has the details. With accounts on, your tailnet login
+signs you in as the user with the same email. Never use `tailscale funnel`, which
 would put it on the public internet.
 
+**Can several people work in one installation?** Yes. Run it on one computer that everyone
+reaches (over Tailscale, or behind a gateway the administrator sets up), switch accounts on
+(`AUTOONTOLOGY_AUTH=accounts`) and invite people with a role per project (chapter 9). Members
+of a project see the same sources and ontology; one person's accept, reject or apply changes
+it for everyone, and one build, export or apply runs at a time across the installation.
+
 **Can I change the model or enter an API key from my laptop?** Yes: open **Settings** in
-the web UI (also over Tailscale). The key is sent once to the computer that runs
+the web UI (also over Tailscale; with accounts on, admins only). The key is sent once to the computer that runs
 AutoOntology, written only to its `.env` (readable by its owner alone) and never shown,
 logged or sent back. The service and the engine must restart to use another model; the
 page does that for you (**Save and restart**) or tells you to run

@@ -20,9 +20,11 @@ checklist, the 10-minute path, how to prepare your own files, and a troubleshoot
 
 ![Overview page](docs/screenshots/overview.png)
 
-The web UI's sidebar: **Overview** (what changed, what needs you), **Review** (confirm what
-the models proposed), **Sources**, **Build**, **Ontology**, **Graph**, **Playground**,
-**Exports**, **Status** and **Settings**. Before the first build, the Overview is the
+The web UI's sidebar: the **project switcher** at the top, then **Overview** (what changed,
+what needs you), **Review** (confirm what the models proposed), **Sources**, **Build**,
+**Ontology**, **Graph**, **Playground**, **Exports**, **Connect** (outside agents over MCP
+and REST), **Status** and **Settings**. With [accounts](#accounts) on, Settings and
+**Users** are shown to admins only. Before the first build, the Overview is the
 five-step **Get started** checklist; afterwards the checklist stays under
 **Settings → Setup guide** (`/ui/setup`).
 
@@ -879,7 +881,8 @@ are overridden.
   Markdown and HTML in extracted text. If you render the `.md` files as HTML elsewhere,
   sanitize them.
 - The SPARQL console is read-only and refuses `SERVICE`, `FROM` and `LOAD`.
-- The outside-agent endpoints (`/mcp`, `/agent/v1`) are the only authenticated routes:
+- The outside-agent endpoints (`/mcp`, `/agent/v1`) are the only authenticated routes
+  with accounts off (with accounts on, every other route needs a sign-in):
   they always need a bearer token, are read-only, and are rate-limited per token. Treat a
   token like a password; rotate or revoke it with `autoontology agent tokens rotate` / `revoke`.
 - API keys are masked in logs, status responses and error bodies relayed from upstream.
@@ -1071,7 +1074,7 @@ See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
 ## Troubleshooting
 
-The [guide's troubleshooting table](docs/GUIDE.md#10-troubleshooting) lists every
+The [guide's troubleshooting table](docs/GUIDE.md#11-troubleshooting) lists every
 `doctor` and `init` remedy with its cause. The most common ones:
 
 | Symptom | Fix |

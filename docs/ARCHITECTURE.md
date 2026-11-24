@@ -8,11 +8,11 @@ overview is in the [README](../README.md).
 
 | Component | Where | Port | Role |
 |---|---|---|---|
-| AutoOntology service | `autoontology/web` (FastAPI, uvicorn) | `127.0.0.1:7800` (`AUTOONTOLOGY_PORT`) | REST API under `/api`, SSE run logs, the playground, the web UI under `/ui`, the `/v1` model router, and the `/ingest` shims the engine calls back. |
+| AutoOntology service | `autoontology/web` (FastAPI, uvicorn) | `127.0.0.1:7800` (`AUTOONTOLOGY_PORT`) | REST API under `/api`, SSE run logs, the playground, the web UI under `/ui`, sign-in (`/api/auth`, `/auth/magic`), the outside-agent surfaces (`/mcp`, `/agent/v1`), the `/v1` model router, and the `/ingest` shims the engine calls back. |
 | Engine backend | `vendor/auto-ontology` (NVIDIA Auto Ontology, git submodule) | `127.0.0.1:3101` (`BACKEND_PORT`) | Connections, catalog, semantic model, exports and NL-to-SQL, over HTTP `/api/...`. |
 | CLI | `autoontology/cli.py` (typer), `autoontology/onboarding.py` | none | Runs `build` and `export` in-process; `up`/`down` supervise the two servers; `init`, `demo` and `provider` drive the onboarding. |
 | Postgres 17 + pgvector | `docker compose` or your own server | `5432` | The engine's catalog and vectors (`autoontology`) and one database per file source (`autoontology_src_<name>`; `autoontology_src_<slug_>__<name>` in a project other than the default one). |
-| SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: projects, sources, runs, documents, concepts, alignments, snapshots, playground. |
+| SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: projects, sources, runs, documents, concepts, alignments, snapshots, playground, agent tokens, and (schema v9) accounts and the audit log. |
 | Model providers | Ollama (`:11434`), an OpenAI-compatible URL, or the user's `claude` / `codex` CLI (chat only) | none | Chat (extraction, judges, playground, engine compile) and embeddings. |
 | kordoc (optional) | `<AUTOONTOLOGY_HOME>/kordoc` (npm, Node 20 or newer); OCR models in kordoc's model cache | none | Reads HWP/HWPX/PDF/DOCX/PPTX/XLS/XLSX into Markdown and OCRs images and scanned PDFs (PP-OCRv5 korean), run offline as a subprocess with an argv list. |
 
@@ -22,6 +22,8 @@ binds them to 127.0.0.1, writes PID files under `<home>/run/` and logs under
 `Host` is not local or whose `Origin` is cross-site. A tailnet hostname listed in
 `AUTOONTOLOGY_TAILSCALE_HOSTS` (forwarded by `tailscale serve`) is accepted only with the
 `Tailscale-User-Login` identity header, optionally limited to `AUTOONTOLOGY_TAILSCALE_LOGINS`.
+With `AUTOONTOLOGY_AUTH=accounts` a sign-in gate runs after this guard (see
+[Accounts and permissions](#accounts-and-permissions)).
 
 ## Projects
 
@@ -55,13 +57,133 @@ belong to the default project (`prj_default`), whose slug is the workspace's
   and kept as an alias under `/api/...` for the default project
   (`web/projects.py`). The `ProjectContext` dependency resolves the slug (404
   `unknown_project`), refuses writes to an archived project (409 `project_archived`) and
-  carries the caller (`actor`: the tailnet login or `local`); its `require(permission)`
-  is the hook where accounts and roles will plug in. Installation-wide routes
+  carries the caller (`actor`: the signed-in user's email with accounts on, else the
+  tailnet login or `local`) and their role in the project; `require(permission)` checks
+  the role table (see [Accounts and permissions](#accounts-and-permissions)). Installation-wide routes
   (`/api/status`, `/api/providers/test`, `/api/settings`) and the management routes
   (`/api/projects`) have no project. The outside-agent surfaces (`/mcp`, `/agent/v1`)
   take the project from the bearer token.
 - **CLI.** `--project/-p SLUG` (or `AUTOONTOLOGY_PROJECT`) before the command selects the
   project: store commands use its `ProjectStore`, API commands call its canonical routes.
+
+## Accounts and permissions
+
+Sign-in is off by default (`AUTOONTOLOGY_AUTH=off`): every caller past the Host/Origin
+guard is a synthetic admin named after the tailnet login or `local`, exactly as before
+accounts. `AUTOONTOLOGY_AUTH=accounts` turns on users, sessions, project memberships and
+the audit log (schema v9; `store/accounts.py`, `web/auth.py`, `web/accounts_api.py`,
+`web/mailer.py`).
+
+**Who is asking** (`auth.AuthService.resolve`, cached per request by `current_user`):
+
+1. the CLI's local key (`X-AutoOntology-Internal`, see below): an admin named `cli`, or the
+   user named by `X-AutoOntology-As` (`ao --as <email>`) for audit attribution;
+2. the session cookie: a random id whose SHA-256 is the `sessions` row. The cookie is
+   `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Domain`, `Max-Age` =
+   `AUTOONTOLOGY_SESSION_HOURS` (default 12, 1 to 720). It is `Secure` and named
+   `__Host-ao_session` when `AUTOONTOLOGY_PUBLIC_URL` is https, the proxy sends
+   `X-Forwarded-Proto: https` or the `Host` is not local; plain-http local use gets
+   `ao_session`. A Secure request reads only the `__Host-` name. Every login issues a new id
+   and ends the session it replaces; logout clears both names;
+3. the Tailscale identity header on a configured tailnet hostname, mapped to the active
+   user with that email;
+4. else nobody. A disabled user is nobody.
+
+**Passwords and tokens** (`store/accounts.py`): PBKDF2-HMAC-SHA256, 240,000 rounds,
+16-byte salt, 12 to 1024 characters; `verify_password` spends one PBKDF2 on every path so
+its timing does not reveal whether an account exists. Single-use login tokens
+(`login_tokens`, SHA-256 only) have three purposes: `magic` (sign-in, 15 minutes),
+`reset` (15 minutes) and `invite` (7 days). Issuing one deletes the user's earlier unused
+token of that purpose; disabling a user deletes their sessions and unused tokens.
+
+**Sign-in flows** (`/api/auth/*`, `/auth/magic/*`; public, but behind the Host/Origin
+guard, which is what stops login CSRF):
+
+- Password: `POST /api/auth/login` answers 401 `invalid_credentials` for every failure.
+  Rate limits are in-memory sliding windows per process: 20 failures a minute per client
+  IP and 5 per (email, IP) give 429 `too_many_attempts` with `Retry-After` (attempts in
+  flight count). Failures for an email from all addresses never refuse; they only delay
+  the failed answer (0.25 s doubling, at most 4 s), so nobody can lock a user out.
+- Magic link, two steps: `POST /api/auth/magic-link` always answers 202 and mails a link
+  only for an active user when SMTP is configured (5 a minute per IP and per (email, IP),
+  20 an hour per email). `GET /auth/magic/<token>` never signs in (mail scanners prefetch
+  links): it serves a no-store confirm page whose button posts the token to
+  `POST /api/auth/magic`, which consumes it and sets the cookie.
+- Invitation and reset: the link is `/ui/invite#token=...&purpose=invite|reset` (the token
+  is in the fragment, so it reaches no server log or `Referer`); the page posts it with the
+  new password to `POST /api/auth/accept-invite`, which sets the password, ends the user's
+  other sessions and signs in. A weak password leaves the token usable.
+- `POST /api/auth/password` (`{current, new}`) ends every other session; wrong `current`
+  passwords count against the same IP and (email, IP) limits.
+- The client IP is the socket peer, or the first `X-Forwarded-For` entry when the peer is
+  loopback (the local gateway); no other header is trusted.
+
+Links point at `AUTOONTOLOGY_PUBLIC_URL` (else the request's base URL); `ao doctor` warns
+when accounts are on and it is unset or not https. **Mail** (`web/mailer.py`, stdlib
+`smtplib`): `AUTOONTOLOGY_SMTP_HOST`, `_PORT` (587, STARTTLS by default; 465 TLS),
+`_USER`, `_PASSWORD`, `_FROM`, `_STARTTLS`; English and Korean templates by the request's
+`Accept-Language`. Without a host nothing is sent, `GET /api/auth/me` reports
+`magic_link_enabled: false` and the UI hides the button; admins copy links from
+`/ui/users` or `ao user link`. Neither the SMTP password nor a link is ever logged.
+
+**Where permissions are enforced.**
+
+- Gate (`auth.engine_refusal`, run by the service middleware after the Host/Origin
+  guard): every path except `/api/auth`, `/auth/magic`, `/health`, `/mcp`, `/agent/v1`,
+  `/ui` and `/` needs a caller (401 `login_required`).
+- Project routes: `ProjectContext` (`web/projects.py`) resolves the caller's membership;
+  a non-member gets 404 `unknown_project` (a project's existence is not revealed) and
+  admins are owners of every project. Each handler calls `ctx.require(permission)` (403
+  `forbidden`, the body names the permission). The one role table is
+  `PROJECT_PERMISSIONS`: viewer (`project.read`, `exports.read`, `playground.ask`) <
+  reviewer (`review.decide`, `review.apply`) < editor (`sources.write`, `runs.start`,
+  `agent.tokens`, `playground.manage`) < owner (`project.manage`, `members.manage`,
+  `audit.read`).
+- Installation routes call `require_installation` (admins only): `project.create`,
+  `settings.manage` (settings, provider test, restart), `users.manage`, `audit.read_all`.
+- Archived projects refuse writes (409 `project_archived`) except archive/unarchive and
+  playground questions; `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny` refuses those too.
+- Outside agents keep their bearer tokens; with accounts on a token stops working when
+  its `created_by` user is disabled or no longer a member of the token's project (tokens
+  without a creator keep working).
+- The UI reads `permissions` and `installation_permissions` from `GET /api/auth/me` and
+  hides or disables what the caller cannot do (`ui/src/lib/auth.ts`); the server decides.
+
+**Audit log** (`audit_log`, written by `ProjectContext.audit` / `projects.audit` and the
+sign-in routes): sign-ins and failures, password changes, users, members, agent tokens,
+run starts and cancels, review decisions and undos, sources, samples, settings changes and
+restarts, project create/rename/archive/unarchive, each with the user, project, client IP
+and a JSON detail. It has no foreign keys, so it outlives the users and projects it names.
+`GET /api/audit` pages newest first (`before_id`); owners must name a project they own,
+admins see everything. CLI entries carry `user_id` NULL and `actor: cli` unless `--as`
+names a user.
+
+**Local trust: the engine's routes** (`config.py`, "local trust"). With accounts on, the
+service keeps a random secret in `<home>/run/internal.key` (0600, created on first use)
+and derives one key per purpose with HMAC-SHA256 (`derived_key`), so leaking one opens
+only its own door:
+
+| Purpose | Who sends it | Opens |
+|---|---|---|
+| `engine` | the engine, as its OpenAI API key (`Authorization: Bearer aoe-...`) | `/v1` only |
+| `ingest` | the engine, through `INGESTION_SERVICE_URL=http://127.0.0.1:<port>/internal/<key>` (it cannot add headers there); the middleware rewrites the path to `/ingest*` | `/ingest`, `/ingest/delete` only |
+| `local` | the CLI, the provider probe and the playground, as `X-AutoOntology-Internal` | everything, as the admin `cli` |
+
+Anyone else reaches `/v1` and `/ingest*` only with an admin session (403 otherwise); a
+wrong `/internal/<key>` is 404. No address or `Host` is trusted for this, because behind a
+local gateway every request arrives from 127.0.0.1 with a local `Host`, just like the
+engine's. Switching `AUTOONTOLOGY_AUTH` or rotating `internal.key` needs a full restart
+(`ao down && ao up`): each process keeps the keys it derived.
+
+**Public deployment behind a gateway.** The service still binds to 127.0.0.1; a gateway on
+the same machine (or a tunnel to it) forwards to it. The Host/Origin guard still runs: the
+forwarded request carries a local `Host`, and a non-GET request's `Origin` must match it
+(or be absent). Set `AUTOONTOLOGY_PUBLIC_URL` to the https address people open (links and
+the Secure `__Host-ao_session` cookie depend on it) and send `X-Forwarded-For` /
+`X-Forwarded-Proto`. Of the browser's credentials only the session cookie needs to cross
+the gateway. At the edge, block `/v1`, `/ingest` and `/internal`, and never forward
+`X-AutoOntology-Internal`, `X-AutoOntology-As` or, outside `/mcp` and `/agent/v1`,
+`Authorization`.
 
 ## How the engine is embedded
 
@@ -81,7 +203,9 @@ AutoOntology uses it in two ways:
 
 The engine reads its environment at import time, so AutoOntology prepares `os.environ`
 (Postgres settings, the expanded model triplets and `INGESTION_SERVICE_URL`) before the
-first import. Engine internals that AutoOntology depends on are pinned by tests
+first import. With accounts on, the engine's OpenAI API key for `/v1` and its
+`INGESTION_SERVICE_URL` carry keys derived from `<home>/run/internal.key` (see
+[Accounts and permissions](#accounts-and-permissions)). Engine internals that AutoOntology depends on are pinned by tests
 (`tests/test_upstream_terms.py` and others), so a submodule bump that changes them fails
 loudly.
 
@@ -206,9 +330,10 @@ A person's decisions on what the build proposed are stored in `review_decisions`
 A concept holds one decision: an alignment decision replaces its `concept` one and vice
 versa. Relation directions: accepting `broader` means the concept is narrower than the
 Term (concept ⊑ Term), `narrower` means Term ⊑ concept, `related` is `skos:related`.
-`decided_by` is the tailnet login when the request came through a configured tailnet
-hostname, else `local`. It is attribution for the record, not authentication: a local
-process can send any Host and login header.
+`decided_by` is the signed-in user's email with accounts on. With accounts off it is the
+tailnet login when the request came through a configured tailnet hostname, else `local`:
+attribution for the record, not authentication (a local process can send any Host and
+login header).
 
 - **Overlay** (`engine/overlay.py`). A decided concept's `alignments` row carries the
   decision: relation and Term from the decision, `accepted` for an accept, `none` for a
@@ -323,7 +448,7 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 
 | Table | Holds |
 |---|---|
-| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground, v3: `term_alias_additions.source_id`, v4: `term_legacy_descriptions`, v5: `documents.reader_fingerprint`, v6: `review_decisions` and `alignments.judged_json`, v7: `agent_tokens`, `agent_calls`, v8: `projects`, `store_meta` and `project_id` on the tables below). |
+| `schema_version` | Migration level (v1: base schema, v2: snapshots and workspace-scoped playground, v3: `term_alias_additions.source_id`, v4: `term_legacy_descriptions`, v5: `documents.reader_fingerprint`, v6: `review_decisions` and `alignments.judged_json`, v7: `agent_tokens`, `agent_calls`, v8: `projects`, `store_meta` and `project_id` on the tables below, v9: the account tables and `agent_tokens.created_by`). |
 | `projects` | Projects: id, slug, name, description, created and archived times. |
 | `sources` | Registered sources (unique per project): name, kind (`files`, `database`, `documents`), locator, catalog database id. |
 | `source_leases` | Leases that keep builds, exports and deletes from overlapping. |
@@ -338,7 +463,12 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 | `review_decisions` | A person's decision per review subject (alignment, alias, concept), who made it, and the revision that first reflected it (`applied_revision`). |
 | `playground_index`, `playground_index_meta` | The element vectors and the snapshot they were built from. |
 | `playground_conversations`, `playground_messages` | Stored chats, keyed by project. |
-| `agent_tokens`, `agent_calls` | Outside-agent tokens (SHA-256 only) of a project, and their calls. |
+| `agent_tokens`, `agent_calls` | Outside-agent tokens (SHA-256 only) of a project, and their calls. `agent_tokens.created_by` (v9) is the user who created or last rotated the token (NULL for older tokens and the CLI's). |
+| `users` | Accounts: email (unique, case-insensitive, stored lower-cased), name, PBKDF2 `pw_hash` (NULL until a password is set), `is_admin`, `disabled_at`, `last_login_at`. |
+| `sessions` | Sign-in sessions: the SHA-256 of the cookie id, user, created/expires/last-seen times (last seen written at most once a minute), IP and user agent. |
+| `login_tokens` | Single-use links (`magic`, `invite`, `reset`): SHA-256 only, expiry and `used_at`. |
+| `memberships` | A user's role in a project (`owner`, `editor`, `reviewer`, `viewer`); a project keeps at least one owner. |
+| `audit_log` | Who did what: time, user (NULL for the CLI), project, action, target, JSON detail and client IP. No foreign keys. |
 
 The engine keeps its own state in Postgres: the catalog and semantic model tables in the
 `autoontology` database, the `vdb.*` vector tables, and each file source's data in
@@ -476,8 +606,12 @@ A React app (Vite, TanStack Query, shadcn/ui) built into `autoontology/web/stati
 and served under `/ui/`; every non-asset `/ui/*` path gets `index.html`. `ui/src/lib/api.ts`
 is the only client of `/api`.
 
-- **Navigation** (`components/nav.ts`): Overview (`/`), Review (`/review`), Sources, Build,
-  Ontology, Graph, Playground, Exports, Status, Settings. The Review entry carries the
+- **Navigation** (`components/nav.ts`): the project switcher
+  (`components/project-switcher.tsx`), then Overview (`/`), Review (`/review`), Sources,
+  Build, Ontology, Graph, Playground, Exports, Connect, Status, Settings; every project page
+  lives under `/ui/p/<slug>/...`. An entry with a `permission` is shown only to callers who
+  have it (with accounts on, Settings and Users are admin-only); Members and Audit log are
+  reached from the project switcher and the projects page. The Review entry carries the
   pending count (`GET /api/review/pending-count`, polled every 30 s and refreshed after a
   decision or a run). The first-run checklist (`pages/home.tsx`) is `/setup`, reachable from
   Settings and the command menu; `/` (`pages/overview.tsx::IndexPage`) renders it while
@@ -498,6 +632,14 @@ is the only client of `/api`.
 - **Ontology** (`pages/ontology.tsx`, `components/revision-changes.tsx`): `?revision=`
   reads an older snapshot (summary, concepts and the concept sheet); `?changed=1` shows the
   diff of the shown revision against the one before it instead of the concept list.
+
+- **Accounts** (accounts mode only): `pages/login.tsx` (`/ui/login`, back to the page
+  asked for), `pages/invite.tsx` (`/ui/invite`, reads the token from the fragment and drops
+  it from the history), the account menu in the header, `pages/members.tsx` and
+  `pages/audit.tsx` (`/ui/p/<slug>/members|audit`, owners), `pages/users.tsx`
+  (`/ui/users`, `/ui/users/audit`, admins). `lib/auth.ts` holds `useMe`, `useCan` and the
+  role labels; a 401 sends the browser to sign-in and a 403 `forbidden` shows a toast
+  naming the permission. With accounts off none of this renders.
 
 ## Internationalisation
 

@@ -17,8 +17,8 @@ behaviour).
   unknown accounts); sessions and login tokens are stored as SHA-256 only. Session cookie
   `ao_session` (HttpOnly, SameSite=Strict, Secure on non-local hosts or an https
   `AUTOONTOLOGY_PUBLIC_URL`, `AUTOONTOLOGY_SESSION_HOURS`). Routes `POST /api/auth/login`
-  (uniform `invalid_credentials`, 5 failures a minute per IP and per email, exponential
-  delay), `logout`, `GET me`, `POST magic-link` (always 202), `GET /auth/magic/{token}`,
+  (uniform `invalid_credentials`; 429 after 20 failures a minute per client IP or 5 per
+  email and IP; failures for an email from other addresses only add an exponential delay), `logout`, `GET me`, `POST magic-link` (always 202), `GET /auth/magic/{token}`,
   `POST accept-invite`, `POST password` (ends the other sessions); every sign-in event is in
   the audit log. Tailscale logins map to the user with the same email. Login links by
   SMTP (`AUTOONTOLOGY_SMTP_*`, Korean/English) or from the CLI: `user create [--admin]
