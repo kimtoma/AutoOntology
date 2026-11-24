@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router"
 
 import { ApplyBanner } from "@/components/apply-banner"
+import { ApprovalsList } from "@/components/approvals-list"
 import { EmptyState, ErrorState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
 import { RoleNotice } from "@/components/role-notice"
@@ -25,6 +26,12 @@ export const PAGE_SIZE = 20
 const STATUSES: ReviewStatus[] = ["pending", "decided", "all"]
 
 const isCategory = (v: string | null): v is ReviewCategory => !!v && (REVIEW_CATEGORIES as string[]).includes(v)
+/** The Approvals tab: pending action runs (not an inbox category of the API). */
+const APPROVALS = "approvals"
+type Tab = ReviewCategory | typeof APPROVALS
+/** The tabs in order: Approvals after Logic proposals. */
+const TABS: Tab[] = [...REVIEW_CATEGORIES.slice(0, REVIEW_CATEGORIES.indexOf("logic") + 1), APPROVALS,
+                     ...REVIEW_CATEGORIES.slice(REVIEW_CATEGORIES.indexOf("logic") + 1)]
 const isStatus = (v: string | null): v is ReviewStatus => !!v && (STATUSES as string[]).includes(v)
 
 /** Typing in a field, or a shortcut with a modifier: not ours. */
@@ -44,8 +51,12 @@ export default function ReviewPage() {
   const status: ReviewStatus = isStatus(params.get("status")) ? params.get("status") as ReviewStatus : "pending"
   // no category in the URL: the first one with something to review
   const urlCategory = params.get("category")
+  const approvals = pending.data?.approvals ?? 0
+  const approvalsTab = urlCategory === APPROVALS
+    || (!isCategory(urlCategory) && !!pending.data && !WAITING_CATEGORIES.some((c) => (counts?.[c] ?? 0) > 0) && approvals > 0)
   const category: ReviewCategory = isCategory(urlCategory) ? urlCategory
     : WAITING_CATEGORIES.find((c) => (counts?.[c] ?? 0) > 0) ?? "proposals"
+  const tab: Tab = approvalsTab ? APPROVALS : category
   const page = Math.max(1, Number(params.get("page") ?? 1) || 1)
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params)
@@ -64,7 +75,7 @@ export default function ReviewPage() {
     retry: retryServerErrors,
     // the list is not polled: a decided card keeps its place (badge, Undo) until the
     // category, page or filter changes; the counts poll on their own
-    enabled: isCategory(urlCategory) || !!pending.data || pending.isError,
+    enabled: !approvalsTab && (isCategory(urlCategory) || !!pending.data || pending.isError),
   })
   const { decide, undo, busyId, announcement } = useReviewActions()
   const [runId, setRunId] = useState<string | null>(null)
@@ -84,7 +95,7 @@ export default function ReviewPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (ignoreKey(e) || !items.length) return
+      if (ignoreKey(e) || !items.length || approvalsTab) return
       const key = e.key.toLowerCase()
       if (key === "j" || key === "k") {
         e.preventDefault()
@@ -104,7 +115,7 @@ export default function ReviewPage() {
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [items, selected, relations, busyId, decide])
+  }, [items, selected, relations, busyId, decide, approvalsTab])
 
   // a ?page past the end (decisions shrank the list, an old link): go to the last page. The
   // listing names the page it answered, so a kept (placeholder) answer for another page is
@@ -125,30 +136,34 @@ export default function ReviewPage() {
       <ApplyBanner className="mb-4" />
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1 overflow-x-auto">
-          <Tabs value={category} onValueChange={(v) => update({ category: v, page: null })}>
+          <Tabs value={tab} onValueChange={(v) => update({ category: v, page: null })}>
             <TabsList id="review-tabs" aria-label={t("review.tabs")}>
-              {REVIEW_CATEGORIES.map((c) => (
-                <TabsTrigger key={c} value={c} data-tab={c} className="gap-1.5">
-                  {t(`review.tab.${c}`)}
-                  <Badge variant="secondary" className="h-5 min-w-5 px-1 font-normal tabular-nums" data-count={counts?.[c] ?? 0}>
-                    {fmtNumber(counts?.[c] ?? 0)}
-                  </Badge>
-                </TabsTrigger>
-              ))}
+              {TABS.map((c) => {
+                const n = c === APPROVALS ? approvals : counts?.[c] ?? 0
+                return (
+                  <TabsTrigger key={c} value={c} data-tab={c} className="gap-1.5">
+                    {t(`review.tab.${c}`)}
+                    <Badge variant="secondary" className="h-5 min-w-5 px-1 font-normal tabular-nums" data-count={n}>
+                      {fmtNumber(n)}
+                    </Badge>
+                  </TabsTrigger>
+                )
+              })}
             </TabsList>
           </Tabs>
         </div>
-        <Select value={status} onValueChange={(v) => update({ status: v === "pending" ? null : v, page: null })}>
+        {!approvalsTab && <Select value={status} onValueChange={(v) => update({ status: v === "pending" ? null : v, page: null })}>
           <SelectTrigger id="review-status" aria-label={t("review.status")} className="w-full sm:w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
             {STATUSES.map((s) => <SelectItem key={s} value={s} data-status={s}>{t(`review.status.${s}`)}</SelectItem>)}
           </SelectContent>
-        </Select>
+        </Select>}
       </div>
-      <p className="mb-3 text-sm text-muted-foreground" id="review-help">{t(`review.help.${category}`)}</p>
+      <p className="mb-3 text-sm text-muted-foreground" id="review-help">{t(`review.help.${tab}`)}</p>
       <p className="sr-only" aria-live="polite" id="review-live">{announcement}</p>
 
-      {list.error ? <ErrorState error={list.error} onRetry={() => list.refetch()} />
+      {approvalsTab ? <ApprovalsList />
+        : list.error ? <ErrorState error={list.error} onRetry={() => list.refetch()} />
         : !list.data ? <div className="grid gap-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-28" />)}</div>
         : outOfRange ? <Skeleton className="h-28" id="review-clamping" />
         : !items.length ? (

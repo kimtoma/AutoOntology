@@ -121,10 +121,10 @@ function ConfirmCard({ onBuild, className }: { onBuild: (sources: string[]) => v
         <ul className="flex flex-wrap gap-1.5" id="ops-review-counts">
           {WAITING_CATEGORIES.map((c) => (
             <li key={c}>
-              <Link to={`/review?category=${c}`} data-category={c} data-count={counts[c]}
+              <Link to={`/review?category=${c}`} data-category={c} data-count={counts[c] ?? 0}
                     className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs hover:bg-accent",
-                                  counts[c] === 0 && "text-muted-foreground")}>
-                {t(`review.tab.${c}`)} <b className="tabular-nums">{fmtNumber(counts[c])}</b>
+                                  !counts[c] && "text-muted-foreground")}>
+                {t(`review.tab.${c}`)} <b className="tabular-nums">{fmtNumber(counts[c] ?? 0)}</b>
               </Link>
             </li>
           ))}

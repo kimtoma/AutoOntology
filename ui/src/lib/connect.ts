@@ -2,7 +2,7 @@
    agents, web/agent_api.py). Pure functions: the page fills them with the real token right
    after creating or rotating one, and with TOKEN_PLACEHOLDER everywhere else. */
 
-import type { AgentTools } from "@/lib/api"
+import type { AgentToken, AgentTools, TokenScope } from "@/lib/api"
 
 export const TOKEN_PLACEHOLDER = "<TOKEN>"
 /** The server name agents see (`claude mcp add ... autoontology`). */
@@ -58,3 +58,14 @@ export function toolParams(schema: { properties?: Record<string, unknown>; requi
     .map((name) => ({ name, required: required.has(name) }))
     .sort((a, b) => Number(b.required) - Number(a.required))
 }
+
+/** The broadest scope of a token: read, propose or execute (older services: read). */
+export function tokenScope(token: Pick<AgentToken, "scopes">): TokenScope {
+  const scopes = token.scopes ?? []
+  return scopes.includes("execute") ? "execute" : scopes.includes("propose") ? "propose" : "read"
+}
+
+/** The actions a token is limited to (its `action:<name>` scopes); empty = no limit. */
+export const tokenActions = (token: Pick<AgentToken, "scopes">) =>
+  (token.scopes ?? []).filter((s) => s.startsWith("action:")).map((s) => s.slice(7))
+

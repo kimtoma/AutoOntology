@@ -51,7 +51,7 @@ const DIFF = {
             totals: { added: 1, removed: 0 } },
   sources: { added: [], removed: [] }, counts_delta: { classes: -1 },
 }
-const COUNTS = (axioms: number) => ({ proposals: 0, axioms, unaligned: 1, aliases: 0, stale_sources: 1, folds: 3, total: axioms + 2 })
+const COUNTS = (axioms: number) => ({ proposals: 0, axioms, unaligned: 1, aliases: 0, objects: 0, logic: 0, stale_sources: 1, folds: 3, total: axioms + 2 })
 const item = (n: number): ReviewItem => ({
   id: `ax:c${n}`, category: "axioms",
   concept: { id: `c${n}`, node: `concept-c${n}`, name: `계약ID${n}`, kind: "attribute", source: "quick-docs", definition: "계약 식별자." },
@@ -238,7 +238,7 @@ describe("Review page", () => {
     renderPage(<><ReviewPage /><Toaster /></>, "/review")
     const tabs = await screen.findAllByRole("tab")
     expect(tabs.map((x) => x.getAttribute("data-tab"))).toEqual(
-      ["proposals", "axioms", "unaligned", "aliases", "stale_sources", "folds"])
+      ["proposals", "axioms", "unaligned", "aliases", "objects", "logic", "approvals", "stale_sources", "folds"])
     await waitFor(() => expect(screen.getByRole("tab", { name: /Merged/ })).toHaveTextContent("3"))
     // no category in the URL: the first waiting one with items, never the merges
     expect(screen.getByRole("tab", { name: /Relations/ })).toHaveAttribute("aria-selected", "true")
@@ -251,7 +251,7 @@ describe("Review page", () => {
 
   it("shows the empty state with the last-checked time", async () => {
     mockFetch(dashboardRoutes({
-      "GET /review": LISTING([], { proposals: 0, axioms: 0, unaligned: 0, aliases: 0, stale_sources: 0, folds: 0, total: 0 }),
+      "GET /review": LISTING([], { proposals: 0, axioms: 0, unaligned: 0, aliases: 0, objects: 0, logic: 0, stale_sources: 0, folds: 0, total: 0 }),
       "GET /review/pending-count": { pending: 0, counts: { proposals: 0, axioms: 0, unaligned: 0, aliases: 0, stale_sources: 0, folds: 0, total: 0 }, unapplied: 0 },
     }))
     renderPage(<ReviewPage />, "/review")
@@ -465,10 +465,11 @@ describe("Revision changes, paging, labels", () => {
 describe("Navigation", () => {
   it("lists Overview and Review first and Settings last; Get started is gone", () => {
     expect(NAV.map((n) => n.id)).toEqual(
-      ["overview", "review", "sources", "build", "ontology", "graph", "playground", "exports", "connect", "status", "settings"])
+      ["overview", "review", "sources", "build", "ontology", "graph", "objects", "logic", "playground", "exports", "connect",
+       "status", "settings"])
     setLang("ko", false)
     expect(NAV.map((n) => n.label)).toEqual(
-      ["개요", "검토", "소스", "빌드", "온톨로지", "그래프", "플레이그라운드", "내보내기", "연결", "상태", "설정"])
+      ["개요", "검토", "소스", "빌드", "온톨로지", "그래프", "개체", "로직", "플레이그라운드", "내보내기", "연결", "상태", "설정"])
   })
 
   it("badges Review with the pending count", async () => {

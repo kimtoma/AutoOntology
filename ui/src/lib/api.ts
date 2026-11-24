@@ -2,7 +2,7 @@
    `{error, detail}` with a matching HTTP status; they surface as ApiError. The payloads
    mirror autoontology/web/api.py, web/concepts.py, web/graph.py and web/playground_api.py. */
 
-import { t } from "@/i18n/core"
+import { t, type MessageKey } from "@/i18n/core"
 import type { Formats } from "@/lib/formats"
 
 export const API = "/api"
@@ -82,7 +82,7 @@ export const NETWORK_HINT = "Cannot reach the AutoOntology service (uv run autoo
 
 /** files / database = structured sources; documents = unstructured. */
 export type SourceKind = "files" | "database" | "documents"
-export type RunKind = "build" | "export" | "apply"
+export type RunKind = "build" | "export" | "apply" | "logic"
 export type RunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "skipped"
 
 export interface RunRef {
@@ -136,6 +136,8 @@ export type ExportFormat = "all" | "rdf" | "ossie" | "okf"
 /** `POST /api/runs` (RunIn in api.py). */
 export type RunRequest =
   | { kind: "build"; sources?: string[] | null; resume?: boolean }
+  /** propose functions, actions and workflows from the documents' rules (logic/extract.py) */
+  | { kind: "logic" }
   | { kind: "export"; revision?: number | null; format?: ExportFormat }
   /** review decisions -> merge -> snapshot, no model call (engine/apply.py) */
   | { kind: "apply"; force?: boolean }
@@ -271,12 +273,23 @@ export interface AgentToken {
   created_at: string
   last_used_at: string | null
   revoked_at: string | null
+  /** read (always) | propose | execute | action:<name> (the allowed actions); older services: absent */
+  scopes?: string[]
 }
 
 /** `POST /api/agent/tokens` and `.../rotate`: the raw token, shown only once. */
 export interface AgentTokenIssued { token: string; record: AgentToken; note: string }
 
-export interface AgentTokenIn { name: string; revision_pin?: number | null; expires_days?: 30 | 90 | null }
+export type TokenScope = "read" | "propose" | "execute"
+export interface AgentTokenIn {
+  name: string
+  revision_pin?: number | null
+  expires_days?: 30 | 90 | null
+  /** read (default) | propose | execute (owners only) */
+  scopes?: TokenScope[]
+  /** an allow-list of actions (empty: every action the scope allows) */
+  actions?: string[]
+}
 
 export interface AgentUsage {
   days: number | null
@@ -298,6 +311,9 @@ export interface AgentTool {
 
 export interface AgentTools {
   tools: AgentTool[]
+  /** the tools that change something (they need the propose or execute scope) */
+  write_tools?: string[]
+  scopes?: TokenScope[]
   protocol: string
   mcp_path: string
   rest_base: string
@@ -307,13 +323,18 @@ export interface AgentTools {
 
 /* --- review inbox, revisions, freshness (web/review.py, revisions.py, freshness.py) -------- */
 
-export type ReviewCategory = "proposals" | "axioms" | "unaligned" | "aliases" | "stale_sources" | "folds"
+export type ReviewCategory =
+  | "proposals" | "axioms" | "unaligned" | "aliases" | "objects" | "logic" | "stale_sources" | "folds"
 /** The review tabs. `folds` (automatic merges a person may reject) is listed only when asked
     for and never counted in the badge total. */
-export const REVIEW_CATEGORIES: ReviewCategory[] = ["proposals", "axioms", "unaligned", "aliases", "stale_sources", "folds"]
+export const REVIEW_CATEGORIES: ReviewCategory[] = [
+  "proposals", "axioms", "unaligned", "aliases", "objects", "logic", "stale_sources", "folds",
+]
 /** The categories that wait for a person (the badge and the Overview counts). */
-export const WAITING_CATEGORIES: ReviewCategory[] = ["proposals", "axioms", "unaligned", "aliases", "stale_sources"]
-export type DecisionKind = "alignment" | "alias" | "concept"
+export const WAITING_CATEGORIES: ReviewCategory[] = [
+  "proposals", "axioms", "unaligned", "aliases", "objects", "logic", "stale_sources",
+]
+export type DecisionKind = "alignment" | "alias" | "concept" | "object" | "logic"
 export type DecisionValue = "accept" | "reject" | "acknowledge"
 /** The UI word of a decision value: the API's `acknowledge` reads "Keep separate". */
 export const DECISION_WORD: Record<DecisionValue, "accept" | "reject" | "keepSeparate"> = {
@@ -372,6 +393,10 @@ export interface ReviewItem {
   alias?: string
   /** stale_sources */
   source?: SourceFreshness
+  /** objects (`ob:<class>`): the proposed object type */
+  object_type?: ObjectType
+  /** logic (`lg:<candidate>`): the proposed definition */
+  logic?: LogicCandidate
 }
 
 export type ReviewCounts = Record<ReviewCategory, number> & { total: number }
@@ -390,13 +415,21 @@ export interface ReviewListing {
   items: ReviewItem[]
 }
 
-export interface PendingCount { pending: number; counts: ReviewCounts; unapplied: number }
+export interface PendingCount {
+  pending: number
+  counts: ReviewCounts
+  unapplied: number
+  /** pending action runs the caller may approve (not part of `pending`) */
+  approvals?: number
+}
 
 export interface DecisionRequest {
   decision: DecisionValue
   relation?: AcceptRelation
   term_id?: string
   note?: string
+  /** logic accept: an edited spec (YAML text) saved instead of the candidate's */
+  spec?: string
 }
 
 export interface RevisionEntry {
@@ -896,6 +929,320 @@ export interface ConceptQuery {
   revision?: number | null
 }
 
+/* --- objects, logic, actions, workflows (web/objects_api.py, logic_api.py, actions_api.py,
+   workflows_api.py) ------------------------------------------------------------------------- */
+
+export type ObjectTypeStatus = "proposed" | "active" | "broken" | "retired"
+
+export interface ObjectLink {
+  name: string
+  label: string
+  direction: "out" | "in"
+  column: string
+  /** the target type's class local name */
+  target: string
+  target_label?: string
+  target_status?: string
+}
+
+/** An object type: a class bound to one source table, its key and title columns. */
+export interface ObjectType {
+  id: string
+  /** the class local name (`term-...`), used in URLs */
+  name: string
+  class: string
+  label: string
+  source: string
+  schema: string
+  table: string
+  key: string | null
+  key_columns: string[]
+  key_origin: string | null
+  key_checked: boolean
+  title_column: string | null
+  links: ObjectLink[]
+  columns: { name: string; type: string }[]
+  status: ObjectTypeStatus | string
+  broken_reason: string
+  validated_revision: number | null
+  decided_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ComputedValue { value: unknown; type: string; error?: { code: string; message: string } | string }
+
+export interface ObjectEditMark {
+  edit_id: number
+  value: unknown
+  /** the source value now (null: an operational property, not in the source) */
+  source_value: unknown
+  source_value_at_edit: unknown
+  /** the source changed after the edit */
+  conflict: boolean
+  operational: boolean
+  edited_by: string
+  edited_at: string
+  action_run_id: string | null
+}
+
+export interface ObjectEdit {
+  id: number
+  object_type: string
+  object_key: string
+  property: string
+  value: unknown
+  old_value: unknown
+  source_value: unknown
+  operational: boolean
+  action_run_id: string | null
+  edited_by: string
+  edited_at: string
+  reverted_at: string | null
+}
+
+/** One object in a listing: the source row with the edit layer applied. */
+export interface ObjectRow {
+  type: string
+  key: string
+  title: string | null
+  values: Record<string, unknown>
+  source: Record<string, unknown>
+  edits: Record<string, ObjectEditMark>
+  conflicts: string[]
+  computed?: Record<string, ComputedValue>
+}
+
+export interface AvailableAction { name: string; label: string; available: boolean; reason?: string }
+
+export interface ObjectDetail extends Omit<ObjectRow, "type"> {
+  type: ObjectType
+  links: ObjectLink[]
+  history: ObjectEdit[]
+  actions: AvailableAction[]
+}
+
+export interface ObjectPage {
+  type: ObjectType
+  items: ObjectRow[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ObjectQuery { q?: string; filter?: string[]; limit?: number; offset?: number; computed?: boolean }
+
+export type LogicKind = "function" | "action" | "workflow"
+export type LogicStatus = "draft" | "active" | "retired" | "broken"
+
+export interface LogicEvidence { quote: string; document?: string; path?: string; page?: number | null; verified?: boolean }
+
+export interface LogicDef {
+  id: string
+  kind: LogicKind
+  name: string
+  label: string
+  object_type: string
+  version: number
+  status: LogicStatus | string
+  origin: "manual" | "extracted" | string
+  spec: Record<string, unknown>
+  evidence: LogicEvidence[]
+  broken_reason: string
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LogicHistoryEntry {
+  version: number
+  status: string
+  spec: Record<string, unknown>
+  note: string
+  changed_by: string | null
+  changed_at: string
+}
+
+export interface SpecError { path: string; code: string; message: string; pos?: number }
+
+export interface ValidateResult { valid: boolean; kind: LogicKind | null; name: string | null; errors: SpecError[] }
+
+export interface FunctionTest {
+  function: string
+  type: string
+  errors: SpecError[]
+  results: { key: string; title: string | null; value: unknown; type: string; error?: { code: string; message: string } }[]
+}
+
+/** A logic candidate a `logic` run proposed (the `logic` field of an `lg:` review item). */
+export interface LogicCandidate {
+  candidate_id: string
+  kind: LogicKind
+  name: string
+  label: string
+  object_type: string
+  spec: Record<string, unknown>
+  spec_yaml: string
+  errors: SpecError[]
+  ready: boolean
+  evidence_verified: boolean
+  document: string
+  run_id: string
+  created_at: string
+  /** a definition of the same kind and name */
+  existing: { status: string; version: number } | null
+}
+
+export type ParamType = "number" | "text" | "bool" | "date"
+
+export interface ActionParam {
+  name: string
+  type: ParamType | string
+  required: boolean
+  enum?: unknown[] | null
+  default?: unknown
+  label?: string
+}
+
+/** `GET /actions`: an active action. */
+export interface ActionInfo {
+  name: string
+  label: string
+  description: string
+  object_type: string
+  object_type_label: string
+  params: ActionParam[]
+  preconditions: string[]
+  effects: { set: string; operational: boolean }[]
+  notifies: number
+  permission: { min_role: string }
+  approval: { role: string; when?: string | null }
+  agent: string
+}
+
+export interface ActionPreview {
+  action: string
+  label: string
+  description: string
+  version: number
+  object_type: string
+  object_type_label: string
+  key: string
+  title: string | null
+  params: Record<string, unknown>
+  preconditions: { index: number; message: string; ok: boolean; error?: string }[]
+  effects: { index: number; property: string; label: string; operational: boolean; old_value: unknown; new_value: unknown; error?: string }[]
+  approval: { required: boolean; role: string | null; reason: string }
+  notify: { subject: string; body: string; to: string[]; recipients: number; invalid: number; skipped_roles?: boolean }[]
+  permission: { min_role: string; allowed: boolean }
+  ok: boolean
+  can_submit: boolean
+}
+
+export type ActionRunStatus = "previewed" | "pending_approval" | "approved" | "rejected" | "applied" | "failed" | "reverted"
+export const ACTION_RUN_STATUSES: ActionRunStatus[] = [
+  "pending_approval", "approved", "rejected", "applied", "failed", "reverted",
+]
+
+export interface ActionRun {
+  id: string
+  action: string
+  action_version: number
+  object_type: string
+  object_key: string
+  params: Record<string, unknown>
+  status: ActionRunStatus | string
+  requested_by: string
+  /** ui | cli | agent | workflow */
+  via: string
+  token_id: string | null
+  workflow_run_id: string | null
+  approver: string | null
+  approval_role: string | null
+  preview: ActionPreview | null
+  result: Record<string, unknown>
+  error: string | null
+  idempotency_key: string | null
+  created_at: string
+  decided_at: string | null
+  applied_at: string | null
+  reverted_at: string | null
+  can_approve?: boolean
+  can_revert?: boolean
+}
+
+export interface ActionRunQuery { status?: string | null; action?: string | null; key?: string | null; type?: string | null; limit?: number }
+
+export interface WorkflowInfo {
+  name: string
+  label: string
+  description: string
+  version: number
+  trigger: { schedule?: string; on_action?: string; manual?: boolean }
+  object_type: string
+  object_type_label: string
+  max_objects: number
+  next_slot: string | null
+  activated_by: string | null
+  last_run: WorkflowRun | null
+}
+
+export type WorkflowRunStatus = "running" | "paused" | "succeeded" | "failed" | "cancelled"
+
+export interface WorkflowRunSummary {
+  matched?: number
+  completed?: number
+  skipped?: number
+  failed?: number
+  actions_applied?: number
+  pending_approval?: number
+  already_pending?: number
+  notified?: number
+  where_errors?: number
+  scanned?: number
+  truncated?: boolean
+  [k: string]: unknown
+}
+
+export interface WorkflowStep {
+  path: string
+  kind: string
+  value?: unknown
+  action?: string
+  params?: Record<string, unknown>
+  action_run_id?: string
+  result?: string
+  approval_role?: string
+  error?: string
+}
+
+export interface WorkflowRun {
+  id: string
+  workflow: string
+  workflow_version: number
+  trigger: string
+  fire_slot: string
+  status: WorkflowRunStatus | string
+  started_by: string | null
+  summary: WorkflowRunSummary
+  error: string | null
+  started_at: string
+  finished_at: string | null
+  objects?: { key: string; title: string | null; status: string; steps: WorkflowStep[]; error?: string }[]
+  paused?: { action_run_id: string; key: string; title: string | null }[]
+  action_runs?: ActionRun[]
+}
+
+const objectQuery = (q: ObjectQuery) => {
+  const sp = new URLSearchParams()
+  if (q.q?.trim()) sp.set("q", q.q.trim())
+  for (const f of q.filter ?? []) sp.append("filter", f)
+  sp.set("limit", String(q.limit ?? 25))
+  sp.set("offset", String(q.offset ?? 0))
+  if (q.computed) sp.set("computed", "1")
+  return sp.toString()
+}
+
 export const api = {
   status: () => request<ServiceStatus>("/status"),
   testProvider: () => request<ProviderTest>("/providers/test", { method: "POST" }),
@@ -978,6 +1325,63 @@ export const api = {
     usage: (days = 30) => request<AgentUsage>(`/agent/usage?days=${days}`),
     tools: () => request<AgentTools>("/agent/tools"),
   },
+  objects: {
+    types: (status?: ObjectTypeStatus) =>
+      request<{ revision: number | null; types: ObjectType[] }>(`/objects/types${status ? `?status=${status}` : ""}`),
+    bind: (type: string, body: { key?: string; title?: string }) =>
+      request<{ type: ObjectType }>(`/objects/types/${enc(type)}`, json("PUT", body)),
+    list: (type: string, q: ObjectQuery = {}) => request<ObjectPage>(`/objects/${enc(type)}?${objectQuery(q)}`),
+    get: (type: string, key: string) => request<ObjectDetail>(`/objects/${enc(type)}/${enc(key)}`),
+    follow: (type: string, key: string, link: string, limit = 10) =>
+      request<ObjectPage & { link: unknown }>(`/objects/${enc(type)}/${enc(key)}/links/${enc(link)}?limit=${limit}`),
+  },
+  logic: {
+    list: (kind?: LogicKind) =>
+      request<{ definitions: LogicDef[] }>(`/logic${kind ? `?kind=${kind}` : ""}`).then((r) => r.definitions),
+    get: (kind: LogicKind, name: string) =>
+      request<{ definition: LogicDef; history: LogicHistoryEntry[] }>(`/logic/${kind}/${enc(name)}`),
+    validate: (spec: string) => request<ValidateResult>("/logic/validate", json("POST", { spec })),
+    save: (spec: string) => request<{ definition: LogicDef }>("/logic", json("POST", { spec })),
+    setStatus: (kind: LogicKind, name: string, status: "active" | "retired" | "draft") =>
+      request<{ definition: LogicDef }>(`/logic/${kind}/${enc(name)}/status`, json("POST", { status })),
+    /** a stored function (by name) or an unsaved spec, on chosen objects */
+    test: (target: { name: string } | { spec: string }, keys: string[]) =>
+      "name" in target
+        ? request<FunctionTest>(`/logic/functions/${enc(target.name)}/test`, json("POST", { keys }))
+        : request<FunctionTest>("/logic/test", json("POST", { spec: target.spec, keys })),
+  },
+  actions: {
+    list: (type?: string) =>
+      request<{ actions: ActionInfo[] }>(`/actions${type ? `?type=${enc(type)}` : ""}`).then((r) => r.actions),
+    preview: (name: string, key: string, params: Record<string, unknown>) =>
+      request<{ preview: ActionPreview }>(`/actions/${enc(name)}/preview`, json("POST", { key, params }))
+        .then((r) => r.preview),
+    submit: (name: string, key: string, params: Record<string, unknown>, idempotency_key: string) =>
+      request<{ run: ActionRun; created: boolean }>(`/actions/${enc(name)}/submit`,
+                                                    json("POST", { key, params, idempotency_key })),
+    runs: (q: ActionRunQuery = {}) => {
+      const sp = new URLSearchParams({ limit: String(q.limit ?? 100) })
+      for (const k of ["status", "action", "key", "type"] as const) if (q[k]) sp.set(k, q[k]!)
+      return request<{ runs: ActionRun[] }>(`/actions/runs?${sp}`).then((r) => r.runs)
+    },
+    run: (id: string) => request<{ run: ActionRun; edits: ObjectEdit[] }>(`/actions/runs/${enc(id)}`),
+    approve: (id: string) => request<{ run: ActionRun }>(`/actions/runs/${enc(id)}/approve`, { method: "POST" }),
+    reject: (id: string, note = "") =>
+      request<{ run: ActionRun }>(`/actions/runs/${enc(id)}/reject`, json("POST", { note })),
+    revert: (id: string, force = false) =>
+      request<{ run: ActionRun }>(`/actions/runs/${enc(id)}/revert`, json("POST", force ? { force: true } : {})),
+  },
+  workflows: {
+    list: () => request<{ workflows: WorkflowInfo[]; triggers: "on" | "off" }>("/workflows"),
+    run: (name: string) => request<{ run: WorkflowRun }>(`/workflows/${enc(name)}/run`, json("POST", {})),
+    runs: (workflow?: string | null, limit = 50) => {
+      const sp = new URLSearchParams({ limit: String(limit) })
+      if (workflow) sp.set("workflow", workflow)
+      return request<{ runs: WorkflowRun[] }>(`/workflows/runs?${sp}`).then((r) => r.runs)
+    },
+    getRun: (id: string) => request<{ run: WorkflowRun }>(`/workflows/runs/${enc(id)}`).then((r) => r.run),
+    cancel: (id: string) => request<{ run: WorkflowRun }>(`/workflows/runs/${enc(id)}/cancel`, { method: "POST" }),
+  },
   projects: {
     list: listProjects,
     create: (body: { slug: string; name?: string; description?: string }) =>
@@ -1001,6 +1405,13 @@ export const api = {
   },
 }
 
+/** Error codes of the action / workflow / object routes with their own message (`logic.error.*`). */
+export const LOGIC_ERRORS = new Set([
+  "self_approval", "not_pending", "not_applied", "superseded", "precondition_failed", "agent_not_allowed",
+  "action_not_active", "object_type_broken", "object_type_not_active", "object_busy", "not_cancellable",
+  "invalid_param", "invalid_spec",
+])
+
 export function errorMessage(err: unknown): string {
   // a role without the permission: name it (the server stays the judge)
   if (isForbidden(err)) return t("auth.forbidden", { permission: String(err.body?.permission ?? "") })
@@ -1008,6 +1419,10 @@ export function errorMessage(err: unknown): string {
   if (err instanceof ApiError && err.code === "project_archived") return t("projects.error.project_archived")
   // a data question in a project without a built structured source
   if (err instanceof ApiError && err.code === "no_structured_source") return t("playground.sql.noStructuredSource")
+  // objects, actions and workflows: the codes a person can act on, in the UI language
+  if (err instanceof ApiError && err.code && LOGIC_ERRORS.has(err.code)) {
+    return t(`logic.error.${err.code}` as MessageKey, { detail: err.message })
+  }
   return err instanceof Error ? err.message : String(err)
 }
 

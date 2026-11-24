@@ -141,7 +141,7 @@ describe("Connect page", () => {
 
     const once = await screen.findByRole("dialog", { name: "Token for “cursor”" })
     const post = calls.find((c) => c.method === "POST" && c.path === "/agent/tokens")!
-    expect(bodyOf(post.init)).toEqual({ name: "cursor", revision_pin: 3, expires_days: null })
+    expect(bodyOf(post.init)).toEqual({ name: "cursor", revision_pin: 3, expires_days: null, scopes: ["read"] })
     expect(within(once).getByText(RAW)).toBeInTheDocument()
     expect(within(once).getByText(/will not be shown again/)).toBeInTheDocument()
     expect(once.querySelector("#once-claudeCode")?.textContent).toBe(

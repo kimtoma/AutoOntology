@@ -39,6 +39,23 @@ export const keys = {
   get agentTokens() { return [...scope(), "agent-tokens"] as const },
   get agentUsage() { return [...scope(), "agent-usage"] as const },
   get agentTools() { return [...scope(), "agent-tools"] as const },
+  // objects and logic
+  get objectsAll() { return [...scope(), "objects"] as const },
+  get objectTypes() { return [...scope(), "objects", "types"] as const },
+  objects: (type: string, q: object) => [...scope(), "objects", "list", type, q] as const,
+  object: (type: string, key: string) => [...scope(), "objects", "one", type, key] as const,
+  objectLinks: (type: string, key: string, link: string) => [...scope(), "objects", "links", type, key, link] as const,
+  get logicAll() { return [...scope(), "logic"] as const },
+  logicDefs: (kind: string) => [...scope(), "logic", "defs", kind] as const,
+  logicDef: (kind: string, name: string) => [...scope(), "logic", "def", kind, name] as const,
+  get actions() { return [...scope(), "actions"] as const },
+  get actionRunsAll() { return [...scope(), "action-runs"] as const },
+  actionRuns: (q: object) => [...scope(), "action-runs", "list", q] as const,
+  actionRun: (id: string) => [...scope(), "action-runs", "one", id] as const,
+  get workflowsAll() { return [...scope(), "workflows"] as const },
+  get workflows() { return [...scope(), "workflows", "list"] as const },
+  workflowRuns: (name: string) => [...scope(), "workflows", "runs", name] as const,
+  workflowRun: (id: string) => [...scope(), "workflows", "run", id] as const,
   get playgroundIndex() { return [...scope(), "playground-index"] as const },
   get sparqlExamples() { return [...scope(), "sparql-examples"] as const },
 }
@@ -50,14 +67,32 @@ export const REVIEW_POLL_MS = 30_000
 export function invalidateAfterRun(qc: QueryClient) {
   for (const key of [keys.runs, keys.sources, keys.exports, keys.ontology, keys.graph, keys.conceptsAll,
                      keys.conceptAll, keys.review, keys.pendingCount, keys.revisions, keys.diffAll, keys.freshness,
-                     keys.projects]) {
+                     keys.projects, keys.objectsAll, keys.logicAll]) {
     qc.invalidateQueries({ queryKey: key })
   }
 }
 
 /** After a decision: the inbox, its badge and the concept details that show decisions. */
 export function invalidateAfterDecision(qc: QueryClient) {
-  for (const key of [keys.pendingCount, keys.conceptAll]) qc.invalidateQueries({ queryKey: key })
+  // object type proposals bind types; logic candidates become drafts
+  for (const key of [keys.pendingCount, keys.conceptAll, keys.objectsAll, keys.logicAll]) {
+    qc.invalidateQueries({ queryKey: key })
+  }
+}
+
+/** After an action run changed (submitted, approved, rejected, reverted) or a workflow ran:
+    the objects (values, history, available actions), the runs and the approvals badge. */
+export function invalidateAfterAction(qc: QueryClient) {
+  for (const key of [keys.objectsAll, keys.actionRunsAll, keys.workflowsAll, keys.pendingCount]) {
+    qc.invalidateQueries({ queryKey: key })
+  }
+}
+
+/** After a logic definition changed (saved, activated, retired, accepted from review). */
+export function invalidateAfterLogic(qc: QueryClient) {
+  for (const key of [keys.logicAll, keys.actions, keys.workflowsAll, keys.objectsAll, keys.pendingCount]) {
+    qc.invalidateQueries({ queryKey: key })
+  }
 }
 
 /** No retry for answers that will not change by retrying (404 no_snapshot, 400 ...). */

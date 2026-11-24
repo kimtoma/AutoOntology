@@ -12,6 +12,9 @@ import ProjectsPage from "@/pages/projects"
 import { InstallationAuditPage, ProjectAuditPage } from "@/pages/audit"
 import InvitePage from "@/pages/invite"
 import LoginPage from "@/pages/login"
+import LogicPage from "@/pages/logic"
+import ObjectDetailPage from "@/pages/object-detail"
+import ObjectsPage from "@/pages/objects"
 import MembersPage from "@/pages/members"
 import UsersPage from "@/pages/users"
 import HomePage from "@/pages/home"
@@ -76,6 +79,9 @@ export default function App() {
             <Route path="build" element={<BuildPage />} />
             <Route path="ontology" element={<OntologyPage />} />
             <Route path="graph" element={lazyPage(GraphPage)} />
+            <Route path="objects" element={<ObjectsPage />} />
+            <Route path="objects/:type/:key" element={<ObjectDetailPage />} />
+            <Route path="logic" element={<LogicPage />} />
             <Route path="playground" element={lazyPage(PlaygroundPage)} />
             <Route path="exports" element={<ExportsPage />} />
             <Route path="connect" element={<ConnectPage />} />

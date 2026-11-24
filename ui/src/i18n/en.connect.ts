@@ -5,8 +5,9 @@ export const enConnect = {
 
   "connect.title": "Connect",
   "connect.description":
-    "Let Claude Code, Claude Desktop, Cursor or your own scripts read the ontology. Agents can only read: "
-    + "they search concepts, open definitions with their evidence and run SPARQL, and never change anything. "
+    "Let Claude Code, Claude Desktop, Cursor or your own scripts use the ontology. A read token searches concepts "
+    + "and objects, opens definitions with their evidence and runs SPARQL; a propose or execute token can also "
+    + "submit actions, within each action's agent policy and approval rules. "
     + "Give each agent its own token. A token is shown only once, and you can revoke it at any time.",
 
   "connect.endpoints": "Endpoints",

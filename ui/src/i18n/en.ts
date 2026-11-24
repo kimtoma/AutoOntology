@@ -3,6 +3,7 @@
 
 import { enAccounts } from "@/i18n/en.accounts"
 import { enConnect } from "@/i18n/en.connect"
+import { enLogic } from "@/i18n/en.logic"
 import { enExplore } from "@/i18n/en.explore"
 import { enOps } from "@/i18n/en.ops"
 import { enProjects } from "@/i18n/en.projects"
@@ -536,4 +537,4 @@ const enCore = {
   "nav.settings.hint": "Models and API keys",
 } as const
 
-export const en = { ...enCore, ...enExplore, ...enOps, ...enConnect, ...enProjects, ...enAccounts }
+export const en = { ...enCore, ...enExplore, ...enOps, ...enConnect, ...enProjects, ...enAccounts, ...enLogic }

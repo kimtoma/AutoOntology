@@ -7,8 +7,9 @@ export const koConnect: Record<keyof typeof enConnect, string> = {
 
   "connect.title": "연결",
   "connect.description":
-    "Claude Code, Claude Desktop, Cursor나 직접 만든 스크립트가 온톨로지를 읽게 합니다. 에이전트는 읽기만 합니다. "
-    + "개념을 검색하고 정의와 근거를 열어 보고 SPARQL을 실행할 뿐, 아무것도 바꾸지 않습니다. "
+    "Claude Code, Claude Desktop, Cursor나 직접 만든 스크립트가 온톨로지를 쓰게 합니다. 읽기 토큰은 개념과 개체를 "
+    + "검색하고 정의와 근거를 열어 보고 SPARQL을 실행합니다. 제안·실행 토큰은 액션도 제출할 수 있으며, "
+    + "각 액션의 에이전트 정책과 승인 규칙을 넘지 못합니다. "
     + "에이전트마다 토큰을 하나씩 주세요. 토큰은 한 번만 보이며 언제든 폐기할 수 있습니다.",
 
   "connect.endpoints": "엔드포인트",

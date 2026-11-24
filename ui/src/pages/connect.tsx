@@ -24,12 +24,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { keys } from "@/hooks/queries"
 import { fmtDate, fmtNumber, t, type MessageKey } from "@/i18n"
 import {
-  api, errorMessage, type AgentToken, type AgentTokenIssued, type AgentTool, type AgentUsage,
+  api, errorMessage, type AgentToken, type AgentTokenIssued, type AgentTool, type AgentUsage, type TokenScope,
 } from "@/lib/api"
 import {
-  endpoints, snippet, SNIPPETS, TOKEN_PLACEHOLDER, toolParams, type Endpoints,
+  endpoints, snippet, SNIPPETS, tokenActions, tokenScope, TOKEN_PLACEHOLDER, toolParams, type Endpoints,
 } from "@/lib/connect"
-import { useCan } from "@/lib/auth"
+import { useCan, useDenied } from "@/lib/auth"
 import { projectName, useArchived, useProject } from "@/lib/project"
 import { cn } from "@/lib/utils"
 
@@ -89,19 +89,46 @@ const revisionLabel = (pin: number | null) =>
 
 type Confirm = { kind: "rotate" | "revoke"; token: AgentToken } | null
 
+const SCOPE_TONE: Record<TokenScope, string> = {
+  read: "border-border bg-muted text-muted-foreground",
+  propose: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  execute: "border-warning/40 bg-warning/10 text-amber-700 dark:text-amber-300",
+}
+
+function ScopeBadges({ token }: { token: AgentToken }) {
+  const scope = tokenScope(token)
+  const limited = tokenActions(token)
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1" data-scope={scope}>
+      <Badge variant="outline" className={cn("font-normal", SCOPE_TONE[scope])}>{t(`connect.scope.${scope}`)}</Badge>
+      {limited.length > 0 && (
+        <Badge variant="outline" className="max-w-48 font-normal" title={limited.join(", ")} data-actions={limited.join(",")}>
+          <span className="truncate">{t("connect.scope.limited", { list: limited.join(", ") })}</span>
+        </Badge>
+      )}
+    </span>
+  )
+}
+
 function TokenRow({ token, calls, onAsk }: {
   token: AgentToken; calls: number; onAsk: (c: NonNullable<Confirm>) => void
 }) {
   const active = token.status === "active"
   const archived = useArchived()
+  // rotating an execute token needs the owner role, like creating one
+  const owner = useCan("logic.activate")
+  const executeDenied = tokenScope(token) === "execute" && !owner ? t("connect.scope.executeOwners") : undefined
   const ro = archived ? t("projects.readOnly") : undefined
   return (
     <li className="grid gap-2 rounded-lg border p-3 lg:grid-cols-[var(--token-cols)]
                    lg:items-center lg:gap-3 lg:rounded-none lg:border-0 lg:border-t lg:px-1 lg:py-2"
         data-token={token.id}>
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="truncate font-medium" title={token.name}>{token.name}</span>
-        <span className="lg:hidden"><TokenStatus status={token.status} /></span>
+      <div className="grid min-w-0 gap-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-medium" title={token.name}>{token.name}</span>
+          <span className="lg:hidden"><TokenStatus status={token.status} /></span>
+        </div>
+        <ScopeBadges token={token} />
       </div>
       <span className="hidden lg:block"><TokenStatus status={token.status} /></span>
       <dl className="contents text-sm">
@@ -114,7 +141,8 @@ function TokenRow({ token, calls, onAsk }: {
         {active && (
           <>
             <Button size="sm" variant="outline" aria-label={t("connect.rotateLabel", { name: token.name })}
-                    data-action="rotate" disabled={archived} title={ro} onClick={() => onAsk({ kind: "rotate", token })}>
+                    data-action="rotate" disabled={archived || !!executeDenied} title={ro ?? executeDenied}
+                    onClick={() => onAsk({ kind: "rotate", token })}>
               <RotateCw aria-hidden /> {t("connect.rotate")}
             </Button>
             <Button size="sm" variant="outline" className="text-destructive hover:text-destructive"
@@ -195,11 +223,20 @@ function CreateForm({ onIssued, onCancel }: { onIssued: (i: Issued) => void; onC
   const [name, setName] = useState("")
   const [revision, setRevision] = useState("latest")
   const [expiry, setExpiry] = useState<Expiry>("90")
+  const [scope, setScope] = useState<TokenScope>("read")
+  const [allowed, setAllowed] = useState<string[]>([])
+  // execute runs actions without a person approving each one: owners only (the server checks too)
+  const owner = useCan("logic.activate")
+  const ownerDenied = useDenied("logic.activate")
+  const canListActions = useCan("objects.read")
+  const actions = useQuery({ queryKey: keys.actions, queryFn: () => api.actions.list(), enabled: scope !== "read" && canListActions })
   const create = useMutation({
     mutationFn: () => api.agent.create({
       name: name.trim(),
       revision_pin: revision === "latest" ? null : Number(revision),
       expires_days: expiry === "never" ? null : (Number(expiry) as 30 | 90),
+      scopes: [scope],
+      ...(scope !== "read" && allowed.length ? { actions: allowed } : {}),
     }),
     onSuccess: (issued) => {
       qc.invalidateQueries({ queryKey: keys.agentTokens })
@@ -249,6 +286,46 @@ function CreateForm({ onIssued, onCancel }: { onIssued: (i: Issued) => void; onC
           </SelectContent>
         </Select>
       </div>
+      <fieldset className="grid gap-2" id="token-scope">
+        <legend className="mb-1 text-sm font-medium">{t("connect.field.scope")}</legend>
+        {(["read", "propose", "execute"] as TokenScope[]).map((s) => {
+          const disabled = s === "execute" && !owner
+          return (
+            <label key={s} className={cn("flex items-start gap-2 rounded-md border p-2.5 text-sm", disabled && "opacity-60",
+                                         scope === s && "border-primary ring-1 ring-primary/30")}
+                   title={disabled ? t("connect.scope.executeOwners") + (ownerDenied ? ` (${ownerDenied})` : "") : undefined}
+                   data-scope-option={s}>
+              <input type="radio" name="token-scope" value={s} checked={scope === s} disabled={disabled}
+                     className="mt-0.5 accent-primary" onChange={() => setScope(s)} />
+              <span className="grid gap-0.5">
+                <span className="font-medium">{t(`connect.scope.${s}`)}</span>
+                <span className="text-xs text-muted-foreground">{t(`connect.scope.${s}.hint`)}</span>
+                {disabled && <span className="text-xs text-muted-foreground">{t("connect.scope.executeOwners")}</span>}
+              </span>
+            </label>
+          )
+        })}
+      </fieldset>
+      {scope !== "read" && (
+        <fieldset className="grid gap-1.5" id="token-actions">
+          <legend className="mb-1 text-sm font-medium">{t("connect.field.actions")}</legend>
+          <p className="text-xs text-muted-foreground">{t("connect.field.actions.hint")}</p>
+          {!actions.data?.length ? <p className="text-xs text-muted-foreground">{t("connect.field.actions.none")}</p> : (
+            <ul className="grid gap-1">
+              {actions.data.map((a) => (
+                <li key={a.name}>
+                  <label className="flex items-center gap-2 text-sm" data-allow-action={a.name}>
+                    <input type="checkbox" className="accent-primary" checked={allowed.includes(a.name)}
+                           onChange={(e) => setAllowed(e.target.checked ? [...allowed, a.name] : allowed.filter((n) => n !== a.name))} />
+                    <span>{a.label || a.name}</span>
+                    <span className="text-xs text-muted-foreground">· {t(`connect.agentPolicy.${a.agent === "execute" ? "execute" : a.agent === "propose" ? "propose" : "none"}`)}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </fieldset>
+      )}
       {create.isError && (
         <p role="alert" className="text-sm break-words text-destructive">
           {t("connect.failed", { error: errorMessage(create.error) })}
@@ -299,7 +376,7 @@ function toolDescription(tool: AgentTool): string {
   return text === key ? tool.description : text
 }
 
-function ToolsCard({ tools, protocol }: { tools: AgentTool[]; protocol: string }) {
+function ToolsCard({ tools, protocol, writeTools }: { tools: AgentTool[]; protocol: string; writeTools: string[] }) {
   return (
     <Card className="gap-3 py-4" id="connect-tools">
       <CardHeader className="px-4">
@@ -312,7 +389,13 @@ function ToolsCard({ tools, protocol }: { tools: AgentTool[]; protocol: string }
             const params = toolParams(tool.inputSchema)
             return (
               <li key={tool.name} className="grid gap-1 border-t pt-3 first:border-t-0 first:pt-0" data-tool={tool.name}>
-                <code className="font-mono text-sm font-semibold break-all">{tool.name}</code>
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <code className="font-mono text-sm font-semibold break-all">{tool.name}</code>
+                  {writeTools.includes(tool.name) && (
+                    <Badge variant="outline" className="border-warning/40 bg-warning/10 font-normal text-amber-700 dark:text-amber-300"
+                           data-write-tool title={t("connect.tools.write.hint")}>{t("connect.tools.write")}</Badge>
+                  )}
+                </span>
                 <p className="text-sm text-muted-foreground">{toolDescription(tool)}</p>
                 <p className="flex flex-wrap items-center gap-1 text-xs">
                   <span className="text-muted-foreground">{t("connect.tools.params")}:</span>
@@ -479,7 +562,7 @@ export default function ConnectPage() {
           </Card>
         )}
 
-        {tools.data && <ToolsCard tools={tools.data.tools} protocol={tools.data.protocol} />}
+        {tools.data && <ToolsCard tools={tools.data.tools} protocol={tools.data.protocol} writeTools={tools.data.write_tools ?? []} />}
         {usage.data && <UsageCard usage={usage.data} />}
       </div>
 

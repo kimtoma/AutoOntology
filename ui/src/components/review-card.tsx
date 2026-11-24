@@ -14,6 +14,7 @@ import { ago, freshnessText } from "@/lib/ops"
 import { cn } from "@/lib/utils"
 import { useCan } from "@/lib/auth"
 import { useArchived } from "@/lib/project"
+import { LogicReviewCard, ObjectReviewCard } from "@/components/review-card-logic"
 
 export function DecisionBadge({ decision }: { decision: Decision }) {
   const t = useT()
@@ -44,8 +45,15 @@ export interface ReviewCardProps {
   onRelation?: (r: AcceptRelation) => void
 }
 
-/** One review item: what it is, why it waits, the evidence, and its actions. */
-export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function ReviewCard(
+/** One review item: what it is, why it waits, the evidence, and its actions (object types
+    and logic candidates have their own cards). */
+export const ReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function ReviewCard(props, ref) {
+  if (props.item.category === "logic" && props.item.logic) return <LogicReviewCard ref={ref} {...props} />
+  if (props.item.category === "objects" && props.item.object_type) return <ObjectReviewCard ref={ref} {...props} />
+  return <ConceptReviewCard ref={ref} {...props} />
+})
+
+const ConceptReviewCard = forwardRef<HTMLLIElement, ReviewCardProps>(function ConceptReviewCard(
   { item, onDecide, onUndo, onBuild, busy, compact, selected, relation: relationProp, onRelation }, ref,
 ) {
   const t = useT()

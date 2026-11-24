@@ -62,7 +62,8 @@ function ServiceFooter() {
 function ReviewBadge({ sr = false }: { sr?: boolean }) {
   const t = useT()
   const { data } = usePendingCount()
-  const n = data?.pending ?? 0
+  // inbox items and the action runs that wait for the caller's approval
+  const n = (data?.pending ?? 0) + (data?.approvals ?? 0)
   if (!n) return null
   // the visible badge sits outside the link; the link itself carries the count for readers
   if (sr) {

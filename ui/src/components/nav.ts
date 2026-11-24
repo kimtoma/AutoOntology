@@ -1,7 +1,7 @@
 import { t, type MessageKey } from "@/i18n/core"
 import {
-  Activity, BookOpen, Database, Download, FlaskConical, Hammer, Inbox, LayoutDashboard, Network, Plug, Rocket,
-  ScrollText, Settings, UserCog, Users, type LucideIcon,
+  Activity, BookOpen, Boxes, Database, Download, FlaskConical, Hammer, Inbox, LayoutDashboard, Network, Plug, Rocket,
+  ScrollText, Settings, UserCog, Users, Workflow, type LucideIcon,
 } from "lucide-react"
 
 import { allows, useMe, type InstallationPermission, type ProjectPermission } from "@/lib/auth"
@@ -33,6 +33,8 @@ export const NAV: NavItem[] = [
   item("/build", Hammer, "build"),
   item("/ontology", BookOpen, "ontology"),
   item("/graph", Network, "graph"),
+  item("/objects", Boxes, "objects", "objects.read"),
+  item("/logic", Workflow, "logic", "logic.read"),
   item("/playground", FlaskConical, "playground"),
   item("/exports", Download, "exports"),
   item("/connect", Plug, "connect"),

@@ -108,7 +108,9 @@ export function opsNotices(input: NoticeInput): Notice[] {
   if (stale > 0) out.push({ id: "stale", tone: "warn", action: "build", text: tn("overview.notice.stale", stale) })
   const lastBuild = runs.find((r) => r.kind === "build" && r.status === "succeeded")
   const builtAt = lastBuild?.finished_at ?? lastBuild?.started_at ?? input.ontology?.created_at
-  if (builtAt) {
+  // the notice's button depends on the freshness (build the changed sources, or open the
+  // Build page): wait for it, or the button flips once it arrives
+  if (builtAt && input.freshness) {
     const days = Math.floor((now - new Date(builtAt).getTime()) / DAY_MS)
     if (days >= OLD_BUILD_DAYS) {
       out.push({ id: "old-build", tone: "info", action: stale > 0 ? "build" : "open-build",
