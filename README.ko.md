@@ -711,6 +711,7 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 | `AUTOONTOLOGY_KORDOC_TIMEOUT` | `300` | 문서당 초(kordoc은 항상 오프라인으로 실행). |
 | `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS` | `200` | CSV/TSV 문서가 담는 행 수. |
 | `AUTOONTOLOGY_DOC_MAX_BYTES` | `52428800`(50 MB) | 기본 리더가 받아들이는 CSV/TSV, 텍스트, Markdown, HTML, `.doc` 문서의 최대 크기. 이보다 큰 파일은 `FILE_TOO_LARGE`로 실패합니다. |
+| `AUTOONTOLOGY_SQL_TRANSLATE` | `1` | 플레이그라운드 SQL: 한국어 질문에 영어로 답하면 채팅 프로바이더가 한국어로 옮깁니다(한 번 호출, 30초 제한, 원문 유지). `0`이면 끕니다. |
 | `AUTOONTOLOGY_SAMPLES_DIR` | `<repo>/samples` | `demo`와 `/api/samples`가 쓰는 샘플 세트 폴더. |
 | `AUTOONTOLOGY_LANG` | 한국어 로캘이면 `ko`, 아니면 `en` | CLI 메시지 언어(`en` 또는 `ko`). 웹 UI는 따로 바꿉니다. |
 | `AUTOONTOLOGY_VISION_MODEL` | 설정 안 됨 | 이미지 문서를 OCR 텍스트 앞에서 설명하는 Ollama 비전 모델(예: `gemma4:e4b`). `setup`이 받습니다. 설정하지 않으면 OCR 텍스트만 씁니다. |

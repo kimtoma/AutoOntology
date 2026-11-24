@@ -36,7 +36,9 @@ class PlaygroundLLM(Protocol):
     provider: str
     model: str
 
-    def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]: ...
+    def stream(
+        self, messages: list[dict[str, str]], *, max_tokens: int | None = None
+    ) -> AsyncIterator[str]: ...
 
     async def structured(
         self, messages: list[dict[str, str]], schema: dict[str, Any], name: str
@@ -79,8 +81,17 @@ class RouterLLM:
             timeout=httpx.Timeout(self.timeout, connect=5.0), transport=self.transport
         )
 
-    async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
-        body = {"model": self.model_name, "messages": messages, "stream": True, "temperature": 0}
+    async def stream(
+        self, messages: list[dict[str, str]], *, max_tokens: int | None = None
+    ) -> AsyncIterator[str]:
+        body: dict[str, Any] = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": True,
+            "temperature": 0,
+        }
+        if max_tokens:  # the router enforces it, also for CLIs without a native limit
+            body["max_tokens"] = max_tokens
         async with self._client() as http:
             try:
                 async with http.stream(

@@ -82,3 +82,21 @@ export function tabulate(value: unknown, columns: string[] = []): { columns: str
   }
   return { columns: columns.length === 1 ? columns : ["value"], rows: v.map((x) => [x]) }
 }
+
+/** Engine 1.3 SQL pipeline nodes (text_to_sql/node_labels.py) in the UI language; an unknown
+    node keeps upstream's English `label`. */
+export const SQL_NODE_LABEL: Record<string, string> = labelTable({
+  react_sql_agent: "playground.sql.node.react_sql_agent",
+  format_and_respond: "playground.sql.node.format_and_respond",
+  unconstructable_sql_response: "playground.sql.node.unconstructable_sql_response",
+})
+
+export type SqlAnswerKind = "sql" | "information" | "unconstructable"
+
+/** The server's `answer_kind` when present; otherwise inferred the same way (an answer the
+    `unconstructable_sql_response` node gave, one with SQL, or one without: rules/definitions). */
+export function sqlAnswerKind(kind: unknown, sqlCode: unknown, nodes: string[]): SqlAnswerKind {
+  if (kind === "sql" || kind === "information" || kind === "unconstructable") return kind
+  if (nodes.includes("unconstructable_sql_response")) return "unconstructable"
+  return typeof sqlCode === "string" && sqlCode.trim() ? "sql" : "information"
+}

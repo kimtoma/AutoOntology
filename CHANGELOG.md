@@ -146,6 +146,23 @@ behaviour).
     English attribute sentence only when the column has none (`structured/semantic.py`,
     one extra `GET /api/columns/{table_id}` per table). Informational SQL answers arrive
     with `sql_code: ""` and `sql_response_from_db: null`; the CLI prints just the answer.
+- **Playground SQL follows the engine 1.3 agent** (`web/playground_api.py`,
+  `ui/src/components/playground/sql-tab.tsx`, `playground sql`): the steps are labelled in
+  the UI language (`react_sql_agent`, `format_and_respond`, `unconstructable_sql_response`);
+  the long ReAct step streams nothing until it ends, so the running step shows its elapsed
+  seconds. The relayed `result` event gets `answer_kind` (`sql` | `information` |
+  `unconstructable`): a rule/definition answer shows only the answer card with
+  "Answered without SQL (a rule or definition question)", an unconstructable one explains
+  why with a hint, on the page and in the CLI.
+- **Korean SQL answers**: when the question has Hangul and the agent's answer is mostly
+  Latin script (Hangul under 10% of its letters), the relay asks the chat provider once
+  (`max_tokens` 1024, 30 s limit) for a Korean translation that keeps SQL, identifiers,
+  table/column names and numbers, after relaying the untouched `result`: events
+  `translation` `{"phase": "start"}`, then `{"phase": "end", "answer": {"response_ko"}}`
+  or `{"phase": "end", "skipped": true}` (any failure, logged masked). The page shows the
+  Korean answer with the original under a collapsed "Original (English)"; the CLI prints
+  `response_ko` (its `--json` lines carry both). `AUTOONTOLOGY_SQL_TRANSLATE=0` turns it
+  off. `RouterLLM.stream` takes an optional `max_tokens`.
 - The `/settings` UI route is the Settings page (it used to redirect to `/status`).
 - The sidebar reads Overview, Review, Sources, Build, Ontology, Graph, Playground,
   Exports, Status, Settings. The first-run **Get started** checklist left it: `/ui/`

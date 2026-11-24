@@ -1060,6 +1060,9 @@ def playground_sql(
     if conversation:
         body["conversation_id"] = conversation
     failed = False
+    answer: dict[str, Any] | None = None
+    kind = ""
+    response_ko = ""
     for event, data, _id in _stream_or_fail("POST", "/playground/sql", body):
         if as_json:
             typer.echo(json.dumps({"event": event, "data": data}, ensure_ascii=False))
@@ -1074,11 +1077,19 @@ def playground_sql(
                 text = msg(key) if code and msg(key) != key else notice
                 typer.echo(f"notice: {text}", err=True)
         elif event == "step" and d.get("phase") != "end":
-            typer.echo(f"[{d.get('label') or d.get('node')}]", err=True)
+            node = str(d.get("node") or "")
+            key = f"ops.sql.node.{node}"
+            label = msg(key) if node and msg(key) != key else d.get("label") or node
+            typer.echo(f"[{label}]", err=True)
+            if node == "unconstructable_sql_response":
+                kind = "unconstructable"
         elif event == "sql":
             typer.echo(f"SQL: {d.get('sql', '')}")
         elif event == "result":
             answer = d.get("answer") or {}
+            kind = str(d.get("answer_kind") or kind) or (
+                "sql" if answer.get("sql_code") else "information"
+            )
             if answer.get("sql_code"):
                 typer.echo(f"SQL: {answer['sql_code']}")
             # sql_columns are semantic-layer column ids: they only name positional rows
@@ -1094,11 +1105,23 @@ def playground_sql(
                     for r in rows[:50]
                 ]
                 typer.echo(base._table(tuple(cols), table))
-            if answer.get("response"):
-                typer.echo(str(answer["response"]))
+        elif event == "translation":
+            if d.get("phase") == "start":
+                typer.echo(f"[{msg('ops.sql.translating')}]", err=True)
+            else:
+                response_ko = str((d.get("answer") or {}).get("response_ko") or "")
         elif event == "error":
             typer.echo(_event_error(data), err=True)
             failed = True
+    # the answer last: a Korean translation (its own event) follows the result
+    if answer is not None:
+        if kind == "information":
+            typer.echo(msg("ops.sql.no_sql"), err=True)
+        elif kind == "unconstructable":
+            typer.echo(msg("ops.sql.unconstructable"), err=True)
+        text = response_ko or str(answer.get("response") or "")
+        if text:
+            typer.echo(text)
     if failed:
         raise typer.Exit(code=1)
 

@@ -3,7 +3,15 @@
 
 * ``POST /chat`` (SSE): RAG over the latest ontology snapshot (``playground.service``).
 * ``POST /sql`` (SSE): upstream's NL->SQL agent (``POST /api/chat/completions`` on the
-  backend), events relayed verbatim (masked).
+  backend), events relayed verbatim (masked). Engine 1.3's ReAct agent answers in English:
+  when the question has Hangul and the answer is mostly Latin script (:func:`needs_korean`),
+  the relay asks the chat provider once for a Korean translation *after* relaying the
+  untouched ``result`` and adds two events of its own: ``translation``
+  ``{"phase": "start", "target": "ko"}``, then ``{"phase": "end", "answer":
+  {"response_ko": ...}}`` or ``{"phase": "end", "skipped": true}`` on any failure (logged,
+  masked). ``AUTOONTOLOGY_SQL_TRANSLATE=0`` turns this off. The relayed ``result`` gets one
+  top-level field of ours, ``answer_kind`` (``sql`` | ``information`` | ``unconstructable``,
+  :func:`answer_kind`); its ``answer`` is untouched.
 * ``POST /sparql``, ``GET /sparql/examples``: the SPARQL console over the latest snapshot
   (its export's ``ontology.ttl`` when that export's ``export.json`` names this very
   snapshot, else a Turtle file written on demand to
@@ -19,9 +27,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import re
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import ExitStack
+from contextlib import ExitStack, aclosing
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +67,77 @@ UPSTREAM_READ_TIMEOUT_S = 180.0
 STORAGE_MISSING = "Conversation storage unavailable"
 #: tests replace it with an httpx.MockTransport
 UPSTREAM_TRANSPORT: httpx.AsyncBaseTransport | None = None
+
+#: Korean post-processing of the SQL agent's (English) answer
+SQL_TRANSLATE_ENV = "AUTOONTOLOGY_SQL_TRANSLATE"
+TRANSLATE_TIMEOUT_S = 30.0
+TRANSLATE_MAX_TOKENS = 1024
+#: a longer answer would not fit the token budget: left untranslated
+TRANSLATE_MAX_CHARS = 4000
+#: below this share of Hangul among the letters, an answer counts as "not Korean"
+KOREAN_MIN_RATIO = 0.10
+TRANSLATE_SYSTEM = (
+    "Translate the user's text into natural Korean. Keep SQL, code, identifiers, table and "
+    "column names, numbers, units, URLs and Markdown formatting exactly as they are. "
+    "Answer with the translation only, without any preface."
+)
+#: engine 1.3 pipeline node of an answer the agent gave up on (text_to_sql/pipeline.py)
+UNCONSTRUCTABLE_NODE = "unconstructable_sql_response"
+_HANGUL_RE = re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7a3]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+
+
+def has_hangul(text: str) -> bool:
+    return bool(_HANGUL_RE.search(text or ""))
+
+
+def needs_korean(question: str, response: str) -> bool:
+    """True when a Korean *question* got an answer that is mostly Latin script (no Hangul,
+    or Hangul under :data:`KOREAN_MIN_RATIO` of its letters). An answer without letters
+    (numbers only) has nothing to translate."""
+    if not has_hangul(question) or not (response or "").strip():
+        return False
+    latin = len(_LATIN_RE.findall(response))
+    if not latin:
+        return False
+    hangul = len(_HANGUL_RE.findall(response))
+    return hangul / (hangul + latin) < KOREAN_MIN_RATIO
+
+
+def answer_kind(answer: Any, nodes: set[str]) -> str:
+    """What an engine 1.3 ``result`` is, for the UI and CLI: ``unconstructable`` (the
+    ``unconstructable_sql_response`` node ran; its answer explains why, without SQL),
+    ``sql`` (a query ran) or ``information`` (answered from the catalog without SQL:
+    rules, definitions; ``sql_code`` is ``""`` and ``sql_response_from_db`` None)."""
+    if UNCONSTRUCTABLE_NODE in nodes:
+        return "unconstructable"
+    if isinstance(answer, dict) and str(answer.get("sql_code") or "").strip():
+        return "sql"
+    return "information"
+
+
+def translate_enabled() -> bool:
+    """``AUTOONTOLOGY_SQL_TRANSLATE`` (shell or ``.env``): on unless 0/false/no/off."""
+    raw = os.environ.get(SQL_TRANSLATE_ENV, "").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+async def translate_to_korean(llm: Any, text: str) -> str:
+    """One provider call: *text* in Korean. Raises on failure, timeout (``TimeoutError``)
+    or an answer that is still not Korean (``ValueError``)."""
+    messages = [
+        {"role": "system", "content": TRANSLATE_SYSTEM},
+        {"role": "user", "content": text},
+    ]
+    parts: list[str] = []
+    with anyio.fail_after(TRANSLATE_TIMEOUT_S):
+        async with aclosing(llm.stream(messages, max_tokens=TRANSLATE_MAX_TOKENS)) as chunks:
+            async for chunk in chunks:
+                parts.append(chunk)
+    out = "".join(parts).strip()
+    if not has_hangul(out):
+        raise ValueError("the translation has no Hangul")
+    return out
 
 
 class _In(BaseModel):
@@ -295,6 +376,8 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                 503, "backend_unavailable", f"upstream backend unreachable: {type(exc).__name__}"
             ) from exc
 
+        nodes: set[str] = set()  # the pipeline nodes seen, for answer_kind
+
         async def relay() -> AsyncIterator[dict[str, str]]:
             try:
                 yield _event(
@@ -318,7 +401,14 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                     except ValueError:
                         continue
                     name = str(ev.get("type") or "message") if isinstance(ev, dict) else "message"
+                    if name == "step":
+                        nodes.add(str(ev.get("node") or ""))
+                    elif name == "result":
+                        ev = {**ev, "answer_kind": answer_kind(ev.get("answer"), nodes)}
                     yield _event(name, ev)
+                    if name == "result":
+                        async for extra in korean(ev):
+                            yield extra
                 yield _event(
                     "error",
                     {
@@ -338,6 +428,35 @@ def build_router(api: Api, app: FastAPI) -> APIRouter:
                 )
             finally:
                 await cleanup()
+
+        async def korean(ev: dict[str, Any]) -> AsyncIterator[dict[str, str]]:
+            """The ``translation`` events for an English answer to a Korean question."""
+            answer = ev.get("answer") if isinstance(ev.get("answer"), dict) else {}
+            response = str(answer.get("response") or "")
+            if (
+                not translate_enabled()
+                or len(response) > TRANSLATE_MAX_CHARS
+                or not needs_korean(body.question, response)
+            ):
+                return
+            yield _event("translation", {"type": "translation", "phase": "start", "target": "ko"})
+            try:
+                text = await translate_to_korean(pg().llm_factory(), response)
+            except Exception as exc:  # noqa: BLE001 - optional: the English answer stands
+                reason = exc.message if isinstance(exc, LLMError) else str(exc)
+                logger.warning(
+                    "sql answer translation skipped: %s: %s",
+                    type(exc).__name__,
+                    mask(reason)[:200],
+                )
+                yield _event(
+                    "translation", {"type": "translation", "phase": "end", "skipped": True}
+                )
+                return
+            yield _event(
+                "translation",
+                {"type": "translation", "phase": "end", "answer": {"response_ko": text}},
+            )
 
         async def cleanup() -> None:
             # idempotent; also the background task, for a client gone before the body started

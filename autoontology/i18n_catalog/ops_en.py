@@ -77,7 +77,11 @@ MESSAGES: dict[str, str] = {
     "help.playground.conversation": "Continue this conversation (its id is printed after an answer).",
     "help.playground.top_k": "Elements to retrieve (1-40).",
     "help.playground.json": "JSON Lines: one SSE event object per line.",
-    "help.playground.sql": "Ask the data in natural language (the upstream SQL agent).",
+    "help.playground.sql": (
+        "Ask the data in natural language (the upstream SQL agent). Rule or definition "
+        "questions may be answered without SQL. An English answer to a Korean question is "
+        "printed in Korean (AUTOONTOLOGY_SQL_TRANSLATE=0 turns this off; --json has both)."
+    ),
     "help.playground.sql.source": "Structured source to query (default: the first one).",
     "help.playground.sql.conversation": "Conversation UUID to continue.",
     "help.playground.sparql": "Run a SPARQL query over the latest snapshot.",
@@ -140,6 +144,15 @@ MESSAGES: dict[str, str] = {
     "ops.notice.conversation_store_missing": (
         "asked without the earlier turns: the upstream conversation store "
         "(frontend schema) is missing"
+    ),
+    "ops.sql.node.react_sql_agent": "Searching the data and writing SQL",
+    "ops.sql.node.format_and_respond": "Formatting the answer",
+    "ops.sql.node.unconstructable_sql_response": "SQL could not be constructed",
+    "ops.sql.translating": "Translating the answer into Korean",
+    "ops.sql.no_sql": "Answered without SQL (a rule or definition question).",
+    "ops.sql.unconstructable": (
+        "The agent could not write SQL for this question from the data it found; "
+        "try naming the table or measure you mean."
     ),
     "ops.sparql_one_of": "give the query as an argument or with --file (one of them)",
     "ops.no_index": "no index yet: `uv run autoontology playground index --rebuild`",

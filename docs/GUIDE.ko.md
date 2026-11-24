@@ -378,7 +378,11 @@ Markdown, TXT, HTML. 제목이 분명할수록 좋습니다. 리더가 제목을
 - **채팅**: 평소 말로 묻습니다("연체는 언제 되나요?"). 답변은 근거로 쓴 개념, 규칙, 원문을 인용하며,
   인용을 누르면 해당 개념이 열립니다. 가장 최근 리비전에 대해서만 답합니다.
 - **SQL**: 데이터에 대해 물으면("지역별 고객 수") 엔진이 SQL을 작성해 정형 소스에서 실행하고 표와
-  SQL을 보여 줍니다.
+  SQL을 보여 줍니다. 규칙이나 정의를 묻는 질문("연체는 언제부터인가요?")은 SQL 없이 카탈로그로
+  답할 수 있으며, 이때 답변에 그렇게 표시됩니다. 맞는 질의를 만들 수 없으면 이유를 설명합니다.
+  에이전트는 검색, 질의 시험, 제출을 한 번의 긴 단계로 진행하므로 페이지에 경과 시간이 표시됩니다.
+  엔진은 영어로 답하므로, 한국어 질문에는 채팅 모델이 옮긴 한국어 답변을 보여 주고 영어 원문은
+  펼쳐 볼 수 있습니다(`AUTOONTOLOGY_SQL_TRANSLATE=0`이면 끔).
 - **SPARQL**: 온톨로지 자체에 읽기 전용 질의를 실행합니다. 예시 메뉴에 바로 쓸 수 있는 질의가
   있습니다: Classes, Synonyms per Term, Aligned concepts, Relations and their evidence, Business
   rules, Concepts per document, Property domain/range, Unaligned concepts(예시 이름은 영어로

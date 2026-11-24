@@ -468,7 +468,72 @@ def test_playground_sql_prints_an_informational_answer_without_sql(isolated_env,
     )
     res = _ok(["playground", "sql", "고객 테이블에는 무엇이 있나요?"])
     assert "고객 테이블에는 이름과 등급이 있습니다" in res.stdout
-    assert "SQL:" not in res.stdout and "[react_sql_agent]" in res.output
+    # the node gets its own label; the answer says it needed no SQL
+    assert "SQL:" not in res.stdout and "[Searching the data and writing SQL]" in res.stderr
+    assert "Answered without SQL (a rule or definition question)." in res.stderr
+
+
+def test_playground_sql_explains_an_unconstructable_answer(isolated_env, monkeypatch):
+    no_sql = {"sql_code": "", "sql_columns": [], "sql_response_from_db": None}
+    _mock(
+        monkeypatch,
+        lambda r: _sse(
+            ("step", {"phase": "start", "node": "unconstructable_sql_response"}),
+            (
+                "result",
+                {
+                    "answer_kind": "unconstructable",
+                    "answer": {**no_sql, "response": "I couldn't write a query."},
+                },
+            ),
+            ("done", {}),
+        ),
+    )
+    res = _ok(["playground", "sql", "날씨는?"])
+    assert "I couldn't write a query." in res.stdout and "SQL:" not in res.stdout
+    assert "[SQL could not be constructed]" in res.stderr
+    assert "could not write SQL for this question" in res.stderr
+
+
+def _translated_stream():
+    return _sse(
+        ("step", {"phase": "start", "node": "react_sql_agent", "label": "x"}),
+        (
+            "result",
+            {
+                "answer_kind": "sql",
+                "answer": {
+                    "sql_code": "SELECT 1",
+                    "sql_columns": [],
+                    "sql_response_from_db": None,
+                    "response": "There are 40 customers.",
+                },
+            },
+        ),
+        ("translation", {"type": "translation", "phase": "start", "target": "ko"}),
+        (
+            "translation",
+            {
+                "type": "translation",
+                "phase": "end",
+                "answer": {"response_ko": "고객은 40명입니다."},
+            },
+        ),
+        ("done", {}),
+    )
+
+
+def test_playground_sql_prints_the_korean_translation(isolated_env, monkeypatch):
+    _mock(monkeypatch, lambda r: _translated_stream())
+    res = _ok(["playground", "sql", "고객은 몇 명인가요?"])
+    assert "고객은 40명입니다." in res.stdout and "There are 40 customers." not in res.stdout
+    assert "SQL: SELECT 1" in res.stdout and "[Translating the answer into Korean]" in res.stderr
+    res = _ok(["playground", "sql", "고객은 몇 명인가요?", "--json"])
+    lines = [json.loads(x) for x in res.stdout.splitlines()]
+    result = next(x["data"] for x in lines if x["event"] == "result")
+    end = [x["data"] for x in lines if x["event"] == "translation"][-1]
+    assert result["answer"]["response"] == "There are 40 customers."
+    assert result["answer_kind"] == "sql" and end["answer"]["response_ko"] == "고객은 40명입니다."
 
 
 def test_playground_sql_tabulates_upstreams_result_envelope(isolated_env, monkeypatch):

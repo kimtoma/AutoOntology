@@ -2,8 +2,9 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { CitedText } from "@/components/playground/shared"
+import { setLang } from "@/i18n/core"
 import { api, parseSse, type SseEvent } from "@/lib/api"
-import { tabulate, toCsv } from "@/lib/playground"
+import { sqlAnswerKind, tabulate, toCsv } from "@/lib/playground"
 import PlaygroundPage from "@/pages/playground"
 import { mockFetch, renderPage } from "@/test/utils"
 
@@ -35,6 +36,13 @@ function sse(events: [string, unknown][]) {
 }
 
 describe("playground helpers", () => {
+  it("classifies an SQL answer like the server does", () => {
+    expect(sqlAnswerKind("unconstructable", "", [])).toBe("unconstructable")
+    expect(sqlAnswerKind(undefined, "", ["react_sql_agent", "unconstructable_sql_response"])).toBe("unconstructable")
+    expect(sqlAnswerKind(undefined, "SELECT 1", ["react_sql_agent"])).toBe("sql")
+    expect(sqlAnswerKind(undefined, "", ["react_sql_agent"])).toBe("information")
+  })
+
   it("parses SSE across chunk boundaries", () => {
     const got: SseEvent[] = []
     let tail = parseSse('event: delta\ndata: {"text":"안', (e) => got.push(e))
@@ -232,6 +240,132 @@ describe("playground page", () => {
     expect(within(result).getByRole("cell")).toHaveTextContent(/^40$/)
     expect(result).not.toHaveTextContent("5a33d98c")
     expect(screen.getByText(/conversation history is not stored upstream/)).toBeInTheDocument()
+  })
+
+  const NO_SQL = { sql_code: "", sql_columns: [], custom_analyses_used: [], sql_response_from_db: null }
+  const askSql = async (label: string, button: RegExp, q: string) => {
+    renderPage(<PlaygroundPage />, "/playground?tab=sql")
+    await userEvent.type(await screen.findByLabelText(label), q)
+    await userEvent.click(screen.getByRole("button", { name: button }))
+  }
+
+  it("shows an informational answer without SQL sections, with Korean step labels", async () => {
+    setLang("ko", false)
+    mockFetch({
+      ...BASE,
+      "POST /playground/sql": () => sse([
+        ["step", { type: "step", phase: "start", node: "react_sql_agent", label: "Searching the data and writing SQL" }],
+        ["step", { type: "step", phase: "end", node: "react_sql_agent", label: "Searching the data and writing SQL", thought: "Answering an information question." }],
+        ["result", { type: "result", answer_kind: "information", answer: { ...NO_SQL, response: "연체는 납기 30일 후입니다." } }],
+        ["done", {}],
+      ]),
+    })
+    await askSql("데이터 질문", /질문하기/, "연체 규칙은?")
+    const card = await waitFor(() => {
+      const el = document.getElementById("sql-answer")
+      expect(el).not.toBeNull()
+      return el as HTMLElement
+    })
+    expect(card).toHaveTextContent("연체는 납기 30일 후입니다.")
+    expect(card).toHaveTextContent("SQL 없이 답했습니다(규칙·정의 질문).")
+    expect(screen.getByText("데이터를 찾아 SQL 작성 중")).toBeInTheDocument()
+    expect(screen.queryByText("Searching the data and writing SQL")).toBeNull()
+    expect(document.getElementById("sql-code")).toBeNull()
+    expect(document.getElementById("sql-result")).toBeNull()
+  })
+
+  it("shows the elapsed time while the long ReAct step runs", async () => {
+    let finish: () => void = () => {}
+    const enc = new TextEncoder()
+    mockFetch({
+      ...BASE,
+      "POST /playground/sql": () => new Response(new ReadableStream({
+        start(ctrl) {
+          ctrl.enqueue(enc.encode(`event: step\ndata: ${JSON.stringify({ type: "step", phase: "start", node: "react_sql_agent", label: "x" })}\n\n`))
+          finish = () => {
+            ctrl.enqueue(enc.encode("event: done\ndata: {}\n\n"))
+            ctrl.close()
+          }
+        },
+      }), { headers: { "content-type": "text/event-stream" } }),
+    })
+    await askSql("Data question", /Ask/, "q")
+    expect(await screen.findByText("Searching the data and writing SQL")).toBeInTheDocument()
+    expect(document.getElementById("sql-elapsed")).toHaveTextContent(/^\d+s$/)
+    expect(screen.getByText(/searches the catalog, tries queries/)).toBeInTheDocument()
+    finish()
+    await waitFor(() => expect(document.getElementById("sql-elapsed")).toBeNull())
+  })
+
+  it("explains an unconstructable answer", async () => {
+    mockFetch({
+      ...BASE,
+      "POST /playground/sql": () => sse([
+        ["step", { type: "step", phase: "start", node: "unconstructable_sql_response", label: "SQL could not be constructed" }],
+        ["step", { type: "step", phase: "end", node: "unconstructable_sql_response" }],
+        ["result", { type: "result", answer_kind: "unconstructable", answer: { ...NO_SQL, response: "I couldn't write a query." } }],
+        ["done", {}],
+      ]),
+    })
+    await askSql("Data question", /Ask/, "날씨는?")
+    const card = await waitFor(() => {
+      const el = document.getElementById("sql-answer")
+      expect(el).not.toBeNull()
+      return el as HTMLElement
+    })
+    expect(card).toHaveAttribute("data-kind", "unconstructable")
+    expect(within(card).getByText("No SQL for this question")).toBeInTheDocument()
+    expect(card).toHaveTextContent("I couldn't write a query.")
+    expect(card).toHaveTextContent(/name the table or measure/)
+    expect(document.getElementById("sql-code")).toBeNull()
+  })
+
+  it("shows the Korean translation with the English original collapsed", async () => {
+    mockFetch({
+      ...BASE,
+      "POST /playground/sql": () => sse([
+        ["result", { type: "result", answer_kind: "sql", answer: {
+          response: "There are 40 customers.", sql_code: "SELECT COUNT(*) AS n FROM customers",
+          sql_columns: [], sql_response_from_db: ['[{"n":40}]'] } }],
+        ["translation", { type: "translation", phase: "start", target: "ko" }],
+        ["translation", { type: "translation", phase: "end", answer: { response_ko: "고객은 40명입니다." } }],
+        ["done", {}],
+      ]),
+    })
+    await askSql("Data question", /Ask/, "고객은 몇 명인가요?")
+    const card = await waitFor(() => {
+      const el = document.getElementById("sql-answer")
+      expect(el).toHaveTextContent("고객은 40명입니다.")
+      return el as HTMLElement
+    })
+    const original = card.querySelector("details") as HTMLDetailsElement
+    expect(original).not.toBeNull()
+    expect(original.open).toBe(false)
+    expect(within(original).getByText("Original (English)")).toBeInTheDocument()
+    expect(original).toHaveTextContent("There are 40 customers.")
+    expect(card).not.toHaveTextContent("Answered without SQL")
+    expect(document.getElementById("sql-code")).toHaveTextContent("SELECT COUNT(*)")
+    expect(screen.queryByText("Translating the answer into Korean…")).toBeNull()
+  })
+
+  it("keeps the English answer when the translation is skipped", async () => {
+    mockFetch({
+      ...BASE,
+      "POST /playground/sql": () => sse([
+        ["result", { type: "result", answer: { ...NO_SQL, response: "Late after 30 days." } }],
+        ["translation", { type: "translation", phase: "start", target: "ko" }],
+        ["translation", { type: "translation", phase: "end", skipped: true }],
+        ["done", {}],
+      ]),
+    })
+    await askSql("Data question", /Ask/, "연체 규칙은?")
+    const card = await waitFor(() => {
+      const el = document.getElementById("sql-answer")
+      expect(el).toHaveTextContent("Late after 30 days.")
+      return el as HTMLElement
+    })
+    expect(card.querySelector("details")).toBeNull()
+    expect(card).toHaveTextContent("Answered without SQL (a rule or definition question).")
   })
 
   it("sends to Build when there is no snapshot", async () => {

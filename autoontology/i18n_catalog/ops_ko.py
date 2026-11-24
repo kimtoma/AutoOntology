@@ -67,7 +67,11 @@ MESSAGES: dict[str, str] = {
     "help.playground.conversation": "이 대화를 이어 갑니다 (답변 뒤에 ID가 출력됨).",
     "help.playground.top_k": "검색할 요소 수 (1-40).",
     "help.playground.json": "JSON Lines: SSE 이벤트 한 줄씩.",
-    "help.playground.sql": "데이터에 자연어로 질문합니다 (업스트림 SQL 에이전트).",
+    "help.playground.sql": (
+        "데이터에 자연어로 질문합니다 (업스트림 SQL 에이전트). 규칙·정의 질문은 SQL 없이 "
+        "답할 수 있습니다. 한국어 질문에 영어로 답하면 한국어로 옮겨 출력합니다 "
+        "(AUTOONTOLOGY_SQL_TRANSLATE=0이면 끔, --json에는 둘 다 있음)."
+    ),
     "help.playground.sql.source": "질의할 정형 소스 (기본: 첫 번째).",
     "help.playground.sql.conversation": "이어 갈 대화 UUID.",
     "help.playground.sparql": "최신 스냅샷에 SPARQL 질의를 실행합니다.",
@@ -121,6 +125,15 @@ MESSAGES: dict[str, str] = {
     "ops.conversation": "대화 {id} (이어 가려면 --conversation {id})",
     "ops.notice.conversation_store_missing": (
         "업스트림에 대화 기록 저장소(frontend 스키마)가 없어 이전 대화 없이 질문했습니다"
+    ),
+    "ops.sql.node.react_sql_agent": "데이터를 찾아 SQL 작성 중",
+    "ops.sql.node.format_and_respond": "답변 정리 중",
+    "ops.sql.node.unconstructable_sql_response": "SQL을 만들 수 없음",
+    "ops.sql.translating": "답변을 한국어로 옮기는 중",
+    "ops.sql.no_sql": "SQL 없이 답했습니다(규칙·정의 질문).",
+    "ops.sql.unconstructable": (
+        "찾은 데이터로는 이 질문에 맞는 SQL을 만들 수 없었습니다. "
+        "원하는 표나 지표 이름을 넣어 다시 질문해 보세요."
     ),
     "ops.sparql_one_of": "질의를 인수 또는 --file 중 하나로 주세요",
     "ops.no_index": "아직 인덱스가 없습니다: `uv run autoontology playground index --rebuild`",

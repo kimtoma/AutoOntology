@@ -402,7 +402,13 @@ Moving dots on a link mean an accepted *same* match.
   rules and evidence it used; click a citation to open it. It answers about the latest
   revision only.
 - **SQL**: ask a question about the data ("지역별 고객 수") and the engine writes SQL,
-  runs it on a structured source and shows the table and the SQL.
+  runs it on a structured source and shows the table and the SQL. A question about rules or
+  definitions ("what counts as overdue?") may be answered from the catalog without SQL; the
+  answer then says so. When no query fits, it explains why. The agent works in one long step
+  (searching, trying queries, submitting), so the page shows how long it has been running.
+  The engine answers in English: a Korean question gets the answer in Korean, translated by
+  your chat model, with the English original one click away
+  (`AUTOONTOLOGY_SQL_TRANSLATE=0` turns this off).
 - **SPARQL**: run read-only queries on the ontology itself. The examples menu has ready
   queries: Classes, Synonyms per Term, Aligned concepts, Relations and their evidence,
   Business rules, Concepts per document, Property domain/range, Unaligned concepts.

@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import logging
 import math
 import os
 import time
@@ -957,6 +958,7 @@ def test_sql_passthrough_relays_events_and_handles_storage_and_409(client, monke
     assert events[0][1]["notice_codes"] == ["conversation_store_missing"]
     assert events[0][1]["target_db"] == "db1"
     assert events[2][1]["answer"]["sql_code"].startswith("SELECT")
+    assert events[2][1]["answer_kind"] == "sql"
     headers, body = seen[0]
     assert headers["x-auto-ontology-user-id"] == "autoontology"
     assert body["conversation_id"] == conv and body["target_db"] == "db1"
@@ -1266,3 +1268,222 @@ def test_sparql_refuses_queries_without_the_memory_guard(ttl, monkeypatch):
         assert runner.started_pids == []  # no unguarded worker was started
     finally:
         runner.close()
+
+
+# --- SQL answer: Korean post-processing (engine 1.3 answers in English) ----------------------
+
+
+@pytest.mark.parametrize(
+    ("question", "response", "expected"),
+    [
+        ("고객은 몇 명인가요?", "There are 40 customers.", True),
+        ("고객은 몇 명인가요?", "고객은 40명입니다.", False),
+        # mostly Latin with a quoted Korean column name: still under 10% Hangul
+        (
+            "계약금액 합계는?",
+            "The total contract amount (계약금액) across all contracts in the table is 1,234,000.",
+            True,
+        ),
+        ("How many customers?", "There are 40 customers.", False),
+        ("고객 수?", "40", False),  # nothing to translate
+        ("고객 수?", "   ", False),
+        ("고객 수?", "", False),
+    ],
+)
+def test_needs_korean_heuristic(question, response, expected):
+    assert playground_api.needs_korean(question, response) is expected
+
+
+def _english_upstream(monkeypatch, answer):
+    events = [
+        {"type": "step", "phase": "start", "node": "react_sql_agent", "thought": None},
+        {"type": "step", "phase": "end", "node": "react_sql_agent", "thought": "Submitting."},
+        {"type": "result", "answer": answer},
+    ]
+
+    def handler(request):
+        text = "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
+        return httpx.Response(200, text=text, headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(playground_api, "UPSTREAM_TRANSPORT", httpx.MockTransport(handler))
+
+
+class TranslatingLLM(FakeLLM):
+    def __init__(self, answer="고객은 40명입니다."):
+        super().__init__(answer)
+        self.kwargs = []
+
+    async def stream(self, messages, **kw):
+        self.kwargs.append(kw)
+        async for chunk in super().stream(messages):
+            yield chunk
+
+
+ENGLISH_ANSWER = {
+    "response": "There are 40 customers in `customers`.",
+    "sql_code": "SELECT COUNT(*) FROM customers",
+    "sql_columns": [],
+    "custom_analyses_used": [],
+    "sql_response_from_db": ['[{"count":40}]'],
+}
+
+
+def test_sql_english_answer_gets_a_korean_translation_event(client, monkeypatch):
+    c, _settings, app, _llm, _embed = client
+    llm = TranslatingLLM()
+    app.state.playground.llm_factory = lambda: llm
+    _english_upstream(monkeypatch, ENGLISH_ANSWER)
+    events = _sse(c.post(f"{API}/sql", json={"question": "고객은 몇 명인가요?"}).text)
+    names = [n for n, _ in events]
+    assert names == ["meta", "step", "step", "result", "translation", "translation", "done"]
+    # the upstream result is relayed untouched, before the translation
+    assert events[3][1]["answer"] == ENGLISH_ANSWER and events[3][1]["answer_kind"] == "sql"
+    assert events[4][1] == {"type": "translation", "phase": "start", "target": "ko"}
+    assert events[5][1] == {
+        "type": "translation",
+        "phase": "end",
+        "answer": {"response_ko": "고객은 40명입니다."},
+    }
+    # one call, a small budget, the instruction keeps identifiers and numbers
+    assert len(llm.messages) == 1 and llm.kwargs == [{"max_tokens": 1024}]
+    system, user = llm.messages[0]
+    assert "Korean" in system["content"] and "column names" in system["content"]
+    assert user["content"] == ENGLISH_ANSWER["response"]
+
+
+def test_sql_korean_or_english_question_is_not_translated(client, monkeypatch):
+    c, _settings, app, _llm, _embed = client
+    llm = TranslatingLLM()
+    app.state.playground.llm_factory = lambda: llm
+    _english_upstream(monkeypatch, ENGLISH_ANSWER)
+    events = _sse(c.post(f"{API}/sql", json={"question": "How many customers?"}).text)
+    assert "translation" not in [n for n, _ in events] and llm.messages == []
+    _english_upstream(monkeypatch, {**ENGLISH_ANSWER, "response": "고객은 40명입니다."})
+    events = _sse(c.post(f"{API}/sql", json={"question": "고객은 몇 명인가요?"}).text)
+    assert "translation" not in [n for n, _ in events] and llm.messages == []
+
+
+class FailingLLM(FakeLLM):
+    async def stream(self, messages, **kw):
+        self.messages.append(messages)
+        yield "부분"
+        raise LLMError(502, "provider_error", "token=sk-secret-value broke")
+
+
+class EnglishLLM(FakeLLM):
+    async def stream(self, messages, **kw):
+        yield "There are 40 customers."
+
+
+def test_sql_translation_failure_is_skipped_silently(client, monkeypatch, caplog):
+    c, _settings, app, _llm, _embed = client
+    _english_upstream(monkeypatch, ENGLISH_ANSWER)
+    for bad in (FailingLLM(), EnglishLLM()):
+        app.state.playground.llm_factory = lambda bad=bad: bad
+        with caplog.at_level(logging.WARNING, logger="autoontology.web"):
+            events = _sse(c.post(f"{API}/sql", json={"question": "고객은 몇 명인가요?"}).text)
+        names = [n for n, _ in events]
+        assert names[-3:] == ["translation", "translation", "done"] and "error" not in names
+        assert events[-2][1] == {"type": "translation", "phase": "end", "skipped": True}
+        assert events[3][1]["answer"] == ENGLISH_ANSWER
+    assert "sk-secret-value" not in caplog.text and "translation skipped" in caplog.text
+
+    def unsupported():
+        raise LLMError(400, "provider_unsupported", "not routed")
+
+    app.state.playground.llm_factory = unsupported
+    events = _sse(c.post(f"{API}/sql", json={"question": "고객은 몇 명인가요?"}).text)
+    assert [n for n, _ in events][-2:] == ["translation", "done"]
+    assert events[-2][1]["skipped"] is True
+
+
+def test_sql_translation_times_out(client, monkeypatch):
+    c, _settings, app, _llm, _embed = client
+
+    class SlowLLM(FakeLLM):
+        async def stream(self, messages, **kw):
+            import anyio
+
+            await anyio.sleep(5)
+            yield "늦은 답"
+
+    app.state.playground.llm_factory = lambda: SlowLLM()
+    monkeypatch.setattr(playground_api, "TRANSLATE_TIMEOUT_S", 0.05)
+    _english_upstream(monkeypatch, ENGLISH_ANSWER)
+    events = _sse(c.post(f"{API}/sql", json={"question": "고객은 몇 명인가요?"}).text)
+    assert events[-2][1] == {"type": "translation", "phase": "end", "skipped": True}
+
+
+@pytest.mark.parametrize("value", ["0", "false", "off"])
+def test_sql_translation_can_be_turned_off(client, monkeypatch, value):
+    c, _settings, app, _llm, _embed = client
+    llm = TranslatingLLM()
+    app.state.playground.llm_factory = lambda: llm
+    monkeypatch.setenv("AUTOONTOLOGY_SQL_TRANSLATE", value)
+    _english_upstream(monkeypatch, ENGLISH_ANSWER)
+    events = _sse(c.post(f"{API}/sql", json={"question": "고객은 몇 명인가요?"}).text)
+    assert "translation" not in [n for n, _ in events] and llm.messages == []
+
+
+@pytest.mark.anyio
+async def test_router_stream_sends_max_tokens_only_when_asked():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        text = (
+            f"data: {json.dumps({'choices': [{'delta': {'content': '네'}}]})}\n\ndata: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=text, headers={"content-type": "text/event-stream"})
+
+    llm = RouterLLM(
+        "http://svc",
+        "claude/sonnet",
+        provider="claude",
+        model="sonnet",
+        transport=httpx.MockTransport(handler),
+    )
+    msgs = [{"role": "user", "content": "q"}]
+    assert [t async for t in llm.stream(msgs)] == ["네"]
+    assert [t async for t in llm.stream(msgs, max_tokens=64)] == ["네"]
+    assert "max_tokens" not in bodies[0] and bodies[1]["max_tokens"] == 64
+
+
+def _upstream(monkeypatch, events):
+    def handler(request):
+        text = "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
+        return httpx.Response(200, text=text, headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(playground_api, "UPSTREAM_TRANSPORT", httpx.MockTransport(handler))
+
+
+NO_SQL = {
+    "sql_code": "",
+    "sql_columns": [],
+    "custom_analyses_used": [],
+    "sql_response_from_db": None,
+}
+
+
+def test_sql_result_is_tagged_information_or_unconstructable(client, monkeypatch):
+    c, _settings, _app, _llm, _embed = client
+    react = {"type": "step", "phase": "end", "node": "react_sql_agent", "thought": "x"}
+    _upstream(
+        monkeypatch,
+        [react, {"type": "result", "answer": {**NO_SQL, "response": "연체는 30일 후입니다."}}],
+    )
+    events = _sse(c.post(f"{API}/sql", json={"question": "연체 규칙은?"}).text)
+    result = next(d for n, d in events if n == "result")
+    assert result["answer_kind"] == "information" and result["answer"]["sql_code"] == ""
+    _upstream(
+        monkeypatch,
+        [
+            react,
+            {"type": "step", "phase": "start", "node": "unconstructable_sql_response"},
+            {"type": "step", "phase": "end", "node": "unconstructable_sql_response"},
+            {"type": "result", "answer": {**NO_SQL, "response": "질문에 맞는 표가 없습니다."}},
+        ],
+    )
+    events = _sse(c.post(f"{API}/sql", json={"question": "날씨는?"}).text)
+    result = next(d for n, d in events if n == "result")
+    assert result["answer_kind"] == "unconstructable"
