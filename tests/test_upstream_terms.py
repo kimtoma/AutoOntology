@@ -405,3 +405,93 @@ def test_remove_synonyms_keeps_a_legacy_manual_whitespace_variant(upstream_env, 
     out = ut.remove_term_synonyms(upstream_env, "t1", ["계약 서"])
     assert out["synonyms"] == ["계약  서"]
     assert out["removed"] == ["계약 서"]
+
+
+def test_reset_also_deletes_the_database_term_families(upstream_env):
+    """Engine 1.3 adds ``term_family`` (migration 7d864cacef9c), scoped by schema. Our
+    semantic reset relies on ``delete_semantic_layer`` deleting them for the database (it
+    does since 1.3); our own orphan-Term delete only reaches Terms no table links, whose
+    family links cascade (``term__term_family`` ON DELETE CASCADE)."""
+    reset = _src("dal/reset.py")
+    scoped = _functions("dal/reset.py")["_delete_scoped_semantic"]
+    assert "s.term_family" in ast.unparse(scoped)
+    assert "s.term_family," in reset  # the unscoped wipe too
+    from auto_ontology.dal import schema as sch
+
+    [fk] = [f for f in sch.term__term_family.foreign_keys if f.column.table.name == "term"]
+    assert fk.ondelete == "CASCADE"
+
+
+def _plans(tmp_path, files):
+    import duckdb
+
+    from autoontology.structured.loaders import discover_files, read_tables
+
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    return {p.name: p for p in read_tables(discover_files(tmp_path), duckdb.connect(), [])}
+
+
+def test_hangul_tables_get_distinct_non_empty_term_names(upstream_env, tmp_path):
+    """Upstream 5fc3e2b2: ``to_term_name`` split on ``[^A-Za-z0-9]+``, so a table our loader
+    named ``고객`` got the Term name "" (never embedded, never retrieved) and the next one
+    collided as " (db.schema.table)"; Korean LLM labels were rejected the same way. Our
+    loader keeps Hangul table names, so the fallback name and the label check must keep
+    them, and the snapshot we build the ontology from must carry distinct names."""
+    from auto_ontology.semantic.deterministic import to_term_name
+    from auto_ontology.semantic.term_extractor import _normalize_label
+
+    from autoontology.store.db import Source
+    from autoontology.structured.semantic import fetch_snapshot
+
+    plans = _plans(tmp_path, {"고객.csv": "id\n1\n", "주문 내역.csv": "id\n1\n"})
+    assert set(plans) == {"고객", "주문_내역"}
+    names = {table: to_term_name(table) for table in plans}
+    assert names == {"고객": "고객", "주문_내역": "주문 내역"}
+    assert _normalize_label("고객", fallback="x") == "고객"  # an LLM label in Korean is kept
+
+    class Client:
+        def database_id_by_name(self, name):
+            return "db1"
+
+        def semantic_graph(self, database_id=None):
+            return {"nodes": [{"id": t, "name": n} for t, n in names.items()], "links": []}
+
+        def schemas(self, database_id):
+            return [{"id": "s1", "schema_name": "public"}]
+
+        def get_term(self, term_id):
+            table = {"id": f"tb-{term_id}", "name": term_id, "schema_id": "s1"}
+            return {"id": term_id, "name": names[term_id], "tables": [table]}
+
+        def term_column_attributes(self, term_id):
+            return []
+
+        def table_columns(self, table_id):
+            return []
+
+    src = Source("id", "k", "files", "{}", "autoontology_src_k", "db1", "", "")
+    snap = fetch_snapshot(Client(), src)
+    term_names = [t.name for t in snap.terms]
+    assert all(term_names) and sorted(term_names) == ["고객", "주문 내역"]
+
+
+def test_table_with_an_empty_key_column_is_kept(upstream_env, tmp_path):
+    """Upstream 67f5bd54: a key column with no values made the ascending distinct-value
+    probe raise IndexError (Postgres returns a frame without columns) and compile skipped
+    the whole table. Our loader writes an all-empty CSV column as a column of NULLs, so
+    such a table reaches the probe; it must answer ``[]`` rather than raise."""
+    from unittest.mock import MagicMock
+
+    import pandas as pd
+    from auto_ontology.semantic.visit_enter import probe_ascending_distinct_values
+
+    plans = _plans(tmp_path, {"계약.csv": "계약id,금액\n,100\n,200\n"})
+    assert [c.name for c in plans["계약"].columns] == ["계약id", "금액"]
+    connector = MagicMock()
+    connector.dialect = "postgres"
+    connector.supports_statement_timeout = False
+    connector.qualify.side_effect = lambda schema, table: f'"{schema}"."{table}"'
+    for frame in (pd.DataFrame(), pd.DataFrame({"계약id": []})):
+        connector.execute.return_value = frame
+        assert probe_ascending_distinct_values(connector, "public", "계약", "계약id") == []

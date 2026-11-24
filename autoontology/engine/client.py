@@ -145,6 +145,13 @@ class BackendClient:
         data = self._json("GET", f"/api/schemas/{quote(database_id, safe='')}") or {}
         return data.get("schemas") or []
 
+    def table_columns(self, table_id: str) -> list[dict[str, Any]]:
+        """Catalog columns of one table (``column_name``, ``data_type``, ``description``,
+        ...). ``description`` is the column's own text, falling back to its attribute's
+        (``dal/sql_fragments.py`` ``column_description_expr``)."""
+        data = self._json("GET", f"/api/columns/{quote(table_id, safe='')}") or {}
+        return (data.get("data") or {}).get("columns") or []
+
     def patch_term(self, term_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._json("PATCH", f"/api/terms/{quote(term_id, safe='')}", json=payload)["data"]
 

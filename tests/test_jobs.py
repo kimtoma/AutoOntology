@@ -67,6 +67,9 @@ class FakeClient:
             }
         ]
 
+    def table_columns(self, table_id):
+        return []
+
     def list_terms(self, **params):
         return {"data": [], "count": 0, "total": 4}
 

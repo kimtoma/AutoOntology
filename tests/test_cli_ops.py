@@ -443,6 +443,34 @@ def test_playground_sql_relays_steps_and_result(isolated_env, monkeypatch):
     )
 
 
+def test_playground_sql_prints_an_informational_answer_without_sql(isolated_env, monkeypatch):
+    # engine 1.3's ReAct agent answers questions that need no query with sql_code "" and
+    # sql_response_from_db None (text_to_sql/react/agent.py "information_answer")
+    _mock(
+        monkeypatch,
+        lambda r: _sse(
+            ("step", {"phase": "start", "node": "react_sql_agent", "thought": None}),
+            ("step", {"phase": "end", "node": "format_and_respond", "thought": None}),
+            (
+                "result",
+                {
+                    "answer": {
+                        "response": "고객 테이블에는 이름과 등급이 있습니다",
+                        "sql_code": "",
+                        "sql_columns": [],
+                        "custom_analyses_used": [],
+                        "sql_response_from_db": None,
+                    }
+                },
+            ),
+            ("done", {}),
+        ),
+    )
+    res = _ok(["playground", "sql", "고객 테이블에는 무엇이 있나요?"])
+    assert "고객 테이블에는 이름과 등급이 있습니다" in res.stdout
+    assert "SQL:" not in res.stdout and "[react_sql_agent]" in res.output
+
+
 def test_playground_sql_tabulates_upstreams_result_envelope(isolated_env, monkeypatch):
     # upstream's sql_response_from_db is a list of JSON-records strings and sql_columns
     # are semantic-layer column ids: the table takes its headers from the records

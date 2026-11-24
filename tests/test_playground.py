@@ -922,8 +922,9 @@ def test_sql_passthrough_relays_events_and_handles_storage_and_409(client, monke
             {
                 "type": "step",
                 "phase": "start",
-                "node": "question_intent",
-                "label": "Classifying the question",
+                # engine 1.3 ReAct pipeline node names (text_to_sql/node_labels.py)
+                "node": "react_sql_agent",
+                "label": "Searching the data and writing SQL",
             },
             {
                 "type": "result",

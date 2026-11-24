@@ -216,6 +216,9 @@ class FakeClient:
     def term_column_attributes(self, term_id):
         return copy.deepcopy(self.attrs[term_id])
 
+    def table_columns(self, table_id):
+        return copy.deepcopy(getattr(self, "columns", {}).get(table_id, []))
+
     def patch_term(self, term_id, payload):
         self.patches.append((term_id, payload))
         self.terms[term_id].update(payload)
@@ -487,6 +490,30 @@ def test_snapshot_derives_semantic_fks_from_referenced_columns():
         "public.contracts.고객id",
     )
     assert snap.term_map()["t-customer"].attributes[0]["schema"] == "public"
+
+
+def test_snapshot_prefers_the_column_text_over_the_engine_attribute_sentence():
+    """Engine 1.3 (``semantic/attribute_descriptions.py``) writes a new English sentence
+    onto every ColumnAttribute and, by its prompt, never copies the column's own text.
+    Before 1.3 the attribute carried the column's description (a source comment or the
+    compiler's column description), often Korean. The snapshot keeps that: the catalog
+    column text (``GET /api/columns/{table_id}``, which itself falls back to the
+    attribute's) first, the engine's attribute sentence only when the column has none."""
+    from autoontology.store.db import Source
+    from autoontology.structured.semantic import fetch_snapshot
+
+    client = FakeClient()
+    client.attrs["t-contract"][0]["description"] = "Identifies the contract."
+    client.attrs["t-customer"][0]["description"] = "Identifies the customer."
+    client.columns = {
+        "tb-c": [{"column_name": "계약id", "description": "계약 식별자"}],
+        "tb-k": [{"column_name": "고객id", "description": "  "}],
+    }
+    src = Source("id", "hanbit", "files", "{}", "autoontology_src_hanbit", "db1", "", "")
+    snap = fetch_snapshot(client, src)
+    terms = snap.term_map()
+    assert terms["t-contract"].attributes[0]["description"] == "계약 식별자"
+    assert terms["t-customer"].attributes[0]["description"] == "Identifies the customer."
 
 
 def test_attribute_and_column_concepts_are_never_same():

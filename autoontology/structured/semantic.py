@@ -108,16 +108,34 @@ def fetch_snapshot(client: BackendClient, source: Source) -> StructuredSnapshot:
         graph_links=len(graph.get("links") or []),
     )
     table_owner: dict[str, str] = {}
+    column_texts: dict[str, dict[str, str]] = {}
+
+    def column_text(table_id: Any, column: Any) -> str:
+        # Engine 1.3 writes a generated English sentence onto every ColumnAttribute
+        # (semantic/attribute_descriptions.py) that never copies the column's own text.
+        # Keep the pre-1.3 output: the column's description (a source comment or the
+        # compiler's column description) first, the attribute sentence as the fallback.
+        if not table_id:
+            return ""
+        key = str(table_id)
+        if key not in column_texts:
+            column_texts[key] = {
+                str(c.get("column_name")): str(c.get("description") or "").strip()
+                for c in client.table_columns(key)
+            }
+        return column_texts[key].get(str(column or ""), "")
+
     for node in sorted(graph.get("nodes") or [], key=lambda n: str(n.get("name"))):
         detail = client.get_term(str(node["id"]))
         attrs = []
         for a in client.term_column_attributes(str(node["id"])):
             primary = _column(a.get("primary_column"), schemas)
+            description = column_text(primary["table_id"], primary["column"])
             attrs.append(
                 {
                     "id": a.get("id"),
                     "name": a.get("name") or a.get("source_column") or "",
-                    "description": a.get("description") or "",
+                    "description": description or (a.get("description") or "").strip(),
                     "source_column": a.get("source_column") or "",
                     "datatype": a.get("datatype"),
                     **{k: primary[k] for k in ("table_id", "table", "schema", "column")},

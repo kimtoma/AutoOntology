@@ -71,3 +71,22 @@ def test_unreachable_is_backend_unavailable():
 
     with pytest.raises(BackendUnavailable, match="autoontology up"):
         make(handler).health()
+
+
+def test_table_columns_reads_the_catalog_column_route():
+    """``GET /api/columns/{table_id}`` (``server/datasources/router.py``, mounted under
+    ``/api``) answers ``{"data": {"columns": [...]}, "count": 1, "total"}``; a missing table
+    is ``{"columns": []}``, never ``data: null``."""
+    seen = []
+
+    def handler(req):
+        seen.append(req.url.raw_path)
+        if req.url.raw_path.endswith(b"empty"):
+            return httpx.Response(200, json={"data": {"columns": []}, "count": 1, "total": 0})
+        cols = [{"column_name": "고객id", "description": "고객 식별자"}]
+        return httpx.Response(200, json={"data": {"columns": cols}, "count": 1, "total": 1})
+
+    c = make(handler)
+    assert c.table_columns("t 1") == [{"column_name": "고객id", "description": "고객 식별자"}]
+    assert c.table_columns("empty") == []
+    assert seen[0] == b"/api/columns/t%201"

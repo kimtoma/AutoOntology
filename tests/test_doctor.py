@@ -374,3 +374,21 @@ def test_no_think_remedy_names_an_existing_setup_flag(monkeypatch):
     check = doctor.check_no_think(Settings.from_env())
     assert check.status == "FAIL"
     assert check.remedy == "uv run autoontology setup --force-alias"
+
+
+def test_vendored_migrations_have_one_head_at_the_engine_13_revision():
+    """Engine c96048c4 (1.3.x) adds 7d864cacef9c (term_family) -> 84dd4f50dbba
+    (catalog_column.distinct_ratio) -> caee572fa81c (catalog_column.distinct_values) on top
+    of 99d4d343dd0b. Doctor compares the catalog against this head, so an existing install
+    reports `alembic` WARN until `autoontology setup` upgrades it. Pinned so the next engine
+    bump notices new migrations."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    from autoontology.engine.migrate import VENDOR_DIR, head_revision
+
+    assert head_revision() == "caee572fa81c"
+    config = Config(str(VENDOR_DIR / "alembic.ini"))
+    config.set_main_option("script_location", str(VENDOR_DIR / "alembic"))
+    chain = [r.revision for r in ScriptDirectory.from_config(config).walk_revisions()][:4]
+    assert chain == ["caee572fa81c", "84dd4f50dbba", "7d864cacef9c", "99d4d343dd0b"]
