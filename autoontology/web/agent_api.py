@@ -290,7 +290,10 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], type[_Args]]] = [
         "optional exact column filters. Values include edits made by actions; edited "
         "properties are marked (conflict: the source changed after the edit).",
         {
-            "type": {"type": "string", "description": "Object type name, e.g. term-t-1."},
+            "type": {
+                "type": "string",
+                "description": "Object type: its name (term-...), label or table, e.g. invoices.",
+            },
             "query": {"type": "string", "maxLength": 200, "description": "Key or title text."},
             "filters": {
                 "type": "object",
@@ -309,7 +312,7 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], type[_Args]]] = [
         "links to other object types, the edit history and the values of the type's "
         "active functions (computed).",
         {
-            "type": {"type": "string", "description": "Object type name."},
+            "type": {"type": "string", "description": "Object type: name, label or table."},
             "key": {"type": "string", "description": "The object's key value."},
         },
         GetObjectArgs,
@@ -318,7 +321,12 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], type[_Args]]] = [
         "list_functions",
         "List the active functions: computed values and yes/no checks defined on an object "
         "type (name, description, result type, parameters and the expression).",
-        {"type": {"type": "string", "description": "Only this object type (name or label)."}},
+        {
+            "type": {
+                "type": "string",
+                "description": "Only this object type (name, label or table).",
+            }
+        },
         ListFunctionsArgs,
     ),
     (
@@ -341,7 +349,12 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], type[_Args]]] = [
         "list_actions",
         "List the active actions: operations on objects of a type (parameters, "
         "preconditions, the properties they set, approval and agent policy). Read-only.",
-        {"type": {"type": "string", "description": "Only this object type (name or label)."}},
+        {
+            "type": {
+                "type": "string",
+                "description": "Only this object type (name, label or table).",
+            }
+        },
         ListActionsArgs,
     ),
     (

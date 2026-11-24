@@ -13,7 +13,7 @@
   trigger:
     schedule: daily 02:00
   for_each:
-    object_type: 청구
+    object_type: invoices
     where: 연체여부()
   max_objects: 500
   steps:

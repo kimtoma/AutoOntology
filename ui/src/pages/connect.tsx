@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, FolderOpen, KeyRound, Loader2, Plus, Plug, RotateCw, Trash2 } from "lucide-react"
+import { AlertTriangle, Download, FolderOpen, KeyRound, Loader2, Plus, Plug, RotateCw, Sparkles, Trash2 } from "lucide-react"
 import { useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import { toast } from "sonner"
 
@@ -478,6 +478,40 @@ function UsageCard({ usage }: { usage: AgentUsage }) {
 
 /* --- page --------------------------------------------------------------------------------- */
 
+/** Export the active logic as an Agent Skill zip (logic.read). */
+function SkillCard() {
+  const can = useCan("logic.read")
+  const denied = useDenied("logic.read")
+  return (
+    <Card className="gap-3 py-4" id="connect-skill">
+      <CardHeader className="flex flex-wrap items-start justify-between gap-2 px-4">
+        <div className="grid min-w-0 gap-1.5">
+          <CardTitle className="flex items-center gap-2 text-base"><Sparkles className="size-4" aria-hidden /> {t("connect.skill")}</CardTitle>
+          <CardDescription>{t("connect.skill.hint")}</CardDescription>
+        </div>
+        {can ? (
+          <Button asChild size="sm" variant="outline">
+            <a href={api.logic.skillZipUrl()} download id="btn-skill-export">
+              <Download aria-hidden /> {t("connect.skill.export")}
+            </a>
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" disabled title={denied} id="btn-skill-export">
+            <Download aria-hidden /> {t("connect.skill.export")}
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="px-4">
+        <ul className="grid gap-1 text-sm text-muted-foreground" id="connect-skill-contents">
+          <li><code>SKILL.md</code> {t("connect.skill.md")}</li>
+          <li><code>mcp.json</code> {t("connect.skill.mcp")}</li>
+          <li><code>definitions/</code> {t("connect.skill.defs")}</li>
+        </ul>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function ConnectPage() {
   const qc = useQueryClient()
   const tools = useQuery({ queryKey: keys.agentTools, queryFn: api.agent.tools, staleTime: Infinity })
@@ -561,6 +595,8 @@ export default function ConnectPage() {
             </CardContent>
           </Card>
         )}
+
+        <SkillCard />
 
         {tools.data && <ToolsCard tools={tools.data.tools} protocol={tools.data.protocol} writeTools={tools.data.write_tools ?? []} />}
         {usage.data && <UsageCard usage={usage.data} />}

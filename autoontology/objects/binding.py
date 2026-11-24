@@ -31,7 +31,7 @@ from autoontology.store.objects import ObjectType
 logger = logging.getLogger(__name__)
 
 #: A column whose (lower-cased) name contains one of these is preferred as the title.
-TITLE_HINTS: tuple[str, ...] = ("명", "이름", "제목", "name", "title", "label")
+TITLE_HINTS: tuple[str, ...] = ("명", "이름", "제목", "name", "title", "label", "subject")
 SNAPSHOT_REASON = "snapshot: "
 SOURCE_REASON = "source: "
 
@@ -171,15 +171,16 @@ def infer_key(
 
 
 def infer_title(columns: list[dict[str, str]], key: str) -> str:
-    """The first text column that is not the key nor key-like, preferring a name-like
-    one (:data:`TITLE_HINTS`); "" when there is none."""
+    """The first name-like text column (:data:`TITLE_HINTS`) that is not the key nor
+    key-like; "" when there is none (the object's key is its title then) -- a status or
+    code column would make a poor title."""
     text = [
         c["name"]
         for c in columns
         if c["name"] != key and is_text(c.get("type", "")) and not id_like(c["name"])
     ]
     preferred = [c for c in text if any(h in c.lower() for h in TITLE_HINTS)]
-    return (preferred or text or [""])[0]
+    return (preferred or [""])[0]
 
 
 def proposal(candidate: Candidate, revision: int | None) -> ObjectType:

@@ -82,6 +82,19 @@ class ObjectType:
     def column_names(self) -> list[str]:
         return [str(c.get("name")) for c in self.columns if c.get("name")]
 
+    def names(self) -> Any:
+        """The names this type answers to (:mod:`autoontology.objects.naming`)."""
+        from autoontology.objects.naming import TypeNames
+
+        return TypeNames(
+            name=self.class_local,
+            id=self.id,
+            label=self.label,
+            schema=self.schema,
+            table=self.table,
+            status=self.status,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,

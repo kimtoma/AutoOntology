@@ -67,6 +67,9 @@ MESSAGES: dict[str, str] = {
     "help.exports.path": "File inside the folder, e.g. report.md or okf/validation.json.",
     "help.exports.get": "Save one export file.",
     "help.exports.out": "Target file (or directory).",
+    "help.skill": "Agent skills: export the active logic as an Agent Skill bundle.",
+    "help.skill.export": "Save the active functions, actions and workflows as an Agent Skill zip (SKILL.md, mcp.json, definitions/).",
+    "help.skill.export.out": "Target .zip file or directory (default: autoontology-<project>.zip here).",
     "help.exports.zip": "Save the whole export folder as one zip.",
     "help.exports.zip.out": "Target .zip file (or directory: autoontology-r<rev>.zip).",
     "help.playground": (
@@ -282,7 +285,7 @@ MESSAGES: dict[str, str] = {
     "help.object": "Objects: the rows of classes bound to a source table (types, bind, list, get).",
     "help.object.types": "List the object types: proposed, active, broken and retired.",
     "help.object.types.status": "Only this status (proposed, active, broken, retired).",
-    "help.object.type": "Object type: its name (term-...) or its label.",
+    "help.object.type": "Object type: its name (term-...), label or table.",
     "help.object.bind": "Bind an object type: key and title columns, verified on the source; the type becomes active.",
     "help.object.bind.key": "The key column (unique, never empty; default: keep or infer).",
     "help.object.bind.title": 'The title column ("" for none; default: keep or infer).',

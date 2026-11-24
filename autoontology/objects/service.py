@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any
 
-from autoontology.objects import binding, overlay, reader
+from autoontology.objects import binding, naming, overlay, reader
 from autoontology.objects.reader import MAX_PAGE, ObjectError, TableQuery
 from autoontology.store.objects import ObjectType
 
@@ -44,12 +44,25 @@ def list_types(
 
 
 def find_type(view: Any, name: str) -> ObjectType:
-    """The type *name* (its class's local name or id), synced; 404 ``unknown_object_type``."""
+    """The type *name* names (:mod:`~autoontology.objects.naming`: id, class name, label,
+    table), synced; 404 ``unknown_object_type``, 409 ``ambiguous_object_type`` (with the
+    ``candidates``)."""
     binding.ensure_synced(view)
-    found = view.object_types().get(name) if name and len(name) <= 200 else None
-    if found is None:
+    types = view.object_types()
+    exact = types.get(name) if name and len(name) <= naming.MAX_REF else None
+    if exact is not None:
+        return exact
+    found = naming.matches(types.list(), name, lambda t: t.names())
+    if not found:
         raise ObjectError(404, "unknown_object_type", f"no object type {name[:80]!r}")
-    return found
+    if len(found) > 1:
+        raise ObjectError(
+            409,
+            "ambiguous_object_type",
+            f"{name[:80]!r} names {len(found)} object types: use the name (term-...) or the table",
+            candidates=[naming.describe(t.names()) for t in found],
+        )
+    return found[0]
 
 
 def readable_type(view: Any, name: str) -> ObjectType:

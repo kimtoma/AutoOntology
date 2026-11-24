@@ -20,7 +20,9 @@ aliases), over :mod:`autoontology.logic.registry` and :mod:`autoontology.logic.f
 * ``GET /logic/candidates?ready=&status=`` -- the candidates a ``logic`` run proposed, as
   review inbox items (``logic.read``; ``status`` pending (default) | decided | all,
   ``ready`` true: only valid ones, false: only those that need an edit). They are decided
-  through the review routes (``POST /review/lg:<id>/decision``, ``logic.edit``).
+  through the review routes (``POST /review/lg:<id>/decision``, ``logic.edit``);
+* ``GET /logic/skill.zip`` -- the active definitions as an Agent Skill bundle
+  (:mod:`autoontology.logic.skills`; ``logic.read``, audited ``skill.export``).
 
 ``spec`` is a mapping or YAML/JSON text. Writes are audited (``logic.save``,
 ``logic.status``).
@@ -30,7 +32,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from autoontology.logic import functions, registry
@@ -109,6 +111,25 @@ def add_logic_routes(router: APIRouter, api: Any, ctx_dep: Any) -> None:
         object_call(lambda: registry.ensure_validated(ctx.store))
         defs = ctx.store.logic_defs().list(kind, status)
         return {"definitions": [d.to_dict() for d in defs]}
+
+    @router.get("/logic/skill.zip")
+    def logic_skill(ctx: ProjectContext = Ctx) -> Response:
+        """The active definitions as an Agent Skill bundle
+        (:func:`autoontology.logic.skills.build_skill`). Sync: runs in the threadpool."""
+        from autoontology.logic import skills
+
+        ctx.require("logic.read")
+        bundle = object_call(lambda: skills.build_skill(ctx.store))
+        data = bundle.zip_bytes()
+        ctx.audit("skill.export", target=bundle.name, detail=dict(bundle.counts))
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{bundle.name}.zip"',
+                "Cache-Control": "no-store",
+            },
+        )
 
     @router.get("/logic/candidates")
     def logic_candidates(

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -393,7 +394,7 @@ def test_candidates_of_the_quickstart_snapshot():
     assert {k: p.title_column for k, p in proposals.items()} == {
         CON: "계약명",
         CUS: "고객명",
-        INV: "수납상태",
+        INV: "",  # no name-like column: the key is the title (not 수납상태)
     }
     links = {(link["direction"], link["target"], link["column"]) for link in con.links}
     assert links == {("out", CUS, "고객id"), ("in", INV, "계약id")}
@@ -820,6 +821,31 @@ def test_object_routes(client, backend):
 
     bound = Accounts(store).list_audit(action="object.bind")
     assert len(bound) >= 3 and bound[0]["target"] in (CON, CUS, INV)
+
+
+def test_object_types_are_named_by_id_class_label_or_table(client, backend):
+    """One resolver for every route: id, class name, label (exact, any case), table."""
+    c, settings, store = client
+    seed(store)
+    for name in (CON, CUS, INV):
+        assert c.put(f"{API}/objects/types/{name}", json={}).status_code == 200
+    ot_id = c.get(f"{API}/objects/types/{INV}").json()["type"]["id"]
+    assert ot_id.startswith("ot_")
+    for ref in (INV, ot_id, "청구", "invoices", "public.invoices", "INVOICES"):
+        resp = c.get(f"{API}/objects/{ref}", params={"limit": 1})
+        assert resp.status_code == 200, ref
+        assert resp.json()["type"]["name"] == INV
+        assert c.get(f"{API}/objects/{ref}/INV-1").json()["key"] == "INV-1"
+        assert c.get(f"{API}/objects/types/{ref}").json()["type"]["name"] == INV
+    assert c.get(f"{API}/objects/types/nope").json()["error"] == "unknown_object_type"
+    # two types with the same label: 409 with the candidates
+    types = store.project().object_types()
+    other = types.get(CUS)
+    types.save(replace(other, label="청구"))
+    amb = c.get(f"{API}/objects/청구")
+    assert amb.status_code == 409 and amb.json()["error"] == "ambiguous_object_type"
+    assert {x["name"] for x in amb.json()["candidates"]} == {CUS, INV}
+    assert c.get(f"{API}/objects/invoices", params={"limit": 1}).status_code == 200
 
 
 def test_off_mode_reads_and_binds_without_a_role(client, backend):

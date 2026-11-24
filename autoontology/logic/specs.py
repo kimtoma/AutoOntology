@@ -6,7 +6,7 @@ A spec is a mapping with ``kind: function | action | workflow``::
 
     kind: function
     name: 미수금
-    object_type: 청구              # an object type: its label or class name (term-...)
+    object_type: invoices          # an object type: its table, label or class name (term-...)
     returns: number               # number | text | bool | date
     expr: 청구금액 - coalesce(수납금액, 0)
 
@@ -41,6 +41,7 @@ from pydantic import (
 
 from autoontology.logic import expr as ex
 from autoontology.logic.schema import Schema, TypeInfo
+from autoontology.objects import naming
 
 KINDS: tuple[str, ...] = ("function", "action", "workflow")
 ROLES: tuple[str, ...] = ("viewer", "reviewer", "editor", "owner")
@@ -440,6 +441,15 @@ class LogicContext:
 
 def _type_error(path: str, ref: str, ctx: LogicContext) -> dict[str, Any]:
     t = ctx.schema.resolve(ref)
+    if t is None and len(found := ctx.schema.candidates(ref)) > 1:
+        names = ", ".join(
+            f"{x.label} ({naming.describe(x.names())['table'] or x.name})" for x in found
+        )
+        return _err(
+            path,
+            "ambiguous_object_type",
+            f"{ref!r} names several object types ({names}): use the table or the name",
+        )
     if t is None:
         known = ", ".join(
             sorted(x.label for x in ctx.schema.types.values() if x.status == "active")
@@ -644,7 +654,14 @@ def _validate_action(spec: ActionSpec, ctx: LogicContext, c: _Checker) -> None:
         c.notify(f"notify[{i}]", n, scope)
     if spec.approval.when is not None:
         if spec.approval.role == "none":
-            c.errors.append(_err("approval.when", "schema", "approval.when needs approval.role"))
+            c.errors.append(
+                _err(
+                    "approval.when",
+                    "schema",
+                    "approval.when is set but approval.role is none; choose reviewer or "
+                    "owner (or remove approval.when)",
+                )
+            )
         c.expr("approval.when", spec.approval.when, scope, "bool")
 
 

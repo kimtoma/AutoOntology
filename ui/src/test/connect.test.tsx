@@ -111,6 +111,18 @@ describe("Connect page", () => {
     expect(document.querySelector("[data-usage-tool=get_concept]")).not.toBeNull()
   })
 
+  it("offers the agent skill as a zip download without a token", async () => {
+    mockFetch(routes())
+    renderPage(<ConnectPage />)
+    const link = await screen.findByRole("link", { name: /Export skill/ })
+    expect(link.getAttribute("href")).toBe("/api/logic/skill.zip")
+    expect(link.hasAttribute("download")).toBe(true)
+    const card = document.querySelector("#connect-skill") as HTMLElement
+    expect(within(card).getByText("SKILL.md")).toBeInTheDocument()
+    expect(within(card).getByText(/replace \{\{AUTOONTOLOGY_URL\}\} and <token>/)).toBeInTheDocument()
+    expect(card.textContent).not.toContain("aok_")
+  })
+
   it("offers to create the first token when there is none", async () => {
     mockFetch(routes([]))
     renderPage(<ConnectPage />)

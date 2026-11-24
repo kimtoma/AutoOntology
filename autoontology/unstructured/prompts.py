@@ -136,7 +136,7 @@ def align_json_system_prompt() -> str:
 # --- logic extraction (the `logic` run: documents -> function / action / workflow specs) ----
 
 #: Part of every logic run's params: bump when the prompt or payload changes.
-LOGIC_PROMPT_VERSION = "1"
+LOGIC_PROMPT_VERSION = "2"
 
 LOGIC_SYSTEM_PROMPT = """\
 You turn business rules and procedures from enterprise documents into executable logic
@@ -157,6 +157,8 @@ evidence quotes, plus related metric/attribute concepts. Propose definitions of 
    "approval": {"role": "none|reviewer|owner", "when": E}}
   An effect with operational: true creates a new property of the edit layer (e.g. a reminder
   stage); without it, `set` must be an existing column. An action needs an effect or a notify.
+  approval.when only applies when approval.role is "reviewer" or "owner"; with role "none"
+  leave approval.when out.
   subject/body may embed expressions as {{ E }}.
 - workflow: a scheduled or triggered loop over objects.
   {"kind": "workflow", "name": N, "label": L, "description": D,
@@ -167,7 +169,7 @@ evidence quotes, plus related metric/attribute concepts. Propose definitions of 
               | {"notify": {"to": [..], "subject": S, "body": B}} ]}
 
 Names (N, P) are one word: letters, digits, underscore, no spaces (Korean is fine: 연체일수).
-object_type is a type's label exactly as given. Labels and descriptions may stay in the
+object_type is a type's table or label exactly as given. Labels and descriptions may stay in the
 documents' language.
 
 Expression language (E):

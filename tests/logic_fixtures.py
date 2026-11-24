@@ -107,25 +107,31 @@ def _attrs(table: str, rows: list[dict[str, Any]], skip: tuple[str, ...] = ()) -
     ]
 
 
-def snapshot() -> StructuredSnapshot:
+#: the class labels of a build that named its classes in English
+ENGLISH = {"계약": "Contract", "고객": "Customer", "청구": "Invoice"}
+
+
+def snapshot(labels: dict[str, str] | None = None) -> StructuredSnapshot:
+    """The quickstart snapshot (*labels*: class label renames, e.g. :data:`ENGLISH`)."""
+    lb = labels or {}
     terms = [
         TermInfo(
             "t-con",
-            "계약",
+            lb.get("계약", "계약"),
             "계약 정보",
             attributes=_attrs("contracts", CONTRACTS, skip=("고객ID",)),
             tables=[{"id": "tb-con", "name": "contracts", "schema": "public"}],
         ),
         TermInfo(
             "t-cus",
-            "고객",
+            lb.get("고객", "고객"),
             "고객",
             attributes=_attrs("customers", CUSTOMERS),
             tables=[{"id": "tb-cus", "name": "customers", "schema": "public"}],
         ),
         TermInfo(
             "t-inv",
-            "청구",
+            lb.get("청구", "청구"),
             "청구서",
             attributes=_attrs("invoices", INVOICES, skip=("계약ID",)),
             tables=[{"id": "tb-inv", "name": "invoices", "schema": "public"}],
@@ -138,8 +144,8 @@ def snapshot() -> StructuredSnapshot:
     return StructuredSnapshot("quickstart", "db1", "autoontology_src_quickstart", terms, fks)
 
 
-def model() -> merged.MergedOntology:
-    return merged.build("default", structured=[snapshot()])
+def model(labels: dict[str, str] | None = None) -> merged.MergedOntology:
+    return merged.build("default", structured=[snapshot(labels)])
 
 
 def tables() -> dict[str, dict[str, Any]]:

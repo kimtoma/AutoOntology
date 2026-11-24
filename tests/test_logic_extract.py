@@ -646,3 +646,14 @@ def test_accounts_roles_on_logic_extraction(isolated_env, monkeypatch):
     entry = accounts.list_audit(action="logic.accept")[0]
     assert entry["actor"] == "e@example.com" and entry["target"] == "function:연체일수"
     assert reviewer.delete(f"{API}/review/{item['id']}/decision").status_code == 403
+
+
+def test_the_prompt_shows_tables_and_the_approval_rule(env):
+    """Types carry their table (a language-independent object_type) and the prompt
+    states that approval.when needs a reviewer or owner role."""
+    settings, store, view, llm = env
+    types = {t["label"]: t for t in extract.schema_payload(view)}
+    assert types["청구"]["table"] == "invoices" and types["계약"]["table"] == "contracts"
+    assert prompts.LOGIC_PROMPT_VERSION == "2"
+    assert "approval.when" in prompts.LOGIC_SYSTEM_PROMPT
+    assert 'role "none"' in prompts.LOGIC_SYSTEM_PROMPT

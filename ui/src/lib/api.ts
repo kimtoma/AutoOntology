@@ -1336,6 +1336,8 @@ export const api = {
       request<ObjectPage & { link: unknown }>(`/objects/${enc(type)}/${enc(key)}/links/${enc(link)}?limit=${limit}`),
   },
   logic: {
+    /** The active definitions as an Agent Skill zip (SKILL.md, mcp.json, definitions/). */
+    skillZipUrl: () => `${projectApiBase()}/logic/skill.zip`,
     list: (kind?: LogicKind) =>
       request<{ definitions: LogicDef[] }>(`/logic${kind ? `?kind=${kind}` : ""}`).then((r) => r.definitions),
     get: (kind: LogicKind, name: string) =>

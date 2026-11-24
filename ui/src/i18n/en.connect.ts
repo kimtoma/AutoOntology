@@ -108,6 +108,14 @@ export const enConnect = {
   "connect.tool.list_exports":
     "List the export folders (RDF/OWL, GraphML, Ossie, OKF) per revision; REST can download one as a zip.",
 
+  "connect.skill": "Agent skill",
+  "connect.skill.hint":
+    "Download the active functions, actions and workflows as an Agent Skill: an agent that loads it knows your object types, rules and the safe order of tool calls (preview before submit, never assume approval).",
+  "connect.skill.export": "Export skill",
+  "connect.skill.md": "explains the object types, functions, actions, workflows and the procedure, in English.",
+  "connect.skill.mcp": "connects to this server: replace {{AUTOONTOLOGY_URL}} and <token> (a token is never included).",
+  "connect.skill.defs": "the active definitions as YAML (ao logic apply -f reads them).",
+
   "connect.usage": "Usage",
   "connect.usage.hint": "Tool calls in the last {days} days.",
   "connect.usage.total": "Calls",

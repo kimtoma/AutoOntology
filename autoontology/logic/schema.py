@@ -8,7 +8,9 @@ never by the property's local id, which collides for Hangul names. Operational
 properties (written by actions, no column) are fields of type ``any``.
 
 A **link** is a foreign key between two object types (``ObjectType.links``), named by the
-link's name, its label, the target type's label or (outgoing links) its column.
+link's name, its label, the target type's label, the target's table (``invoices`` or
+``public.invoices``, so specs need not depend on the language of the labels) or
+(outgoing links) its column.
 
 Value types: ``number``, ``text``, ``bool``, ``date``, ``null`` and ``any`` (known only
 when evaluated). :func:`column_type` maps a Postgres / XSD datatype to one of them.
@@ -18,6 +20,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+
+from autoontology.objects import naming
+from autoontology.objects.naming import TypeNames
 
 VALUE_TYPES: tuple[str, ...] = ("number", "text", "bool", "date")
 
@@ -73,6 +78,12 @@ class TypeInfo:
     links: list[LinkInfo] = field(default_factory=list)
     #: operational property -> value type (declared by actions)
     operational: dict[str, str] = field(default_factory=dict)
+    schema: str = ""
+    table: str = ""
+    id: str = ""
+
+    def names(self) -> TypeNames:
+        return TypeNames(self.name, self.id, self.label, self.schema, self.table, self.status)
 
     def field(self, name: str) -> tuple[str, str] | None:
         """``(column or property, value type)`` for a field name (column, label, then the
@@ -105,6 +116,9 @@ class TypeInfo:
             names = [lk.label]
             if target is not None:
                 names.append(target.label)
+                names.append(target.table)
+                if target.schema:
+                    names.append(f"{target.schema}.{target.table}")
             if lk.direction == "out":
                 names.append(lk.column)
             if any(n and n.casefold() == folded for n in names):
@@ -120,16 +134,16 @@ class Schema:
     types: dict[str, TypeInfo] = field(default_factory=dict)
 
     def resolve(self, ref: str) -> TypeInfo | None:
-        """The type *ref* names: its class's local name, else its label (ignoring case;
-        an ambiguous label resolves to none)."""
+        """The type *ref* names (:mod:`~autoontology.objects.naming`: id, class name,
+        label, table); an ambiguous reference resolves to none (:meth:`candidates`)."""
         if ref in self.types:
             return self.types[ref]
-        folded = ref.strip().casefold()
-        found = [t for t in self.types.values() if t.label.casefold() == folded]
-        if len(found) > 1:
-            active = [t for t in found if t.status == "active"]
-            found = active
+        found = self.candidates(ref)
         return found[0] if len(found) == 1 else None
+
+    def candidates(self, ref: str) -> list[TypeInfo]:
+        """Every type *ref* may name (several: ambiguous)."""
+        return naming.matches(self.types.values(), ref or "", lambda t: t.names())
 
 
 def _labels(model: Any, otype: Any) -> dict[str, str]:
@@ -176,6 +190,9 @@ def type_info(otype: Any, model: Any = None) -> TypeInfo:
         label=otype.label or otype.class_local,
         key=otype.key,
         status=otype.status,
+        schema=otype.schema,
+        table=otype.table,
+        id=otype.id,
         columns=columns,
         labels=labels,
         links=[

@@ -105,6 +105,14 @@ export const koConnect: Record<keyof typeof enConnect, string> = {
   "connect.tool.list_exports":
     "리비전별 내보내기 폴더(RDF/OWL, GraphML, Ossie, OKF) 목록. REST로는 zip 하나로 내려받을 수 있습니다.",
 
+  "connect.skill": "에이전트 스킬",
+  "connect.skill.hint":
+    "활성 펑션·액션·워크플로를 Agent Skill로 내려받습니다. 스킬을 읽은 에이전트는 개체 유형, 업무 규칙, 안전한 도구 호출 순서(제출 전 미리보기, 승인을 가정하지 않기)를 압니다.",
+  "connect.skill.export": "스킬 내보내기",
+  "connect.skill.md": "개체 유형·펑션·액션·워크플로와 작업 절차를 영어로 설명합니다.",
+  "connect.skill.mcp": "이 서버 연결 설정: {{AUTOONTOLOGY_URL}}과 <token>을 바꿔 넣으세요 (토큰은 들어 있지 않습니다).",
+  "connect.skill.defs": "활성 정의 YAML (ao logic apply -f로 다시 적용할 수 있음).",
+
   "connect.usage": "사용량",
   "connect.usage.hint": "최근 {days}일 동안의 도구 호출.",
   "connect.usage.total": "호출",

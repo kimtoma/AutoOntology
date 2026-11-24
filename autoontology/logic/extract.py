@@ -183,6 +183,7 @@ def schema_payload(view: Any) -> list[dict[str, Any]]:
         out.append(
             {
                 "label": info.label,
+                "table": info.table,
                 "key": info.key,
                 "columns": dict(info.columns),
                 **({"labels": labels} if labels else {}),

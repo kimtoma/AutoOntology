@@ -11,7 +11,7 @@
   description: >-
     연체된 청구서에 독촉 단계를 기록한다 (1: 유선 안내, 2: 서면 독촉장, 3: 본부장 보고,
     4: 해지 검토). 원천 데이터는 바꾸지 않고 운영 속성으로 남긴다.
-  object_type: 청구
+  object_type: invoices
   params:
     - name: 단계
       type: number
@@ -34,7 +34,7 @@
   notify:
     - to: role:editor
       subject: "[독촉 {{ param.단계 }}단계] {{ 청구ID }}"
-      body: "{{ 계약.계약명 }} 청구서 {{ 청구ID }}: 미수금 {{ 미수금() }}원, 연체 {{ 연체일수() }}일"
+      body: "{{ contracts.계약명 }} 청구서 {{ 청구ID }}: 미수금 {{ 미수금() }}원, 연체 {{ 연체일수() }}일"
   permission:
     min_role: editor
   approval:

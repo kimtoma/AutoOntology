@@ -29,15 +29,19 @@ SAMPLES = Path(__file__).resolve().parents[1] / "samples" / "quickstart" / "logi
 # --- a schema without a store -------------------------------------------------------------
 
 
-def _schema() -> Schema:
+def _schema(labels: dict[str, str] | None = None, *, lower: bool = False) -> Schema:
+    """The quickstart schema (*labels*: class label renames; *lower*: column names as
+    Postgres folds their ASCII parts, ``청구ID`` -> ``청구id``)."""
     from autoontology.objects import binding
 
-    m = fx.model()
+    m = fx.model(labels)
     types = []
     for cand in binding.candidates(m):
         t = binding.proposal(cand, 1)
         t.status = "active"
         t.columns = fx.tables()[f"public.{t.table}"]["columns"]
+        if lower:
+            t.columns = [{**c, "name": c["name"].lower()} for c in t.columns]
         types.append(t)
     return build_schema(types, m)
 
@@ -599,6 +603,84 @@ def test_sample_specs_validate_against_the_quickstart_schema():
         assert specs.validate(s, ctx) == [], s.name
 
 
+def test_sample_specs_validate_when_the_build_labels_classes_in_english():
+    """The samples name types and links by table, so they work whatever language the
+    build gave the class labels; field references ignore case (``청구ID`` vs ``청구id``)."""
+    schema = _schema(fx.ENGLISH, lower=True)
+    assert {t.label for t in schema.types.values()} == {"Contract", "Customer", "Invoice"}
+    parsed = [
+        specs.parse_spec(d)
+        for f in sorted(SAMPLES.glob("*.yaml"))
+        for d in specs.load_documents(f.read_text("utf-8"))
+    ]
+    assert {s.object_type for s in parsed if hasattr(s, "object_type")} <= {
+        "invoices",
+        "contracts",
+    }
+    ctx = specs.LogicContext(schema)
+    for s in parsed:
+        getattr(ctx, s.kind + "s")[s.name] = s
+    for s in parsed:
+        assert specs.validate(s, ctx) == [], s.name
+
+
+def test_types_resolve_by_id_class_label_and_table():
+    schema = _schema(fx.ENGLISH)
+    inv = schema.types[INV]
+    for ref in (INV, "Invoice", "invoice", "invoices", "public.invoices", "INVOICES"):
+        assert schema.resolve(ref) is inv, ref
+    assert schema.resolve("nope") is None and schema.resolve("") is None
+    # links by the target's table too
+    con = schema.types[CON]
+    assert [lk.target for lk in con.link("invoices", schema)] == [INV]
+    assert [lk.target for lk in inv.link("contracts", schema)] == [CON]
+    scope_ = ex.Scope(schema, con, {}, lambda n: None)
+    assert ex.compile_expr("count(invoices where 수납상태 != '완납')", scope_).type == "number"
+    assert ex.compile_expr("contracts.계약명", ex.Scope(schema, inv, {}, lambda n: None))
+
+
+def test_an_ambiguous_type_reference_is_an_error():
+    from autoontology.objects import naming
+
+    def n(name, label, table, status="active", schema="public"):
+        return naming.TypeNames(name, f"ot_{name}", label, schema, table, status)
+
+    items = [n("a", "Invoice", "invoices"), n("b", "Invoice", "invoices", schema="billing")]
+    found = naming.matches(items, "Invoice", lambda x: x)
+    assert [x.name for x in found] == ["a", "b"]  # ambiguous
+    assert [x.name for x in naming.matches(items, "billing.invoices", lambda x: x)] == ["b"]
+    assert [x.name for x in naming.matches(items, "ot_a", lambda x: x)] == ["a"]
+    # a retired or proposed twin does not make an active type ambiguous
+    items[1] = n("b", "Invoice", "invoices", status="retired")
+    assert [x.name for x in naming.matches(items, "invoices", lambda x: x)] == ["a"]
+    items[1] = n("b", "Invoice", "invoices", status="proposed")
+    assert [x.name for x in naming.matches(items, "Invoice", lambda x: x)] == ["a"]
+    # an exact label wins over a table of the same name
+    items = [n("a", "invoices", "bills"), n("b", "Bill", "invoices")]
+    assert [x.name for x in naming.matches(items, "invoices", lambda x: x)] == ["a"]
+    # specs: an ambiguous object_type is reported with the candidates
+    schema = Schema(
+        {
+            "a": TypeInfo("a", "Invoice", "id", "active", table="invoices", schema="public"),
+            "b": TypeInfo("b", "Invoice", "id", "active", table="invoices", schema="billing"),
+        }
+    )
+    errors = specs.validate(
+        specs.parse_spec(
+            {
+                "kind": "function",
+                "name": "f",
+                "object_type": "Invoice",
+                "returns": "number",
+                "expr": "1",
+            }
+        ),
+        specs.LogicContext(schema),
+    )
+    assert errors[0]["code"] == "ambiguous_object_type"
+    assert "billing.invoices" in errors[0]["message"]
+
+
 # --- store --------------------------------------------------------------------------------
 
 
@@ -849,3 +931,17 @@ def test_link_budget_is_an_error_per_value(store, backend, monkeypatch):
     cons = service.search(settings, view, CON)["items"]
     values = functions.computed(settings, view, view.object_types().get(CON), cons, when=TODAY)
     assert values[0]["담당자"]["error"]["code"] == "link_budget"
+
+
+def test_approval_when_without_a_role_says_what_to_choose():
+    action = {
+        "kind": "action",
+        "name": "a",
+        "label": "A",
+        "object_type": "invoices",
+        "effects": [{"set": "x", "value": "1", "operational": True}],
+        "approval": {"role": "none", "when": "true"},
+    }
+    errors = specs.validate(specs.parse_spec(action), specs.LogicContext(SCHEMA))
+    found = [e for e in errors if e["path"] == "approval.when"]
+    assert found and "choose reviewer or owner" in found[0]["message"]

@@ -264,7 +264,7 @@ export const AUDIT_ACTIONS = [
   "project.create", "project.rename", "project.archive", "project.unarchive",
   "object.bind", "logic.save", "logic.status", "logic.accept", "logic.reject",
   "action.submit", "action.approve", "action.reject", "action.apply", "action.revert", "action.fail",
-  "workflow.run", "workflow.finish", "workflow.cancel",
+  "workflow.run", "workflow.finish", "workflow.cancel", "skill.export",
 ]
 
 export const AUDIT_PAGE_SIZE = 50

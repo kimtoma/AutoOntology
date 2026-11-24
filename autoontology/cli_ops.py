@@ -2205,16 +2205,11 @@ object_app = typer.Typer(help=msg("help.object"), no_args_is_help=True)
 
 
 def _object_type(name: str) -> str:
-    """*name* (a type's name ``term-...``, or its label) as one URL path segment."""
+    """*name* (a type's name ``term-...``, id, label or table; the service resolves it)
+    as one URL path segment."""
     if not name or len(name) > 200:
         _error("unknown_object_type", f"no object type {name[:80]!r}", 2)
-    if not re.fullmatch(r"(term|concept|ot)[-_][A-Za-z0-9_-]+", name):
-        body = _guard(lambda: _local().call("GET", "/objects/types"))
-        wanted = name.strip().casefold()
-        match = [t["name"] for t in body["types"] if str(t["label"]).casefold() == wanted]
-        if len(match) == 1:
-            name = match[0]
-    return quote(name, safe="")
+    return quote(name.strip(), safe="")
 
 
 def _type_rows(types: list[dict[str, Any]]) -> str:
@@ -3084,6 +3079,32 @@ def workflow_cancel(
     typer.echo(msg("ops.workflow_run", id=body["run"]["id"], status=body["run"]["status"]))
 
 
+# --- skill --------------------------------------------------------------------------
+
+skill_app = typer.Typer(help=msg("help.skill"), no_args_is_help=True)
+
+
+@skill_app.command("export", help=msg("help.skill.export"))
+def skill_export(
+    out: str = typer.Option(None, "-o", "--out", help=msg("help.skill.export.out")),
+) -> None:
+    import os
+    import re as _re
+
+    resp = _guard(lambda: _local().raw("GET", "/logic/skill.zip"))
+    disposition = resp.headers.get("content-disposition", "")
+    found = _re.search(r'filename="([A-Za-z0-9._-]+)"', disposition)
+    default = found.group(1) if found else "autoontology-skill.zip"
+    target = Path(out).expanduser() if out else Path(default)
+    if out and target.is_dir():
+        target = target / default
+    elif out and out.endswith(("/", os.sep)):
+        _error("no_such_directory", msg("ops.no_such_dir", path=target), 2)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(resp.content)
+    typer.echo(msg("ops.saved", path=target, bytes=len(resp.content)))
+
+
 def register(app: typer.Typer, source_app: typer.Typer) -> None:
     """Add the parity commands to the CLI (called at the end of :mod:`autoontology.cli`)."""
     app.add_typer(ontology_app, name="ontology")
@@ -3100,6 +3121,7 @@ def register(app: typer.Typer, source_app: typer.Typer) -> None:
     app.add_typer(logic_app, name="logic")
     app.add_typer(action_app, name="action")
     app.add_typer(workflow_app, name="workflow")
+    app.add_typer(skill_app, name="skill")
     app.command("audit", help=msg("help.audit"))(audit_cmd)
     source_app.command("freshness", help=msg("help.sources.freshness"))(sources_freshness)
     # `sources freshness` (the UI's page name) is `source freshness`

@@ -16,7 +16,8 @@ aliases), over :mod:`autoontology.objects.service`.
 * ``GET /objects/{type}/{key}/links/{link}?then=&limit=&offset=`` -- the objects a link
   reaches (``then``: one more hop).
 
-Reads need ``objects.read``. A type is named by its class's local name (``term-...``).
+Reads need ``objects.read``. A type is named by its id, class name (``term-...``), label or
+table (:mod:`autoontology.objects.naming`); an ambiguous name is 409 ``ambiguous_object_type``.
 """
 
 from __future__ import annotations

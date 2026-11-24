@@ -57,6 +57,9 @@ MESSAGES: dict[str, str] = {
     "help.exports.path": "폴더 안의 파일, 예: report.md 또는 okf/validation.json.",
     "help.exports.get": "내보내기 파일 하나를 저장합니다.",
     "help.exports.out": "저장할 파일 (또는 디렉터리).",
+    "help.skill": "에이전트 스킬: 활성 로직을 Agent Skill 꾸러미로 내보냅니다.",
+    "help.skill.export": "활성 펑션·액션·워크플로를 Agent Skill zip(SKILL.md, mcp.json, definitions/)으로 저장합니다.",
+    "help.skill.export.out": "저장할 .zip 파일 또는 디렉터리 (기본: 현재 위치의 autoontology-<프로젝트>.zip).",
     "help.exports.zip": "내보내기 폴더 전체를 zip 하나로 저장합니다.",
     "help.exports.zip.out": "저장할 .zip 파일 (또는 디렉터리: autoontology-r<rev>.zip).",
     "help.playground": (
@@ -265,7 +268,7 @@ MESSAGES: dict[str, str] = {
     "help.object": "개체: 소스 테이블에 연결된 클래스의 행 (types, bind, list, get).",
     "help.object.types": "개체 유형 목록: 제안·활성·깨짐·폐기.",
     "help.object.types.status": "이 상태만 (proposed, active, broken, retired).",
-    "help.object.type": "개체 유형: 이름(term-...) 또는 라벨.",
+    "help.object.type": "개체 유형: 이름(term-...), 라벨 또는 테이블 이름.",
     "help.object.bind": "개체 유형 연결: 키·제목 컬럼을 소스에서 검증하고 유형을 활성화.",
     "help.object.bind.key": "키 컬럼 (고유·빈 값 없음; 기본: 유지 또는 추론).",
     "help.object.bind.title": '제목 컬럼 (없음은 ""; 기본: 유지 또는 추론).',
