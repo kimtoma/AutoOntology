@@ -980,9 +980,9 @@ body. Admins are owners of every project.
 
 | Role | May |
 |---|---|
-| viewer | read everything in the project, download exports, ask the playground (chat, SQL, SPARQL, conversations) |
+| viewer | read everything in the project, download exports, ask the playground (chat, SQL, SPARQL, reading conversations) |
 | reviewer | + decide and undo review items, apply decisions (a new revision) |
-| editor | + add and remove sources, load samples, start builds and exports, manage agent tokens |
+| editor | + add and remove sources, load samples, start builds and exports, list and manage agent tokens and their usage, delete playground conversations |
 | owner | + rename, archive and unarchive the project, manage its members, read its audit log |
 | admin | + create projects, settings and restart, provider test, users, the whole audit log |
 

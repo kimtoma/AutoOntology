@@ -403,7 +403,7 @@ def _routes(
 
     @router.delete("/conversations/{conversation_id}")
     def delete_conversation(conversation_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
-        ctx.require("playground.ask")
+        ctx.require("playground.manage")
         if not pg().pg_for(ctx.store).delete_conversation(conversation_id):
             raise ApiError(404, "unknown_conversation", f"no conversation {conversation_id!r}")
         return {"deleted": conversation_id}

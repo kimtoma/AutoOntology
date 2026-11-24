@@ -265,6 +265,7 @@ def test_me_lists_memberships(env):
                 "sources.write",
                 "runs.start",
                 "agent.tokens",
+                "playground.manage",
             ],
         }
     ]

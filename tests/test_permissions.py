@@ -99,6 +99,7 @@ def test_role_table_is_cumulative():
         "sources.write",
         "runs.start",
         "agent.tokens",
+        "playground.manage",
     }
     assert set(role_permissions("owner")) == set(PROJECT_PERMISSIONS)
     assert role_permissions(None) == role_permissions("god") == []
@@ -109,10 +110,13 @@ def test_role_table_is_cumulative():
 ROUTES = [
     ("GET", f"{BETA}/sources", None, "project.read"),
     ("GET", f"{BETA}/runs", None, "project.read"),
-    ("GET", f"{BETA}/agent/tokens", None, "project.read"),
+    ("GET", f"{BETA}/agent/tokens", None, "agent.tokens"),
+    ("GET", f"{BETA}/agent/usage", None, "agent.tokens"),
+    ("GET", f"{BETA}/agent/tools", None, "project.read"),
     ("GET", f"{BETA}/exports/r1.zip", None, "exports.read"),
     ("POST", f"{BETA}/playground/sparql", SPARQL, "playground.ask"),
-    ("DELETE", f"{BETA}/playground/conversations/{'0' * 32}", None, "playground.ask"),
+    ("GET", f"{BETA}/playground/conversations", None, "playground.ask"),
+    ("DELETE", f"{BETA}/playground/conversations/{'0' * 32}", None, "playground.manage"),
     ("POST", f"{BETA}/review/x:1/decision", {"decision": "accept"}, "review.decide"),
     ("DELETE", f"{BETA}/review/x:1/decision", None, "review.decide"),
     ("POST", f"{BETA}/runs", {"kind": "apply"}, "review.apply"),

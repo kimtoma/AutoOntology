@@ -46,6 +46,10 @@ behaviour).
 - **Audit log entries** for users, members, agent tokens, run starts and cancels, review
   decisions and undos, sources, samples, settings changes and restarts, and project
   create/rename/archive/unarchive.
+- **Agent token list and usage** (`GET /api/agent/tokens`, `/api/agent/usage`) need
+  `agent.tokens` (editor+) with accounts on; `/api/agent/tools` stays readable by viewers.
+  Deleting a playground conversation needs the new `playground.manage` (editor+; there is
+  no per-conversation owner yet); asking and reading stay viewer.
 - **Agent tokens** record `created_by` (creator or last rotator); with accounts on a token
   stops working when its creator is disabled or no longer a member of its project (tokens
   without a creator keep working).

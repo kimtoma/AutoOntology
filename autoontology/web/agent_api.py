@@ -840,6 +840,7 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
 
     @router.get("/agent/tokens")
     def list_agent_tokens(ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        ctx.require("agent.tokens")
         return {"tokens": [t.to_dict() for t in ctx.store.agent_tokens().list_tokens()]}
 
     @router.post("/agent/tokens", status_code=201)
@@ -905,6 +906,7 @@ def add_management_routes(router: APIRouter, api: Api, ctx_dep: Any = None) -> N
     def agent_usage(
         days: int | None = Query(None, ge=1, le=365), ctx: ProjectContext = Ctx
     ) -> dict[str, Any]:
+        ctx.require("agent.tokens")
         return ctx.store.agent_tokens().usage(days)
 
     @router.get("/agent/tools")

@@ -80,12 +80,13 @@ ROLE_ORDER = ("viewer", "reviewer", "editor", "owner")
 PROJECT_PERMISSIONS: dict[str, str] = {
     "project.read": "viewer",  # every GET of the project: sources, runs, ontology, review list
     "exports.read": "viewer",  # download exports
-    "playground.ask": "viewer",  # chat / SQL / SPARQL, the index, conversations (incl. delete)
+    "playground.ask": "viewer",  # chat / SQL / SPARQL, the index, reading conversations
     "review.decide": "reviewer",  # decide and undo review items
     "review.apply": "reviewer",  # apply runs (decisions -> a new revision)
     "sources.write": "editor",  # add / delete sources, load samples
     "runs.start": "editor",  # build and export runs (and cancelling runs)
-    "agent.tokens": "editor",  # create / rotate / revoke outside-agent tokens
+    "agent.tokens": "editor",  # list / create / rotate / revoke agent tokens, their usage
+    "playground.manage": "editor",  # delete playground conversations (no per-user owner yet)
     "project.manage": "owner",  # rename, archive, unarchive
     "members.manage": "owner",  # add / change / remove members
     "audit.read": "owner",  # the project's audit log

@@ -141,7 +141,7 @@ def test_archived_projects_are_read_only(web_env, isolated_env):
 
 def test_permission_hooks_cover_reads_settings_and_conversations(web_env, monkeypatch):
     """Every project request asks for project.read; deleting a conversation asks for
-    playground.ask; the settings and provider-test routes ask installation-wide."""
+    playground.manage; the settings and provider-test routes ask installation-wide."""
     from autoontology.web import projects, settings_api
     from autoontology.web.api import ApiError
 
@@ -150,7 +150,7 @@ def test_permission_hooks_cover_reads_settings_and_conversations(web_env, monkey
 
     def require(self, permission):
         asked.append(permission)
-        if permission == "playground.ask":
+        if permission == "playground.manage":
             raise ApiError(403, "forbidden", permission)
 
     def installation(actor, permission):
@@ -165,7 +165,7 @@ def test_permission_hooks_cover_reads_settings_and_conversations(web_env, monkey
     assert asked == ["project.read", "project.read"]
     asked.clear()
     resp = c.delete(f"{BETA}/playground/conversations/{'0' * 32}")
-    assert resp.status_code == 403 and asked == ["project.read", "playground.ask"]
+    assert resp.status_code == 403 and asked == ["project.read", "playground.manage"]
     for method, path in (
         ("POST", f"{API}/providers/test"),
         ("PUT", f"{API}/settings"),
