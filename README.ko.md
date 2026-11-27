@@ -1,4 +1,4 @@
-# AutoOntology
+# Ontology (옛 이름 AutoOntology)
 
 [English](README.md) | **한국어**
 
@@ -14,18 +14,18 @@ Ontology Ops는 그 지식을 계속 운영하는 흐름입니다. 변경 발견
 
 | 구분 | 포함된 내용 |
 | --- | --- |
-| [`ops-ui`](https://github.com/kimtoma/AutoOntology/tree/ops-ui) | **실제 서비스를 운영하는 브랜치**(커밋 `dcdcf8c`, `0.2.0` 계열). 설치 하나에 여러 프로젝트를 두고 프로젝트마다 리비전을 따로 관리합니다. 선택적으로 계정 기능(이메일·비밀번호 로그인, 이메일 로그인 링크), 프로젝트별 역할(viewer·reviewer·editor·owner)과 설치 관리자(admin), 외부 에이전트 연결 화면(Connect, MCP·REST), CLI 단축 이름 `ao`, 1.3.x로 올린 NVIDIA Auto Ontology 엔진을 갖췄습니다. [README](https://github.com/kimtoma/AutoOntology/blob/ops-ui/README.ko.md)와 [가이드](https://github.com/kimtoma/AutoOntology/blob/ops-ui/docs/GUIDE.ko.md)를 참고하세요. |
+| [`ops-ui`](https://github.com/kimtoma/ontology/tree/ops-ui) | **실제 서비스를 운영하는 브랜치**(`0.3.0`, AutoOntology에서 Ontology로 이름 변경: 패키지 `ontology`, CLI `onto`). 설치 하나에 여러 프로젝트를 두고 프로젝트마다 리비전을 따로 관리합니다. 선택적으로 계정 기능(이메일·비밀번호 로그인, 이메일 로그인 링크), 프로젝트별 역할(viewer·reviewer·editor·owner)과 설치 관리자(admin), 외부 에이전트 연결 화면(Connect, MCP·REST), 개체·펑션·액션·워크플로·스킬 내보내기(실행 가능한 온톨로지), 1.3.x로 올린 NVIDIA Auto Ontology 엔진을 갖췄습니다. [README](https://github.com/kimtoma/ontology/blob/ops-ui/README.ko.md)와 [가이드](https://github.com/kimtoma/ontology/blob/ops-ui/docs/GUIDE.ko.md)를 참고하세요. |
 | `main` | 기본 브랜치. Codex로 개발한 지식 OS 계열입니다(`0.3.0a1`, 앱 기준점 `c4b7dca`, Ontology Ops UI·CLI 포함). 현재는 배포하지 않습니다. |
-| [`codex/ontology-ops-local`](https://github.com/kimtoma/AutoOntology/tree/codex/ontology-ops-local) | 지식 OS 계열의 최신 추가분. 소유자 등록·복구, 고정 데이터 비교, 백업 검증, 복원 후 읽기 연결 검토를 담았습니다. 체크포인트는 `042637c`입니다. 현재는 배포하지 않습니다. |
+| [`codex/ontology-ops-local`](https://github.com/kimtoma/ontology/tree/codex/ontology-ops-local) | 지식 OS 계열의 최신 추가분. 소유자 등록·복구, 고정 데이터 비교, 백업 검증, 복원 후 읽기 연결 검토를 담았습니다. 체크포인트는 `042637c`입니다. 현재는 배포하지 않습니다. |
 
 `ops-ui`와 지식 OS 계열(`main`, `codex/ontology-ops-local`)은 서로 갈라져 있으며 병합하지 않았습니다.
 README 변경만으로 두 브랜치의 앱 코드가 병합되지는 않습니다. 이 README의 나머지 내용은 지식 OS 계열을 설명합니다.
-[구현 체크포인트](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/docs/PUBLIC_CHECKPOINT.md)에서
+[구현 체크포인트](https://github.com/kimtoma/ontology/blob/codex/ontology-ops-local/docs/PUBLIC_CHECKPOINT.md)에서
 검증 범위와 남은 제약을 확인할 수 있습니다. 이전 인수인계·단계 기록은 각각 당시 시점을 보존합니다.
 
 ## 실제 서비스 체험
 
-실제 서비스 주소는 [autoontology.kimtoma.com](https://autoontology.kimtoma.com/)이며 `ops-ui` 브랜치로 운영합니다.
+실제 서비스 주소는 [ontology.kimtoma.com](https://ontology.kimtoma.com/)이며 `ops-ui` 브랜치로 운영합니다.
 로그인이 필요하고 계정은 초대제입니다. 작업 공간 소유자에게 초대를 요청하세요.
 소유자의 Mac mini에서 Cloudflare를 거쳐 서비스합니다. 개인 배포이므로 상시 가동이나 운영 환경 완성을 보장하지는 않습니다.
 
@@ -70,13 +70,13 @@ OpenAI 호환 API 중 고르고, 임베딩은 Ollama 또는 OpenAI 호환 엔드
 ## 빠른 시작
 
 실제 서비스와 같은 버전을 받으려면 아래 클론 명령에서 `--branch ops-ui`를 사용하고
-[`ops-ui` README](https://github.com/kimtoma/AutoOntology/blob/ops-ui/README.ko.md)의 빠른 시작을 따르세요.
-설치 명령은 같으며, 그 브랜치에서는 모든 `autoontology` 명령을 `ao`로도 실행할 수 있습니다.
+[`ops-ui` README](https://github.com/kimtoma/ontology/blob/ops-ui/README.ko.md)의 빠른 시작을 따르세요.
+설치 명령은 같으며, 그 브랜치에서는 명령 이름이 `ontology`(단축 `onto`)입니다. 이 브랜치의 코드는 옛 이름 `autoontology`를 그대로 씁니다.
 아래 명령은 지식 OS 계열을 설치합니다.
 
 ```
-git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
-cd AutoOntology
+git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/ontology.git
+cd ontology
 docker compose up -d            # or point POSTGRES_* in .env at your own Postgres 17 + pgvector
 uv sync
 uv run autoontology init        # checks what is installed, picks a model, writes .env, runs setup
@@ -162,7 +162,7 @@ uv run autoontology export      # exports the published operational version
 **터미널의 Claude Code.** 홈 폴더에서 `claude`를 실행하고 다음을 붙여 넣습니다.
 
 ```text
-https://github.com/kimtoma/AutoOntology 의 codex/ontology-ops-local 브랜치를 submodule과 함께 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
+https://github.com/kimtoma/ontology 의 codex/ontology-ops-local 브랜치를 submodule과 함께 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
 ```
 
 `--yes`는 묻지 않고 진행합니다. uv가 없으면 공식 설치 스크립트로 설치하고, `init`의 기본값을
@@ -173,7 +173,7 @@ mini, 2026-10-29, uv 캐시 있음, quickstart 빌드만 547초).
 영어로는:
 
 ```text
-Clone the codex/ontology-ops-local branch of https://github.com/kimtoma/AutoOntology with submodules into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
+Clone the codex/ontology-ops-local branch of https://github.com/kimtoma/ontology with submodules into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
 ```
 
 **Claude 데스크톱 앱.** **Code** 탭(데스크톱 앱 안의 Claude Code)을 열고, 작업 폴더로 홈
@@ -211,8 +211,8 @@ Google Vertex AI, API 키로 설정한 Claude Code는 여기서 `loggedIn: false
 [`scripts/bootstrap.sh`](scripts/bootstrap.sh)를 직접 실행합니다.
 
 ```bash
-git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
-cd AutoOntology
+git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/ontology.git
+cd ontology
 scripts/bootstrap.sh --yes --provider claude
 ```
 

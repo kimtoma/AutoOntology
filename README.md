@@ -1,4 +1,4 @@
-# AutoOntology
+# Ontology (formerly AutoOntology)
 
 **English** | [한국어](README.ko.md)
 
@@ -16,20 +16,20 @@ This README was refreshed against the public source on **2026-11-24**.
 
 | Reference | What it contains |
 | --- | --- |
-| [`ops-ui`](https://github.com/kimtoma/AutoOntology/tree/ops-ui) | **The branch that runs the live service** (commit `dcdcf8c`, version `0.2.0` line): several projects per installation, each with its own revisions; optional accounts with email/password sign-in and emailed sign-in links; per-project roles viewer, reviewer, editor and owner, plus installation admins; a Connect page for outside agents (MCP and REST); the `ao` short alias of the CLI; the NVIDIA Auto Ontology engine updated to 1.3.x. Read its [README](https://github.com/kimtoma/AutoOntology/blob/ops-ui/README.md) and [guide](https://github.com/kimtoma/AutoOntology/blob/ops-ui/docs/GUIDE.md) |
+| [`ops-ui`](https://github.com/kimtoma/ontology/tree/ops-ui) | **The branch that runs the live service** (version `0.3.0`, renamed from AutoOntology to Ontology: package `ontology`, CLI `onto`): several projects per installation, each with its own revisions; optional accounts with email/password sign-in and emailed sign-in links; per-project roles viewer, reviewer, editor and owner, plus installation admins; a Connect page for outside agents (MCP and REST); objects, functions, actions, workflows and skill export (actionable ontology); the NVIDIA Auto Ontology engine updated to 1.3.x. Read its [README](https://github.com/kimtoma/ontology/blob/ops-ui/README.md) and [guide](https://github.com/kimtoma/ontology/blob/ops-ui/docs/GUIDE.md) |
 | `main` | Default branch: the Knowledge OS line developed with Codex (`0.3.0a1`, application baseline `c4b7dca`, Ontology Ops UI and CLI). No longer deployed |
-| [`codex/ontology-ops-local`](https://github.com/kimtoma/AutoOntology/tree/codex/ontology-ops-local) | Latest Knowledge OS additions: owner enrollment/recovery, frozen-data comparison, backup verification and reviewed restored reads; checkpoint `042637c`. No longer deployed |
+| [`codex/ontology-ops-local`](https://github.com/kimtoma/ontology/tree/codex/ontology-ops-local) | Latest Knowledge OS additions: owner enrollment/recovery, frozen-data comparison, backup verification and reviewed restored reads; checkpoint `042637c`. No longer deployed |
 
 `ops-ui` and the Knowledge OS line (`main`, `codex/ontology-ops-local`) have diverged and
 are not merged; documentation updates do not merge application changes between branches.
-The rest of this README describes the Knowledge OS line. Read its
-[implementation checkpoint](https://github.com/kimtoma/AutoOntology/blob/codex/ontology-ops-local/docs/PUBLIC_CHECKPOINT.md)
+The rest of this README describes the Knowledge OS line, whose code still uses the former names (`autoontology` package and CLI). Read its
+[implementation checkpoint](https://github.com/kimtoma/ontology/blob/codex/ontology-ops-local/docs/PUBLIC_CHECKPOINT.md)
 for tested scope and remaining limitations. Older handoff and ledger entries retain
 their original checkpoint dates.
 
 ## Try the live service
 
-The live service is [autoontology.kimtoma.com](https://autoontology.kimtoma.com/) and runs
+The live service is [ontology.kimtoma.com](https://ontology.kimtoma.com/) and runs
 the `ops-ui` branch. Sign-in is required and accounts are invite-only: ask the workspace
 owner for an invitation. It runs on the owner's Mac mini behind Cloudflare. It is a
 personal deployment, not a continuous uptime or production-readiness guarantee.
@@ -79,13 +79,13 @@ embeddings use Ollama or an OpenAI-compatible endpoint.
 ## Quickstart
 
 For the version that matches the live service, use `--branch ops-ui` in the clone below
-and follow the [`ops-ui` README](https://github.com/kimtoma/AutoOntology/blob/ops-ui/README.md#quickstart);
-the setup commands are the same, and there every `autoontology` command also runs as `ao`.
+and follow the [`ops-ui` README](https://github.com/kimtoma/ontology/blob/ops-ui/README.md#quickstart);
+the setup commands are the same; there the command is `ontology` (short `onto`). Code on this branch keeps the former `autoontology` name.
 The commands below install the Knowledge OS line.
 
 ```
-git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
-cd AutoOntology
+git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/ontology.git
+cd ontology
 docker compose up -d            # or point POSTGRES_* in .env at your own Postgres 17 + pgvector
 uv sync
 uv run autoontology init        # checks what is installed, picks a model, writes .env, runs setup
@@ -175,7 +175,7 @@ handle each outcome.
 **Claude Code in the terminal.** Start `claude` in your home folder and paste:
 
 ```text
-Clone the codex/ontology-ops-local branch of https://github.com/kimtoma/AutoOntology with submodules into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
+Clone the codex/ontology-ops-local branch of https://github.com/kimtoma/ontology with submodules into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
 ```
 
 `--yes` makes it non-interactive: it installs uv with the official installer if it is
@@ -187,7 +187,7 @@ terminal then. A measured run from an empty folder took 9 min 34 s (Apple M4 Mac
 In Korean:
 
 ```text
-https://github.com/kimtoma/AutoOntology 의 codex/ontology-ops-local 브랜치를 submodule과 함께 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
+https://github.com/kimtoma/ontology 의 codex/ontology-ops-local 브랜치를 submodule과 함께 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
 ```
 
 **Claude desktop app.** Open the **Code** tab (Claude Code in the desktop app), choose
@@ -227,8 +227,8 @@ up through Amazon Bedrock, Google Vertex AI or an API key reports `loggedIn: fal
 [`scripts/bootstrap.sh`](scripts/bootstrap.sh) from that checkout:
 
 ```bash
-git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/AutoOntology.git
-cd AutoOntology
+git clone --branch codex/ontology-ops-local --recurse-submodules https://github.com/kimtoma/ontology.git
+cd ontology
 scripts/bootstrap.sh --yes --provider claude
 ```
 
