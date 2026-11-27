@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 """The unified build end to end on the samples: real Postgres, upstream backend and models.
 
-Run with (the service must be up on the ``.env`` ports: ``uv run autoontology up``):
+Run with (the service must be up on the ``.env`` ports: ``uv run onto up``):
 
-    AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_build_e2e.py -s
+    ONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_build_e2e.py -s
 
 Registers ``quick`` (samples/quickstart/structured) and ``quick-docs``
 (samples/quickstart/documents), the names ``demo --set quickstart`` uses, when missing, runs ``build`` (a first run on the local qwen3:8b profile takes ~30-45 min; a
@@ -16,14 +16,14 @@ from pathlib import Path
 import httpx
 import pytest
 
-from autoontology.config import REPO_ROOT, Settings
-from autoontology.engine import export_job
-from autoontology.engine.build import run_build
-from autoontology.engine.extract import ensure_documents_source
-from autoontology.engine.jobs import service_alive, setup_job_logging
-from autoontology.ontology.model import MergedOntology
-from autoontology.store.db import Store
-from autoontology.structured import pipeline
+from ontology.config import REPO_ROOT, Settings
+from ontology.engine import export_job
+from ontology.engine.build import run_build
+from ontology.engine.extract import ensure_documents_source
+from ontology.engine.jobs import service_alive, setup_job_logging
+from ontology.ontology.model import MergedOntology
+from ontology.store.db import Store
+from ontology.structured import pipeline
 
 pytestmark = pytest.mark.integration
 
@@ -34,11 +34,11 @@ STRUCTURED, DOCS = "quick", "quick-docs"
 def live():
     settings = Settings.from_env()
     if not service_alive(settings):
-        pytest.skip("service not running (uv run autoontology up)")
+        pytest.skip("service not running (uv run onto up)")
     try:
         httpx.get(f"{settings.backend_url}/api/health/live", timeout=5).raise_for_status()
     except httpx.HTTPError:
-        pytest.skip("upstream backend not running (uv run autoontology up)")
+        pytest.skip("upstream backend not running (uv run onto up)")
     store = Store.for_home(settings.home)
     if store.get_source(STRUCTURED) is None:
         pipeline.add_source(

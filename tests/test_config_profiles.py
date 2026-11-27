@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from autoontology.config import (
+from ontology.config import (
     UPSTREAM_TRIPLET_PREFIXES,
     Settings,
     expand_model_profile,
@@ -24,7 +24,7 @@ def test_default_is_ollama_chat_and_embed(isolated_env):
         s.postgres_user,
         s.postgres_password,
         s.postgres_database,
-    ) == ("localhost", 5432, "autoontology", "autoontology", "autoontology")
+    ) == ("localhost", 5432, "ontology", "ontology", "ontology")
     assert s.ollama_endpoint == "http://localhost:11434/v1"
 
 
@@ -56,10 +56,10 @@ def test_ollama_sets_llm_limits_only_when_unset(isolated_env, monkeypatch):
 
 
 def test_ollama_overrides(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_ENDPOINT", "http://gpu-box:11434/v1")
-    monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_CHAT_MODEL", "openai/llama3:8b")
-    monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_EMBED_MODEL", "nomic-embed-text")
-    monkeypatch.setenv("AUTOONTOLOGY_PORT", "7900")
+    monkeypatch.setenv("ONTOLOGY_OLLAMA_ENDPOINT", "http://gpu-box:11434/v1")
+    monkeypatch.setenv("ONTOLOGY_OLLAMA_CHAT_MODEL", "openai/llama3:8b")
+    monkeypatch.setenv("ONTOLOGY_OLLAMA_EMBED_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("ONTOLOGY_PORT", "7900")
     env = expand_model_profile(Settings.from_env())
     assert env["REASONING_ENDPOINT"] == "http://127.0.0.1:7900/v1"
     assert env["REASONING_MODEL"] == "openai/llama3:8b"
@@ -68,12 +68,12 @@ def test_ollama_overrides(isolated_env, monkeypatch):
 
 
 def _openai(monkeypatch, embed: str = "openai") -> None:
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")
-    monkeypatch.setenv("AUTOONTOLOGY_EMBED_PROVIDER", embed)
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_BASE_URL", "https://integrate.api.nvidia.com/v1/")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_API_KEY", "nvapi-secret-value")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "nvidia/nemotron-3-nano-30b-a3b")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_EMBED_MODEL", "nvidia/nemotron-3-embed-1b")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_EMBED_PROVIDER", embed)
+    monkeypatch.setenv("ONTOLOGY_OPENAI_BASE_URL", "https://integrate.api.nvidia.com/v1/")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_API_KEY", "nvapi-secret-value")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_CHAT_MODEL", "nvidia/nemotron-3-nano-30b-a3b")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_EMBED_MODEL", "nvidia/nemotron-3-embed-1b")
 
 
 def test_openai_chat_goes_through_router_with_prefixed_model(isolated_env, monkeypatch):
@@ -106,11 +106,11 @@ def test_openai_chat_with_ollama_embeddings(isolated_env, monkeypatch):
 
 
 def test_openai_validation_names_missing_values(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")
     problems = validate_model_profile(Settings.from_env())
-    assert any("AUTOONTOLOGY_OPENAI_BASE_URL" in p for p in problems)
-    assert any("AUTOONTOLOGY_OPENAI_API_KEY" in p for p in problems)
-    assert any("AUTOONTOLOGY_OPENAI_CHAT_MODEL" in p for p in problems)
+    assert any("ONTOLOGY_OPENAI_BASE_URL" in p for p in problems)
+    assert any("ONTOLOGY_OPENAI_API_KEY" in p for p in problems)
+    assert any("ONTOLOGY_OPENAI_CHAT_MODEL" in p for p in problems)
     assert validate_model_profile(Settings.from_env()) and not validate_model_profile(
         Settings(home=isolated_env)
     )
@@ -118,16 +118,16 @@ def test_openai_validation_names_missing_values(isolated_env, monkeypatch):
 
 @pytest.mark.parametrize("value", ["nvidia", "custom", "gemini"])
 def test_removed_providers_are_refused(isolated_env, monkeypatch, value):
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", value)
-    with pytest.raises(ValueError, match="AUTOONTOLOGY_CHAT_PROVIDER"):
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", value)
+    with pytest.raises(ValueError, match="ONTOLOGY_CHAT_PROVIDER"):
         Settings.from_env()
 
 
 def test_postgres_env_has_user_and_password(isolated_env):
     env = postgres_env(Settings.from_env())
-    assert env["POSTGRES_USER"] == "autoontology"
+    assert env["POSTGRES_USER"] == "ontology"
     assert "POSTGRES_PASSWORD" in env  # upstream reads it with os.environ[...]
-    assert env["POSTGRES_DATABASE"] == "autoontology"
+    assert env["POSTGRES_DATABASE"] == "ontology"
 
 
 def test_config_still_does_not_import_engine(isolated_env):
@@ -138,12 +138,12 @@ def test_config_still_does_not_import_engine(isolated_env):
 
 def test_selection_precedence_shell_over_dotenv(isolated_env, monkeypatch):
     env_file = isolated_env / "test.env"
-    env_file.write_text("AUTOONTOLOGY_CHAT_PROVIDER=openai\nAUTOONTOLOGY_EMBED_PROVIDER=openai\n")
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env_file))
+    env_file.write_text("ONTOLOGY_CHAT_PROVIDER=openai\nONTOLOGY_EMBED_PROVIDER=openai\n")
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(env_file))
     s = Settings.from_env()
     assert (s.chat_provider, s.embed_provider) == ("openai", "openai")
     assert s.selection_origin["chat_provider"] == ".env"
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "ollama")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "ollama")
     s = Settings.from_env()
     assert s.chat_provider == "ollama" and s.selection_origin["chat_provider"] == "shell"
     assert s.embed_provider == "openai"
@@ -151,11 +151,11 @@ def test_selection_precedence_shell_over_dotenv(isolated_env, monkeypatch):
 
 def test_dotenv_values_loaded_into_environ_do_not_count_as_shell(isolated_env, monkeypatch):
     env_file = isolated_env / "test.env"
-    env_file.write_text("AUTOONTOLOGY_CHAT_PROVIDER=openai\n")
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env_file))
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "x")  # so monkeypatch restores "unset"
-    monkeypatch.delenv("AUTOONTOLOGY_CHAT_PROVIDER")
-    load_env()  # copies the .env value into os.environ, as every AutoOntology process does
+    env_file.write_text("ONTOLOGY_CHAT_PROVIDER=openai\n")
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(env_file))
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "x")  # so monkeypatch restores "unset"
+    monkeypatch.delenv("ONTOLOGY_CHAT_PROVIDER")
+    load_env()  # copies the .env value into os.environ, as every Ontology process does
     s = Settings.from_env()
     assert s.chat_provider == "openai" and s.selection_origin["chat_provider"] == ".env"
 
@@ -164,7 +164,7 @@ def test_derived_keys_from_a_parent_are_not_user_settings(isolated_env, monkeypa
     # a child process inherits the parent's derived triplets: they must not look user-set
     monkeypatch.setenv("REASONING_MODEL", "openai/qwen3:8b")
     monkeypatch.setenv("LLM_INVOKE_TIMEOUT_S", "180")
-    monkeypatch.setenv("AUTOONTOLOGY_DERIVED_ENV", "REASONING_MODEL,LLM_INVOKE_TIMEOUT_S")
+    monkeypatch.setenv("ONTOLOGY_DERIVED_ENV", "REASONING_MODEL,LLM_INVOKE_TIMEOUT_S")
     s = Settings.from_env()
     assert "REASONING_MODEL" not in s.upstream_models
     assert "LLM_INVOKE_TIMEOUT_S" not in s.llm_limits
@@ -173,10 +173,10 @@ def test_derived_keys_from_a_parent_are_not_user_settings(isolated_env, monkeypa
 
 def test_unit_tests_never_see_the_developer_env():
     """Review M-6: no shell or repo-.env value reaches a unit test (run the suite with
-    e.g. POSTGRES_PORT=1 KORDOC_CLI=x AUTOONTOLOGY_CHAT_PROVIDER=openai to check)."""
+    e.g. POSTGRES_PORT=1 KORDOC_CLI=x ONTOLOGY_CHAT_PROVIDER=openai to check)."""
     import os
 
-    from autoontology.config import Settings, env_file_path
+    from ontology.config import Settings, env_file_path
 
     assert not env_file_path().is_file()
     leaked = [
@@ -185,15 +185,15 @@ def test_unit_tests_never_see_the_developer_env():
         if k.startswith(("KORDOC_", "POSTGRES_", "LLM_"))
         or k in {"BACKEND_PORT", "INGESTION_SERVICE_URL", "APP_URL"}
         or (
-            k.startswith("AUTOONTOLOGY_")
+            k.startswith("ONTOLOGY_")
             and k
             not in {
-                "AUTOONTOLOGY_HOME",
-                "AUTOONTOLOGY_EXPORTS_DIR",
-                "AUTOONTOLOGY_ENV_FILE",
-                "AUTOONTOLOGY_LANG",  # pinned to en by conftest
+                "ONTOLOGY_HOME",
+                "ONTOLOGY_EXPORTS_DIR",
+                "ONTOLOGY_ENV_FILE",
+                "ONTOLOGY_LANG",  # pinned to en by conftest
             }
-            and k != "AUTOONTOLOGY_INTEGRATION"
+            and k != "ONTOLOGY_INTEGRATION"
         )
     ]
     assert leaked == []
@@ -206,16 +206,16 @@ def test_unit_tests_never_see_the_developer_env():
 
 def test_sql_agent_tool_calls_default_to_12(isolated_env):
     """Upstream's TEXT_TO_SQL_REACT_MAX_TOOL_CALLS (react/config.py, default 24) resends the
-    whole transcript every turn: AutoOntology halves it unless the user set it."""
+    whole transcript every turn: Ontology halves it unless the user set it."""
     s = Settings.from_env()
     assert s.sql_max_tool_calls == 12
     assert expand_model_profile(s)["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "12"
 
 
-def test_sql_agent_tool_calls_follow_autoontology_setting(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_SQL_MAX_TOOL_CALLS", "6")
+def test_sql_agent_tool_calls_follow_ontology_setting(isolated_env, monkeypatch):
+    monkeypatch.setenv("ONTOLOGY_SQL_MAX_TOOL_CALLS", "6")
     assert expand_model_profile(Settings.from_env())["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "6"
-    monkeypatch.setenv("AUTOONTOLOGY_SQL_MAX_TOOL_CALLS", "0")  # floor of one call
+    monkeypatch.setenv("ONTOLOGY_SQL_MAX_TOOL_CALLS", "0")  # floor of one call
     assert expand_model_profile(Settings.from_env())["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "1"
 
 
@@ -223,29 +223,29 @@ def test_sql_agent_tool_calls_set_by_the_user_stay(isolated_env, monkeypatch):
     monkeypatch.setenv("TEXT_TO_SQL_REACT_MAX_TOOL_CALLS", "30")
     assert "TEXT_TO_SQL_REACT_MAX_TOOL_CALLS" not in expand_model_profile(Settings.from_env())
     # a value a parent process derived is not the user's: re-derived from the setting
-    monkeypatch.setenv("AUTOONTOLOGY_DERIVED_ENV", "TEXT_TO_SQL_REACT_MAX_TOOL_CALLS")
-    monkeypatch.setenv("AUTOONTOLOGY_SQL_MAX_TOOL_CALLS", "8")
+    monkeypatch.setenv("ONTOLOGY_DERIVED_ENV", "TEXT_TO_SQL_REACT_MAX_TOOL_CALLS")
+    monkeypatch.setenv("ONTOLOGY_SQL_MAX_TOOL_CALLS", "8")
     assert expand_model_profile(Settings.from_env())["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "8"
 
 
 def test_backend_child_gets_the_sql_tool_call_budget(isolated_env):
-    from autoontology.engine.supervisor import child_env
+    from ontology.engine.supervisor import child_env
 
     env = child_env(Settings.from_env(), base={})
     assert env["TEXT_TO_SQL_REACT_MAX_TOOL_CALLS"] == "12"
-    assert "TEXT_TO_SQL_REACT_MAX_TOOL_CALLS" in env["AUTOONTOLOGY_DERIVED_ENV"].split(",")
+    assert "TEXT_TO_SQL_REACT_MAX_TOOL_CALLS" in env["ONTOLOGY_DERIVED_ENV"].split(",")
 
 
 def test_sql_concurrency_setting(isolated_env, monkeypatch):
     assert Settings.from_env().sql_concurrency == 2
-    monkeypatch.setenv("AUTOONTOLOGY_SQL_CONCURRENCY", "5")
+    monkeypatch.setenv("ONTOLOGY_SQL_CONCURRENCY", "5")
     assert Settings.from_env().sql_concurrency == 5
-    monkeypatch.setenv("AUTOONTOLOGY_SQL_CONCURRENCY", "0")
+    monkeypatch.setenv("ONTOLOGY_SQL_CONCURRENCY", "0")
     assert Settings.from_env().sql_concurrency == 1
 
 
 def test_internal_secret_file_is_kept_owner_only(tmp_path):
-    from autoontology.config import _read_or_create_secret
+    from ontology.config import _read_or_create_secret
 
     key = tmp_path / "run" / "internal.key"
     first = _read_or_create_secret(key)

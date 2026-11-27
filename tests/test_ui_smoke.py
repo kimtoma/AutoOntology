@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 """Playwright smoke test of the web UI (``ui/`` build served at ``/ui/``) against the live
-service (``uv run autoontology up``) and a built ontology (e.g. ``hanbit`` + ``hanbit-docs``,
+service (``uv run onto up``) and a built ontology (e.g. ``hanbit`` + ``hanbit-docs``,
 built and exported once).
 
-Run with: AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_ui_smoke.py
-(browsers: ``uv run playwright install chromium``). With ``AUTOONTOLOGY_SCREENSHOTS=1`` the
+Run with: ONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_ui_smoke.py
+(browsers: ``uv run playwright install chromium``). With ``ONTOLOGY_SCREENSHOTS=1`` the
 last test also rewrites ``docs/screenshots/{home,overview,review,ontology,graph,exports}.png``
 and their Korean
 ``*.ko.png`` versions at 1280 px.
@@ -19,7 +19,7 @@ from urllib.parse import quote
 import httpx
 import pytest
 
-from autoontology.config import Settings
+from ontology.config import Settings
 
 pytestmark = pytest.mark.integration
 
@@ -69,7 +69,7 @@ OVERFLOWING = """() => {
   }
   return bad.slice(0, 10);
 }"""
-STATS = "window.__autoontologyGraphStats"
+STATS = "window.__ontologyGraphStats"
 SCREENSHOTS = Path(__file__).resolve().parents[1] / "docs" / "screenshots"
 
 
@@ -81,13 +81,13 @@ def live():
     try:
         httpx.get(f"{url}/health/live", timeout=3).raise_for_status()
     except httpx.HTTPError:
-        pytest.skip("service not running (uv run autoontology up)")
+        pytest.skip("service not running (uv run onto up)")
     sources = httpx.get(f"{url}/api/sources").json()["sources"]
     if not sources:
         pytest.skip("no source to show")
     resp = httpx.get(f"{url}/api/ontology")
     if resp.status_code == 404:
-        pytest.skip("no ontology snapshot (uv run autoontology build)")
+        pytest.skip("no ontology snapshot (uv run onto build)")
     return url, sources, resp.json()
 
 
@@ -209,7 +209,7 @@ def test_home_checklist_reflects_the_api(live, browser, name):
         == (status["checks"]["backend"]["status"])
     )
     if want == "active":  # not ready: the fix is shown as code
-        assert "uv run autoontology down && uv run autoontology up" in models.inner_text()
+        assert "uv run onto down && uv run onto up" in models.inner_text()
     # sources and a snapshot exist (the live fixture): steps 2-4 are done
     for step in ("sources", "build", "explore"):
         page.locator(f"[data-step={step}][data-state=done]").wait_for(timeout=15000)
@@ -770,7 +770,7 @@ def test_playground_sparql_example_shows_rows(live, browser, name):
     rows = int(result.locator("[data-rows]").get_attribute("data-rows"))
     assert rows >= 1
     assert result.locator("tbody tr").count() >= 1
-    assert "ao:" in result.locator("tbody tr").first.inner_text()
+    assert "onto:" in result.locator("tbody tr").first.inner_text()
     # an invalid query shows the parser error instead of rows
     page.fill("#sparql-query", "SELECT * WHERE {")
     page.click("#sparql-run")
@@ -788,7 +788,7 @@ def test_exports_show_ossie_and_okf_with_validation(live, browser):
     exports = httpx.get(f"{url}/api/exports").json()["exports"]
     latest = next((e for e in exports if {"ossie", "okf"} <= {d["name"] for d in e["dirs"]}), None)
     if latest is None:
-        pytest.skip("no export with ossie/ and okf/ (uv run autoontology export)")
+        pytest.skip("no export with ossie/ and okf/ (uv run onto export)")
     page = new_page(browser, VIEWPORTS["desktop"])
     page.goto(f"{url}/ui/exports")
     card = page.locator(f"[data-export={latest['dir']}]")
@@ -853,7 +853,7 @@ def service():
     try:
         httpx.get(f"{url}/health/live", timeout=3).raise_for_status()
     except httpx.HTTPError:
-        pytest.skip("service not running (uv run autoontology up)")
+        pytest.skip("service not running (uv run onto up)")
     return url
 
 
@@ -915,7 +915,7 @@ def test_settings_save_and_restart_flow(service, browser):
     def settings(route):
         if route.request.method == "PUT":
             calls.append("PUT")
-            _json(route, {"written": ["AUTOONTOLOGY_CHAT_PROVIDER"], "backup": None,
+            _json(route, {"written": ["ONTOLOGY_CHAT_PROVIDER"], "backup": None,
                           "restart_required": True})  # fmt: skip
             return
         resp = route.fetch()
@@ -1033,7 +1033,7 @@ def test_lang_toggle_switches_without_reload(live, browser):
     page.locator("main h1", has_text="시작하기").wait_for()
     assert page.evaluate("window.__noReload") == 1, "the page reloaded"
     assert page.evaluate("document.documentElement.lang") == "ko"
-    assert page.evaluate("localStorage.getItem('autoontology.lang')") == "ko"
+    assert page.evaluate("localStorage.getItem('ontology.lang')") == "ko"
     assert page.locator("#lang-toggle").get_attribute("aria-label") == "언어: 한국어"
     # keyboard: open the menu with Enter, move to English, choose it
     page.locator("#lang-toggle").focus()
@@ -1047,9 +1047,7 @@ def test_lang_toggle_switches_without_reload(live, browser):
     page.close()
 
 
-@pytest.mark.skipif(
-    not os.environ.get("AUTOONTOLOGY_SCREENSHOTS"), reason="AUTOONTOLOGY_SCREENSHOTS unset"
-)
+@pytest.mark.skipif(not os.environ.get("ONTOLOGY_SCREENSHOTS"), reason="ONTOLOGY_SCREENSHOTS unset")
 def test_screenshots(live, browser):
     url, _, _ = live
     SCREENSHOTS.mkdir(parents=True, exist_ok=True)

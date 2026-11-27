@@ -6,13 +6,13 @@ import pytest
 from rdflib import Graph, Literal, Namespace
 from rdflib.namespace import OWL, PROV, RDF, RDFS, SKOS
 
-from autoontology.export import graphml, rdf
-from autoontology.export import report as export_report
-from autoontology.ontology import model as merged
-from autoontology.store.alignments import AlignmentRecord
-from autoontology.store.documents import ConceptRow, DocumentRow, RelationRow
-from autoontology.structured.semantic import SemanticFK, StructuredSnapshot
-from autoontology.unstructured.align import TermInfo
+from ontology.export import graphml, rdf
+from ontology.export import report as export_report
+from ontology.ontology import model as merged
+from ontology.store.alignments import AlignmentRecord
+from ontology.store.documents import ConceptRow, DocumentRow, RelationRow
+from ontology.structured.semantic import SemanticFK, StructuredSnapshot
+from ontology.unstructured.align import TermInfo
 
 ATTR = {"schema": "public", "table": "contracts"}
 
@@ -55,7 +55,7 @@ def _snapshot():
     return StructuredSnapshot(
         "hanbit",
         "db1",
-        "autoontology_src_hanbit",
+        "ontology_src_hanbit",
         [contracts, customers],
         [SemanticFK("t-c", "t-k", "a3", "고객id", "public.contracts.고객id")],
     )
@@ -255,7 +255,7 @@ def test_turtle_and_jsonld_roundtrip_with_korean_labels(model, tmp_path):
     assert not rdf.roundtrip(paths["ttl"], model, expected_classes=7)["ok"]
     g = Graph().parse(str(paths["ttl"]), format="turtle")
     os_ = Namespace(model.base)
-    assert model.base == "http://example.com/autoontology#"  # AUTOONTOLOGY_BASE_IRI default
+    assert model.base == "http://example.com/ontology#"  # ONTOLOGY_BASE_IRI default
     contracts = os_["term-t-c"]
     assert (contracts, SKOS.altLabel, Literal("계약", lang="ko")) in g
     assert (contracts, RDFS.label, Literal("Contracts", lang="en")) in g
@@ -274,10 +274,10 @@ def test_turtle_and_jsonld_roundtrip_with_korean_labels(model, tmp_path):
     assert (os_["rel-r4"], RDFS.subPropertyOf, os_["owns"]) in g
     assert (os_["rel-r4"], RDF.type, OWL.ObjectProperty) in g
     text = paths["ttl"].read_text(encoding="utf-8")
-    assert "@prefix ao: <http://example.com/autoontology#>" in text
+    assert "@prefix onto: <http://example.com/ontology#>" in text
     assert "계약관리규정" in text  # not \u-escaped
     data = json.loads(paths["jsonld"].read_text(encoding="utf-8"))
-    assert data["@context"]["ao"] == model.base
+    assert data["@context"]["onto"] == model.base
     assert len(Graph().parse(str(paths["jsonld"]), format="json-ld")) == len(g)
 
 
@@ -433,8 +433,8 @@ def test_graph_keeps_relations_between_individuals_and_classes():
     """Review #13: `승인(process) governed_by 승인 기준(rule)` and a process -> entity relation
     must be edges in the graph view (the property's domain/range are only os:Process /
     os:BusinessRule, which are not nodes)."""
-    from autoontology.store.documents import RelationRow
-    from autoontology.web.graph import to_view
+    from ontology.store.documents import RelationRow
+    from ontology.web.graph import to_view
 
     docs = _documents()
     docs.relations = [

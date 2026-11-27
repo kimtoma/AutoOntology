@@ -4,8 +4,8 @@ import shutil
 
 import pytest
 
-from autoontology.unstructured import chunker, kordoc, readers
-from autoontology.unstructured.readers import Document, Section
+from ontology.unstructured import chunker, kordoc, readers
+from ontology.unstructured.readers import Document, Section
 
 MD = """\
 머리말 문단.
@@ -167,7 +167,7 @@ def test_chunker_splits_tables_repeating_header():
 
 def test_hard_split_keeps_korean_text_intact():
     """Review #16: fixed token slices decoded on their own split Hangul syllables."""
-    from autoontology.unstructured import chunker
+    from ontology.unstructured import chunker
 
     text = "한글문서추출검증" * 1000
     pieces = chunker._hard_split(text, 1200)
@@ -210,7 +210,7 @@ def test_tsv_cp949_and_row_cap(tmp_path, monkeypatch):
     assert lines[2] == "| P001 | 품목, 1 | 100 |"
     assert len(lines) == 2 + 5 + 1
     assert lines[-1] == "… 2 more rows (7 total)"
-    monkeypatch.setenv("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", "3")
+    monkeypatch.setenv("ONTOLOGY_DOC_TABLE_MAX_ROWS", "3")
     assert readers.read_document(path).sections[0].text.endswith("… 4 more rows (7 total)")
 
 
@@ -270,18 +270,18 @@ def test_csv_falls_back_to_cp949_past_the_kept_rows(tmp_path):
 def test_documents_over_the_byte_cap_fail(tmp_path, monkeypatch, name, data):
     path = tmp_path / name
     path.write_bytes(data)
-    monkeypatch.setenv("AUTOONTOLOGY_DOC_MAX_BYTES", "1000")
+    monkeypatch.setenv("ONTOLOGY_DOC_MAX_BYTES", "1000")
     with pytest.raises(readers.ReadError) as err:
         readers.read_document(path)
-    assert err.value.code == "FILE_TOO_LARGE" and "AUTOONTOLOGY_DOC_MAX_BYTES" in str(err.value)
+    assert err.value.code == "FILE_TOO_LARGE" and "ONTOLOGY_DOC_MAX_BYTES" in str(err.value)
     with pytest.raises(readers.ReadError) as err:
         readers.read_document(path, max_bytes=1000)
     assert err.value.code == "FILE_TOO_LARGE"
-    monkeypatch.delenv("AUTOONTOLOGY_DOC_MAX_BYTES")
+    monkeypatch.delenv("ONTOLOGY_DOC_MAX_BYTES")
     assert readers.doc_max_bytes() == readers.DEFAULT_DOC_MAX_BYTES == 50 * 1024 * 1024
 
 
-@pytest.mark.parametrize("var", ["AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", "AUTOONTOLOGY_DOC_MAX_BYTES"])
+@pytest.mark.parametrize("var", ["ONTOLOGY_DOC_TABLE_MAX_ROWS", "ONTOLOGY_DOC_MAX_BYTES"])
 def test_bad_env_values_are_read_errors(tmp_path, monkeypatch, var):
     path = tmp_path / "a.csv"
     path.write_text("a\n1\n", encoding="utf-8")

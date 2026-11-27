@@ -275,89 +275,6 @@ release = [
 ]
 
 [[package]]
-name = "autoontology"
-version = "0.2.0"
-source = { editable = "." }
-dependencies = [
-    { name = "auto-ontology-server" },
-    { name = "beautifulsoup4" },
-    { name = "duckdb" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "jsonschema" },
-    { name = "markdown-it-py" },
-    { name = "numpy" },
-    { name = "olefile" },
-    { name = "openpyxl" },
-    { name = "pandas" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic" },
-    { name = "python-calamine" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "rdflib" },
-    { name = "referencing" },
-    { name = "sse-starlette" },
-    { name = "tiktoken" },
-    { name = "typer" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "matplotlib" },
-    { name = "pillow" },
-    { name = "playwright" },
-    { name = "pymupdf" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "python-docx" },
-    { name = "python-pptx" },
-    { name = "ruff" },
-    { name = "xlwt" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "auto-ontology-server", editable = "vendor/auto-ontology" },
-    { name = "beautifulsoup4", specifier = ">=4.15.0" },
-    { name = "duckdb", specifier = ">=2.0.0" },
-    { name = "fastapi", specifier = ">=0.162.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "jsonschema", specifier = ">=4.26.0" },
-    { name = "markdown-it-py", specifier = ">=4.2.0" },
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "olefile", specifier = ">=0.47" },
-    { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "pandas", specifier = ">=2.3.3" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
-    { name = "pydantic", specifier = ">=2.14.1" },
-    { name = "python-calamine", specifier = ">=0.4" },
-    { name = "python-dotenv", specifier = ">=1.2.4" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "rdflib", specifier = ">=7.6.0" },
-    { name = "referencing", specifier = ">=0.36" },
-    { name = "sse-starlette", specifier = ">=3.6.0" },
-    { name = "tiktoken", specifier = ">=0.14.0" },
-    { name = "typer", specifier = ">=0.27.3" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "matplotlib", specifier = ">=3.11.2" },
-    { name = "pillow", specifier = ">=13.0.0" },
-    { name = "playwright", specifier = ">=1.64.1" },
-    { name = "pymupdf", specifier = ">=2.0" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-asyncio", specifier = ">=1.4.1" },
-    { name = "python-docx", specifier = ">=1.2.0" },
-    { name = "python-pptx", specifier = ">=1.0.2" },
-    { name = "ruff", specifier = ">=0.17.3" },
-    { name = "xlwt", specifier = ">=1.3" },
-]
-
-[[package]]
 name = "beautifulsoup4"
 version = "4.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1524,6 +1441,89 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/fd/529135287474dbaf19d9362ccda61998128ab18507f78bc82931e1bbaf22/onnxruntime-1.31.1-cp313-cp313-win_arm64.whl", hash = "sha256:075147c2e2430b4b29c436bffa78537b902a6ed58ed66f99ae3c6795e2081cb5", size = 14740772, upload-time = "2026-10-26T19:26:44.042Z" },
     { url = "https://files.pythonhosted.org/packages/0e/d4/56ea7d601695be4018ccc6bb9a47637a1deaccc5c4db6c6ad272e48d88e2/onnxruntime-1.31.1-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:ae0987aedb9ae589f3395615c58b22aad2eae6657b14508cec70c24b367cfad1", size = 21432641, upload-time = "2026-10-26T19:26:47.065Z" },
     { url = "https://files.pythonhosted.org/packages/05/10/e37d9f06dae61cecaad344aef213a19643b66761a06667bdfe5282c1fb37/onnxruntime-1.31.1-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:6711108bcddf8b401145fb31ac93776b8ca6e7e7e56acdfa9d478575b8df9a2f", size = 23773876, upload-time = "2026-10-26T19:26:50.371Z" },
+]
+
+[[package]]
+name = "ontology"
+version = "0.3.0"
+source = { editable = "." }
+dependencies = [
+    { name = "auto-ontology-server" },
+    { name = "beautifulsoup4" },
+    { name = "duckdb" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "jsonschema" },
+    { name = "markdown-it-py" },
+    { name = "numpy" },
+    { name = "olefile" },
+    { name = "openpyxl" },
+    { name = "pandas" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
+    { name = "python-calamine" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rdflib" },
+    { name = "referencing" },
+    { name = "sse-starlette" },
+    { name = "tiktoken" },
+    { name = "typer" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "matplotlib" },
+    { name = "pillow" },
+    { name = "playwright" },
+    { name = "pymupdf" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "python-docx" },
+    { name = "python-pptx" },
+    { name = "ruff" },
+    { name = "xlwt" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "auto-ontology-server", editable = "vendor/auto-ontology" },
+    { name = "beautifulsoup4", specifier = ">=4.15.0" },
+    { name = "duckdb", specifier = ">=2.0.0" },
+    { name = "fastapi", specifier = ">=0.162.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
+    { name = "markdown-it-py", specifier = ">=4.2.0" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "olefile", specifier = ">=0.47" },
+    { name = "openpyxl", specifier = ">=3.1.5" },
+    { name = "pandas", specifier = ">=2.3.3" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
+    { name = "pydantic", specifier = ">=2.14.1" },
+    { name = "python-calamine", specifier = ">=0.4" },
+    { name = "python-dotenv", specifier = ">=1.2.4" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "rdflib", specifier = ">=7.6.0" },
+    { name = "referencing", specifier = ">=0.36" },
+    { name = "sse-starlette", specifier = ">=3.6.0" },
+    { name = "tiktoken", specifier = ">=0.14.0" },
+    { name = "typer", specifier = ">=0.27.3" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "matplotlib", specifier = ">=3.11.2" },
+    { name = "pillow", specifier = ">=13.0.0" },
+    { name = "playwright", specifier = ">=1.64.1" },
+    { name = "pymupdf", specifier = ">=2.0" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pytest-asyncio", specifier = ">=1.4.1" },
+    { name = "python-docx", specifier = ">=1.2.0" },
+    { name = "python-pptx", specifier = ">=1.0.2" },
+    { name = "ruff", specifier = ">=0.17.3" },
+    { name = "xlwt", specifier = ">=1.3" },
 ]
 
 [[package]]

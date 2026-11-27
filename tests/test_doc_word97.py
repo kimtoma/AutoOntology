@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from autoontology.unstructured import doc_word97, readers
+from ontology.unstructured import doc_word97, readers
 
 FIXTURES = Path(__file__).parent / "fixtures" / "doc"
 

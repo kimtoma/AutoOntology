@@ -5,10 +5,10 @@ source freshness -- over a fake build (``tests/test_decisions.py``'s ``ops`` fix
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.engine.apply import run_apply
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager
+from ontology.config import Settings
+from ontology.engine.apply import run_apply
+from ontology.web import app as web
+from ontology.web.runs import RunManager
 from tests.test_align import ClientWriter
 from tests.test_build import env  # noqa: F401 - the build fixture
 from tests.test_decisions import OpsJudge, _no_models, _rows, ops  # noqa: F401
@@ -19,7 +19,7 @@ TS_HOST = "box.example.ts.net"
 
 def _client(ops, monkeypatch=None, hosts=""):  # noqa: F811
     if monkeypatch is not None:
-        monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_HOSTS", hosts)
+        monkeypatch.setenv("ONTOLOGY_TAILSCALE_HOSTS", hosts)
     settings = Settings.from_env()
 
     def jobs():
@@ -228,9 +228,9 @@ def test_cli_review_and_apply(ops, monkeypatch):  # noqa: F811
 
     from typer.testing import CliRunner
 
-    from autoontology import cli
-    from autoontology.engine import align as align_job
-    from autoontology.engine import apply as apply_job
+    from ontology import cli
+    from ontology.engine import align as align_job
+    from ontology.engine import apply as apply_job
 
     runner = CliRunner()
     rows = _rows(ops)
@@ -268,9 +268,9 @@ def test_cli_review_and_apply(ops, monkeypatch):  # noqa: F811
 
 
 def test_diff_of_models(monkeypatch):
-    from autoontology.ontology import model as merged
-    from autoontology.store.alignments import AlignmentRecord
-    from autoontology.web import revisions
+    from ontology.ontology import model as merged
+    from ontology.store.alignments import AlignmentRecord
+    from ontology.web import revisions
     from tests import test_ossie_okf as fx
 
     docs = fx.documents()
@@ -307,7 +307,7 @@ def test_diff_of_models(monkeypatch):
 
 
 def test_badge_and_inbox_never_compute_freshness(api, monkeypatch):
-    from autoontology.web import freshness as fr
+    from ontology.web import freshness as fr
 
     calls = []
     real = fr.freshness
@@ -332,8 +332,8 @@ def test_badge_and_inbox_never_compute_freshness(api, monkeypatch):
 def test_freshness_is_computed_outside_the_lock(ops, monkeypatch):  # noqa: F811
     import threading
 
-    from autoontology.web import freshness as fr
-    from autoontology.web.api import Api
+    from ontology.web import freshness as fr
+    from ontology.web.api import Api
 
     api_ = Api(Settings.from_env())
     entered, release = threading.Event(), threading.Event()
@@ -454,8 +454,8 @@ def test_diff_default_from_is_the_revision_before_to(api):
 def test_concurrent_freshness_requests_share_one_computation(ops, monkeypatch):  # noqa: F811
     import threading
 
-    from autoontology.web import freshness as fr
-    from autoontology.web.api import Api
+    from ontology.web import freshness as fr
+    from ontology.web.api import Api
 
     api_ = Api(Settings.from_env())
     calls, entered, release = [], threading.Event(), threading.Event()
@@ -485,8 +485,8 @@ def test_freshness_waiters_never_compute_while_the_producer_runs(ops, monkeypatc
     import threading
     import time
 
-    from autoontology.web import api as api_mod
-    from autoontology.web import freshness as fr
+    from ontology.web import api as api_mod
+    from ontology.web import freshness as fr
 
     monkeypatch.setattr(api_mod, "FRESHNESS_WAIT_S", 0.02)
     api_ = api_mod.Api(Settings.from_env())

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""The ``logic`` run (``autoontology/logic/extract.py``), the review inbox's ``logic``
-category (``autoontology/logic/candidates.py``) and ``ao logic extract|candidates|accept|
+"""The ``logic`` run (``ontology/logic/extract.py``), the review inbox's ``logic``
+category (``ontology/logic/candidates.py``) and ``onto logic extract|candidates|accept|
 reject``: a golden run over the quickstart 청구수납규정 (제4조 지급기한, 제6조 연체 판정,
 제7조 독촉 절차) with a deterministic fake chat model -- a valid function, one that needs a
 column the data lacks (지급기한), an action and a workflow that validate together, junk
@@ -18,16 +18,16 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.engine.jobs import JobError
-from autoontology.logic import candidates, extract, functions
-from autoontology.store import accounts as acc
-from autoontology.store.accounts import Accounts
-from autoontology.store.db import Store
-from autoontology.store.documents import ConceptRecord, DocumentStore, EvidenceRecord
-from autoontology.unstructured import prompts
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager, run_log_path
+from ontology.config import Settings
+from ontology.engine.jobs import JobError
+from ontology.logic import candidates, extract, functions
+from ontology.store import accounts as acc
+from ontology.store.accounts import Accounts
+from ontology.store.db import Store
+from ontology.store.documents import ConceptRecord, DocumentStore, EvidenceRecord
+from ontology.unstructured import prompts
+from ontology.web import app as web
+from ontology.web.runs import RunManager, run_log_path
 from tests import logic_fixtures as fx
 from tests.test_logic import TODAY
 
@@ -550,8 +550,8 @@ def test_run_review_accept_reject_undo_through_the_api(client):
 def test_cli_logic_commands(client, monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
-    from autoontology import cli_ops
-    from autoontology.cli import app
+    from ontology import cli_ops
+    from ontology.cli import app
 
     c, store, view, runs, llm = client
 
@@ -602,7 +602,7 @@ def test_cli_logic_commands(client, monkeypatch, tmp_path):
 def test_accounts_roles_on_logic_extraction(isolated_env, monkeypatch):
     monkeypatch.setattr(acc, "PBKDF2_ROUNDS", 1000)
     monkeypatch.setattr(acc, "_DUMMY_HASH", None)
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     monkeypatch.setattr(functions, "today", lambda: TODAY)
     fx.install_backend(monkeypatch)
     settings = Settings.from_env()
@@ -619,7 +619,7 @@ def test_accounts_roles_on_logic_extraction(isolated_env, monkeypatch):
         accounts.add_member(view.id, user.id, role)
         raw, _ = accounts.create_session(user.id)
         c = TestClient(app)
-        c.cookies.set("ao_session", raw)
+        c.cookies.set("onto_session", raw)
         return c
 
     viewer, reviewer, editor = (

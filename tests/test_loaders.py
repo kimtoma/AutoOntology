@@ -6,8 +6,8 @@ import duckdb
 import pandas as pd
 import pytest
 
-from autoontology.structured import loaders
-from autoontology.structured.loaders import (
+from ontology.structured import loaders
+from ontology.structured.loaders import (
     LoadError,
     dedupe_identifiers,
     discover_files,
@@ -137,10 +137,10 @@ def test_read_tables_dedupes_table_names(tmp_path):
 
 
 def test_load_requires_files(isolated_env):
-    from autoontology.config import Settings
+    from ontology.config import Settings
 
     with pytest.raises(LoadError):
-        loaders.load_files_to_postgres([], "autoontology_src_x", Settings.from_env())
+        loaders.load_files_to_postgres([], "ontology_src_x", Settings.from_env())
     with pytest.raises(ValueError):
         loaders.load_files_to_postgres([isolated_env], "other_db", Settings.from_env())
 
@@ -150,7 +150,7 @@ def test_sqlite_table_names_with_quotes_are_escaped(tmp_path):
 
     import duckdb
 
-    from autoontology.structured.loaders import read_tables
+    from ontology.structured.loaders import read_tables
 
     db = tmp_path / "q.sqlite"
     with sqlite3.connect(db) as conn:
@@ -165,7 +165,7 @@ def test_sqlite_table_names_with_quotes_are_escaped(tmp_path):
 def test_duckdb_renames_duplicate_csv_headers_before_dedupe(tmp_path):
     import duckdb
 
-    from autoontology.structured.loaders import read_tables
+    from ontology.structured.loaders import read_tables
 
     path = tmp_path / "d.csv"
     path.write_text("금액,금액,Amount,amount,a b,a_b\n1,2,3,4,5,6\n", encoding="utf-8")
@@ -198,7 +198,7 @@ def test_sqlite_nullable_integers_keep_precision(tmp_path):
 def test_manifest_and_diff(tmp_path):
     """Review #4/#5: the load manifest records each table's input and column types; the diff
     reports added, removed and changed (new column / changed type) tables."""
-    from autoontology.structured.loaders import diff_manifest, table_manifest
+    from ontology.structured.loaders import diff_manifest, table_manifest
 
     (tmp_path / "customers.csv").write_text("id,name\n1,a\n")
     (tmp_path / "orders.csv").write_text("id,total\n1,2.5\n")
@@ -278,7 +278,7 @@ def test_xlsx_out_of_range_numbers_and_dates_load_exactly(tmp_path):
 
     import openpyxl
 
-    from autoontology.structured.loaders import typed_column
+    from ontology.structured.loaders import typed_column
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -398,7 +398,7 @@ def test_xlsx_colliding_headers_keep_every_column(tmp_path, headers, names):
     case-insensitive) copied one column's values into both."""
     import openpyxl
 
-    from autoontology.structured.loaders import write_tables
+    from ontology.structured.loaders import write_tables
 
     wb = openpyxl.Workbook()
     ws = wb.active

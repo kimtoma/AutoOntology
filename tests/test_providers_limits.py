@@ -10,19 +10,19 @@ import time
 
 import pytest
 
-from autoontology.config import Settings, expand_model_profile
-from autoontology.web import app as web
-from autoontology.web.providers import base
-from autoontology.web.providers.openai_compat import ProviderError, parse_request
-from autoontology.web.providers.router import ClientGone, until_disconnected
+from ontology.config import Settings, expand_model_profile
+from ontology.web import app as web
+from ontology.web.providers import base
+from ontology.web.providers.openai_compat import ProviderError, parse_request
+from ontology.web.providers.router import ClientGone, until_disconnected
 from tests.test_providers_cli import FMT, _chat, _client, fakes  # noqa: F401 - fixture
 
 
 def test_one_deadline_covers_the_wait_for_a_slot(fakes, monkeypatch):  # noqa: F811
     monkeypatch.setenv("FAKE_MODE", "sleep")
-    monkeypatch.setenv("AUTOONTOLOGY_PROVIDER_TIMEOUT_S", "1.5")
-    monkeypatch.setenv("AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT", "1")
-    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
+    monkeypatch.setenv("ONTOLOGY_PROVIDER_TIMEOUT_S", "1.5")
+    monkeypatch.setenv("ONTOLOGY_PROVIDER_MAX_INFLIGHT", "1")
+    from ontology.web.providers.claude_cli import ClaudeCLIProvider
 
     provider = ClaudeCLIProvider(Settings.from_env().home, ["sonnet"])
     req = parse_request({"messages": [{"role": "user", "content": "x"}]}, "sonnet")
@@ -49,16 +49,16 @@ def test_reask_needs_enough_time_left(fakes, monkeypatch):  # noqa: F811
 
 
 def test_llm_invoke_timeout_sits_above_the_router_deadline(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "claude")
     assert expand_model_profile(Settings.from_env())["LLM_INVOKE_TIMEOUT_S"] == "270"
-    monkeypatch.setenv("AUTOONTOLOGY_PROVIDER_TIMEOUT_S", "60")
+    monkeypatch.setenv("ONTOLOGY_PROVIDER_TIMEOUT_S", "60")
     assert expand_model_profile(Settings.from_env())["LLM_INVOKE_TIMEOUT_S"] == "150"
     assert base.DEFAULT_TIMEOUT_S == 120
 
 
 def test_cancel_kills_and_reaps_the_cli(fakes, monkeypatch):  # noqa: F811
     monkeypatch.setenv("FAKE_MODE", "sleep")
-    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
+    from ontology.web.providers.claude_cli import ClaudeCLIProvider
 
     provider = ClaudeCLIProvider(Settings.from_env().home, ["sonnet"])
     req = parse_request({"messages": [{"role": "user", "content": "x"}]}, "sonnet")
@@ -110,7 +110,7 @@ def test_bad_model_names_are_400(fakes, model):  # noqa: F811
 
 
 def test_oversized_schema_is_413_not_503(fakes, monkeypatch):  # noqa: F811
-    from autoontology.web.providers import claude_cli
+    from ontology.web.providers import claude_cli
 
     monkeypatch.setattr(claude_cli, "MAX_SCHEMA_ARG_BYTES", 50)
     res = _chat(_client(), "openai/claude:sonnet", response_format=FMT)
@@ -118,7 +118,7 @@ def test_oversized_schema_is_413_not_503(fakes, monkeypatch):  # noqa: F811
 
 
 def test_models_route_checks_status_off_the_event_loop(fakes, monkeypatch):  # noqa: F811
-    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
+    from ontology.web.providers.claude_cli import ClaudeCLIProvider
 
     threads = []
     real = ClaudeCLIProvider.status
@@ -148,7 +148,7 @@ def test_service_start_sweeps_stale_workdirs(isolated_env):
 
 
 def test_cli_profile_points_every_chat_role_at_the_router(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "codex")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "codex")
     settings = Settings.from_env()
     env = expand_model_profile(settings)
     for prefix in ("DEFAULT_MODELS", "REASONING", "NON_REASONING", "RERANK"):
@@ -159,8 +159,8 @@ def test_cli_profile_points_every_chat_role_at_the_router(isolated_env, monkeypa
     # the user's own limits win
     monkeypatch.setenv("LLM_INVOKE_TIMEOUT_S", "999")
     assert "LLM_INVOKE_TIMEOUT_S" not in expand_model_profile(Settings.from_env())
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
-    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_MODEL", "claude-haiku-5-5")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "claude")
+    monkeypatch.setenv("ONTOLOGY_CLAUDE_MODEL", "claude-haiku-5-5")
     settings = Settings.from_env()
     assert settings.upstream_chat_model == "openai/claude:claude-haiku-5-5"
     assert settings.effective_chat_model == "claude-haiku-5-5"

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Schema v9 and :mod:`autoontology.store.accounts`: users, passwords, sessions, login
+"""Schema v9 and :mod:`ontology.store.accounts`: users, passwords, sessions, login
 tokens, memberships and the audit log, plus the v8 -> v9 migration."""
 
 from __future__ import annotations
@@ -12,11 +12,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from autoontology.store import accounts as acc
-from autoontology.store import db
-from autoontology.store.accounts import AccountError, Accounts
-from autoontology.store.agent_tokens import AgentTokens
-from autoontology.store.db import Store
+from ontology.store import accounts as acc
+from ontology.store import db
+from ontology.store.accounts import AccountError, Accounts
+from ontology.store.agent_tokens import AgentTokens
+from ontology.store.db import Store
 
 
 @pytest.fixture(autouse=True)
@@ -167,7 +167,7 @@ def test_default_rounds_are_the_reference_cost():
         [
             sys.executable,
             "-c",
-            "from autoontology.store import accounts as a; print(a.PBKDF2_ROUNDS)",
+            "from ontology.store import accounts as a; print(a.PBKDF2_ROUNDS)",
         ],
         capture_output=True,
         text=True,

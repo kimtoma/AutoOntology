@@ -12,17 +12,17 @@ from pathlib import Path
 import pytest
 import yaml
 
-from autoontology.config import REPO_ROOT, Settings
-from autoontology.engine import build as bj
-from autoontology.engine import export_job, jobs
-from autoontology.engine import extract as ex
-from autoontology.engine.align import AlignBackends
-from autoontology.engine.jobs import JobError
-from autoontology.ontology.model import MergedOntology
-from autoontology.store.db import Store
-from autoontology.structured import pipeline
-from autoontology.structured.loaders import LoadReport, TableReport
-from autoontology.unstructured.schemas import MergeDecision
+from ontology.config import REPO_ROOT, Settings
+from ontology.engine import build as bj
+from ontology.engine import export_job, jobs
+from ontology.engine import extract as ex
+from ontology.engine.align import AlignBackends
+from ontology.engine.jobs import JobError
+from ontology.ontology.model import MergedOntology
+from ontology.store.db import Store
+from ontology.structured import pipeline
+from ontology.structured.loaders import LoadReport, TableReport
+from ontology.unstructured.schemas import MergeDecision
 from tests.test_align import ClientWriter, FakeJudge
 from tests.test_align import FakeClient as TermsClient
 from tests.test_extract_job import FakeLLM as VocabLLM
@@ -87,7 +87,7 @@ class Client(TermsClient):
 def _dataset(name, key, columns):
     return {
         "name": name,
-        "source": f"autoontology_src_hanbit.public.{name}",
+        "source": f"ontology_src_hanbit.public.{name}",
         "unique_keys": [[key]],
         "fields": [
             {
@@ -104,7 +104,7 @@ def ossie_zip() -> bytes:
     """An upstream Ossie export of the fake catalog (the shape the backend returns)."""
     model = {
         "version": "0.2.0.dev0",
-        "name": "autoontology_src_hanbit",
+        "name": "ontology_src_hanbit",
         "datasets": [
             _dataset("contracts", "계약id", ["계약id", "고객id"]),
             _dataset("customers", "고객id", ["고객id"]),
@@ -159,7 +159,7 @@ def env(isolated_env, monkeypatch, tmp_path):
         calls.append(f"compile:{db}")
         return {"tables_compiled": 1}
 
-    monkeypatch.setattr("autoontology.structured.loaders.load_files_to_postgres", fake_load)
+    monkeypatch.setattr("ontology.structured.loaders.load_files_to_postgres", fake_load)
     monkeypatch.setattr(jobs, "upstream_ingest", fake_ingest)
     monkeypatch.setattr(jobs, "upstream_compile", fake_compile)
     monkeypatch.setattr(jobs, "ensure_vector_tables", lambda s: {"vector_tables": {}})
@@ -224,9 +224,9 @@ def test_build_runs_every_source_in_one_run_and_saves_a_snapshot(env):
     assert {s.status for s in steps} == {"succeeded"}
     assert len([r for r in store.list_runs(None) if r.kind == "build"]) == 1
     assert env["calls"] == [
-        "load:autoontology_src_hanbit",
-        "ingest:autoontology_src_hanbit",
-        "compile:autoontology_src_hanbit",
+        "load:ontology_src_hanbit",
+        "ingest:ontology_src_hanbit",
+        "compile:ontology_src_hanbit",
     ]
     align = next(s for s in steps if s.name == "align:hanbit-docs").detail
     assert align["structured_sources"] == ["hanbit"]
@@ -239,7 +239,7 @@ def test_build_runs_every_source_in_one_run_and_saves_a_snapshot(env):
         ("hanbit-docs", "documents", True),
     ]
     model = MergedOntology.from_dict(snap.model)
-    assert model.name == "default" and model.base == "http://example.com/autoontology#"
+    assert model.name == "default" and model.base == "http://example.com/ontology#"
     assert model.counts()["classes_structured"] == 2
     folded = {m.concept_name: model.classes[m.term_local].label for m in model.merges}
     assert folded == {"계약": "Contract", "고객": "Customer"}
@@ -312,11 +312,11 @@ def test_resume_keeps_unchanged_sources_and_continues_the_run(env):
         run(env, llm=Failing())
     first = env["store"].list_runs(None)[0]
     assert first.status == "failed"
-    assert env["calls"].count("ingest:autoontology_src_hanbit") == 1
+    assert env["calls"].count("ingest:ontology_src_hanbit") == 1
     result = run(env, resume=True)
     assert result.status == "succeeded" and result.run_id == first.id
     # the structured source and the read step were kept: no second ingest
-    assert env["calls"].count("ingest:autoontology_src_hanbit") == 1
+    assert env["calls"].count("ingest:ontology_src_hanbit") == 1
     assert result.steps["structured:hanbit:ingest"] == "succeeded"
     assert "structured:hanbit:ingest" not in result.details
     assert "documents:hanbit-docs:read" not in result.details
@@ -345,13 +345,13 @@ def test_resume_of_a_succeeded_build_rebuilds_sources_whose_inputs_changed(env):
     assert edited.revision == 2 and env["store"].latest_revision() == 2
     read = edited.details["documents:hanbit-docs:read"]
     assert read["new_or_changed"] >= 1
-    assert env["calls"].count("ingest:autoontology_src_hanbit") == 1
+    assert env["calls"].count("ingest:ontology_src_hanbit") == 1
     # a structured input file changed: its steps run again
     (env["data"] / "contracts.csv").write_text("x\n1\n2\n")
     again = run(env, resume=True)
     assert "structured:hanbit:ingest" in again.details and again.revision == 3
     assert not any(n.startswith("documents:") for n in again.details)
-    assert env["calls"].count("ingest:autoontology_src_hanbit") == 2
+    assert env["calls"].count("ingest:ontology_src_hanbit") == 2
     assert run(env, resume=True).details == {}
 
 
@@ -456,7 +456,7 @@ def test_resumed_align_rejudges_when_the_candidate_term_changed(env):
     first = run(env)
     assert first.status == "succeeded"
     docs_id = store.get_source("hanbit-docs").id
-    from autoontology.store.alignments import AlignmentStore
+    from ontology.store.alignments import AlignmentStore
 
     def accepted():
         return {
@@ -694,7 +694,7 @@ def test_build_records_the_documents_source_on_the_aliases_it_adds(env):
     add_documents(env)
     store = env["store"]
     assert run(env).status == "succeeded"
-    from autoontology.store.alignments import AlignmentStore
+    from ontology.store.alignments import AlignmentStore
 
     prov = AlignmentStore(store).alias_provenance()
     sources = {r["source_id"] for records in prov.values() for r in records}
@@ -752,7 +752,7 @@ def test_documents_source_that_only_needs_kordoc_reads_zero_documents(env, monke
 def test_cli_build_prints_the_kordoc_warning_and_exits_0(env, monkeypatch):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     monkeypatch.delenv("KORDOC_CLI", raising=False)
     monkeypatch.setenv("PATH", "/nonexistent")
@@ -1009,7 +1009,7 @@ def test_export_reads_the_snapshot_and_overwrites_its_folder(env):
     assert (folder / "upstream/hanbit.ossie.zip").read_bytes() == ossie_zip()
     assert "ossie/ontology.yaml" in (folder / "report.md").read_text(encoding="utf-8")
     ttl = (folder / "ontology.ttl").read_text(encoding="utf-8")
-    assert "@prefix ao: <http://example.com/autoontology#>" in ttl
+    assert "@prefix onto: <http://example.com/ontology#>" in ttl
     report = (folder / "report.md").read_text(encoding="utf-8")
     assert "Revision: 1" in report
     assert "upstream/ files reflect the backend state at export time, not at build time" in report
@@ -1211,7 +1211,7 @@ def test_export_format_keeps_the_other_formats_of_the_revision(env, tmp_path):
 
 
 def test_failed_validation_keeps_the_record_and_the_previous_folder(env, monkeypatch):
-    from autoontology.export import okf
+    from ontology.export import okf
 
     add_structured(env)
     add_documents(env)
@@ -1238,7 +1238,7 @@ def test_failed_validation_keeps_the_record_and_the_previous_folder(env, monkeyp
 def test_cli_build_ontology_export_and_runs(env, monkeypatch):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     real_build, real_export = bj.run_build, export_job.run_export
     llm = FakeLLM()
@@ -1338,7 +1338,7 @@ def test_export_backup_cleanup_failure_still_succeeds(env, monkeypatch, caplog):
         return real_unlink(self, *a, **k)
 
     monkeypatch.setattr(Path, "unlink", failing_unlink)
-    with caplog.at_level("WARNING", logger="autoontology.jobs"):
+    with caplog.at_level("WARNING", logger="ontology.jobs"):
         result = export_job.run_export(store, settings, client=env["client"])
     assert result.status == "succeeded"
     assert store.get_run(result.run_id).status == "succeeded"
@@ -1443,7 +1443,7 @@ def test_export_refuses_a_marker_without_file_hashes(env, tmp_path):
 def _fake_kordoc(monkeypatch, tmp_path, *, ready):
     """A resolvable kordoc engine whose OCR readiness the test controls; parse_chunks
     returns one OCR line."""
-    from autoontology.unstructured import kordoc
+    from ontology.unstructured import kordoc
 
     cli = tmp_path / "kordoc-cli.js"
     cli.write_text("//", encoding="utf-8")
@@ -1513,7 +1513,7 @@ def test_ocr_state_is_part_of_the_fingerprint(env, monkeypatch, tmp_path):
 def test_vision_caption_is_prepended_or_skipped_on_failure(env, monkeypatch, tmp_path, caplog):
     import dataclasses
 
-    from autoontology.unstructured import vision
+    from ontology.unstructured import vision
 
     _fake_kordoc(monkeypatch, tmp_path, ready=True)
     (env["docs"] / "조직도.png").write_bytes(b"\x89PNG")
@@ -1533,7 +1533,7 @@ def test_vision_caption_is_prepended_or_skipped_on_failure(env, monkeypatch, tmp
         "endpoint": env["settings"].ollama_endpoint,
         "model": "gemma4:e4b",
     }
-    from autoontology.store.documents import DocumentStore
+    from ontology.store.documents import DocumentStore
 
     docs = DocumentStore(env["store"])
     source = env["store"].get_source("hanbit-docs")
@@ -1607,7 +1607,7 @@ def test_vision_model_is_part_of_the_fingerprint_for_images(env, monkeypatch, tm
 def test_setting_the_vision_model_captions_images_already_read(env, monkeypatch, tmp_path):
     import dataclasses
 
-    from autoontology.unstructured import vision
+    from ontology.unstructured import vision
 
     _fake_kordoc(monkeypatch, tmp_path, ready=True)
     captions: list[str] = []
@@ -1638,7 +1638,7 @@ def test_unexpected_vision_errors_only_warn(monkeypatch, tmp_path, caplog):
 
     import httpx
 
-    from autoontology.unstructured import readers, vision
+    from ontology.unstructured import readers, vision
 
     def boom(*_a, **_kw):
         raise httpx.InvalidURL("bad endpoint")
@@ -1654,8 +1654,8 @@ def test_unexpected_vision_errors_only_warn(monkeypatch, tmp_path, caplog):
 def test_build_keeps_instance_like_names_off_the_terms(env, monkeypatch):
     """identity-v2.2 through a whole build: a company-named concept and an ID alias never
     reach a Term, while an ordinary concept with identity evidence still folds."""
-    from autoontology.store.alignments import AlignmentStore
-    from autoontology.unstructured.schemas import ExtractedConcept
+    from ontology.store.alignments import AlignmentStore
+    from ontology.unstructured.schemas import ExtractedConcept
     from tests.test_align import _v
 
     (env["docs"] / "거래처.md").write_text(
@@ -1726,7 +1726,7 @@ def test_build_keeps_instance_like_names_off_the_terms(env, monkeypatch):
 
 
 def _doc_text(env, name: str) -> str | None:
-    from autoontology.store.documents import DocumentStore
+    from ontology.store.documents import DocumentStore
 
     docs = DocumentStore(env["store"])
     source = env["store"].get_source("hanbit-docs")
@@ -1769,7 +1769,7 @@ def test_raising_the_table_row_limit_rereads_a_csv_document(env):
 def test_ocr_models_arriving_reread_a_mixed_text_and_scanned_pdf(env, monkeypatch, tmp_path):
     """A PDF with a text page and a scanned page reads without OCR (text only, no
     `needs_ocr`): once the models are ready the cached read is stale and redone."""
-    from autoontology.unstructured import kordoc
+    from ontology.unstructured import kordoc
 
     state = _fake_kordoc(monkeypatch, tmp_path, ready=False)
 

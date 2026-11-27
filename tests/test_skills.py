@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Skill export (``autoontology/logic/skills.py``, ``GET /logic/skill.zip``, ``ao skill
+"""Skill export (``ontology/logic/skills.py``, ``GET /logic/skill.zip``, ``onto skill
 export``): the bundle's layout, SKILL.md front matter and sections, placeholders instead
 of tokens, re-importable definitions, deterministic bytes and the audit record."""
 
@@ -14,11 +14,11 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.logic import functions, registry, skills, specs
-from autoontology.store.db import Store
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager
+from ontology.config import Settings
+from ontology.logic import functions, registry, skills, specs
+from ontology.store.db import Store
+from ontology.web import app as web
+from ontology.web.runs import RunManager
 from tests import logic_fixtures as fx
 from tests.test_actions import activate_samples, sample_specs
 from tests.test_logic import TODAY
@@ -52,9 +52,9 @@ def _front(text: str) -> dict:
 
 def test_bundle_layout_and_skill_md(view):
     bundle = skills.build_skill(view)
-    assert bundle.name == "autoontology-default"
+    assert bundle.name == "ontology-default"
     files = _unzip(bundle.zip_bytes())
-    root = "autoontology-default/"
+    root = "ontology-default/"
     assert sorted(files) == [
         root + "SKILL.md",
         root + "definitions/actions.yaml",
@@ -64,7 +64,7 @@ def test_bundle_layout_and_skill_md(view):
     ]
     md = files[root + "SKILL.md"]
     front = _front(md)
-    assert front["name"] == "autoontology-default"
+    assert front["name"] == "ontology-default"
     assert 0 < len(front["description"]) <= skills.MAX_DESCRIPTION
     assert "Use when" in front["description"]
     for heading in (
@@ -93,13 +93,13 @@ def test_bundle_layout_and_skill_md(view):
 
 
 def test_mcp_json_has_placeholders_and_never_a_token(view):
-    from autoontology.store.agent_tokens import AgentTokens
+    from ontology.store.agent_tokens import AgentTokens
 
     secret, _ = AgentTokens(view).create("bot", created_by="local")
     files = _unzip(skills.build_skill(view).zip_bytes())
-    mcp = json.loads(files["autoontology-default/mcp.json"])
-    server = mcp["mcpServers"]["autoontology-default"]
-    assert server["url"] == "{{AUTOONTOLOGY_URL}}/mcp"
+    mcp = json.loads(files["ontology-default/mcp.json"])
+    server = mcp["mcpServers"]["ontology-default"]
+    assert server["url"] == "{{ONTOLOGY_URL}}/mcp"
     assert server["headers"] == {"Authorization": "Bearer <token>"}
     blob = "".join(files.values())
     assert secret not in blob and "aok_" not in blob
@@ -108,13 +108,13 @@ def test_mcp_json_has_placeholders_and_never_a_token(view):
 def test_definitions_are_the_active_specs_and_apply_again(view):
     registry.save(view, {**sample_specs("functions.yaml")[0], "name": "초안", "label": "초안"})
     files = _unzip(skills.build_skill(view).zip_bytes())
-    fns = specs.load_documents(files["autoontology-default/definitions/functions.yaml"])
+    fns = specs.load_documents(files["ontology-default/definitions/functions.yaml"])
     assert sorted(d["name"] for d in fns) == sorted(
         d.name for d in view.logic_defs().list("function", "active")
     )
     assert "초안" not in {d["name"] for d in fns}  # drafts stay out
     for name in ("functions", "actions", "workflows"):
-        docs = specs.load_documents(files[f"autoontology-default/definitions/{name}.yaml"])
+        docs = specs.load_documents(files[f"ontology-default/definitions/{name}.yaml"])
         for doc in docs:
             spec, errors = registry.check(view, doc)
             assert spec is not None and errors == [], doc["name"]
@@ -136,15 +136,15 @@ def test_an_empty_project_exports_a_valid_skill(isolated_env):
     store = Store.for_home(Settings.from_env().home)
     bundle = skills.build_skill(store.project())
     files = _unzip(bundle.zip_bytes())
-    md = files["autoontology-default/SKILL.md"]
-    assert _front(md)["name"] == "autoontology-default"
+    md = files["ontology-default/SKILL.md"]
+    assert _front(md)["name"] == "ontology-default"
     assert "No active action." in md
     assert bundle.timestamp == skills.EPOCH
 
 
 def test_skill_name_and_long_descriptions():
-    assert skills.skill_name("Beta Team_2") == "autoontology-beta-team-2"
-    assert skills.skill_name("한글") == "autoontology-project"
+    assert skills.skill_name("Beta Team_2") == "ontology-beta-team-2"
+    assert skills.skill_name("한글") == "ontology-project"
     assert len(skills.skill_name("x" * 200)) <= 64
     many = [type("T", (), {"label": "가" * 60, "name": "n"})() for _ in range(40)]
     text = skills._description("p", many, many, many, many)
@@ -154,23 +154,23 @@ def test_skill_name_and_long_descriptions():
 def test_route_and_cli(view, tmp_path):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     settings = Settings.from_env()
     with TestClient(web.create_app(settings, runs=RunManager(settings, jobs=dict))) as c:
         resp = c.get(f"{API}/logic/skill.zip")
         assert resp.status_code == 200, resp.text
         assert resp.headers["content-type"] == "application/zip"
-        assert 'filename="autoontology-default.zip"' in resp.headers["content-disposition"]
+        assert 'filename="ontology-default.zip"' in resp.headers["content-disposition"]
         assert resp.content == skills.build_skill(view).zip_bytes()
         assert c.get(f"{API}/projects/default/logic/skill.zip").status_code == 200
         with sqlite3.connect(view.store.path) as conn:
             rows = conn.execute(
                 "SELECT target, detail_json FROM audit_log WHERE action = 'skill.export'"
             ).fetchall()
-        assert rows and rows[0][0] == "autoontology-default"
+        assert rows and rows[0][0] == "ontology-default"
         assert json.loads(rows[0][1])["actions"] == 1
         out = CliRunner().invoke(app, ["skill", "export", "-o", str(tmp_path)])
         assert out.exit_code == 0, out.output
-        saved = tmp_path / "autoontology-default.zip"
+        saved = tmp_path / "ontology-default.zip"
         assert saved.read_bytes() == resp.content

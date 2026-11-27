@@ -11,14 +11,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from autoontology import __version__
-from autoontology.config import REPO_ROOT
-from autoontology.export import okf, ossie
-from autoontology.ontology import model as merged
-from autoontology.store.alignments import AlignmentRecord
-from autoontology.store.documents import ConceptRow, DocumentRow, RelationRow
-from autoontology.structured.semantic import SemanticFK, StructuredSnapshot
-from autoontology.unstructured.align import TermInfo
+from ontology import __version__
+from ontology.config import REPO_ROOT
+from ontology.export import okf, ossie
+from ontology.ontology import model as merged
+from ontology.store.alignments import AlignmentRecord
+from ontology.store.documents import ConceptRow, DocumentRow, RelationRow
+from ontology.structured.semantic import SemanticFK, StructuredSnapshot
+from ontology.unstructured.align import TermInfo
 
 CREATED = "2026-10-28T11:11:30.616+00:00"
 
@@ -77,7 +77,7 @@ def structured():
     return StructuredSnapshot(
         "hanbit",
         "db1",
-        "autoontology_src_hanbit",
+        "ontology_src_hanbit",
         [contracts, customers, invoices],
         [SemanticFK("t-c", "t-k", "a4", "고객id", "public.contracts.고객id")],
     )
@@ -165,7 +165,7 @@ def documents():
 def _dataset(name, keys, columns, *, primary=None):
     item = {
         "name": name,
-        "source": f"autoontology_src_hanbit.public.{name}",
+        "source": f"ontology_src_hanbit.public.{name}",
         "fields": [
             {
                 "name": c,
@@ -182,7 +182,7 @@ def _dataset(name, keys, columns, *, primary=None):
     return item
 
 
-def semantic_model(name="autoontology_src_hanbit", extra=()):
+def semantic_model(name="ontology_src_hanbit", extra=()):
     return {
         "version": "0.2.0.dev0",
         "name": name,
@@ -365,7 +365,7 @@ def test_ontology_mapping_rules(bundle):
     out, result, _ = bundle
     onto = _load(out / "ossie/ontology.yaml")
     assert onto["name"] == "hanbit_ontology"
-    assert onto["prefixes"] == {"ao": "http://example.com/autoontology#"}
+    assert onto["prefixes"] == {"onto": "http://example.com/ontology#"}
     ctx = onto["ai_context"]
     assert ctx["revision"] == 1 and ctx["created_at"] == CREATED
     assert ctx["sources"] == ["hanbit", "hanbit-docs"] and ctx["counts"]["evidence"] == 8
@@ -378,7 +378,7 @@ def test_ontology_mapping_rules(bundle):
     # same: 계약 folded into Contracts (no own concept, synonyms in the description)
     assert "계약" not in comps
     contracts = comps["Contracts"]
-    assert contracts["iri"] == "ao:term-t-c"
+    assert contracts["iri"] == "onto:term-t-c"
     assert contracts["description"].startswith("contracts 테이블. 고객과 맺는 약정.")
     assert contracts["description"].endswith("Also known as: Contract, 계약, 계약서.")
     rels = {r["name"]: r for r in contracts["relationships"]}
@@ -664,14 +664,14 @@ def test_okf_concept_frontmatter_and_body(bundle):
     out, _, _ = bundle
     meta, body = _okf(out, "concepts/contracts.md")
     assert meta["type"] == "Business Concept" and meta["title"] == "Contracts"
-    assert meta["resource"] == "http://example.com/autoontology#term-t-c"
+    assert meta["resource"] == "http://example.com/ontology#term-t-c"
     assert meta["tags"] == ["origin:aligned", "kind:term", "source:hanbit", "source:hanbit-docs"]
-    assert meta["generated"] == {"by": f"autoontology/{__version__}", "at": CREATED}
+    assert meta["generated"] == {"by": f"ontology/{__version__}", "at": CREATED}
     assert meta["status"] == "stable"
     assert meta["sources"] == [
         {
             "id": "e1",
-            "resource": "autoontology://hanbit-docs/samples/계약%20규정.md",
+            "resource": "ontology://hanbit-docs/samples/계약%20규정.md",
             "title": "계약관리규정",
         }
     ]
@@ -706,14 +706,12 @@ def test_okf_is_byte_deterministic(model, tmp_path):
 def test_okf_tables_documents_index_and_log(bundle):
     out, _, _ = bundle
     table, body = _okf(out, "tables/hanbit.contracts.md")
-    assert (
-        table["type"] == "Table" and table["resource"] == "autoontology://hanbit/public.contracts"
-    )
+    assert table["type"] == "Table" and table["resource"] == "ontology://hanbit/public.contracts"
     assert "| `고객id` | - | refers to [Customers](/concepts/customers.md) |" in body
     assert "- represented by [Contracts](/concepts/contracts.md)" in body
     doc, body = _okf(out, "documents/계약-규정-md.md")
     assert doc["type"] == "Document" and doc["sha256"] == "ab" * 32
-    assert doc["resource"] == "autoontology://hanbit-docs/samples/계약%20규정.md"
+    assert doc["resource"] == "ontology://hanbit-docs/samples/계약%20규정.md"
     assert "- [Contracts](/concepts/contracts.md)" in body
     index, body = _okf(out, "index.md")
     assert index == {"okf_version": "0.2"}
@@ -722,7 +720,7 @@ def test_okf_tables_documents_index_and_log(bundle):
     log = (out / "okf/log.md").read_text(encoding="utf-8")
     assert log.startswith("# Update Log\n\n## 2026-10-28\n\n")
     assert (
-        f"- revision r0001: generated by autoontology {__version__} from sources hanbit, hanbit-docs"
+        f"- revision r0001: generated by ontology {__version__} from sources hanbit, hanbit-docs"
         in log
     )
 

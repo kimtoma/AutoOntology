@@ -1,5 +1,5 @@
 # Functions for the quickstart demo (청구수납규정 제6조 연체 판정, 계약관리).
-# Apply with: uv run ao logic apply -f samples/quickstart/logic/functions.yaml
+# Apply with: uv run onto logic apply -f samples/quickstart/logic/functions.yaml
 #
 # Assumption: invoices.csv has no 지급기한 (due date) column. 제6조 counts overdue days
 # from the day after the due date, so these functions take the due date as

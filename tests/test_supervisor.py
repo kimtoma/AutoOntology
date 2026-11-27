@@ -7,8 +7,8 @@ import time
 
 import pytest
 
-from autoontology.config import Settings
-from autoontology.engine.supervisor import (
+from ontology.config import Settings
+from ontology.engine.supervisor import (
     ProcessSpec,
     ProcessStatus,
     Supervisor,
@@ -19,7 +19,7 @@ from autoontology.engine.supervisor import (
     pid_alive,
 )
 
-MARK = "autoontology-fake-child"
+MARK = "ontology-fake-child"
 
 
 def free_port() -> int:
@@ -286,7 +286,7 @@ def test_pid_alive_does_not_reap_popen_children():
 def test_child_env_shell_wins_over_dotenv(isolated_env, monkeypatch):
     env_file = isolated_env / "precedence.env"
     env_file.write_text("SHARED_KEY=from-dotenv\nDOTENV_ONLY=yes\n")
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env_file))
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(env_file))
     settings = Settings(home=isolated_env / "home")  # from_env would load it into os.environ
     env = child_env(settings, base={"SHARED_KEY": "from-shell"})
     assert env["SHARED_KEY"] == "from-shell" and env["DOTENV_ONLY"] == "yes"
@@ -305,11 +305,11 @@ def test_build_specs_and_child_env(isolated_env, monkeypatch):
         "http://127.0.0.1:3101/api/health",
     )
     assert service.health_urls == ("http://127.0.0.1:7800/health/live",)
-    assert "autoontology.web.app:app" in service.argv
+    assert "ontology.web.app:app" in service.argv
     env = child_env(settings, base={"PATH": "/usr/bin"})
     assert env["INGESTION_SERVICE_URL"] == "http://127.0.0.1:7800"
     assert env["PYTHONUNBUFFERED"] == "1"
-    assert env["POSTGRES_DATABASE"] == "autoontology" and "POSTGRES_PASSWORD" in env
+    assert env["POSTGRES_DATABASE"] == "ontology" and "POSTGRES_PASSWORD" in env
     assert env["REASONING_MODEL"] == "openai/qwen3:8b" and env["EMBED_MODEL"] == "bge-m3"
     assert env["LLM_INVOKE_TIMEOUT_S"] == "180" and env["SEMANTIC_LLM_MAX_INFLIGHT"] == "1"
     assert env["PATH"] == "/usr/bin"
@@ -339,47 +339,45 @@ def test_spawn_failure_rolls_back_what_this_call_started(make_sup, monkeypatch):
 
 
 def test_child_env_marks_derived_keys_and_keeps_dotenv_selection_out(isolated_env, monkeypatch):
-    from autoontology.config import Settings as S
-    from autoontology.config import load_env
+    from ontology.config import Settings as S
+    from ontology.config import load_env
 
     env_file = isolated_env / "sel.env"
-    env_file.write_text(
-        "AUTOONTOLOGY_CHAT_PROVIDER=openai\nAUTOONTOLOGY_OPENAI_CHAT_MODEL=m1\nOTHER=1\n"
-    )
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env_file))
+    env_file.write_text("ONTOLOGY_CHAT_PROVIDER=openai\nONTOLOGY_OPENAI_CHAT_MODEL=m1\nOTHER=1\n")
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(env_file))
     load_env()
     settings = S.from_env()
     assert settings.chat_provider == "openai"
     env = child_env(settings)
     # the child re-reads .env itself: a .env selection must not look like a shell value
-    assert "AUTOONTOLOGY_CHAT_PROVIDER" not in env and env["OTHER"] == "1"
-    derived = set(env["AUTOONTOLOGY_DERIVED_ENV"].split(","))
+    assert "ONTOLOGY_CHAT_PROVIDER" not in env and env["OTHER"] == "1"
+    derived = set(env["ONTOLOGY_DERIVED_ENV"].split(","))
     assert {"REASONING_MODEL", "EMBED_MODEL"} <= derived
     assert env["REASONING_MODEL"] == "openai/m1"
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "ollama")  # a real shell value passes
-    assert child_env(S.from_env())["AUTOONTOLOGY_CHAT_PROVIDER"] == "ollama"
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "ollama")  # a real shell value passes
+    assert child_env(S.from_env())["ONTOLOGY_CHAT_PROVIDER"] == "ollama"
 
 
 def test_child_env_marks_dotenv_copies_as_derived(isolated_env, monkeypatch):
     """A .env value a child got from its parent is not a shell value there: after the .env
     is rewritten, the child (a restarted service, the restart helper) reads the new value."""
-    from autoontology.config import Settings as S
-    from autoontology.config import load_env, shell_value, user_env
+    from ontology.config import Settings as S
+    from ontology.config import load_env, shell_value, user_env
 
     env_file = isolated_env / "copy.env"
     env_file.write_text(
-        "AUTOONTOLOGY_CHAT_PROVIDER=openai\nAUTOONTOLOGY_OPENAI_BASE_URL=http://old.test/v1\n"
-        "AUTOONTOLOGY_OPENAI_API_KEY=sk-oldkeyvalue\nAUTOONTOLOGY_OPENAI_CHAT_MODEL=m1\n"
+        "ONTOLOGY_CHAT_PROVIDER=openai\nONTOLOGY_OPENAI_BASE_URL=http://old.test/v1\n"
+        "ONTOLOGY_OPENAI_API_KEY=sk-oldkeyvalue\nONTOLOGY_OPENAI_CHAT_MODEL=m1\n"
     )
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env_file))
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(env_file))
     monkeypatch.setenv("SHELL_ONLY_KEY", "kept")
     load_env()
     env = child_env(S.from_env())
-    derived = set(env["AUTOONTOLOGY_DERIVED_ENV"].split(","))
+    derived = set(env["ONTOLOGY_DERIVED_ENV"].split(","))
     assert {
-        "AUTOONTOLOGY_OPENAI_BASE_URL",
-        "AUTOONTOLOGY_OPENAI_API_KEY",
-        "AUTOONTOLOGY_OPENAI_CHAT_MODEL",
+        "ONTOLOGY_OPENAI_BASE_URL",
+        "ONTOLOGY_OPENAI_API_KEY",
+        "ONTOLOGY_OPENAI_CHAT_MODEL",
     } <= derived
     assert "SHELL_ONLY_KEY" not in derived and env["SHELL_ONLY_KEY"] == "kept"
     # now be the child: its environment is exactly `env`; then the user rewrites .env
@@ -387,23 +385,23 @@ def test_child_env_marks_dotenv_copies_as_derived(isolated_env, monkeypatch):
         monkeypatch.delenv(key)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    env_file.write_text("AUTOONTOLOGY_CHAT_PROVIDER=claude\nAUTOONTOLOGY_OPENAI_CHAT_MODEL=m2\n")
-    assert shell_value("AUTOONTOLOGY_OPENAI_CHAT_MODEL") is None
+    env_file.write_text("ONTOLOGY_CHAT_PROVIDER=claude\nONTOLOGY_OPENAI_CHAT_MODEL=m2\n")
+    assert shell_value("ONTOLOGY_OPENAI_CHAT_MODEL") is None
     child = S.from_env()
     assert child.chat_provider == "claude" and child.openai_chat_model == "m2"
     assert child.openai_api_key == "" and child.openai_base_url == ""
-    assert "AUTOONTOLOGY_OPENAI_API_KEY" not in user_env()
+    assert "ONTOLOGY_OPENAI_API_KEY" not in user_env()
 
 
 def test_child_env_keeps_a_shell_value_that_shadows_dotenv(isolated_env, monkeypatch):
-    from autoontology.config import Settings as S
-    from autoontology.config import load_env
+    from ontology.config import Settings as S
+    from ontology.config import load_env
 
     env_file = isolated_env / "shadow.env"
-    env_file.write_text("AUTOONTOLOGY_OPENAI_CHAT_MODEL=from-dotenv\n")
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env_file))
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "from-shell")
+    env_file.write_text("ONTOLOGY_OPENAI_CHAT_MODEL=from-dotenv\n")
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(env_file))
+    monkeypatch.setenv("ONTOLOGY_OPENAI_CHAT_MODEL", "from-shell")
     load_env()
     env = child_env(S.from_env())
-    assert env["AUTOONTOLOGY_OPENAI_CHAT_MODEL"] == "from-shell"
-    assert "AUTOONTOLOGY_OPENAI_CHAT_MODEL" not in env["AUTOONTOLOGY_DERIVED_ENV"].split(",")
+    assert env["ONTOLOGY_OPENAI_CHAT_MODEL"] == "from-shell"
+    assert "ONTOLOGY_OPENAI_CHAT_MODEL" not in env["ONTOLOGY_DERIVED_ENV"].split(",")

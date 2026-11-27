@@ -7,12 +7,12 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.engine import build as bj
-from autoontology.structured import pipeline
-from autoontology.web import app as web
-from autoontology.web.freshness import freshness, source_freshness
-from autoontology.web.runs import RunManager
+from ontology.config import Settings
+from ontology.engine import build as bj
+from ontology.structured import pipeline
+from ontology.web import app as web
+from ontology.web.freshness import freshness, source_freshness
+from ontology.web.runs import RunManager
 from tests import test_build as tb
 from tests.test_build import env  # noqa: F401 - the build fixture
 
@@ -79,7 +79,7 @@ def test_files_source_changed_file(built):
 
 
 def test_never_built_and_missing_inputs(built, tmp_path):
-    from autoontology.engine import extract as ex
+    from ontology.engine import extract as ex
 
     other = tmp_path / "other"
     other.mkdir()

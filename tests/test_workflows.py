@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The workflow runner (``autoontology/logic/workflows.py``): the quickstart 연체독촉
+"""The workflow runner (``ontology/logic/workflows.py``): the quickstart 연체독촉
 workflow end to end over faked sources, for_each with where and truncation, if/then/else,
 notify, pause on approval and resume (approve, reject, restart reconciliation, nested
 steps), duplicate slots, on_action triggers and their depth limit, the activator's role,
@@ -11,12 +11,12 @@ import sqlite3
 
 import pytest
 
-from autoontology.config import Settings
-from autoontology.logic import actions, functions, registry, workflows
-from autoontology.logic.actions import Caller
-from autoontology.objects import service
-from autoontology.objects.reader import ObjectError
-from autoontology.store.db import Store
+from ontology.config import Settings
+from ontology.logic import actions, functions, registry, workflows
+from ontology.logic.actions import Caller
+from ontology.objects import service
+from ontology.objects.reader import ObjectError
+from ontology.store.db import Store
 from tests import logic_fixtures as fx
 from tests.logic_fixtures import INV
 from tests.test_actions import ACTION, FakeMailer, activate_samples, sample_specs
@@ -489,7 +489,7 @@ def test_on_action_respects_where_type_and_the_off_setting(env, monkeypatch):
     workflows.wait()
     run = view.workflow_runs().list()[0]
     assert run.status == "succeeded" and run.summary["matched"] == 0  # 55 days: where false
-    monkeypatch.setenv("AUTOONTOLOGY_WORKFLOWS", "off")
+    monkeypatch.setenv("ONTOLOGY_WORKFLOWS", "off")
     off = Settings.from_env()
     assert off.workflows == "off"
     workflows.install(off)
@@ -502,7 +502,7 @@ def test_on_action_respects_where_type_and_the_off_setting(env, monkeypatch):
 
 
 def test_activator_role_is_checked_at_run_time(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     monkeypatch.setattr(functions, "today", lambda: TODAY)
     backend = fx.install_backend(monkeypatch)
     _add_invoices(backend)
@@ -510,7 +510,7 @@ def test_activator_role_is_checked_at_run_time(isolated_env, monkeypatch):
     store = Store.for_home(settings.home)
     view = fx.seed(store)
     activate_samples(view)
-    from autoontology.store.accounts import Accounts
+    from ontology.store.accounts import Accounts
 
     accounts = Accounts(store)
     owner = accounts.create_user("boss@example.com")
@@ -552,14 +552,14 @@ def test_activator_role_is_checked_at_run_time(isolated_env, monkeypatch):
 def test_another_owner_reactivates_an_active_workflow(isolated_env, monkeypatch):
     """Pressing Activate on an already active workflow records the new activator (no
     retire first), so its runs work again after the old activator was demoted."""
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     monkeypatch.setattr(functions, "today", lambda: TODAY)
     fx.install_backend(monkeypatch)
     settings = Settings.from_env()
     store = Store.for_home(settings.home)
     view = fx.seed(store)
     activate_samples(view)
-    from autoontology.store.accounts import Accounts
+    from ontology.store.accounts import Accounts
 
     accounts = Accounts(store)
     boss = accounts.create_user("boss@example.com")

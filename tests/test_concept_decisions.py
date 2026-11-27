@@ -35,9 +35,9 @@ def test_concept_detail_lists_its_decisions(ops):  # noqa: F811
 
 
 def test_diff_names_the_ends_of_axioms_and_merges():
-    from autoontology.ontology import model as merged
-    from autoontology.store.alignments import AlignmentRecord
-    from autoontology.web import revisions
+    from ontology.ontology import model as merged
+    from ontology.store.alignments import AlignmentRecord
+    from ontology.web import revisions
     from tests import test_ossie_okf as fx
 
     docs = fx.documents()

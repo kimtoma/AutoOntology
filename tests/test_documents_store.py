@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from autoontology.store.db import MIGRATIONS, Store
-from autoontology.store.documents import (
+from ontology.store.db import MIGRATIONS, Store
+from ontology.store.documents import (
     ConceptRecord,
     DocumentStore,
     EvidenceRecord,
@@ -25,7 +25,7 @@ class C:
 
 @pytest.fixture
 def stores(tmp_path):
-    store = Store(tmp_path / "autoontology.db")
+    store = Store(tmp_path / "ontology.db")
     src = store.add_source(name="docs", kind="documents", locator="{}")
     return store, DocumentStore(store), src
 

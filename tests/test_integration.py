@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
-"""Real local Postgres + Ollama. Run with: AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration"""
+"""Real local Postgres + Ollama. Run with: ONTOLOGY_INTEGRATION=1 uv run pytest -m integration"""
 
 import httpx
 import pytest
 
-from autoontology import doctor
-from autoontology.config import Settings
-from autoontology.engine import pg
-from autoontology.engine.migrate import current_revision, head_revision, run_migrations
-from autoontology.engine.supervisor import Supervisor
+from ontology import doctor
+from ontology.config import Settings
+from ontology.engine import pg
+from ontology.engine.migrate import current_revision, head_revision, run_migrations
+from ontology.engine.supervisor import Supervisor
 
 pytestmark = pytest.mark.integration
 
@@ -21,7 +21,7 @@ def settings():
 def test_setup_db_is_idempotent(settings):
     first = pg.setup_database(settings)
     second = pg.setup_database(settings)
-    assert "database autoontology" in first and "(exists)" in second
+    assert "database ontology" in first and "(exists)" in second
     assert pg.database_exists(settings)
     assert pg.extension_version(settings, "vector")
     assert pg.extension_version(settings, "pg_trgm")
@@ -37,7 +37,7 @@ def test_doctor_all_green_with_models(settings):
     checks = doctor.run_checks(settings)
     print("\n" + doctor.format_checks(checks))
     failing = [c for c in checks if c.status in ("FAIL", "WARN")]
-    # Ports may be legitimately owned by an already running AutoOntology.
+    # Ports may be legitimately owned by an already running Ontology.
     assert failing == [], doctor.format_checks(failing)
     embed = next(c for c in checks if c.name == "embedding endpoint")
     assert "dim 1024" in embed.detail
@@ -46,7 +46,7 @@ def test_doctor_all_green_with_models(settings):
 def test_up_health_down(settings):
     sup = Supervisor.from_settings(settings)
     if any(row.running for row in sup.status()):
-        pytest.skip("AutoOntology is already running; not touching a live instance")
+        pytest.skip("Ontology is already running; not touching a live instance")
     try:
         sup.up()
         backend = httpx.get(f"{settings.backend_url}/api/health", timeout=10)

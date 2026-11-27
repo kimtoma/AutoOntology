@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""Integration: the real kordoc engine (``<home>/kordoc``, from ``autoontology tools
+"""Integration: the real kordoc engine (``<home>/kordoc``, from ``onto tools
 install-kordoc``) on the HWP fixture and the generated PDF/DOCX, and the real
-``autoontology extract quick-docs samples/quickstart/documents`` against the local Ollama.
+``onto extract quick-docs samples/quickstart/documents`` against the local Ollama.
 
-The extract test needs ``autoontology up`` (chat goes through the service's /v1). On a store
+The extract test needs ``onto up`` (chat goes through the service's /v1). On a store
 that already holds this source it is a no-op re-run, which also proves idempotence.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from autoontology.config import REPO_ROOT, Settings
+from ontology.config import REPO_ROOT, Settings
 
 pytestmark = pytest.mark.integration
 
@@ -24,11 +24,11 @@ SOURCE = "quick-docs"  # the name `demo --set quickstart` uses
 
 @pytest.fixture
 def engine(monkeypatch):
-    from autoontology.unstructured import kordoc
+    from ontology.unstructured import kordoc
 
     monkeypatch.delenv("KORDOC_CLI", raising=False)  # the real <home>/kordoc install
     engine = kordoc.resolve_engine(Settings.from_env().home)
-    assert engine.origin == "home", "run `uv run autoontology tools install-kordoc` first"
+    assert engine.origin == "home", "run `uv run onto tools install-kordoc` first"
     assert kordoc.engine_version(engine) == kordoc.DEFAULT_VERSION
     return engine
 
@@ -42,7 +42,7 @@ def engine(monkeypatch):
     ],
 )
 def test_real_kordoc_reads_fixture(engine, path, expected):
-    from autoontology.unstructured import chunker, kordoc, readers
+    from ontology.unstructured import chunker, kordoc, readers
 
     data = kordoc.parse_json(engine, path)
     assert data["success"] is True and data["markdown"].strip()
@@ -54,19 +54,19 @@ def test_real_kordoc_reads_fixture(engine, path, expected):
 
 
 def _service_up(settings: Settings) -> bool:
-    from autoontology.engine.jobs import service_alive
+    from ontology.engine.jobs import service_alive
 
     return service_alive(settings)
 
 
 def test_extract_quick_docs_against_ollama(monkeypatch):
-    from autoontology.engine import extract as extract_job
-    from autoontology.store.db import Store
-    from autoontology.store.documents import DocumentStore
+    from ontology.engine import extract as extract_job
+    from ontology.store.db import Store
+    from ontology.store.documents import DocumentStore
 
     settings = Settings.from_env()
     if not _service_up(settings):
-        pytest.skip("services are down (uv run autoontology up)")
+        pytest.skip("services are down (uv run onto up)")
     monkeypatch.delenv("KORDOC_CLI", raising=False)
     monkeypatch.chdir(REPO_ROOT)
     store = Store.for_home(settings.home)

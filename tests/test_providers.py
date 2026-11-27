@@ -9,9 +9,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.web import app as web
-from autoontology.web.providers.openai_compat import (
+from ontology.config import Settings
+from ontology.web import app as web
+from ontology.web.providers.openai_compat import (
     ChatResponse,
     ProviderError,
     parse_request,
@@ -81,10 +81,10 @@ def _chat(client, model, **extra):
 
 @pytest.fixture
 def openai_env(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_BASE_URL", "https://llm.example.test/v1")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_API_KEY", SECRET)
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "meta/llama-4-scout")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_BASE_URL", "https://llm.example.test/v1")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_API_KEY", SECRET)
+    monkeypatch.setenv("ONTOLOGY_OPENAI_CHAT_MODEL", "meta/llama-4-scout")
     return isolated_env
 
 
@@ -157,7 +157,7 @@ def test_to_openai_tool_calls_and_usage():
     assert out["choices"][0]["finish_reason"] == "tool_calls"
     assert msg["tool_calls"][0]["function"] == {"name": "Ping", "arguments": '{"answer":"pong"}'}
     assert out["usage"] == {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
-    assert out["autoontology_cost_usd"] == 0.01 and out["model"] == "openai/m"
+    assert out["ontology_cost_usd"] == 0.01 and out["model"] == "openai/m"
 
 
 def test_sse_shim_is_one_chunk_then_done():
@@ -237,7 +237,7 @@ def test_openai_passthrough_strips_prefix_and_adds_bearer_key(openai_env):
 def test_openai_model_id_with_its_own_openai_prefix_survives_routing(openai_env, monkeypatch):
     """NVIDIA/OpenRouter ids such as ``openai/gpt-oss-120b`` must reach the endpoint intact:
     upstream sends one extra router prefix and the router strips exactly one."""
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "openai/gpt-oss-120b")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_CHAT_MODEL", "openai/gpt-oss-120b")
     settings = Settings.from_env()
     assert settings.upstream_chat_model == "openai/openai/gpt-oss-120b"
     upstream = Upstream()
@@ -336,7 +336,7 @@ def test_langchain_chatopenai_structured_output_through_router(openai_env):
     with serve(web.create_app(settings, llm_transport=upstream.transport)) as base_url:
         llm = ChatOpenAI(
             model=settings.upstream_chat_model,
-            api_key="autoontology-router",
+            api_key="ontology-router",
             base_url=f"{base_url}/v1",
             max_retries=0,
             timeout=30,
@@ -350,8 +350,8 @@ def test_langchain_chatopenai_structured_output_through_router(openai_env):
 def test_doctor_style_complete_through_the_provider(openai_env):
     import asyncio
 
-    from autoontology.web.providers.openai import OpenAIProvider
-    from autoontology.web.providers.openai_compat import ChatMessage, ChatRequest
+    from ontology.web.providers.openai import OpenAIProvider
+    from ontology.web.providers.openai_compat import ChatMessage, ChatRequest
 
     upstream = Upstream()
     provider = OpenAIProvider(Settings.from_env(), upstream.transport)
@@ -416,7 +416,7 @@ def no_fetch(monkeypatch):
     ids=["http", "file", "nested", "relative", "bogus-type", "bad-required", "self", "defs-cycle"],
 )
 def test_check_schema_refuses_unsafe_or_invalid_schemas(no_fetch, schema):
-    from autoontology.web.providers.base import check_schema
+    from ontology.web.providers.base import check_schema
 
     with pytest.raises(ProviderError) as err:
         check_schema(schema)
@@ -425,7 +425,7 @@ def test_check_schema_refuses_unsafe_or_invalid_schemas(no_fetch, schema):
 
 
 def test_schema_size_and_depth_are_bounded():
-    from autoontology.web.providers import base
+    from ontology.web.providers import base
 
     deep: dict = {"type": "string"}
     for _ in range(base.MAX_SCHEMA_DEPTH + 5):
@@ -440,7 +440,7 @@ def test_schema_size_and_depth_are_bounded():
 
 
 def test_schema_problem(no_fetch):
-    from autoontology.web.providers.base import schema_problem
+    from ontology.web.providers.base import schema_problem
 
     with pytest.raises(ProviderError) as bad:
         schema_problem({"a": 1}, {"type": "bogus"})
@@ -453,7 +453,7 @@ def test_schema_problem(no_fetch):
 
 
 def test_schema_problem_maps_recursion_to_400(monkeypatch):
-    from autoontology.web.providers import base
+    from ontology.web.providers import base
 
     monkeypatch.setattr(base, "check_schema", lambda schema: None)  # bypass admission
     with pytest.raises(ProviderError) as err:

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 import pytest
 
-from autoontology.config import Settings
-from autoontology.engine import extract as ex
-from autoontology.engine import jobs
-from autoontology.store.db import Store
-from autoontology.store.documents import DocumentStore
-from autoontology.unstructured.schemas import ChunkExtraction, MergeDecision
+from ontology.config import Settings
+from ontology.engine import extract as ex
+from ontology.engine import jobs
+from ontology.store.db import Store
+from ontology.store.documents import DocumentStore
+from ontology.unstructured.schemas import ChunkExtraction, MergeDecision
 
 VOCAB = ["계약", "고객", "청구서", "수납"]
 
@@ -77,8 +77,8 @@ def _backends(settings, llm=None, embed=None):
 
 
 def _cli_build_with(monkeypatch, backends):
-    """`autoontology build` with fake extraction backends (no service check)."""
-    from autoontology.engine import build
+    """`onto build` with fake extraction backends (no service check)."""
+    from ontology.engine import build
 
     real = build.run_build
     monkeypatch.setattr(
@@ -105,7 +105,7 @@ def _run(settings, store, target, backends, **kw):
 
 def test_extract_end_to_end_and_noop_rerun(env, monkeypatch):
     settings, store, docs_dir = env
-    monkeypatch.setenv("AUTOONTOLOGY_CHUNK_TOKENS", "200")
+    monkeypatch.setenv("ONTOLOGY_CHUNK_TOKENS", "200")
     llm = FakeLLM()
     result = _run(settings, store, docs_dir, _backends(settings, llm))
     assert result.status == "succeeded"
@@ -250,14 +250,14 @@ def test_source_kind_and_service_checks(env, monkeypatch):
         _run(settings, store, docs_dir, _backends(settings))
     ollama = Settings.from_env()
     monkeypatch.setattr(jobs, "service_alive", lambda s: False)
-    with pytest.raises(jobs.JobError, match="autoontology up"):
+    with pytest.raises(jobs.JobError, match="onto up"):
         ex.run_extract("other", docs_dir, settings=ollama, store=store)
 
 
 def test_cli_documents_source_list_and_rm(env):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     settings, store, docs_dir = env
     runner = CliRunner()
@@ -318,7 +318,7 @@ def test_removed_documents_are_pruned_and_duplicates_kept_stable(env):
 def test_cli_partial_exits_1(env, monkeypatch):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     settings, store, docs_dir = env
 
@@ -343,8 +343,8 @@ def test_cli_partial_exits_1(env, monkeypatch):
 
 
 def test_report_flags_chunks_over_the_llm_timeout(monkeypatch):
-    from autoontology.store.documents import ChunkRow
-    from autoontology.unstructured import report
+    from ontology.store.documents import ChunkRow
+    from ontology.unstructured import report
 
     monkeypatch.setenv("LLM_INVOKE_TIMEOUT_S", "180")
 
@@ -408,7 +408,7 @@ def test_moving_to_another_dir_with_the_old_copy_still_present(env, tmp_path):
 def test_read_failures_fail_the_run_and_resume_retries_them(env, monkeypatch):
     """Review #9: a document that fails to read makes the run failed (listed), `--resume`
     reads it again and, once it reads, extract/consolidate/report run for it."""
-    from autoontology.unstructured import readers
+    from ontology.unstructured import readers
 
     settings, store, docs_dir = env
     real = readers.read_document
@@ -439,8 +439,8 @@ def test_read_failures_fail_the_run_and_resume_retries_them(env, monkeypatch):
 def test_cli_extract_lists_read_failures(env, monkeypatch):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
-    from autoontology.unstructured import readers
+    from ontology.cli import app
+    from ontology.unstructured import readers
 
     settings, store, docs_dir = env
     real = readers.read_document
@@ -508,7 +508,7 @@ def test_failed_consolidation_is_partial_and_retried(env):
 def test_consolidation_identity_includes_threshold(env, monkeypatch):
     settings, store, docs_dir = env
     _run(settings, store, docs_dir, _backends(settings))
-    monkeypatch.setenv("AUTOONTOLOGY_MERGE_THRESHOLD", "0.9")
+    monkeypatch.setenv("ONTOLOGY_MERGE_THRESHOLD", "0.9")
     again = _run(settings, store, docs_dir, _backends(settings))
     assert again.details["consolidate"]["action"] == "consolidated"
     assert again.details["consolidate"]["config"]["threshold"] == 0.9
@@ -612,7 +612,7 @@ def test_resume_reconsolidates_a_legacy_incomplete_consolidation(env):
 def test_resume_reconsolidates_when_the_threshold_changed(env, monkeypatch):
     settings, store, docs_dir = env
     first = _run(settings, store, docs_dir, _backends(settings))
-    monkeypatch.setenv("AUTOONTOLOGY_MERGE_THRESHOLD", "0.99")
+    monkeypatch.setenv("ONTOLOGY_MERGE_THRESHOLD", "0.99")
     resumed = _run(settings, store, docs_dir, _backends(settings), resume=True)
     assert resumed.run_id == first.run_id
     assert resumed.details["consolidate"]["config"]["threshold"] == 0.99
@@ -646,7 +646,7 @@ def test_threshold_cycle_never_reports_an_unmaterialised_result(env, monkeypatch
         return [vectors.get(t.split(":")[0], [0.0, -1.0]) for t in texts]
 
     def run(threshold, **kw):
-        monkeypatch.setenv("AUTOONTOLOGY_MERGE_THRESHOLD", threshold)
+        monkeypatch.setenv("ONTOLOGY_MERGE_THRESHOLD", threshold)
         return _run(settings, store, docs_dir, _backends(settings, Merging(), embed), **kw)
 
     first = run("0.8")

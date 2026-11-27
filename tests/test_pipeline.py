@@ -3,11 +3,11 @@ import json
 
 import pytest
 
-from autoontology.config import Settings
-from autoontology.store.db import Store
-from autoontology.structured import pipeline
-from autoontology.structured.loaders import LoadError
-from autoontology.structured.pipeline import SourceError
+from ontology.config import Settings
+from ontology.store.db import Store
+from ontology.structured import pipeline
+from ontology.structured.loaders import LoadError
+from ontology.structured.pipeline import SourceError
 
 
 @pytest.fixture
@@ -25,9 +25,9 @@ def data(tmp_path):
 
 def test_add_files_source(store, data):
     src = pipeline.add_source(store, str(data), name="hanbit", recursive=True)
-    assert src.kind == "files" and src.pg_database == "autoontology_src_hanbit"
+    assert src.kind == "files" and src.pg_database == "ontology_src_hanbit"
     assert json.loads(src.locator) == {"path": str(data.resolve()), "recursive": True}
-    assert pipeline.catalog_database_name(src) == "autoontology_src_hanbit"
+    assert pipeline.catalog_database_name(src) == "ontology_src_hanbit"
     assert pipeline.display_locator(src).endswith("(recursive)")
     with pytest.raises(SourceError, match="already exists"):
         pipeline.add_source(store, str(data), name="hanbit")

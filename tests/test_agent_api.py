@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Outside-agent access (``autoontology/web/agent_api.py``): bearer tokens, the MCP
+"""Outside-agent access (``ontology/web/agent_api.py``): bearer tokens, the MCP
 endpoint (``POST /mcp``), the REST API under ``/agent/v1`` and the token management
 routes under ``/api/agent``."""
 
@@ -16,12 +16,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.ontology import model as merged
-from autoontology.store.agent_tokens import AgentTokens
-from autoontology.store.db import Store
-from autoontology.web import agent_api
-from autoontology.web import app as web
+from ontology.config import Settings
+from ontology.ontology import model as merged
+from ontology.store.agent_tokens import AgentTokens
+from ontology.store.db import Store
+from ontology.web import agent_api
+from ontology.web import app as web
 from tests.test_web_api import _seed_snapshot, _snapshot
 
 MCP = "/mcp"
@@ -73,7 +73,7 @@ def test_token_is_shown_once_and_only_its_hash_is_stored(agent):
     assert token.startswith("aok_") and len(token) > 40
     assert made["record"]["name"] == "claude code" and made["record"]["status"] == "active"
     assert made["record"]["revision_pin"] is None and made["record"]["expires_at"] is None
-    db = sqlite3.connect(Path(settings.home) / "autoontology.db")
+    db = sqlite3.connect(Path(settings.home) / "ontology.db")
     rows = db.execute("SELECT token_hash FROM agent_tokens").fetchall()
     assert rows == [(hashlib.sha256(token.encode()).hexdigest(),)]
     dump = "\n".join(db.iterdump())
@@ -129,7 +129,7 @@ def test_revoked_and_expired_tokens_are_refused(agent):
     assert c.get(f"{REST}/revisions", headers=_auth(token)).status_code == 401
     assert c.post(f"/api/agent/tokens/{tid}/rotate").status_code == 409
     # history kept, the hash cleared
-    db = sqlite3.connect(Path(settings.home) / "autoontology.db")
+    db = sqlite3.connect(Path(settings.home) / "ontology.db")
     assert db.execute("SELECT token_hash FROM agent_tokens").fetchall() == [(None,)]
     assert c.get("/api/agent/tokens").json()["tokens"][0]["status"] == "revoked"
 
@@ -156,9 +156,9 @@ def test_rotate_kills_the_old_token(agent):
 
 
 def test_migration_v7_upgrades_a_v6_store(tmp_path):
-    from autoontology.store.db import MIGRATIONS
+    from ontology.store.db import MIGRATIONS
 
-    path = tmp_path / "autoontology.db"
+    path = tmp_path / "ontology.db"
     Store(path)
     with sqlite3.connect(path) as conn:
         conn.execute("DROP TABLE agent_calls")
@@ -188,7 +188,7 @@ def test_mcp_initialize_ping_and_tools_list(agent):
     assert init["jsonrpc"] == "2.0" and init["id"] == 1
     assert res["protocolVersion"] == "2025-06-18"
     assert res["capabilities"] == {"tools": {"listChanged": False}}
-    assert res["serverInfo"]["name"] == "autoontology"
+    assert res["serverInfo"]["name"] == "ontology"
     assert "r2" in res["instructions"] and "read-only" in res["instructions"]
     assert _rpc(c, made["token"], "ping")["result"] == {}
     tools = _rpc(c, made["token"], "tools/list")["result"]["tools"]
@@ -403,7 +403,7 @@ def test_openapi_lists_only_agent_routes(agent):
 
 def test_rate_limit_per_token(agent, monkeypatch):
     c, _, made = agent
-    monkeypatch.setenv("AUTOONTOLOGY_AGENT_RATE_PER_MIN", "3")
+    monkeypatch.setenv("ONTOLOGY_AGENT_RATE_PER_MIN", "3")
     other = c.post("/api/agent/tokens", json={"name": "other"}).json()["token"]
     for _ in range(3):
         assert c.get(f"{REST}/revisions", headers=_auth(made["token"])).status_code == 200
@@ -450,7 +450,7 @@ def test_calls_are_recorded_and_summarised(agent):
 
 
 def test_calls_are_pruned(isolated_env, monkeypatch):
-    from autoontology.store import agent_tokens
+    from ontology.store import agent_tokens
 
     monkeypatch.setattr(agent_tokens, "MAX_CALLS", 5)
     tokens = AgentTokens(Store.for_home(Settings.from_env().home))
@@ -508,7 +508,7 @@ def _call_msg(mid, name="list_revisions"):
 
 def test_batch_tool_calls_are_charged_to_the_rate_limit(agent, monkeypatch):
     c, _, made = agent
-    monkeypatch.setenv("AUTOONTOLOGY_AGENT_RATE_PER_MIN", "2")
+    monkeypatch.setenv("ONTOLOGY_AGENT_RATE_PER_MIN", "2")
     out = c.post(MCP, json=[_call_msg(i) for i in range(5)], headers=_auth(made["token"])).json()
     assert [m["id"] for m in out] == list(range(5))
     results = [m["result"] for m in out]

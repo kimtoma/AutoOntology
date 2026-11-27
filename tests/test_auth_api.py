@@ -10,15 +10,15 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.store import accounts as acc
-from autoontology.store.accounts import Accounts
-from autoontology.store.db import Store
-from autoontology.web import app as web
-from autoontology.web import auth as auth_mod
-from autoontology.web import mailer as mailer_mod
-from autoontology.web.mailer import Mailer
-from autoontology.web.runs import RunManager
+from ontology.config import Settings
+from ontology.store import accounts as acc
+from ontology.store.accounts import Accounts
+from ontology.store.db import Store
+from ontology.web import app as web
+from ontology.web import auth as auth_mod
+from ontology.web import mailer as mailer_mod
+from ontology.web.mailer import Mailer
+from ontology.web.runs import RunManager
 
 PW = "correct horse battery"
 TAILNET = "box.tail1234.ts.net"
@@ -62,7 +62,7 @@ def _fast(monkeypatch):
 
 
 def _client(monkeypatch, **env) -> tuple[TestClient, Settings, Accounts]:
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     settings = Settings.from_env()
@@ -78,10 +78,10 @@ def env(isolated_env, monkeypatch):
 
 
 SMTP_ENV = {
-    "AUTOONTOLOGY_SMTP_HOST": "smtp.example.com",
-    "AUTOONTOLOGY_SMTP_USER": "mailer@example.com",
-    "AUTOONTOLOGY_SMTP_PASSWORD": "smtp-secret-value",
-    "AUTOONTOLOGY_SMTP_FROM": "ao@example.com",
+    "ONTOLOGY_SMTP_HOST": "smtp.example.com",
+    "ONTOLOGY_SMTP_USER": "mailer@example.com",
+    "ONTOLOGY_SMTP_PASSWORD": "smtp-secret-value",
+    "ONTOLOGY_SMTP_FROM": "onto@example.com",
 }
 
 
@@ -106,7 +106,7 @@ def test_login_sets_a_strict_http_only_cookie_and_me_answers(env):
     assert body["auth"] == "accounts" and body["is_admin"] is False
     assert "pw_hash" not in body["user"]
     cookie = _set_cookie(resp)
-    assert cookie.startswith("ao_session=")
+    assert cookie.startswith("onto_session=")
     for flag in ("HttpOnly", "Path=/", "SameSite=strict", "Max-Age=43200"):
         assert flag.lower() in cookie.lower(), cookie
     assert "secure" not in cookie.lower()  # 127.0.0.1/localhost/testserver
@@ -276,35 +276,33 @@ def test_client_ip_trusts_forwarded_for_only_from_loopback(peer, headers, expect
 
 def test_login_rotates_the_session(env):
     client, *_ = env
-    first = _login(client).cookies["ao_session"]
-    second = _login(client).cookies["ao_session"]
+    first = _login(client).cookies["onto_session"]
+    second = _login(client).cookies["onto_session"]
     assert first != second
     stale = TestClient(client.app)
-    stale.cookies.set("ao_session", first)
+    stale.cookies.set("onto_session", first)
     assert stale.get("/api/auth/me").json()["authenticated"] is False
 
 
 def test_cookie_is_secure_with_an_https_public_url(isolated_env, monkeypatch):
-    client, _, accounts = _client(
-        monkeypatch, AUTOONTOLOGY_PUBLIC_URL="https://autoontology.example.com/"
-    )
+    client, _, accounts = _client(monkeypatch, ONTOLOGY_PUBLIC_URL="https://ontology.example.com/")
     accounts.create_user("kim@example.com", password=PW)
     resp = _login(client)
     assert resp.status_code == 200
     cookie = _set_cookie(resp)
-    assert cookie.startswith("__Host-ao_session=") and "secure" in cookie.lower()
+    assert cookie.startswith("__Host-onto_session=") and "secure" in cookie.lower()
     assert "domain" not in cookie.lower() and "path=/" in cookie.lower()
-    raw = resp.cookies["__Host-ao_session"]
+    raw = resp.cookies["__Host-onto_session"]
     # the __Host- cookie is read; an unprefixed one (tossed by a sibling site) is not
     secure = TestClient(client.app, base_url="https://testserver")
-    secure.cookies.set("ao_session", raw)
+    secure.cookies.set("onto_session", raw)
     assert secure.get("/api/auth/me").json()["authenticated"] is False
     secure.cookies.clear()
-    secure.cookies.set("__Host-ao_session", raw)
+    secure.cookies.set("__Host-onto_session", raw)
     assert secure.get("/api/auth/me").json()["authenticated"] is True
     resp = secure.post("/api/auth/logout")
     cleared = _set_cookie(resp)
-    assert "__Host-ao_session=" in cleared and "ao_session=" in cleared.replace("__Host-", "")
+    assert "__Host-onto_session=" in cleared and "onto_session=" in cleared.replace("__Host-", "")
     assert accounts.lookup_session(raw) is None
 
 
@@ -314,14 +312,14 @@ def test_local_plain_http_prefers_the_host_cookie(env):
     other = accounts.create_user("lee@example.com", password=PW)
     theirs, _ = accounts.create_session(other.id)
     c = TestClient(client.app)
-    c.cookies.set("ao_session", theirs)
+    c.cookies.set("onto_session", theirs)
     assert c.get("/api/auth/me").json()["user"]["email"] == "lee@example.com"
-    c.cookies.set("__Host-ao_session", mine)
+    c.cookies.set("__Host-onto_session", mine)
     assert c.get("/api/auth/me").json()["user"]["email"] == "kim@example.com"
 
 
 def test_cookie_is_secure_on_a_tailnet_host_and_behind_https(isolated_env, monkeypatch):
-    client, _, accounts = _client(monkeypatch, AUTOONTOLOGY_TAILSCALE_HOSTS=TAILNET)
+    client, _, accounts = _client(monkeypatch, ONTOLOGY_TAILSCALE_HOSTS=TAILNET)
     accounts.create_user("kim@example.com", password=PW)
     headers = {"host": TAILNET, "tailscale-user-login": "someone@example.com"}
     resp = _login(client, headers=headers)
@@ -349,10 +347,10 @@ def test_auth_routes_keep_the_host_and_cross_origin_checks(env):
 
 def test_logout_ends_the_session(env):
     client, _, accounts, _ = env
-    raw = _login(client).cookies["ao_session"]
+    raw = _login(client).cookies["onto_session"]
     resp = client.post("/api/auth/logout")
     assert resp.status_code == 200 and resp.json() == {"ok": True}
-    assert 'ao_session=""' in _set_cookie(resp) or "Max-Age=0" in _set_cookie(resp)
+    assert 'onto_session=""' in _set_cookie(resp) or "Max-Age=0" in _set_cookie(resp)
     assert accounts.lookup_session(raw) is None
     assert client.get("/api/auth/me").json()["authenticated"] is False
     assert "logout" in [r["action"] for r in accounts.list_audit()]
@@ -417,7 +415,7 @@ def test_magic_link_answers_the_same_without_smtp(env):
 
 def test_magic_link_mail_and_single_use_redeem(isolated_env, monkeypatch, caplog):
     client, settings, accounts = _client(
-        monkeypatch, AUTOONTOLOGY_PUBLIC_URL="https://ao.example.com", **SMTP_ENV
+        monkeypatch, ONTOLOGY_PUBLIC_URL="https://onto.example.com", **SMTP_ENV
     )
     accounts.create_user("kim@example.com", name="Kim", password=PW)
     off = accounts.create_user("off@example.com")
@@ -431,10 +429,10 @@ def test_magic_link_mail_and_single_use_redeem(isolated_env, monkeypatch, caplog
     assert len(answers) == 1
     assert len(FakeSMTP.sent) == 1
     message = FakeSMTP.sent[0]
-    assert message["To"] == "kim@example.com" and "ao@example.com" in message["From"]
+    assert message["To"] == "kim@example.com" and "onto@example.com" in message["From"]
     assert ("login", "mailer@example.com", "smtp-secret-value") in FakeSMTP.calls
     assert ("starttls",) in FakeSMTP.calls
-    link = re.search(r"https://ao\.example\.com/auth/magic/(\S+)", message.get_content())
+    link = re.search(r"https://onto\.example\.com/auth/magic/(\S+)", message.get_content())
     assert link, message.get_content()
     token = link.group(1)
     assert "smtp-secret-value" not in caplog.text and token not in caplog.text
@@ -445,7 +443,7 @@ def test_magic_link_mail_and_single_use_redeem(isolated_env, monkeypatch, caplog
     assert resp.status_code == 200 and resp.json()["user"]["email"] == "kim@example.com"
     assert "secure" in _set_cookie(resp).lower()  # https public URL
     assert resp.headers["referrer-policy"] == "no-referrer"
-    raw = resp.cookies["__Host-ao_session"]
+    raw = resp.cookies["__Host-onto_session"]
     assert accounts.lookup_session(raw)[1].email == "kim@example.com"
     again = TestClient(client.app).get(f"/auth/magic/{token}", follow_redirects=False)
     assert again.status_code == 303 and again.headers["location"] == "/ui/login?error=link"
@@ -547,7 +545,7 @@ def test_accept_invite_sets_the_password_and_signs_in(env):
     resp = client.post("/api/auth/accept-invite", json={"token": raw, "password": PW})
     assert resp.status_code == 200, resp.text
     assert resp.json()["user"]["email"] == "new@example.com"
-    assert "ao_session=" in _set_cookie(resp)
+    assert "onto_session=" in _set_cookie(resp)
     assert accounts.verify_password("new@example.com", PW) is not None
     again = client.post("/api/auth/accept-invite", json={"token": raw, "password": PW})
     assert again.status_code == 400 and again.json()["error"] == "invalid_token"
@@ -557,7 +555,7 @@ def test_accept_invite_sets_the_password_and_signs_in(env):
 
 def test_reset_link_ends_other_sessions(env):
     client, _, accounts, user = env
-    old = _login(client).cookies["ao_session"]
+    old = _login(client).cookies["onto_session"]
     raw, _ = accounts.issue_token(user.id, "reset")
     other = TestClient(client.app)
     resp = other.post("/api/auth/accept-invite", json={"token": raw, "password": "a new password!"})
@@ -570,7 +568,7 @@ def test_password_change_revokes_other_sessions(env):
     client, _, accounts, _ = env
     _login(client)
     second = TestClient(client.app)
-    second_raw = _login(second).cookies["ao_session"]
+    second_raw = _login(second).cookies["onto_session"]
     resp = client.post("/api/auth/password", json={"current": "nope nope nope", "new": "x" * 12})
     assert resp.status_code == 403 and resp.json()["error"] == "wrong_password"
     resp = client.post("/api/auth/password", json={"current": PW, "new": "short"})
@@ -592,7 +590,7 @@ def test_password_change_needs_a_session(env):
 
 
 def test_tailscale_login_maps_to_the_user_with_that_email(isolated_env, monkeypatch):
-    client, _, accounts = _client(monkeypatch, AUTOONTOLOGY_TAILSCALE_HOSTS=TAILNET)
+    client, _, accounts = _client(monkeypatch, ONTOLOGY_TAILSCALE_HOSTS=TAILNET)
     accounts.create_user("kim@example.com", is_admin=True)
     known = client.get(
         "/api/auth/me", headers={"host": TAILNET, "tailscale-user-login": "Kim@example.com"}
@@ -640,11 +638,11 @@ def test_accounts_mode_requires_a_session_elsewhere(env):
 @pytest.mark.parametrize(
     ("var", "value"),
     [
-        ("AUTOONTOLOGY_AUTH", "sso"),
-        ("AUTOONTOLOGY_ARCHIVED_PLAYGROUND", "maybe"),
-        ("AUTOONTOLOGY_SESSION_HOURS", "0"),
-        ("AUTOONTOLOGY_PUBLIC_URL", "ftp://x"),
-        ("AUTOONTOLOGY_PUBLIC_URL", "https://x/?a=1"),
+        ("ONTOLOGY_AUTH", "sso"),
+        ("ONTOLOGY_ARCHIVED_PLAYGROUND", "maybe"),
+        ("ONTOLOGY_SESSION_HOURS", "0"),
+        ("ONTOLOGY_PUBLIC_URL", "ftp://x"),
+        ("ONTOLOGY_PUBLIC_URL", "https://x/?a=1"),
     ],
 )
 def test_settings_validation(isolated_env, monkeypatch, var, value):
@@ -664,16 +662,16 @@ def test_settings_defaults_and_values(isolated_env, monkeypatch):
     assert not s.smtp_enabled and s.smtp_port == 587 and s.smtp_starttls
     for key, value in {
         **SMTP_ENV,
-        "AUTOONTOLOGY_AUTH": "Accounts",
-        "AUTOONTOLOGY_SESSION_HOURS": "8",
-        "AUTOONTOLOGY_PUBLIC_URL": "https://ao.example.com/",
-        "AUTOONTOLOGY_ARCHIVED_PLAYGROUND": "deny",
-        "AUTOONTOLOGY_SMTP_PORT": "465",
-        "AUTOONTOLOGY_SMTP_STARTTLS": "0",
+        "ONTOLOGY_AUTH": "Accounts",
+        "ONTOLOGY_SESSION_HOURS": "8",
+        "ONTOLOGY_PUBLIC_URL": "https://onto.example.com/",
+        "ONTOLOGY_ARCHIVED_PLAYGROUND": "deny",
+        "ONTOLOGY_SMTP_PORT": "465",
+        "ONTOLOGY_SMTP_STARTTLS": "0",
     }.items():
         monkeypatch.setenv(key, value)
     s = Settings.from_env()
     assert s.accounts_enabled and s.session_hours == 8 and s.archived_playground == "deny"
-    assert s.public_url == "https://ao.example.com" and s.smtp_enabled
+    assert s.public_url == "https://onto.example.com" and s.smtp_enabled
     assert s.smtp_port == 465 and not s.smtp_starttls
     assert "smtp-secret-value" not in repr(s)

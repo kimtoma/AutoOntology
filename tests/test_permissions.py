@@ -10,7 +10,7 @@ import pytest
 from fastapi.routing import _IncludedRouter
 from fastapi.testclient import TestClient
 
-from autoontology.config import (
+from ontology.config import (
     INTERNAL_AS_HEADER,
     INTERNAL_HEADER,
     Settings,
@@ -20,16 +20,16 @@ from autoontology.config import (
     ingestion_service_url,
     internal_headers,
 )
-from autoontology.store import accounts as acc
-from autoontology.store.accounts import Accounts
-from autoontology.store.db import Store
-from autoontology.web import app as web
-from autoontology.web.projects import (
+from ontology.store import accounts as acc
+from ontology.store.accounts import Accounts
+from ontology.store.db import Store
+from ontology.web import app as web
+from ontology.web.projects import (
     INSTALLATION_PERMISSIONS,
     PROJECT_PERMISSIONS,
     role_permissions,
 )
-from autoontology.web.runs import RunManager
+from ontology.web.runs import RunManager
 
 API = "/api"
 BETA = f"{API}/projects/beta"
@@ -39,7 +39,7 @@ SPARQL = {"query": "SELECT * WHERE { ?s ?p ?o }"}
 
 @pytest.fixture(autouse=True)
 def _fast(monkeypatch):
-    from autoontology.engine import jobs
+    from ontology.engine import jobs
 
     monkeypatch.setattr(acc, "PBKDF2_ROUNDS", 1000)
     monkeypatch.setattr(acc, "_DUMMY_HASH", None)
@@ -49,7 +49,7 @@ def _fast(monkeypatch):
 
 
 def _app(monkeypatch, **env):
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     settings = Settings.from_env()
@@ -77,7 +77,7 @@ class Env:
         if role:
             self.accounts.add_member(self.store.project("beta").id, user.id, role)
         raw, _ = self.accounts.create_session(user.id)
-        c.cookies.set("ao_session", raw)
+        c.cookies.set("onto_session", raw)
         return c
 
 
@@ -217,7 +217,7 @@ def test_role_route_matrix(env, role, monkeypatch):
     async def no_test(self, app):
         return {"ok": True}
 
-    monkeypatch.setattr("autoontology.web.api.Api.test_provider", no_test)
+    monkeypatch.setattr("ontology.web.api.Api.test_provider", no_test)
     if role == "anonymous":
         c = env.client(None)
     elif role == "admin":
@@ -305,7 +305,7 @@ def test_review_decision_records_the_email_and_audit(env, monkeypatch):
 
             return D()
 
-    monkeypatch.setattr("autoontology.web.api.Api.inbox", lambda self, **kw: Inbox())
+    monkeypatch.setattr("ontology.web.api.Api.inbox", lambda self, **kw: Inbox())
     c = env.client("rev@example.com", role="reviewer")
     resp = c.post(f"{BETA}/review/x:1/decision", json={"decision": "accept"})
     assert resp.status_code == 200, resp.text
@@ -422,7 +422,7 @@ def test_v1_refuses_anonymous_and_users_but_lets_the_engine_in(env):
     resp = anon.post("/v1/chat/completions", json={"model": "x", "messages": []}, headers=local)
     assert resp.status_code == 401
     # the constant key from before accounts opens nothing
-    bad = {**local, "authorization": "Bearer autoontology-router"}
+    bad = {**local, "authorization": "Bearer ontology-router"}
     assert anon.get("/v1/models", headers=bad).status_code == 401
     viewer = env.client("v@example.com", role="viewer")
     assert viewer.get("/v1/models").status_code == 403
@@ -459,15 +459,15 @@ def test_ingest_only_through_the_engine_prefix(env, monkeypatch):
 
 
 def test_engine_env_uses_the_installation_keys(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     settings = Settings.from_env()
     env = expand_model_profile(settings)
     assert env["DEFAULT_MODELS_API_KEY"] == engine_api_key(settings)
     assert (settings.run_dir / "internal.key").stat().st_mode & 0o777 == 0o600
     assert derived_key(settings, "engine") != derived_key(settings, "local")
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "off")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "off")
     off = Settings.from_env()
-    assert expand_model_profile(off)["DEFAULT_MODELS_API_KEY"] in ("ollama", "autoontology-router")
+    assert expand_model_profile(off)["DEFAULT_MODELS_API_KEY"] in ("ollama", "ontology-router")
     assert ingestion_service_url(off) == off.service_url
     assert internal_headers(off) == {}
 
@@ -639,7 +639,7 @@ def test_run_start_is_audited(env):
 
 @pytest.mark.parametrize(("mode", "status"), [("allow", 404), ("deny", 409)])
 def test_archived_playground_setting(isolated_env, monkeypatch, mode, status):
-    e = Env(monkeypatch, AUTOONTOLOGY_ARCHIVED_PLAYGROUND=mode)
+    e = Env(monkeypatch, ONTOLOGY_ARCHIVED_PLAYGROUND=mode)
     assert e.admin.post(f"{BETA}/archive").status_code == 200
     viewer = e.client("v@example.com", role="viewer")
     resp = viewer.post(f"{BETA}/playground/sparql", json=SPARQL)
@@ -658,13 +658,13 @@ def test_magic_link_needs_a_post(env):
     c = TestClient(env.app, follow_redirects=False)
     for _ in range(2):  # a scanner's prefetch does not use the token
         page = c.get(f"/auth/magic/{raw}")
-        assert page.status_code == 200 and "ao_session" not in page.cookies
+        assert page.status_code == 200 and "onto_session" not in page.cookies
         assert 'action="/api/auth/magic"' in page.text and raw in page.text
         assert page.headers["cache-control"] == "no-store"
         assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
     resp = c.post("/api/auth/magic", json={"token": raw})
     assert resp.status_code == 200, resp.text
-    assert resp.json()["user"]["email"] == "m@example.com" and resp.cookies.get("ao_session")
+    assert resp.json()["user"]["email"] == "m@example.com" and resp.cookies.get("onto_session")
     again = c.post("/api/auth/magic", json={"token": raw})
     assert again.status_code == 400 and again.json()["error"] == "invalid_token"
     gone = c.get(f"/auth/magic/{raw}")
@@ -677,7 +677,7 @@ def test_magic_link_form_post_redirects(env):
     c = TestClient(env.app, follow_redirects=False)
     resp = c.post("/api/auth/magic", data={"token": raw})
     assert resp.status_code == 303 and resp.headers["location"] == "/ui/"
-    assert resp.cookies.get("ao_session")
+    assert resp.cookies.get("onto_session")
     resp = c.post("/api/auth/magic", data={"token": raw})
     assert resp.status_code == 303 and resp.headers["location"] == "/ui/login?error=link"
 

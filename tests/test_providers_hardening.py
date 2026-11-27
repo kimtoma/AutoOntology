@@ -15,13 +15,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology import doctor
-from autoontology.config import Settings
-from autoontology.web import app as web
-from autoontology.web.providers import base, codex_cli, probe
-from autoontology.web.providers.codex_cli import DISABLED_FEATURES
-from autoontology.web.providers.openai_compat import parse_request
-from autoontology.web.providers.router import Registry
+from ontology import doctor
+from ontology.config import Settings
+from ontology.web import app as web
+from ontology.web.providers import base, codex_cli, probe
+from ontology.web.providers.codex_cli import DISABLED_FEATURES
+from ontology.web.providers.openai_compat import parse_request
+from ontology.web.providers.router import Registry
 from tests.test_providers_api import offline  # noqa: F401 - fixture
 from tests.test_providers_cli import FMT, _chat, _client, _settings, fakes  # noqa: F401
 
@@ -34,7 +34,7 @@ def _mode(path: Path) -> int:
 
 @pytest.fixture
 def codex_user(isolated_env, monkeypatch):
-    """A user CODEX_HOME (0755 dir, 0600 auth.json) and an AutoOntology home."""
+    """A user CODEX_HOME (0755 dir, 0600 auth.json) and an Ontology home."""
     user = isolated_env / "user-codex"
     user.mkdir(exist_ok=True)
     user.chmod(0o755)
@@ -73,7 +73,7 @@ class _Records(logging.Handler):
 def provider_log():
     handler = _Records()
     handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-    plog = logging.getLogger("autoontology.providers")
+    plog = logging.getLogger("ontology.providers")
     plog.addHandler(handler)
     old = plog.level
     plog.setLevel(logging.INFO)
@@ -244,7 +244,7 @@ def test_old_last_test_entries_are_scrubbed_on_read(fakes, offline):  # noqa: F8
 
 
 def test_codex_reasoning_effort_is_passed_when_valid(fakes, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("AUTOONTOLOGY_CODEX_REASONING_EFFORT", "high")
+    monkeypatch.setenv("ONTOLOGY_CODEX_REASONING_EFFORT", "high")
     res = _chat(_client("codex"), "openai/codex:gpt-6-astra", response_format=FMT)
     assert res.status_code == 200, res.text
     (call,) = fakes()
@@ -254,13 +254,13 @@ def test_codex_reasoning_effort_is_passed_when_valid(fakes, monkeypatch):  # noq
 
 @pytest.mark.parametrize("value", ["hihg", 'high" x="1', "none"])
 def test_bad_codex_reasoning_effort_is_400_and_doctor_fail(fakes, monkeypatch, value):  # noqa: F811
-    monkeypatch.setenv("AUTOONTOLOGY_CODEX_REASONING_EFFORT", value)
+    monkeypatch.setenv("ONTOLOGY_CODEX_REASONING_EFFORT", value)
     res = _chat(_client("codex"), "openai/codex:gpt-6-astra", response_format=FMT)
     assert res.status_code == 400 and res.json()["error"]["type"] == "invalid_reasoning_effort"
     assert fakes() == []
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "codex")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "codex")
     check = doctor.check_profile(Settings.from_env())
-    assert check.status == "FAIL" and "AUTOONTOLOGY_CODEX_REASONING_EFFORT" in check.detail
+    assert check.status == "FAIL" and "ONTOLOGY_CODEX_REASONING_EFFORT" in check.detail
 
 
 # --- Minor 8: concurrent last-test writes -------------------------------------------------
@@ -357,7 +357,7 @@ def _grandchild_pid(path: Path, wait: float = 10.0) -> int:
 
 
 def test_cancel_kills_the_whole_process_group(fakes, isolated_env, monkeypatch):  # noqa: F811
-    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
+    from ontology.web.providers.claude_cli import ClaudeCLIProvider
 
     marker = isolated_env / "grandchild.pid"
     monkeypatch.setenv("FAKE_MODE", "grandchild")
@@ -383,7 +383,7 @@ def test_timeout_kills_the_whole_process_group(fakes, isolated_env, monkeypatch)
     marker = isolated_env / "grandchild.pid"
     monkeypatch.setenv("FAKE_MODE", "grandchild")
     monkeypatch.setenv("FAKE_GRANDCHILD", str(marker))
-    monkeypatch.setenv("AUTOONTOLOGY_PROVIDER_TIMEOUT_S", "2")
+    monkeypatch.setenv("ONTOLOGY_PROVIDER_TIMEOUT_S", "2")
     start = time.monotonic()
     res = _chat(_client(), "openai/claude:sonnet")
     assert res.status_code == 504
@@ -530,7 +530,7 @@ def test_child_env_failure_is_503_not_500(fakes, monkeypatch):  # noqa: F811
 
 
 def test_a_failed_disconnect_watcher_is_not_a_disconnect():
-    from autoontology.web.providers.router import until_disconnected
+    from ontology.web.providers.router import until_disconnected
 
     class Req:
         async def receive(self):
@@ -678,25 +678,25 @@ def _exe(path: Path) -> Path:
 
 
 def test_claude_bin_with_a_tilde_is_expanded(isolated_env, monkeypatch):
-    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
+    from ontology.web.providers.claude_cli import ClaudeCLIProvider
 
     user_home = isolated_env / "userhome"
     real = _exe(user_home / "tools" / "claude")
     monkeypatch.setenv("HOME", str(user_home))
     monkeypatch.setenv("PATH", str(isolated_env / "empty-bin"))
-    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_BIN", "~/tools/claude")
+    monkeypatch.setenv("ONTOLOGY_CLAUDE_BIN", "~/tools/claude")
     assert ClaudeCLIProvider(isolated_env / "h", []).binary() == str(real)
 
 
 def test_claude_local_install_is_the_last_fallback(isolated_env, monkeypatch):
-    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
+    from ontology.web.providers.claude_cli import ClaudeCLIProvider
 
     user_home = isolated_env / "userhome"
     monkeypatch.setenv("HOME", str(user_home))
     bindir = isolated_env / "bin"
     bindir.mkdir()
     monkeypatch.setenv("PATH", str(bindir))
-    monkeypatch.delenv("AUTOONTOLOGY_CLAUDE_BIN", raising=False)
+    monkeypatch.delenv("ONTOLOGY_CLAUDE_BIN", raising=False)
     provider = ClaudeCLIProvider(isolated_env / "h", [])
     assert provider.binary() is None
     local = _exe(user_home / ".claude" / "local" / "claude")
@@ -704,5 +704,5 @@ def test_claude_local_install_is_the_last_fallback(isolated_env, monkeypatch):
     on_path = _exe(bindir / "claude")  # PATH comes first, as in bootstrap.sh
     assert provider.binary() == str(on_path)
     # a configured binary that does not exist is not silently replaced by the fallback
-    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_BIN", str(isolated_env / "nope" / "claude"))
+    monkeypatch.setenv("ONTOLOGY_CLAUDE_BIN", str(isolated_env / "nope" / "claude"))
     assert provider.binary() is None

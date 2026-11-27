@@ -1,8 +1,8 @@
 # Actions for the quickstart demo (청구수납규정 제7조 독촉 절차).
 # Apply after functions.yaml, then activate (owner):
-#   uv run ao logic apply -f samples/quickstart/logic/actions.yaml
-#   uv run ao logic activate action 독촉단계기록
-#   uv run ao action preview 독촉단계기록 INV-20200003 --param 단계=2
+#   uv run onto logic apply -f samples/quickstart/logic/actions.yaml
+#   uv run onto logic activate action 독촉단계기록
+#   uv run onto action preview 독촉단계기록 INV-20200003 --param 단계=2
 # Stage 4 (해지 검토) waits for an owner's approval; agents may only propose it.
 
 - kind: action

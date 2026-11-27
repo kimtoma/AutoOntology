@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""Pins the upstream internals ``autoontology align`` writes Term synonyms through
-(``autoontology/engine/upstream_terms.py``), against the vendored source. If upstream changes
+"""Pins the upstream internals ``onto align`` writes Term synonyms through
+(``ontology/engine/upstream_terms.py``), against the vendored source. If upstream changes
 any of these, this fails instead of the write silently doing nothing."""
 
 import ast
@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from autoontology.config import REPO_ROOT
+from ontology.config import REPO_ROOT
 
 UP = REPO_ROOT / "vendor" / "auto-ontology" / "auto_ontology"
 
@@ -55,8 +55,8 @@ def upstream_env(isolated_env, monkeypatch):
     put os.environ and the applied-env marker back afterwards."""
     import os
 
-    from autoontology.config import Settings
-    from autoontology.engine import jobs
+    from ontology.config import Settings
+    from ontology.engine import jobs
 
     saved_env, saved_marker = dict(os.environ), jobs._APPLIED_ENV
     settings = Settings.from_env()
@@ -68,7 +68,7 @@ def upstream_env(isolated_env, monkeypatch):
 
 
 def test_runtime_guard_imports_the_pinned_names(upstream_env):
-    from autoontology.engine.upstream_terms import require_internals
+    from ontology.engine.upstream_terms import require_internals
 
     up = require_internals()
     assert {"synonyms", "name", "modified", "modified_by"} <= set(up["s"].term.c.keys())
@@ -110,7 +110,7 @@ class _FakeStore:
 def test_add_synonyms_merges_inside_the_transaction(upstream_env, monkeypatch):
     from contextlib import contextmanager
 
-    from autoontology.engine import upstream_terms as ut
+    from ontology.engine import upstream_terms as ut
 
     real = ut.require_internals()
     log: list = []
@@ -143,7 +143,7 @@ def test_add_synonyms_merges_inside_the_transaction(upstream_env, monkeypatch):
     assert log[0] == "begin" and log[1] == ("select", True)  # FOR UPDATE, in the tx
     kind, params = log[2]
     assert kind == "update" and params["synonyms"] == ["계약", "약정", "계약서"]
-    assert params["modified_by"] == "autoontology"
+    assert params["modified_by"] == "ontology"
     assert log[3] == "commit" and log[4] == ("refresh", "t1", False)
     # nothing new: no update, no refresh
     log.clear()
@@ -153,7 +153,7 @@ def test_add_synonyms_merges_inside_the_transaction(upstream_env, monkeypatch):
 
 
 def test_refresh_failure_is_reported_not_raised(upstream_env, monkeypatch):
-    from autoontology.engine import upstream_terms as ut
+    from ontology.engine import upstream_terms as ut
 
     real = ut.require_internals()
 
@@ -197,8 +197,8 @@ def _catalog_sqlite():
             c.execute(sa.text(ddl))
         c.execute(
             sa.text(
-                "INSERT INTO catalog_database VALUES ('dA', 'autoontology_src_a'), "
-                "('dB', 'autoontology_src_b')"
+                "INSERT INTO catalog_database VALUES ('dA', 'ontology_src_a'), "
+                "('dB', 'ontology_src_b')"
             )
         )
         c.execute(
@@ -232,11 +232,11 @@ def test_reset_statements_detach_shared_terms_and_drop_orphans(upstream_env):
     import sqlalchemy as sa
     from auto_ontology.dal import schema as s
 
-    from autoontology.engine import upstream_semantic as us
+    from ontology.engine import upstream_semantic as us
 
     engine = _catalog_sqlite()
     with engine.begin() as c:
-        rows = [dict(r._mapping) for r in c.execute(us.snapshot_statement(s, "autoontology_src_a"))]
+        rows = [dict(r._mapping) for r in c.execute(us.snapshot_statement(s, "ontology_src_a"))]
         snap = us.snapshot_from_rows(rows)
         assert snap == {
             "public.customers": {
@@ -246,7 +246,7 @@ def test_reset_statements_detach_shared_terms_and_drop_orphans(upstream_env):
                 "fk_columns": ["name"],
             }
         }
-        detached = c.execute(us.detach_statement(s, "autoontology_src_a")).fetchall()
+        detached = c.execute(us.detach_statement(s, "ontology_src_a")).fetchall()
         assert [r[0] for r in detached] == ["shared"]
         links = c.execute(sa.text("SELECT table_id, term_id FROM table__term")).fetchall()
         assert links == [("tB", "shared")]  # B keeps its link
@@ -265,7 +265,7 @@ def test_reset_order_and_blank_name(upstream_env, monkeypatch):
     import auto_ontology.dal.reset as reset
     import auto_ontology.dal.session as session
 
-    from autoontology.engine import upstream_semantic as us
+    from ontology.engine import upstream_semantic as us
 
     calls = []
     monkeypatch.setattr(reset, "delete_semantic_layer", lambda db: calls.append(("reset", db)) or 2)
@@ -277,9 +277,9 @@ def test_reset_order_and_blank_name(upstream_env, monkeypatch):
 
     monkeypatch.setattr(session, "store", lambda: _Conn())
     monkeypatch.setattr(session, "write_transaction", contextlib.nullcontext)
-    out = us.reset_database_semantics(upstream_env, "autoontology_src_a", stale_table_ids=["t"])
+    out = us.reset_database_semantics(upstream_env, "ontology_src_a", stale_table_ids=["t"])
     assert calls == [
-        ("reset", "autoontology_src_a"),
+        ("reset", "ontology_src_a"),
         ("write", "table__term"),
         ("write", "term"),
         ("write", "column_attribute"),
@@ -303,7 +303,7 @@ def test_remove_synonyms_is_a_reviewed_repair_with_refresh(upstream_env, monkeyp
     Term (whole aliases only, under the row lock) and its embeddings refresh."""
     from contextlib import contextmanager
 
-    from autoontology.engine import upstream_terms as ut
+    from ontology.engine import upstream_terms as ut
 
     real = ut.require_internals()
     log: list = []
@@ -350,8 +350,8 @@ def test_remove_synonyms_keeps_a_manual_spacing_variant(upstream_env, monkeypatc
     the rollback of ``계약서`` must not take the manual spelling with it."""
     from contextlib import contextmanager
 
-    from autoontology.engine import upstream_terms as ut
-    from autoontology.unstructured.align import merge_synonyms
+    from ontology.engine import upstream_terms as ut
+    from ontology.unstructured.align import merge_synonyms
 
     assert merge_synonyms(["계약 서"], ["계약서"]) == ["계약 서", "계약서"]
     real = ut.require_internals()
@@ -383,7 +383,7 @@ def test_remove_synonyms_keeps_a_legacy_manual_whitespace_variant(upstream_env, 
     automatic ``계약 서`` it recorded; removing the recorded string takes only that one."""
     from contextlib import contextmanager
 
-    from autoontology.engine import upstream_terms as ut
+    from ontology.engine import upstream_terms as ut
 
     real = ut.require_internals()
     fake = _FakeStore([], ["계약  서", "계약 서"])
@@ -425,7 +425,7 @@ def test_reset_also_deletes_the_database_term_families(upstream_env):
 def _plans(tmp_path, files):
     import duckdb
 
-    from autoontology.structured.loaders import discover_files, read_tables
+    from ontology.structured.loaders import discover_files, read_tables
 
     for name, text in files.items():
         (tmp_path / name).write_text(text, encoding="utf-8")
@@ -441,8 +441,8 @@ def test_hangul_tables_get_distinct_non_empty_term_names(upstream_env, tmp_path)
     from auto_ontology.semantic.deterministic import to_term_name
     from auto_ontology.semantic.term_extractor import _normalize_label
 
-    from autoontology.store.db import Source
-    from autoontology.structured.semantic import fetch_snapshot
+    from ontology.store.db import Source
+    from ontology.structured.semantic import fetch_snapshot
 
     plans = _plans(tmp_path, {"고객.csv": "id\n1\n", "주문 내역.csv": "id\n1\n"})
     assert set(plans) == {"고객", "주문_내역"}
@@ -470,7 +470,7 @@ def test_hangul_tables_get_distinct_non_empty_term_names(upstream_env, tmp_path)
         def table_columns(self, table_id):
             return []
 
-    src = Source("id", "k", "files", "{}", "autoontology_src_k", "db1", "", "")
+    src = Source("id", "k", "files", "{}", "ontology_src_k", "db1", "", "")
     snap = fetch_snapshot(Client(), src)
     term_names = [t.name for t in snap.terms]
     assert all(term_names) and sorted(term_names) == ["고객", "주문 내역"]

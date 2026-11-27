@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from autoontology.ontology import model as merged
-from autoontology.ontology.model import MergedOntology
-from autoontology.store.alignments import AlignmentRecord, AlignmentStore
-from autoontology.store.db import MIGRATIONS, Store
-from autoontology.store.decisions import Decision, DecisionStore, alias_key
+from ontology.ontology import model as merged
+from ontology.ontology.model import MergedOntology
+from ontology.store.alignments import AlignmentRecord, AlignmentStore
+from ontology.store.db import MIGRATIONS, Store
+from ontology.store.decisions import Decision, DecisionStore, alias_key
 from tests import test_build as tb
 from tests.test_align import FakeJudge, _v
 from tests.test_build import env  # noqa: F401 - the build fixture
@@ -39,7 +39,7 @@ def _downgrade(path, version):
 
 @pytest.mark.parametrize("version", [5, 3])
 def test_migration_v6_upgrades_older_stores(tmp_path, version):
-    path = tmp_path / "autoontology.db"
+    path = tmp_path / "ontology.db"
     Store(path)
     _downgrade(path, version)
     store = Store(path)
@@ -167,7 +167,7 @@ def test_decisions_override_the_judge_and_survive_a_re_align(ops, monkeypatch):
     ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
     ops["judge"].judged.clear()
     # every concept is judged again (a new judge key), but never a decided one
-    from autoontology.engine import align as align_job
+    from ontology.engine import align as align_job
 
     key = align_job.al.judge_key
     monkeypatch.setattr(align_job.al, "judge_key", lambda *a, **kw: key(*a, **kw) + "-v2")
@@ -227,7 +227,7 @@ def test_a_decision_whose_term_is_gone_is_judged_again(ops):
 
 
 def test_accepted_axioms_export_like_proposals():
-    from autoontology.export import rdf
+    from ontology.export import rdf
     from tests import test_ossie_okf as fx
 
     docs = fx.documents()
@@ -247,17 +247,17 @@ def test_accepted_axioms_export_like_proposals():
     assert "term-t-i" not in proposal.aligned_terms() and "term-t-i" in decided.aligned_terms()
     from rdflib import Literal, Namespace
 
-    ao = Namespace("http://example.com/autoontology#")
+    ns = Namespace("http://example.com/ontology#")
 
     def statuses(model):
-        return sorted(str(o) for o in rdf.to_graph(model).objects(None, ao.alignmentStatus))
+        return sorted(str(o) for o in rdf.to_graph(model).objects(None, ns.alignmentStatus))
 
     # serialised the same way, the status says which is which
     assert statuses(proposal) == ["accepted", "proposed"]  # 거래처 accepted, 연체율 proposed
     assert statuses(decided) == ["accepted", "accepted"]
     g = rdf.to_graph(decided)
-    assert (None, ao.alignmentStatus, Literal("accepted")) in g
-    from autoontology.export import okf
+    assert (None, ns.alignmentStatus, Literal("accepted")) in g
+    from ontology.export import okf
 
     okf.write(decided, Path(tempfile.mkdtemp()), revision=1, created_at=fx.CREATED)
     # a person's decision is "decided", and the judge's rationale is kept after the note
@@ -291,7 +291,7 @@ def test_accepted_axioms_export_like_proposals():
 
 
 def test_okf_marks_decided_concepts_stable(tmp_path):
-    from autoontology.export import okf
+    from ontology.export import okf
     from tests import test_ossie_okf as fx
 
     def status(model, out):
@@ -354,9 +354,9 @@ def _no_models(monkeypatch):
     def refuse(*_a, **_kw):
         raise AssertionError("apply must not reach a model")
 
-    from autoontology.engine import align as align_job
-    from autoontology.engine import extract as extract_job
-    from autoontology.engine import jobs
+    from ontology.engine import align as align_job
+    from ontology.engine import extract as extract_job
+    from ontology.engine import jobs
 
     for module, name in (
         (align_job, "upstream_backend"),
@@ -370,7 +370,7 @@ def _no_models(monkeypatch):
 
 
 def _apply(ops, **kw):
-    from autoontology.engine.apply import run_apply
+    from ontology.engine.apply import run_apply
     from tests.test_align import ClientWriter
 
     return run_apply(
@@ -426,8 +426,8 @@ def test_apply_reflects_the_decisions_in_a_new_revision_without_a_model(ops, mon
 
 
 def test_apply_refuses_while_another_run_holds_the_workspace(ops):
-    from autoontology.engine.build import WORKSPACE_LEASE
-    from autoontology.engine.jobs import JobError
+    from ontology.engine.build import WORKSPACE_LEASE
+    from ontology.engine.jobs import JobError
 
     with ops["store"].lease([WORKSPACE_LEASE], "build"):
         with pytest.raises(JobError, match="already has an active build"):
@@ -435,7 +435,7 @@ def test_apply_refuses_while_another_run_holds_the_workspace(ops):
 
 
 def test_apply_needs_a_snapshot(env):  # noqa: F811
-    from autoontology.engine.jobs import JobError
+    from ontology.engine.jobs import JobError
 
     tb.add_documents(env)
     with pytest.raises(JobError, match="no ontology snapshot"):
@@ -458,7 +458,7 @@ def _exports(model):
     import tempfile
     from pathlib import Path
 
-    from autoontology.export import okf, ossie, rdf
+    from ontology.export import okf, ossie, rdf
 
     graph = rdf.to_graph(model)
     onto = ossie.build_ontology(
@@ -478,7 +478,7 @@ def _exports(model):
 def _alt_labels(graph, local):
     from rdflib import SKOS, URIRef
 
-    base = "http://example.com/autoontology#"
+    base = "http://example.com/ontology#"
     return {str(o) for o in graph.objects(URIRef(base + local), SKOS.altLabel)}
 
 
@@ -588,8 +588,8 @@ def _flaky_writer(ops, fails=1):
 
 
 def test_a_failed_unfold_is_retried_by_the_next_apply(ops):
-    from autoontology.engine.apply import run_apply
-    from autoontology.engine.jobs import JobError
+    from ontology.engine.apply import run_apply
+    from ontology.engine.jobs import JobError
 
     rows = _rows(ops)
     d = ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
@@ -615,8 +615,8 @@ def test_a_build_unfolds_a_rejected_fold(ops):
 
 
 def test_a_build_resumed_after_a_crash_between_judge_and_apply_unfolds(ops, monkeypatch):
-    from autoontology.engine import align as align_job
-    from autoontology.engine.jobs import JobError
+    from ontology.engine import align as align_job
+    from ontology.engine.jobs import JobError
 
     rows = _rows(ops)
     d = ops["decisions"].put(Decision("alignment", rows["계약"].concept_id, "reject"))
@@ -650,8 +650,8 @@ def test_an_undone_same_on_a_never_judged_concept_still_unfolds(ops):
     assert "청구서" in ops["client"].terms["t-customer"]["synonyms"]
     ops["decisions"].delete("alignment", cid)
     writer = _flaky_writer(ops)
-    from autoontology.engine.apply import run_apply
-    from autoontology.engine.jobs import JobError
+    from ontology.engine.apply import run_apply
+    from ontology.engine.jobs import JobError
 
     with pytest.raises(JobError):
         run_apply(ops["store"], ops["settings"], client=ops["client"], writer=writer)
@@ -660,7 +660,7 @@ def test_an_undone_same_on_a_never_judged_concept_still_unfolds(ops):
 
 
 def test_a_v6_store_without_the_review_index_gets_it_on_open(tmp_path):
-    path = tmp_path / "autoontology.db"
+    path = tmp_path / "ontology.db"
     Store(path)
     with sqlite3.connect(path) as conn:
         conn.execute("DROP INDEX alignments_review_idx")
@@ -724,7 +724,7 @@ def test_keep_separate_stops_a_later_fold_and_undo_restores_it(env, monkeypatch)
     # the apply path writes the same row and folds nothing
     _apply(env)
     assert (row().relation, row().accepted) == ("none", False) and not folded()
-    from autoontology.engine.apply import pending_work
+    from ontology.engine.apply import pending_work
 
     assert pending_work(store)["total"] == 0
     # Undo: the judge decides again and the concept folds
@@ -761,7 +761,7 @@ def test_keep_separate_on_a_folded_concept_unfolds_it_and_undo_folds_back(ops):
 def two_sources(ops, tmp_path):
     """A second documents source folds its own `계약` into the Contract Term the first one
     already wrote `계약` to (so it writes nothing upstream itself)."""
-    from autoontology.engine import extract as ex
+    from ontology.engine import extract as ex
 
     other = tmp_path / "other-docs"
     other.mkdir()
@@ -789,8 +789,8 @@ def _snapshot_labels(ops):
     "order", ["first_then_second", "second_then_first", "both", "both_by_a_build", "retry"]
 )
 def test_rejecting_shared_folds_takes_the_synonym_off_once_the_last_is_gone(two_sources, order):
-    from autoontology.engine.apply import pending_work, run_apply
-    from autoontology.engine.jobs import JobError
+    from ontology.engine.apply import pending_work, run_apply
+    from ontology.engine.jobs import JobError
 
     ops = two_sources
     rows = _contract_rows(ops)
@@ -839,7 +839,7 @@ def test_rejecting_shared_folds_takes_the_synonym_off_once_the_last_is_gone(two_
 
 def _rm_source(ops, name, remover=None):
     """``source rm`` of a documents source (its synonyms first, then the rows)."""
-    from autoontology.structured import remove
+    from ontology.structured import remove
     from tests.test_align import ClientWriter
 
     src = ops["store"].get_source(name)
@@ -857,7 +857,7 @@ def _rm_source(ops, name, remover=None):
 
 
 def _gone_everywhere(ops):
-    from autoontology.engine.apply import pending_work
+    from ontology.engine.apply import pending_work
 
     assert "계약" not in ops["client"].terms["t-contract"]["synonyms"]
     _apply(ops, force=True)
@@ -879,7 +879,7 @@ def test_reject_the_writer_then_remove_the_supporting_source(two_sources):
 
 def test_remove_the_writing_source_then_reject_the_supporter(two_sources):
     """Same start: removing A hands 계약 to B; rejecting B then takes it off."""
-    from autoontology.engine.apply import pending_work
+    from ontology.engine.apply import pending_work
 
     ops = two_sources
     rows = _contract_rows(ops)
@@ -893,7 +893,7 @@ def test_remove_the_writing_source_then_reject_the_supporter(two_sources):
 
 
 def test_a_failed_source_removal_keeps_the_source_and_is_retried(two_sources):
-    from autoontology.structured import remove
+    from ontology.structured import remove
 
     ops = two_sources
     rows = _contract_rows(ops)
@@ -913,7 +913,7 @@ def test_a_failed_source_removal_keeps_the_source_and_is_retried(two_sources):
 
 @pytest.mark.parametrize("sequence", ["reject_then_rm", "rm_then_reject", "reject_both"])
 def test_a_manually_supplied_synonym_is_never_taken_off(two_sources, sequence):
-    """계약 put on the Term by a person (no AutoOntology write recorded) stays whatever
+    """계약 put on the Term by a person (no Ontology write recorded) stays whatever
     happens to the folds that also account for it."""
     ops = two_sources
     with ops["store"]._conn() as conn:
@@ -940,7 +940,7 @@ def test_a_manually_supplied_synonym_is_never_taken_off(two_sources, sequence):
 
 
 def test_decisions_on_removed_sources_are_retired_by_the_next_apply(two_sources):
-    from autoontology.engine.apply import pending_work
+    from ontology.engine.apply import pending_work
 
     ops = two_sources
     rows = _contract_rows(ops)
@@ -960,8 +960,8 @@ def test_decisions_on_removed_sources_are_retired_by_the_next_apply(two_sources)
 
 
 def test_a_source_removed_after_a_failed_unfold_retires_its_decision(two_sources):
-    from autoontology.engine.apply import pending_work, run_apply
-    from autoontology.engine.jobs import JobError
+    from ontology.engine.apply import pending_work, run_apply
+    from ontology.engine.jobs import JobError
 
     ops = two_sources
     rows = _contract_rows(ops)

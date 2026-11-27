@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 """Integration: the real ``claude`` / ``codex`` CLIs behind the /v1 router (in-process app).
 
-Needs both CLIs installed and logged in (``AUTOONTOLOGY_CLAUDE_BIN`` /
-``AUTOONTOLOGY_CODEX_BIN`` may point at them). Five small calls against the user's
+Needs both CLIs installed and logged in (``ONTOLOGY_CLAUDE_BIN`` /
+``ONTOLOGY_CODEX_BIN`` may point at them). Five small calls against the user's
 subscriptions (a pong and a json_schema answer per CLI, one file-mention canary):
 
-    AUTOONTOLOGY_INTEGRATION=1 uv run pytest -q tests/test_providers_e2e.py -s
+    ONTOLOGY_INTEGRATION=1 uv run pytest -q tests/test_providers_e2e.py -s
 """
 
 import asyncio
@@ -17,10 +17,10 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.web import app as web
-from autoontology.web.providers.probe import ping_body
-from autoontology.web.providers.router import cli_provider
+from ontology.config import Settings
+from ontology.web import app as web
+from ontology.web.providers.probe import ping_body
+from ontology.web.providers.router import cli_provider
 
 pytestmark = pytest.mark.integration
 
@@ -92,8 +92,8 @@ def test_real_cli_json_schema_answer(provider):
 def test_real_claude_does_not_expand_file_mentions(tmp_path):
     """``@/abs/path`` in the (untrusted) prompt must not put the file's contents in front of
     the model: a canary outside the CLI workdir, asked for through the provider."""
-    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
-    from autoontology.web.providers.openai_compat import parse_request
+    from ontology.web.providers.claude_cli import ClaudeCLIProvider
+    from ontology.web.providers.openai_compat import parse_request
 
     secret = "ZEBRA-PLUM-" + os.urandom(3).hex().upper()
     canary = tmp_path / "canary.txt"

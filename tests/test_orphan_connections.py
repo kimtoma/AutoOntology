@@ -4,12 +4,12 @@ the ``doctor`` row and ``prune_orphan_connections``."""
 
 import pytest
 
-from autoontology import doctor
-from autoontology.config import Settings
-from autoontology.engine import pg
-from autoontology.engine.client import BackendError, BackendUnavailable
-from autoontology.store.db import Store
-from autoontology.structured import remove
+from ontology import doctor
+from ontology.config import Settings
+from ontology.engine import pg
+from ontology.engine.client import BackendError, BackendUnavailable
+from ontology.store.db import Store
+from ontology.structured import remove
 from tests.test_cli_onboarding import FakeBackend
 
 
@@ -48,7 +48,7 @@ class _DownClient:
 def files_source(isolated_env, monkeypatch):
     settings = Settings.from_env()
     store = Store.for_home(settings.home)
-    src = store.add_source(name="x", kind="files", locator="{}", pg_database="autoontology_src_x")
+    src = store.add_source(name="x", kind="files", locator="{}", pg_database="ontology_src_x")
     executed: list[str] = []
     monkeypatch.setattr(pg, "connect", lambda *a, **k: _Conn(executed))
     return settings, store, src, executed
@@ -61,7 +61,7 @@ def files_source(isolated_env, monkeypatch):
 def test_forced_drop_keeps_the_database_when_the_connection_stays(
     files_source, monkeypatch, client_error
 ):
-    import autoontology.engine.client as client_mod
+    import ontology.engine.client as client_mod
 
     settings, store, src, executed = files_source
 
@@ -77,16 +77,13 @@ def test_forced_drop_keeps_the_database_when_the_connection_stays(
     assert executed == []  # no DROP DATABASE under a live connection
     assert store.get_source("x") is None  # --force: the local row still goes
     text = "\n".join(m for m, _w in said)
-    assert "database autoontology_src_x kept" in text
-    assert (
-        "uv run autoontology tools prune-connections autoontology_src_x "
-        "--include-unowned --drop-db" in text
-    )
+    assert "database ontology_src_x kept" in text
+    assert "uv run onto tools prune-connections ontology_src_x --include-unowned --drop-db" in text
     assert "re-adding the source" not in text
 
 
 def test_drop_happens_when_the_connection_was_deleted(files_source, monkeypatch):
-    import autoontology.engine.client as client_mod
+    import ontology.engine.client as client_mod
 
     settings, store, src, executed = files_source
 
@@ -99,26 +96,24 @@ def test_drop_happens_when_the_connection_was_deleted(files_source, monkeypatch)
 
     monkeypatch.setattr(client_mod, "BackendClient", Client)
     remove.remove_source(settings, store, src, drop_db=True, force=True)
-    assert executed == ['DROP DATABASE IF EXISTS "autoontology_src_x" WITH (FORCE)']
+    assert executed == ['DROP DATABASE IF EXISTS "ontology_src_x" WITH (FORCE)']
 
 
 def test_find_orphans_by_missing_database_or_owner(isolated_env):
     settings = Settings.from_env()
     store = Store.for_home(settings.home)
-    store.add_source(name="a", kind="files", locator="{}", pg_database="autoontology_src_a")
-    store.add_source(name="b", kind="files", locator="{}", pg_database="autoontology_src_b")
-    fake = FakeBackend(
-        ["autoontology_src_a", "autoontology_src_b", "autoontology_src_c", "crm", "x-y"]
-    )
-    present = {"autoontology_src_a", "autoontology_src_c"}
+    store.add_source(name="a", kind="files", locator="{}", pg_database="ontology_src_a")
+    store.add_source(name="b", kind="files", locator="{}", pg_database="ontology_src_b")
+    fake = FakeBackend(["ontology_src_a", "ontology_src_b", "ontology_src_c", "crm", "x-y"])
+    present = {"ontology_src_a", "ontology_src_c"}
     orphans = remove.find_orphan_connections(
         settings, store, fake, database_exists=present.__contains__
     )
     assert [(o.name, o.reason) for o in orphans] == [
-        ("autoontology_src_b", "database missing"),
-        ("autoontology_src_c", "no registered source"),
+        ("ontology_src_b", "database missing"),
+        ("ontology_src_c", "no registered source"),
     ]
-    # no store yet: every autoontology_src_* connection is unowned
+    # no store yet: every ontology_src_* connection is unowned
     assert (
         len(
             remove.find_orphan_connections(
@@ -129,16 +124,14 @@ def test_find_orphans_by_missing_database_or_owner(isolated_env):
     )
 
 
-def test_prune_only_touches_autoontology_names_and_drops_unowned_databases(
-    isolated_env, monkeypatch
-):
+def test_prune_only_touches_ontology_names_and_drops_unowned_databases(isolated_env, monkeypatch):
     settings = Settings.from_env()
     executed: list[str] = []
     monkeypatch.setattr(pg, "connect", lambda *a, **k: _Conn(executed))
-    fake = FakeBackend(["autoontology_src_b", "autoontology_src_c", "crm"])
+    fake = FakeBackend(["ontology_src_b", "ontology_src_c", "crm"])
     orphans = [
-        remove.OrphanConnection("autoontology_src_b", True, True),
-        remove.OrphanConnection("autoontology_src_c", False, False),
+        remove.OrphanConnection("ontology_src_b", True, True),
+        remove.OrphanConnection("ontology_src_c", False, False),
         remove.OrphanConnection("crm", True, False),  # never pruned, even if asked
     ]
     said: list[str] = []
@@ -148,50 +141,47 @@ def test_prune_only_touches_autoontology_names_and_drops_unowned_databases(
         orphans,
         drop_db=True,
         say=lambda m, w=False: said.append(m),
-        database_exists=lambda name: name == "autoontology_src_c",
+        database_exists=lambda name: name == "ontology_src_c",
     )
-    assert deleted == fake.deleted == ["autoontology_src_b", "autoontology_src_c"]
-    assert executed == ['DROP DATABASE IF EXISTS "autoontology_src_c" WITH (FORCE)']
+    assert deleted == fake.deleted == ["ontology_src_b", "ontology_src_c"]
+    assert executed == ['DROP DATABASE IF EXISTS "ontology_src_c" WITH (FORCE)']
     assert any("skipped crm" in m for m in said)
 
 
 def _doctor_settings(isolated_env, monkeypatch, names):
-    import autoontology.engine.client as client_mod
+    import ontology.engine.client as client_mod
 
     settings = Settings.from_env()
     store = Store.for_home(settings.home)
-    store.add_source(name="a", kind="files", locator="{}", pg_database="autoontology_src_a")
+    store.add_source(name="a", kind="files", locator="{}", pg_database="ontology_src_a")
     monkeypatch.setattr(remove, "backend_is_ours", lambda s: True)
     monkeypatch.setattr(client_mod, "BackendClient", lambda *a, **k: FakeBackend(names))
-    monkeypatch.setattr(pg, "database_exists", lambda s, name: name != "autoontology_src_gone")
+    monkeypatch.setattr(pg, "database_exists", lambda s, name: name != "ontology_src_gone")
     return settings
 
 
 def test_doctor_warns_about_orphaned_connections(isolated_env, monkeypatch):
-    settings = _doctor_settings(
-        isolated_env, monkeypatch, ["autoontology_src_a", "autoontology_src_gone"]
-    )
+    settings = _doctor_settings(isolated_env, monkeypatch, ["ontology_src_a", "ontology_src_gone"])
     check = doctor.check_upstream_connections(settings)
     assert check.status == "WARN"
-    assert "database gone (breaks every ingest): autoontology_src_gone" in check.detail
-    assert check.remedy == "uv run autoontology tools prune-connections"
+    assert "database gone (breaks every ingest): ontology_src_gone" in check.detail
+    assert check.remedy == "uv run onto tools prune-connections"
 
 
 def test_doctor_reports_live_unowned_connections_without_plain_prune(isolated_env, monkeypatch):
-    settings = _doctor_settings(isolated_env, monkeypatch, ["autoontology_src_other"])
+    settings = _doctor_settings(isolated_env, monkeypatch, ["ontology_src_other"])
     check = doctor.check_upstream_connections(settings)
     assert check.status == "WARN"
-    assert check.detail == "no source in this checkout: autoontology_src_other"
+    assert check.detail == "no source in this checkout: ontology_src_other"
     assert check.remedy == (
-        "if no other checkout uses them: uv run autoontology tools prune-connections "
-        "--include-unowned"
+        "if no other checkout uses them: uv run onto tools prune-connections --include-unowned"
     )
 
 
 def test_doctor_skips_when_postgres_is_down(isolated_env, monkeypatch):
     import psycopg
 
-    settings = _doctor_settings(isolated_env, monkeypatch, ["autoontology_src_a"])
+    settings = _doctor_settings(isolated_env, monkeypatch, ["ontology_src_a"])
 
     def down(s, name):
         raise psycopg.OperationalError("connection refused")
@@ -203,8 +193,8 @@ def test_doctor_skips_when_postgres_is_down(isolated_env, monkeypatch):
 
 
 def test_doctor_upstream_row_ok_and_skip(isolated_env, monkeypatch):
-    settings = _doctor_settings(isolated_env, monkeypatch, ["autoontology_src_a", "crm"])
+    settings = _doctor_settings(isolated_env, monkeypatch, ["ontology_src_a", "crm"])
     assert doctor.check_upstream_connections(settings).status == "OK"
     monkeypatch.setattr(remove, "backend_is_ours", lambda s: False)
     skipped = doctor.check_upstream_connections(settings)
-    assert skipped.status == "SKIP" and "autoontology up" in skipped.detail
+    assert skipped.status == "SKIP" and "onto up" in skipped.detail

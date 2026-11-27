@@ -3,10 +3,10 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from autoontology.cli import app
-from autoontology.engine import build as build_job
-from autoontology.engine import jobs
-from autoontology.structured import remove
+from ontology.cli import app
+from ontology.engine import build as build_job
+from ontology.engine import jobs
+from ontology.structured import remove
 
 runner = CliRunner()
 
@@ -17,7 +17,7 @@ def test_source_add_list_and_runs(isolated_env):
     (data / "a.csv").write_text("x\n1\n")
     res = runner.invoke(app, ["source", "add", str(data), "--name", "demo"])
     assert res.exit_code == 0, res.output
-    assert "autoontology_src_demo" in res.output and "a.csv" in res.output
+    assert "ontology_src_demo" in res.output and "a.csv" in res.output
     res = runner.invoke(app, ["source", "add", str(data), "--name", "Bad-Name"])
     assert res.exit_code == 1 and "invalid source name" in res.output
     res = runner.invoke(app, ["source", "list"])
@@ -98,11 +98,11 @@ def test_build_with_backend_down_points_to_up(isolated_env, monkeypatch):
     _demo_source(isolated_env)
     monkeypatch.setenv("BACKEND_PORT", "1")  # nothing listens there
     res = runner.invoke(app, ["build", "--source", "demo"])
-    assert res.exit_code == 1 and "autoontology up" in res.output
+    assert res.exit_code == 1 and "onto up" in res.output
 
 
 def test_setup_runs_every_step_and_skips_models(isolated_env, monkeypatch):
-    from autoontology.engine import migrate, ollama, pg
+    from ontology.engine import migrate, ollama, pg
 
     steps = []
     monkeypatch.setattr(pg, "setup_database", lambda s: steps.append("db") or "database ok")
@@ -138,10 +138,10 @@ def test_setup_runs_every_step_and_skips_models(isolated_env, monkeypatch):
 
 
 def test_setup_with_openai_provider_skips_ollama(isolated_env, monkeypatch):
-    from autoontology.engine import migrate, ollama, pg
+    from ontology.engine import migrate, ollama, pg
 
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")
-    monkeypatch.setenv("AUTOONTOLOGY_EMBED_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_EMBED_PROVIDER", "openai")
     monkeypatch.setattr(pg, "setup_database", lambda s: "database ok")
     monkeypatch.setattr(migrate, "run_migrations", lambda s: None)
     monkeypatch.setattr(migrate, "current_revision", lambda s: "abc")
@@ -157,10 +157,10 @@ def test_setup_with_openai_provider_skips_ollama(isolated_env, monkeypatch):
 
 
 def test_setup_postgres_failure_points_to_compose(isolated_env, monkeypatch):
-    from autoontology.engine import pg
+    from ontology.engine import pg
 
     def fail(s):
-        raise pg.SetupError("cannot prepare database autoontology")
+        raise pg.SetupError("cannot prepare database ontology")
 
     monkeypatch.setattr(pg, "setup_database", fail)
     res = runner.invoke(app, ["setup"])
@@ -183,7 +183,7 @@ class _RmClient:
         return False
 
     def delete_connection(self, name):
-        from autoontology.engine.client import BackendError, BackendUnavailable
+        from ontology.engine.client import BackendError, BackendUnavailable
 
         if self.down:
             raise BackendUnavailable("backend not reachable")
@@ -198,8 +198,8 @@ class _RmClient:
 
 
 def _rm_setup(isolated_env, monkeypatch, fake):
-    from autoontology.engine import client as client_mod
-    from autoontology.engine import pg
+    from ontology.engine import client as client_mod
+    from ontology.engine import pg
 
     data = Path(isolated_env) / "d"
     data.mkdir()
@@ -249,7 +249,7 @@ def test_source_rm_backend_down_needs_force(isolated_env, monkeypatch):
     assert res.exit_code == 0, res.output
     # the connection could not be deleted: dropping its database would orphan it
     assert "may remain" in res.output and fake.events == []
-    assert "database autoontology_src_demo kept" in res.output
+    assert "database ontology_src_demo kept" in res.output
     assert "--include-unowned --drop-db" in res.output
     assert "removed source demo" in res.output
 
@@ -265,6 +265,6 @@ def test_build_unexpected_error_is_one_line(isolated_env, monkeypatch):
     assert res.exit_code == 1
     assert "build failed: KeyError" in res.output and "jobs.log" in res.output
     assert "Traceback" not in res.output
-    monkeypatch.setenv("AUTOONTOLOGY_DEBUG", "1")
+    monkeypatch.setenv("ONTOLOGY_DEBUG", "1")
     res = runner.invoke(app, ["build"])
     assert isinstance(res.exception, KeyError)

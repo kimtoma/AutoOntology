@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from autoontology.engine.client import BackendClient, BackendError, BackendUnavailable
+from ontology.engine.client import BackendClient, BackendError, BackendUnavailable
 
 
 def make(handler):
@@ -18,7 +18,7 @@ def test_sends_user_header_and_parses():
         seen.append(req)
         if req.url.path == "/api/datasources/dbs":
             return httpx.Response(
-                200, json={"data": [{"id": "d1", "name": "AutoOntology_Src_A"}], "count": 1}
+                200, json={"data": [{"id": "d1", "name": "Ontology_Src_A"}], "count": 1}
             )
         if req.url.path == "/api/connections" and req.method == "POST":
             return httpx.Response(201, json={"data": json.loads(req.content)["connection"]})
@@ -31,7 +31,7 @@ def test_sends_user_header_and_parses():
         return httpx.Response(404)
 
     c = make(handler)
-    assert c.database_id_by_name("autoontology_src_a") == "d1"
+    assert c.database_id_by_name("ontology_src_a") == "d1"
     assert c.database_id_by_name("nope") is None
     assert c.create_connection({"database": "x"}) == {"database": "x"}
     assert c.connection_exists("X") and not c.connection_exists("y")
@@ -43,7 +43,7 @@ def test_sends_user_header_and_parses():
     }
     c.list_terms(query="고객", limit=None)
     assert seen[-1].url.params.get("query") == "고객" and "limit" not in seen[-1].url.params
-    assert all(r.headers["x-auto-ontology-user-id"] == "autoontology" for r in seen)
+    assert all(r.headers["x-auto-ontology-user-id"] == "ontology" for r in seen)
 
 
 def test_non_2xx_raises_backend_error_with_status_and_body():
@@ -69,7 +69,7 @@ def test_unreachable_is_backend_unavailable():
     def handler(req):
         raise httpx.ConnectError("refused", request=req)
 
-    with pytest.raises(BackendUnavailable, match="autoontology up"):
+    with pytest.raises(BackendUnavailable, match="onto up"):
         make(handler).health()
 
 

@@ -13,11 +13,11 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.web import app as web
-from autoontology.web.providers.codex_cli import strict_compatible
-from autoontology.web.providers.openai_compat import ProviderError
-from autoontology.web.providers.router import PASSTHROUGH, split_model
+from ontology.config import Settings
+from ontology.web import app as web
+from ontology.web.providers.codex_cli import strict_compatible
+from ontology.web.providers.openai_compat import ProviderError
+from ontology.web.providers.router import PASSTHROUGH, split_model
 
 SCHEMA = {
     "type": "object",
@@ -145,8 +145,8 @@ def fakes(isolated_env, monkeypatch):
     tmp = isolated_env
     log = tmp / "calls.jsonl"
     monkeypatch.setenv("FAKE_LOG", str(log))
-    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_BIN", str(_install(tmp, "claude", FAKE_CLAUDE)))
-    monkeypatch.setenv("AUTOONTOLOGY_CODEX_BIN", str(_install(tmp, "codex", FAKE_CODEX)))
+    monkeypatch.setenv("ONTOLOGY_CLAUDE_BIN", str(_install(tmp, "claude", FAKE_CLAUDE)))
+    monkeypatch.setenv("ONTOLOGY_CODEX_BIN", str(_install(tmp, "codex", FAKE_CODEX)))
     monkeypatch.setenv("FAKE_ANSWERS", json.dumps([{"answer": "pong"}]))
     # never the developer's own codex login: a private user CODEX_HOME per test
     user = tmp / "user-codex"
@@ -199,7 +199,7 @@ def test_split_model():
 def test_cli_prefix_of_an_inactive_provider_is_refused(fakes):
     res = _chat(_client("claude"), "openai/chatgpt:gpt-6-astra")
     assert res.status_code == 400 and res.json()["error"]["type"] == "provider_not_active"
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=codex" in res.json()["error"]["remedy"]
+    assert "ONTOLOGY_CHAT_PROVIDER=codex" in res.json()["error"]["remedy"]
     res = _chat(_client("ollama"), "openai/claude:sonnet")
     assert res.status_code == 400 and res.json()["error"]["type"] == "provider_not_active"
     # a passthrough name while a CLI provider is active
@@ -233,7 +233,7 @@ def test_claude_json_schema_call(fakes, monkeypatch):
     body = res.json()
     assert json.loads(body["choices"][0]["message"]["content"]) == {"answer": "pong"}
     assert body["usage"]["prompt_tokens"] == 18 and body["usage"]["completion_tokens"] == 7
-    assert body["autoontology_cost_usd"] == pytest.approx(0.0012)
+    assert body["ontology_cost_usd"] == pytest.approx(0.0012)
     (call,) = fakes()
     argv = call["argv"]
     assert argv[:2] == ["-p", "--no-session-persistence"] and "--bare" not in argv
@@ -258,8 +258,8 @@ def test_claude_json_schema_call(fakes, monkeypatch):
     }
     assert "--disable-slash-commands" in argv
     assert body["choices"][0]["finish_reason"] == "stop"
-    # an empty temp dir outside the repo and the AutoOntology home, removed after the call
-    assert os.path.basename(call["cwd"]).startswith("autoontology-provider-claude-")
+    # an empty temp dir outside the repo and the Ontology home, removed after the call
+    assert os.path.basename(call["cwd"]).startswith("ontology-provider-claude-")
     assert not os.path.realpath(call["cwd"]).startswith(os.path.realpath(os.getcwd()))
     assert not os.path.exists(call["cwd"])
 
@@ -312,13 +312,13 @@ def test_claude_not_logged_in_is_401_with_remedy(fakes, monkeypatch):
 
 def test_cli_timeout_is_504(fakes, monkeypatch):
     monkeypatch.setenv("FAKE_MODE", "sleep")
-    monkeypatch.setenv("AUTOONTOLOGY_PROVIDER_TIMEOUT_S", "1")
+    monkeypatch.setenv("ONTOLOGY_PROVIDER_TIMEOUT_S", "1")
     res = _chat(_client(), "openai/claude:sonnet")
     assert res.status_code == 504 and res.json()["error"]["type"] == "upstream_timeout"
 
 
 def test_missing_cli_is_503(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_BIN", str(isolated_env / "nope" / "claude"))
+    monkeypatch.setenv("ONTOLOGY_CLAUDE_BIN", str(isolated_env / "nope" / "claude"))
     monkeypatch.setenv("PATH", str(isolated_env / "empty"))
     res = _chat(_client(), "openai/claude:sonnet")
     assert res.status_code == 503 and res.json()["error"]["type"] == "cli_not_found"
@@ -378,7 +378,7 @@ def test_codex_strict_schema_uses_output_schema(fakes, monkeypatch):
     assert 'web_search="disabled"' in argv
     assert [f for f in call["codex_home"] if not f.startswith(".")] == ["auth.json"]
     assert call["codex_home_path"].endswith("/run/codex-home")
-    assert os.path.basename(call["cwd"]).startswith("autoontology-provider-codex-")
+    assert os.path.basename(call["cwd"]).startswith("ontology-provider-codex-")
 
 
 def test_codex_tool_use_fails_closed(fakes, monkeypatch):
@@ -398,7 +398,7 @@ def test_codex_plan_updates_are_not_tool_use(fakes, monkeypatch):
 def test_codex_home_is_safe_under_concurrent_calls(isolated_env, monkeypatch):
     import threading
 
-    from autoontology.web.providers import codex_cli
+    from ontology.web.providers import codex_cli
 
     user = isolated_env / "user-codex"
     user.mkdir()
@@ -441,7 +441,7 @@ def test_codex_home_is_safe_under_concurrent_calls(isolated_env, monkeypatch):
 
 
 def test_codex_home_links_auth_and_syncs_a_refreshed_copy_back(isolated_env, monkeypatch):
-    from autoontology.web.providers.codex_cli import ensure_codex_home
+    from ontology.web.providers.codex_cli import ensure_codex_home
 
     user = isolated_env / "user-codex"
     user.mkdir()
@@ -490,7 +490,7 @@ def test_models_lists_the_active_cli_provider_when_logged_in(fakes, monkeypatch)
     assert not any(i.startswith("openai/chatgpt:") for i in ids)
     ids = [m["id"] for m in _client("codex").get("/v1/models").json()["data"]]
     assert ids == ["openai/chatgpt:gpt-6-astra", "openai/chatgpt:gpt-5.5"]
-    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_MODEL", "claude-opus-5-5")
+    monkeypatch.setenv("ONTOLOGY_CLAUDE_MODEL", "claude-opus-5-5")
     ids = [m["id"] for m in _client("claude").get("/v1/models").json()["data"]]
     assert ids[0] == "openai/claude:claude-opus-5-5" and len(ids) == len(set(ids))
     monkeypatch.setenv("FAKE_MODE", "notlogged")
@@ -498,7 +498,7 @@ def test_models_lists_the_active_cli_provider_when_logged_in(fakes, monkeypatch)
 
 
 def test_claude_status_never_exposes_account_details(fakes):
-    from autoontology.web.providers.claude_cli import ClaudeCLIProvider
+    from ontology.web.providers.claude_cli import ClaudeCLIProvider
 
     st = ClaudeCLIProvider(Settings.from_env().home, ["sonnet"]).status()
     assert st.ok and st.detail == "logged in (claude.ai, max)"
@@ -659,7 +659,7 @@ def test_invalid_schema_is_400_before_the_cli(fakes, schema):
 
 
 def test_schema_size_and_depth_are_bounded(fakes):
-    from autoontology.web.providers import base
+    from ontology.web.providers import base
 
     deep: dict = {"type": "string"}
     for _ in range(base.MAX_SCHEMA_DEPTH + 5):
@@ -675,7 +675,7 @@ def test_schema_size_and_depth_are_bounded(fakes):
 
 
 def test_schema_problem_never_treats_a_bad_schema_as_valid(no_fetch):
-    from autoontology.web.providers.base import schema_problem
+    from ontology.web.providers.base import schema_problem
 
     with pytest.raises(ProviderError) as bad:
         schema_problem({"a": 1}, {"type": "bogus"})
@@ -718,7 +718,7 @@ def test_codex_answer_is_cut_to_max_tokens(fakes, monkeypatch):
     assert res.status_code == 200, res.text
     choice = res.json()["choices"][0]
     assert choice["finish_reason"] == "length"
-    from autoontology.unstructured.chunker import count_tokens
+    from ontology.unstructured.chunker import count_tokens
 
     assert 0 < count_tokens(choice["message"]["content"]) <= 5
     assert res.json()["usage"]["completion_tokens"] == 5
@@ -802,7 +802,7 @@ def test_recursive_schemas_through_properties_are_fine(fakes, monkeypatch):
 
 
 def test_schema_problem_maps_recursion_to_400(monkeypatch):
-    from autoontology.web.providers import base
+    from ontology.web.providers import base
 
     # bypass admission to reach the worker with a self-referencing schema
     monkeypatch.setattr(base, "check_schema", lambda schema: None)
@@ -816,7 +816,7 @@ def test_schema_problem_maps_recursion_to_400(monkeypatch):
 
 
 def _tokens(text):
-    from autoontology.unstructured.chunker import _encoding
+    from ontology.unstructured.chunker import _encoding
 
     return len(_encoding().encode(text, disallowed_special=()))
 

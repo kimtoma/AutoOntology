@@ -3,7 +3,7 @@
 (``hanbit`` + ``hanbit-docs``, built by ``tests/test_build_e2e.py``) with whatever
 chat/embed provider is active.
 
-Run with: AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_playground_e2e.py -s
+Run with: ONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_playground_e2e.py -s
 (slow with the local ollama profile: ~10 min, the NL->SQL agent alone takes minutes).
 Every answer is written to ``exports/playground-e2e/<ts>.json``.
 """
@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from autoontology.config import Settings
+from ontology.config import Settings
 
 pytestmark = pytest.mark.integration
 
@@ -31,9 +31,9 @@ def svc():
     try:
         httpx.get(f"{settings.service_url}/health/live", timeout=3).raise_for_status()
     except httpx.HTTPError:
-        pytest.skip("service not running (uv run autoontology up)")
+        pytest.skip("service not running (uv run onto up)")
     if httpx.get(f"{settings.service_url}/api/ontology").status_code != 200:
-        pytest.skip("no ontology snapshot (uv run autoontology build)")
+        pytest.skip("no ontology snapshot (uv run onto build)")
     yield base
     out = settings.exports_dir / "playground-e2e"
     out.mkdir(parents=True, exist_ok=True)

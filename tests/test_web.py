@@ -4,8 +4,8 @@ import json
 import httpx
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.web import app as web
+from ontology.config import Settings
+from ontology.web import app as web
 
 
 def client(isolated_env):
@@ -21,7 +21,7 @@ def test_ingest_records_request_and_redacts(isolated_env, monkeypatch):
     monkeypatch.setattr(web, "enqueue_ingest", lambda conn, settings=None: seen.append(conn))
     c = client(isolated_env)
     body = {
-        "database": "autoontology_src_demo",
+        "database": "ontology_src_demo",
         "type": "postgres",
         "password": "hunter2",
         "options": {"api_key": "k"},
@@ -31,7 +31,7 @@ def test_ingest_records_request_and_redacts(isolated_env, monkeypatch):
     assert seen == [body]
     log = Settings.from_env().run_dir / "ingest-requests.jsonl"
     record = json.loads(log.read_text().splitlines()[-1])
-    assert record["database"] == "autoontology_src_demo"
+    assert record["database"] == "ontology_src_demo"
     assert record["connection"]["password"] == "***"
     assert record["connection"]["options"]["api_key"] == "***"
     assert "hunter2" not in log.read_text()
@@ -72,7 +72,7 @@ def test_health_ok(isolated_env, monkeypatch):
 
 
 def test_enqueue_ingest_runs_ingest_job_in_thread(isolated_env, monkeypatch):
-    from autoontology.engine import jobs
+    from ontology.engine import jobs
 
     calls = []
     monkeypatch.setattr(
@@ -80,13 +80,13 @@ def test_enqueue_ingest_runs_ingest_job_in_thread(isolated_env, monkeypatch):
     )
     settings = Settings.from_env()
     assert web.enqueue_ingest({"type": "postgres"}, settings) is None
-    thread = web.enqueue_ingest({"database": "autoontology_src_demo"}, settings)
+    thread = web.enqueue_ingest({"database": "ontology_src_demo"}, settings)
     thread.join(5)
-    assert calls == [("autoontology_src_demo", "autoontology.db")]
+    assert calls == [("ontology_src_demo", "ontology.db")]
 
 
 def test_enqueue_ingest_swallows_job_errors(isolated_env, monkeypatch):
-    from autoontology.engine import jobs
+    from ontology.engine import jobs
 
     def boom(*a, **k):
         raise RuntimeError("x")
@@ -99,12 +99,10 @@ def test_ingest_delete_shim(isolated_env, monkeypatch):
     seen = []
     monkeypatch.setattr(web, "enqueue_delete", lambda db, settings=None: seen.append(db))
     c = client(isolated_env)
-    assert (
-        c.post("/ingest/delete", params={"database_name": "autoontology_src_a"}).status_code == 202
-    )
+    assert c.post("/ingest/delete", params={"database_name": "ontology_src_a"}).status_code == 202
     assert c.post("/ingest/delete", params={"database_name": "  "}).status_code == 422
     assert c.post("/ingest/delete").status_code == 422
-    assert seen == ["autoontology_src_a"]
+    assert seen == ["ontology_src_a"]
 
 
 def test_shims_and_proxy_refuse_foreign_host_and_cross_origin(isolated_env, monkeypatch):
@@ -113,7 +111,7 @@ def test_shims_and_proxy_refuse_foreign_host_and_cross_origin(isolated_env, monk
     monkeypatch.setattr(web, "enqueue_delete", lambda db, settings=None: deleted.append(db))
     monkeypatch.setattr(web, "enqueue_ingest", lambda c, settings=None: ingested.append(c))
     c = client(isolated_env)
-    url = "/ingest/delete?database_name=autoontology_src_hanbit"
+    url = "/ingest/delete?database_name=ontology_src_hanbit"
     resp = c.post(url, headers={"host": "evil.example:7800"})
     assert resp.status_code == 403 and resp.json()["error"] == "forbidden_host"
     resp = c.post(url, headers={"origin": "http://evil.example"})
@@ -131,7 +129,7 @@ def test_shims_and_proxy_refuse_foreign_host_and_cross_origin(isolated_env, monk
     assert deleted == [] and ingested == []
     # upstream's own calls: Host 127.0.0.1:7800, no Origin
     resp = c.post(url, headers={"host": "127.0.0.1:7800"})
-    assert resp.status_code == 202 and deleted == ["autoontology_src_hanbit"]
+    assert resp.status_code == 202 and deleted == ["ontology_src_hanbit"]
     resp = c.post("/ingest", json={"database": "x"}, headers={"host": "127.0.0.1:7800"})
     assert resp.status_code == 202 and ingested == [{"database": "x"}]
     # health probes stay open
@@ -142,10 +140,10 @@ def test_shims_and_proxy_on_the_tailnet_host_need_the_identity_header(isolated_e
     """The /ingest shims and /v1 passthrough share the Tailscale rule with the API."""
     deleted = []
     monkeypatch.setattr(web, "enqueue_delete", lambda db, settings=None: deleted.append(db))
-    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_HOSTS", "box.example.ts.net")
-    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_LOGINS", "alice@example.com")
+    monkeypatch.setenv("ONTOLOGY_TAILSCALE_HOSTS", "box.example.ts.net")
+    monkeypatch.setenv("ONTOLOGY_TAILSCALE_LOGINS", "alice@example.com")
     c = client(isolated_env)
-    url = "/ingest/delete?database_name=autoontology_src_hanbit"
+    url = "/ingest/delete?database_name=ontology_src_hanbit"
     host = {"host": "box.example.ts.net"}
     resp = c.post(url, headers=host)
     assert resp.status_code == 403 and resp.json()["error"] == "tailscale_identity_required"
@@ -158,4 +156,4 @@ def test_shims_and_proxy_on_the_tailnet_host_need_the_identity_header(isolated_e
     assert resp.status_code == 403 and resp.json()["error"] == "cross_origin"
     assert deleted == []
     resp = c.post(url, headers=alice)
-    assert resp.status_code == 202 and deleted == ["autoontology_src_hanbit"]
+    assert resp.status_code == 202 and deleted == ["ontology_src_hanbit"]

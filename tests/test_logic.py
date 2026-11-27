@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from autoontology.config import Settings
-from autoontology.logic import expr as ex
-from autoontology.logic import functions, registry, specs
-from autoontology.logic.schema import Schema, TypeInfo, build_schema, column_type
-from autoontology.objects import overlay
-from autoontology.objects.reader import ObjectError
-from autoontology.store.db import Store
+from ontology.config import Settings
+from ontology.logic import expr as ex
+from ontology.logic import functions, registry, specs
+from ontology.logic.schema import Schema, TypeInfo, build_schema, column_type
+from ontology.objects import overlay
+from ontology.objects.reader import ObjectError
+from ontology.store.db import Store
 from tests import logic_fixtures as fx
 from tests.logic_fixtures import CON, CUS, INV
 
@@ -32,7 +32,7 @@ SAMPLES = Path(__file__).resolve().parents[1] / "samples" / "quickstart" / "logi
 def _schema(labels: dict[str, str] | None = None, *, lower: bool = False) -> Schema:
     """The quickstart schema (*labels*: class label renames; *lower*: column names as
     Postgres folds their ASCII parts, ``청구ID`` -> ``청구id``)."""
-    from autoontology.objects import binding
+    from ontology.objects import binding
 
     m = fx.model(labels)
     types = []
@@ -640,7 +640,7 @@ def test_types_resolve_by_id_class_label_and_table():
 
 
 def test_an_ambiguous_type_reference_is_an_error():
-    from autoontology.objects import naming
+    from ontology.objects import naming
 
     def n(name, label, table, status="active", schema="public"):
         return naming.TypeNames(name, f"ot_{name}", label, schema, table, status)
@@ -833,7 +833,7 @@ def _activate_all(view, funcs=FUNCS):
 def test_computed_values_on_records_with_links_batched(store, backend, monkeypatch):
     view = fx.seed(store)
     _activate_all(view)
-    from autoontology.objects import service
+    from ontology.objects import service
 
     settings = Settings.from_env()
     invs = service.search(settings, view, INV)["items"]
@@ -925,7 +925,7 @@ def test_link_budget_is_an_error_per_value(store, backend, monkeypatch):
     view = fx.seed(store)
     _activate_all(view)
     monkeypatch.setattr(functions, "MAX_LINK_QUERIES", 0)
-    from autoontology.objects import service
+    from ontology.objects import service
 
     settings = Settings.from_env()
     cons = service.search(settings, view, CON)["items"]

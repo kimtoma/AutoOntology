@@ -10,26 +10,26 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.engine import build as build_job
-from autoontology.engine import export_job, jobs
-from autoontology.store.alignments import AlignmentRecord, AlignmentStore
-from autoontology.store.db import Store
-from autoontology.store.documents import (
+from ontology.config import Settings
+from ontology.engine import build as build_job
+from ontology.engine import export_job, jobs
+from ontology.store.alignments import AlignmentRecord, AlignmentStore
+from ontology.store.db import Store
+from ontology.store.documents import (
     ConceptRecord,
     DocumentStore,
     EvidenceRecord,
     RelationRecord,
     concept_id,
 )
-from autoontology.structured.semantic import SemanticFK, StructuredSnapshot
-from autoontology.unstructured.align import TermInfo
-from autoontology.web import api as web_api
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager
+from ontology.structured.semantic import SemanticFK, StructuredSnapshot
+from ontology.unstructured.align import TermInfo
+from ontology.web import api as web_api
+from ontology.web import app as web
+from ontology.web.runs import RunManager
 
 API = "/api"
-log = logging.getLogger("autoontology.jobs")
+log = logging.getLogger("ontology.jobs")
 
 
 @dataclass
@@ -167,7 +167,7 @@ def test_upload_files_source_and_documents_source(env):
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["kind"] == "files" and body["uploaded"] is True
-    assert body["database"] == "autoontology_src_shop"
+    assert body["database"] == "ontology_src_shop"
     target = Path(settings.home) / "uploads" / "shop"
     assert sorted(p.name for p in target.iterdir()) == ["customers.csv", "orders.csv"]
 
@@ -207,7 +207,7 @@ def test_upload_rejects_unsupported_type_and_size(env, monkeypatch):
         files=[("files", ("x.exe", b"MZ", "application/octet-stream"))],
     )
     assert resp.status_code == 400 and resp.json()["error"] == "unsupported_file"
-    monkeypatch.setenv("AUTOONTOLOGY_UPLOAD_MAX_MB", "0.000001")
+    monkeypatch.setenv("ONTOLOGY_UPLOAD_MAX_MB", "0.000001")
     resp = c.post(
         f"{API}/sources",
         data={"name": "shop", "kind": "files"},
@@ -404,7 +404,7 @@ def _seed_documents(settings, name="hanbit-docs"):
         name="hanbit",
         kind="files",
         locator=json.dumps({"path": "/y"}),
-        pg_database="autoontology_src_hanbit",
+        pg_database="ontology_src_hanbit",
     )
     store.set_catalog_database_id(structured.id, "db1")
     AlignmentStore(store).put(
@@ -469,7 +469,7 @@ def _snapshot():
     return StructuredSnapshot(
         "hanbit",
         "db1",
-        "autoontology_src_hanbit",
+        "ontology_src_hanbit",
         [contracts, customers],
         [SemanticFK("t-c", "t-k", "a3", "고객id", "public.contracts.고객id")],
     )
@@ -477,7 +477,7 @@ def _snapshot():
 
 def _seed_snapshot(settings):
     """The documents + structured fixture merged and saved as snapshot revision 1."""
-    from autoontology.ontology import model as merged
+    from ontology.ontology import model as merged
 
     src = _seed_documents(settings)
     store = _store(settings)
@@ -500,7 +500,7 @@ def test_ontology_summary(env):
     revision, model = _seed_snapshot(settings)
     body = c.get(f"{API}/ontology").json()
     assert body["revision"] == revision == 1
-    assert body["workspace"] == "default" and body["base_iri"] == "http://example.com/autoontology#"
+    assert body["workspace"] == "default" and body["base_iri"] == "http://example.com/ontology#"
     assert {(s["name"], s["kind"]) for s in body["sources"]} == {
         ("hanbit", "structured"),
         ("hanbit-docs", "documents"),
@@ -562,7 +562,7 @@ def test_ontology_concepts_search_and_detail(env):
 
 
 def test_concept_index_is_memoized_and_detail_aligns_once(env, monkeypatch):
-    from autoontology.web import concepts
+    from ontology.web import concepts
 
     c, settings, _, _ = env
     _, model = _seed_snapshot(settings)
@@ -581,7 +581,7 @@ def test_concept_index_is_memoized_and_detail_aligns_once(env, monkeypatch):
 
 
 def test_concepts_take_a_revision(env):
-    from autoontology.ontology import model as merged
+    from ontology.ontology import model as merged
 
     c, settings, _, _ = env
     _seed_snapshot(settings)
@@ -599,8 +599,8 @@ def test_concepts_take_a_revision(env):
 
 
 def test_folded_concepts_keep_their_own_documents_source():
-    from autoontology.ontology import model as merged
-    from autoontology.web.concepts import concept_items
+    from ontology.ontology import model as merged
+    from ontology.web.concepts import concept_items
 
     model = merged.MergedOntology(name="w", base="http://x/#")
     model.classes["term-t"] = merged.OClass(
@@ -619,8 +619,8 @@ def test_folded_concepts_keep_their_own_documents_source():
 def test_a_proposal_below_the_accept_threshold_changes_no_origin(env):
     """A judge ``related`` at 0.3 is exported as an axiom but is not an accepted edge: the
     Term stays ``structured`` and the link says ``accepted: False``."""
-    from autoontology.ontology import model as merged
-    from autoontology.web.concepts import concept_items
+    from ontology.ontology import model as merged
+    from ontology.web.concepts import concept_items
 
     c, settings, _, _ = env
     src = _seed_documents(settings)
@@ -710,14 +710,14 @@ def test_ontology_graph_evidence_layer_and_env_cap(env, monkeypatch):
     assert nodes["term-t-c"]["evidence_count"] == 1  # folded 계약's evidence
     rel = {e["type"]: e.get("relation") for e in g["edges"] if e["layer"] == "aligned"}
     assert rel == {"aligned_same": "same", "related": "related"}
-    monkeypatch.setenv("AUTOONTOLOGY_GRAPH_MAX_NODES", "2")
+    monkeypatch.setenv("ONTOLOGY_GRAPH_MAX_NODES", "2")
     capped = c.get(f"{API}/ontology/graph").json()
     assert capped["truncated"] is True and capped["max_nodes"] == 2
     assert len(capped["nodes"]) == 2
 
 
 def test_ontology_follows_the_latest_snapshot(env):
-    from autoontology.ontology import model as merged
+    from ontology.ontology import model as merged
 
     c, settings, _, _ = env
     _seed_snapshot(settings)
@@ -732,8 +732,8 @@ def test_ontology_follows_the_latest_snapshot(env):
 
 
 def test_graph_cap_applies_before_the_evidence_layer():
-    from autoontology.ontology import model as merged
-    from autoontology.web.graph import to_view
+    from ontology.ontology import model as merged
+    from ontology.web.graph import to_view
 
     model = merged.MergedOntology(name="g", base="x")
     for i, local in enumerate(("a", "b", "c")):
@@ -761,8 +761,8 @@ def test_graph_cap_applies_before_the_evidence_layer():
 
 
 def test_graph_alignment_subclass_relation_direction():
-    from autoontology.ontology import model as merged
-    from autoontology.web.graph import to_view
+    from ontology.ontology import model as merged
+    from ontology.web.graph import to_view
 
     model = merged.MergedOntology(name="g", base="x")
     model.classes["t"] = merged.OClass(local="t", label="T", source="structured")
@@ -780,7 +780,7 @@ def test_exports_list_and_path_safe_download(env):
     c, settings, _, _ = env
     rev_dir = Path(settings.exports_dir) / "default" / "r0003"  # exports/<project slug>/
     (rev_dir / "upstream").mkdir(parents=True)
-    (rev_dir / "ontology.ttl").write_text("@prefix ao: <x#> .\n", encoding="utf-8")
+    (rev_dir / "ontology.ttl").write_text("@prefix onto: <x#> .\n", encoding="utf-8")
     (rev_dir / "report.md").write_text("# 보고서\n", encoding="utf-8")
     (rev_dir / "upstream" / "hanbit.ossie.zip").write_bytes(b"PK")
     (rev_dir / "ossie").mkdir()
@@ -844,7 +844,7 @@ def test_export_zip_holds_exactly_the_listed_files(env):
     exports = Path(settings.exports_dir) / "default"  # exports/<project slug>/
     rev_dir = exports / "r0003"
     (rev_dir / "okf" / "concepts").mkdir(parents=True)
-    (rev_dir / "ontology.ttl").write_text("@prefix ao: <x#> .\n", encoding="utf-8")
+    (rev_dir / "ontology.ttl").write_text("@prefix onto: <x#> .\n", encoding="utf-8")
     (rev_dir / "okf" / "concepts" / "계약.md").write_text("# 계약\n", encoding="utf-8")
     (rev_dir / ".hidden").write_text("no")
     (rev_dir / "okf" / "_draft.md").write_text("no")
@@ -861,7 +861,7 @@ def test_export_zip_holds_exactly_the_listed_files(env):
     resp = c.get(f"{API}/exports/r0003.zip")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/zip"
-    assert resp.headers["content-disposition"] == 'attachment; filename="autoontology-r0003.zip"'
+    assert resp.headers["content-disposition"] == 'attachment; filename="ontology-r0003.zip"'
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
         assert zf.namelist() == [f"r0003/{n}" for n in names]
         assert zf.read("r0003/okf/concepts/계약.md").decode("utf-8") == "# 계약\n"
@@ -938,7 +938,7 @@ def test_status_reports_backend_postgres_ollama_kordoc_and_providers(env, monkey
     c, settings, _, _ = env
     import httpx
 
-    from autoontology.engine import pg
+    from ontology.engine import pg
 
     def no_backend(*a, **k):
         raise httpx.ConnectError("refused")
@@ -981,20 +981,20 @@ def test_status_reports_backend_postgres_ollama_kordoc_and_providers(env, monkey
 def test_status_never_shows_the_openai_key(isolated_env, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from autoontology.config import Settings
-    from autoontology.web import app as web
+    from ontology.config import Settings
+    from ontology.web import app as web
 
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")
-    monkeypatch.setenv("AUTOONTOLOGY_EMBED_PROVIDER", "openai")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_BASE_URL", "https://llm.example.test/v1")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_API_KEY", "sk-very-secret-123456")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "m")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_EMBED_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_BASE_URL", "https://llm.example.test/v1")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_API_KEY", "sk-very-secret-123456")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_CHAT_MODEL", "m")
     import httpx
 
     monkeypatch.setattr(
         web_api.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("refused"))
     )
-    from autoontology.engine import pg
+    from ontology.engine import pg
 
     monkeypatch.setattr(pg, "connect", lambda *a, **k: (_ for _ in ()).throw(OSError("x")))
     c = TestClient(web.create_app(Settings.from_env()))
@@ -1014,7 +1014,7 @@ def test_committed_ui_is_served_or_a_clear_503(env):
         # T1 ships no build (ui/ is rebuilt later): the service says so
         assert page.status_code == 503 and page.json()["error"] == "ui_not_built"
         return
-    assert page.status_code == 200 and "AutoOntology" in page.text
+    assert page.status_code == 200 and "Ontology" in page.text
     assert '<div id="root">' in page.text and page.headers["cache-control"] == "no-cache"
     import re
 
@@ -1031,7 +1031,7 @@ def test_ui_spa_fallback_and_redirects(tmp_path):
 
     dist = tmp_path / "dist"
     (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<!doctype html><title>AutoOntology</title>", encoding="utf-8")
+    (dist / "index.html").write_text("<!doctype html><title>Ontology</title>", encoding="utf-8")
     (dist / "assets" / "index-abc.js").write_text("console.log(1)", encoding="utf-8")
     (dist / "favicon.svg").write_text("<svg/>", encoding="utf-8")
     (tmp_path / "secret.txt").write_text("top secret", encoding="utf-8")
@@ -1048,7 +1048,7 @@ def test_ui_spa_fallback_and_redirects(tmp_path):
         "/ui/concepts/deep/link",
     ):
         resp = c.get(path)
-        assert resp.status_code == 200 and "<title>AutoOntology</title>" in resp.text, path
+        assert resp.status_code == 200 and "<title>Ontology</title>" in resp.text, path
         assert resp.headers["content-type"].startswith("text/html")
     asset = c.get("/ui/assets/index-abc.js")
     assert asset.status_code == 200 and "immutable" in asset.headers["cache-control"]
@@ -1076,7 +1076,7 @@ def test_ui_not_built_is_a_clear_503(tmp_path):
 
 
 def test_build_ui_reports_missing_tools(tmp_path, monkeypatch):
-    from autoontology.web import ui_build
+    from ontology.web import ui_build
 
     src = tmp_path / "ui"
     with pytest.raises(ui_build.BuildUiError, match="no UI sources"):
@@ -1117,14 +1117,14 @@ def test_cli_ui_prints_url_and_opens_browser(isolated_env, monkeypatch):
 
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     opened = []
     monkeypatch.setattr(webbrowser, "open", opened.append)
     monkeypatch.setattr(jobs, "service_alive", lambda settings: False)
     res = CliRunner().invoke(app, ["ui"])
     assert res.exit_code == 0 and "http://127.0.0.1:7800/ui/" in res.output
-    assert "autoontology up" in res.output and opened == ["http://127.0.0.1:7800/ui/"]
+    assert "onto up" in res.output and opened == ["http://127.0.0.1:7800/ui/"]
     opened.clear()
     assert CliRunner().invoke(app, ["ui", "--no-browser"]).exit_code == 0 and opened == []
 
@@ -1204,7 +1204,7 @@ def _finished_run(settings, name="shop"):
         name=name,
         kind="files",
         locator=json.dumps({"path": "/x"}),
-        pg_database=f"autoontology_src_{name}",
+        pg_database=f"ontology_src_{name}",
     )
     run = store.create_run(kind="build", source_id=src.id)
     store.update_run(run.id, status="succeeded")
@@ -1264,8 +1264,8 @@ def test_sse_resumes_from_last_event_id(env):
 
 
 def test_graph_view_dedupes_edge_ids_and_caps_nodes():
-    from autoontology.ontology import model as merged
-    from autoontology.web.graph import to_view
+    from ontology.ontology import model as merged
+    from ontology.web.graph import to_view
 
     model = merged.MergedOntology(name="g", base="x")
     for local, label in (("a", "A"), ("b", "B"), ("c", "C")):
@@ -1288,7 +1288,7 @@ def test_graph_view_dedupes_edge_ids_and_caps_nodes():
 
 def test_upload_checks_content_length_and_holds_the_source(env, monkeypatch):
     c, settings, _, manager = env
-    monkeypatch.setenv("AUTOONTOLOGY_UPLOAD_MAX_MB", "1")
+    monkeypatch.setenv("ONTOLOGY_UPLOAD_MAX_MB", "1")
     read = []
     original = web_api._add_upload
 
@@ -1340,22 +1340,22 @@ def test_bare_ipv6_host_is_local(env):
 
 
 def test_run_log_handler_claims_only_its_pool_threads():
-    from autoontology.unstructured.extractor import pool_thread_prefix
-    from autoontology.web.runs import _RunLogHandler
+    from ontology.unstructured.extractor import pool_thread_prefix
+    from ontology.web.runs import _RunLogHandler
 
     seen = {}
     t = threading.Thread(
-        target=lambda: seen.update(prefix=pool_thread_prefix()), name="autoontology-run-7-extract"
+        target=lambda: seen.update(prefix=pool_thread_prefix()), name="ontology-run-7-extract"
     )
     t.start()
     t.join()
-    assert seen["prefix"] == "autoontology-run-7-extract:extract"
-    handler = _RunLogHandler("autoontology-run-7-extract")
+    assert seen["prefix"] == "ontology-run-7-extract:extract"
+    handler = _RunLogHandler("ontology-run-7-extract")
     rec = logging.LogRecord("x", logging.INFO, __file__, 1, "m", None, None)
     for name, owned in (
-        ("autoontology-run-7-extract", True),
-        ("autoontology-run-7-extract:extract_0", True),
-        ("autoontology-run-8-extract:extract_0", False),
+        ("ontology-run-7-extract", True),
+        ("ontology-run-7-extract:extract_0", True),
+        ("ontology-run-8-extract:extract_0", False),
         ("extract_0", False),
     ):
         rec.threadName = name
@@ -1455,9 +1455,9 @@ def test_status_lists_formats_ocr_and_vision(env, monkeypatch):
     c, _, _, _ = env
     import httpx
 
-    from autoontology import formats
-    from autoontology.engine import pg
-    from autoontology.unstructured import kordoc
+    from ontology import formats
+    from ontology.engine import pg
+    from ontology.unstructured import kordoc
 
     def refused(*a, **k):
         raise httpx.ConnectError("refused")
@@ -1486,8 +1486,8 @@ TS_LOGIN = {"tailscale-user-login": "alice@example.com"}
 
 
 def _ts_client(monkeypatch, hosts="box.example.ts.net", logins=""):
-    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_HOSTS", hosts)
-    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_LOGINS", logins)
+    monkeypatch.setenv("ONTOLOGY_TAILSCALE_HOSTS", hosts)
+    monkeypatch.setenv("ONTOLOGY_TAILSCALE_LOGINS", logins)
     settings = Settings.from_env()
     app = web.create_app(settings, runs=RunManager(settings, jobs=FakeJobs().table))
     return TestClient(app), settings
@@ -1495,14 +1495,14 @@ def _ts_client(monkeypatch, hosts="box.example.ts.net", logins=""):
 
 def test_tailscale_settings_parse_spaces_ports_and_case(isolated_env, monkeypatch):
     monkeypatch.setenv(
-        "AUTOONTOLOGY_TAILSCALE_HOSTS", " Box.Example.TS.net:8444 , ,other.example.ts.net"
+        "ONTOLOGY_TAILSCALE_HOSTS", " Box.Example.TS.net:8444 , ,other.example.ts.net"
     )
-    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_LOGINS", " Alice@Example.com,  bob@example.com ,")
+    monkeypatch.setenv("ONTOLOGY_TAILSCALE_LOGINS", " Alice@Example.com,  bob@example.com ,")
     s = Settings.from_env()
     assert s.tailscale_hosts == ("box.example.ts.net", "other.example.ts.net")
     assert s.tailscale_logins == ("alice@example.com", "bob@example.com")
-    monkeypatch.delenv("AUTOONTOLOGY_TAILSCALE_HOSTS")
-    monkeypatch.delenv("AUTOONTOLOGY_TAILSCALE_LOGINS")
+    monkeypatch.delenv("ONTOLOGY_TAILSCALE_HOSTS")
+    monkeypatch.delenv("ONTOLOGY_TAILSCALE_LOGINS")
     s = Settings.from_env()
     assert s.tailscale_hosts == () and s.tailscale_logins == ()
 
@@ -1573,7 +1573,7 @@ def test_tailnet_host_still_refuses_cross_origin_writes(isolated_env, monkeypatc
 def test_status_reports_remote_access_without_logins(isolated_env, monkeypatch):
     import httpx
 
-    from autoontology.engine import pg
+    from ontology.engine import pg
 
     monkeypatch.setattr(
         web_api.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("x"))
@@ -1589,13 +1589,13 @@ def test_status_reports_remote_access_without_logins(isolated_env, monkeypatch):
 
 @pytest.mark.parametrize("local", ["localhost", "127.0.0.1:7800", "[::1]", "LocalHost"])
 def test_tailscale_hosts_refuse_local_hosts(isolated_env, monkeypatch, local):
-    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_HOSTS", f"box.example.ts.net,{local}")
-    with pytest.raises(ValueError, match="AUTOONTOLOGY_TAILSCALE_HOSTS.*local"):
+    monkeypatch.setenv("ONTOLOGY_TAILSCALE_HOSTS", f"box.example.ts.net,{local}")
+    with pytest.raises(ValueError, match="ONTOLOGY_TAILSCALE_HOSTS.*local"):
         Settings.from_env()
 
 
 def test_tailscale_hosts_parse_ipv6(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_TAILSCALE_HOSTS", "[FD7A::1]:8444, fd7a::2, [fd7a::3]")
+    monkeypatch.setenv("ONTOLOGY_TAILSCALE_HOSTS", "[FD7A::1]:8444, fd7a::2, [fd7a::3]")
     s = Settings.from_env()
     assert s.tailscale_hosts == ("[fd7a::1]", "[fd7a::2]", "[fd7a::3]")
     c, _ = _ts_client(monkeypatch, hosts="[fd7a::1]:8444")

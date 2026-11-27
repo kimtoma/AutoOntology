@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from autoontology.unstructured import kordoc, readers
+from ontology.unstructured import kordoc, readers
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 
@@ -147,11 +147,11 @@ def test_read_document_with_ocr(fake, tmp_path):
 def test_cli_install_kordoc_downloads_or_skips_the_models(fake, monkeypatch):
     from typer.testing import CliRunner
 
-    from autoontology import cli
+    from ontology import cli
 
     home = fake["home"]
-    monkeypatch.setenv("AUTOONTOLOGY_HOME", str(home))
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(home / "none.env"))
+    monkeypatch.setenv("ONTOLOGY_HOME", str(home))
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(home / "none.env"))
     monkeypatch.delenv("KORDOC_CLI")  # the CLI checks the installed (home) engine
     cli_js = kordoc.home_cli(home)
     cli_js.parent.mkdir(parents=True)
@@ -173,15 +173,15 @@ def test_cli_install_kordoc_downloads_or_skips_the_models(fake, monkeypatch):
 
 
 def test_doctor_ocr_models_row(fake, monkeypatch, tmp_path):
-    from autoontology import doctor
-    from autoontology.config import Settings
+    from ontology import doctor
+    from ontology.config import Settings
 
     settings = Settings(home=fake["home"])
     check = doctor.check_ocr_models(settings)
     assert check.status == "WARN"
     assert "images and image-only PDFs are skipped" in check.detail
     assert "scanned pages of other PDFs yield no text" in check.detail
-    assert check.remedy == "run `uv run autoontology tools install-kordoc`"
+    assert check.remedy == "run `uv run onto tools install-kordoc`"
     (fake["state"] / "ready").write_text("ok")
     assert doctor.check_ocr_models(settings).status == "OK"
     monkeypatch.delenv("KORDOC_CLI")

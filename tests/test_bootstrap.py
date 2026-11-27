@@ -26,7 +26,7 @@ def _run(args, *, env=None, cwd=None, timeout=60, tty=False):
     base = {
         k: v
         for k, v in os.environ.items()
-        if not k.startswith(("POSTGRES_", "AUTOONTOLOGY_", "BACKEND_PORT"))
+        if not k.startswith(("POSTGRES_", "ONTOLOGY_", "AUTOONTOLOGY_", "BACKEND_PORT"))
     }
     if env:
         base.update(env)
@@ -92,10 +92,10 @@ def _fake_path(tmp_path: Path, claude_status: str | None = LOGGED_IN, *, docker=
 
 
 def _fixture_repo(tmp_path: Path) -> Path:
-    """A tiny git repo that looks like an AutoOntology checkout, to clone with --repo."""
+    """A tiny git repo that looks like an Ontology checkout, to clone with --repo."""
     src = tmp_path / "upstream"
     src.mkdir()
-    (src / "pyproject.toml").write_text('[project]\nname = "autoontology"\n')
+    (src / "pyproject.toml").write_text('[project]\nname = "ontology"\n')
     (src / "README.md").write_text("fixture\n")
     git = ["git", "-C", str(src), "-c", "user.email=t@example.com", "-c", "user.name=t"]
     subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
@@ -170,8 +170,8 @@ def test_dry_run_prints_every_step_and_changes_nothing(tmp_path):
         assert f"[{n}/6]" in out
     assert "git clone --recurse-submodules" in out
     assert "uv sync" in out
-    assert "autoontology init --yes --provider claude" in out
-    assert "autoontology demo --set quickstart --no-open --replace" in out
+    assert "onto init --yes --provider claude" in out
+    assert "onto demo --set quickstart --no-open --replace" in out
     assert "http://127.0.0.1:7800/ui/" in out
     assert "dry-run" in out
     assert sorted(p.name for p in tmp_path.iterdir()) == sorted([*before, "calls.log"])
@@ -184,12 +184,12 @@ def test_dry_run_no_demo_and_hanbit(tmp_path):
     env, _ = _fake_path(tmp_path)
     proc = _run(["--dry-run", "--no-demo", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "autoontology demo --set quickstart --no-open" not in proc.stdout
+    assert "onto demo --set quickstart --no-open" not in proc.stdout
     assert "demo skipped" in proc.stdout
     proc = _run(
         ["--dry-run", "--set", "hanbit", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path
     )
-    assert "autoontology demo --set hanbit" in proc.stdout
+    assert "onto demo --set hanbit" in proc.stdout
 
 
 def test_dry_run_korean_next_steps(tmp_path):
@@ -209,7 +209,7 @@ def test_paths_with_spaces_are_quoted(tmp_path):
 def test_port_override_and_password_never_printed(tmp_path):
     env, _ = _fake_path(tmp_path)
     env.update(
-        {"AUTOONTOLOGY_PORT": "7890", "BACKEND_PORT": "3191", "POSTGRES_PASSWORD": "pw-Zq81-secret"}
+        {"ONTOLOGY_PORT": "7890", "BACKEND_PORT": "3191", "POSTGRES_PASSWORD": "pw-Zq81-secret"}
     )
     proc = _run(["--dry-run", "--yes", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -305,7 +305,7 @@ def test_claude_bin_from_environment_or_local_install(tmp_path):
     _stub(elsewhere, "claude-real", f'echo "claude-real $*" >> "{log}"\necho \'{LOGGED_IN}\'')
     proc = _run(
         ["--dry-run", "--dir", str(tmp_path / "c")],
-        env={**env, "AUTOONTOLOGY_CLAUDE_BIN": str(elsewhere / "claude-real")},
+        env={**env, "ONTOLOGY_CLAUDE_BIN": str(elsewhere / "claude-real")},
         cwd=tmp_path,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -328,11 +328,11 @@ def test_claude_outside_path_is_saved_into_env_dry_run(tmp_path):
     _stub(local, "claude", f"echo '{LOGGED_IN}'")
     proc = _run(["--dry-run", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert f"AUTOONTOLOGY_CLAUDE_BIN={local / 'claude'}" in proc.stdout
+    assert f"ONTOLOGY_CLAUDE_BIN={local / 'claude'}" in proc.stdout
     # on PATH: nothing to save
     _stub(tmp_path / "bin", "claude", f"echo '{LOGGED_IN}'")
     proc = _run(["--dry-run", "--dir", str(tmp_path / "c")], env=env, cwd=tmp_path)
-    assert proc.returncode == 0 and "AUTOONTOLOGY_CLAUDE_BIN" not in proc.stdout
+    assert proc.returncode == 0 and "ONTOLOGY_CLAUDE_BIN" not in proc.stdout
 
 
 @pytest.mark.skipif(REAL_GIT is None, reason="git not available")
@@ -340,7 +340,7 @@ def test_claude_outside_path_reaches_init_and_env(tmp_path):
     import sys
 
     env, log = _fake_path(tmp_path, None)
-    # uv: `run python` really runs (init's EnvFile), `run autoontology init` records the
+    # uv: `run python` really runs (init's EnvFile), `run onto init` records the
     # claude binary it was given
     _stub(
         tmp_path / "bin",
@@ -348,7 +348,7 @@ def test_claude_outside_path_reaches_init_and_env(tmp_path):
         f'echo "uv $*" >> "{log}"\n'
         'case "$1 $2" in\n'
         f'  "run python") shift 2; PYTHONPATH="{REPO}" exec "{sys.executable}" "$@" ;;\n'
-        f'  "run autoontology") echo "init-bin ${{AUTOONTOLOGY_CLAUDE_BIN:-}}" >> "{log}" ;;\n'
+        f'  "run onto") echo "init-bin ${{ONTOLOGY_CLAUDE_BIN:-}}" >> "{log}" ;;\n'
         "esac\necho 'uv 0.9.0'",
     )
     local = Path(env["HOME"]) / ".claude" / "local"
@@ -364,7 +364,7 @@ def test_claude_outside_path_reaches_init_and_env(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert f"init-bin {local / 'claude'}" in log.read_text()
     lines = (target / ".env").read_text().splitlines()
-    assert f"AUTOONTOLOGY_CLAUDE_BIN={local / 'claude'}" in lines
+    assert f"ONTOLOGY_CLAUDE_BIN={local / 'claude'}" in lines
     assert stat.S_IMODE((target / ".env").stat().st_mode) == 0o600
 
 
@@ -374,7 +374,7 @@ def test_missing_claude_cli_explains_aliases(tmp_path):
     assert proc.returncode == 4
     text = proc.stdout + proc.stderr
     assert "Claude Code" in text
-    assert "aliases" in text and "AUTOONTOLOGY_CLAUDE_BIN" in text
+    assert "aliases" in text and "ONTOLOGY_CLAUDE_BIN" in text
 
 
 def test_missing_uv_without_yes_prints_installer_and_stops(tmp_path):
@@ -400,7 +400,7 @@ def test_existing_non_checkout_directory_is_refused(tmp_path):
     (target / "something.txt").write_text("x")
     proc = _run(["--yes", "--dir", str(target)], env=env, cwd=tmp_path)
     assert proc.returncode == 4
-    assert "not an AutoOntology checkout" in proc.stdout + proc.stderr
+    assert "not an Ontology checkout" in proc.stdout + proc.stderr
 
 
 @pytest.mark.skipif(REAL_GIT is None, reason="git not available")
@@ -413,21 +413,16 @@ def test_clone_then_rerun_updates_and_keeps_env(tmp_path):
     assert first.returncode == 0, first.stdout + first.stderr
     assert "cloned" in first.stdout
     assert (target / "README.md").exists()
-    (target / ".env").write_text("AUTOONTOLOGY_CHAT_PROVIDER=claude\nPOSTGRES_PASSWORD=x\n")
+    (target / ".env").write_text("ONTOLOGY_CHAT_PROVIDER=claude\nPOSTGRES_PASSWORD=x\n")
     second = _run(args, env=env, cwd=tmp_path)
     assert second.returncode == 0, second.stdout + second.stderr
     assert "updated" in second.stdout and "cloned" not in second.stdout
-    assert (
-        target / ".env"
-    ).read_text() == "AUTOONTOLOGY_CHAT_PROVIDER=claude\nPOSTGRES_PASSWORD=x\n"
+    assert (target / ".env").read_text() == "ONTOLOGY_CHAT_PROVIDER=claude\nPOSTGRES_PASSWORD=x\n"
     calls = log.read_text().splitlines()
     assert sum(1 for c in calls if c.startswith("git clone")) == 1
     assert any(c.startswith("git -C") and "pull --ff-only" in c for c in calls)
-    assert (
-        sum(1 for c in calls if c.startswith("uv run autoontology init --yes --provider claude"))
-        == 2
-    )
-    assert not any("autoontology demo" in c for c in calls)
+    assert sum(1 for c in calls if c.startswith("uv run onto init --yes --provider claude")) == 2
+    assert not any("onto demo" in c for c in calls)
 
 
 @pytest.mark.skipif(REAL_GIT is None, reason="git not available")
@@ -436,7 +431,7 @@ def test_shell_ports_are_saved_into_env(tmp_path):
     upstream = _fixture_repo(tmp_path)
     proc = _run(
         ["--yes", "--no-demo", "--repo", str(upstream), "--dir", str(tmp_path / "c")],
-        env={**env, "AUTOONTOLOGY_PORT": "7890"},
+        env={**env, "ONTOLOGY_PORT": "7890"},
         cwd=tmp_path,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -464,14 +459,14 @@ def test_shellcheck_clean():
 # --- Agent instructions, skill and docs -------------------------------------------------
 
 PROMPT_EN = (
-    "Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run "
+    "Clone https://github.com/kimtoma/ontology into ~/ontology and run "
     "`scripts/bootstrap.sh --yes --provider claude` there"
 )
 CURL = (
-    "curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/bootstrap.sh"
+    "curl -fsSL https://raw.githubusercontent.com/kimtoma/ontology/main/scripts/bootstrap.sh"
     " | bash -s -- --yes --provider claude"
 )
-SKILL = REPO / ".claude" / "skills" / "setup-autoontology" / "SKILL.md"
+SKILL = REPO / ".claude" / "skills" / "setup-ontology" / "SKILL.md"
 ONE_PROMPT_DOCS = {
     REPO / "README.md": "## Start with one prompt",
     REPO / "README.ko.md": "## 프롬프트 한 번으로 시작하기",
@@ -489,7 +484,7 @@ def test_agents_md_is_a_copy_of_claude_md():
         "scripts/bootstrap.sh --yes --provider claude",
         "vendor/",
         "SPDX",
-        "autoontology_src_",
+        "ontology_src_",
     ):
         assert needle in text
 
@@ -498,11 +493,11 @@ def test_skill_frontmatter_and_command():
     text = SKILL.read_text()
     assert text.startswith("---\n")
     front = text.split("---\n", 2)[1]
-    assert "name: setup-autoontology\n" in front
+    assert "name: setup-ontology\n" in front
     assert "description: " in front
     assert "scripts/bootstrap.sh --yes --provider claude" in text
-    assert "AUTOONTOLOGY_LANG=ko" in text
-    assert "background" in text and "AUTOONTOLOGY_CLAUDE_BIN" in text
+    assert "ONTOLOGY_LANG=ko" in text
+    assert "background" in text and "ONTOLOGY_CLAUDE_BIN" in text
 
 
 @pytest.mark.parametrize("doc", list(ONE_PROMPT_DOCS), ids=lambda p: p.name)
@@ -510,7 +505,7 @@ def test_one_prompt_section(doc):
     text = doc.read_text()
     assert ONE_PROMPT_DOCS[doc] in text
     assert PROMPT_EN in text
-    assert "~/AutoOntology 에 클론하고" in text  # the Korean prompt too
+    assert "~/ontology 에 클론하고" in text  # the Korean prompt too
     assert CURL in text
     assert "claude auth login" in text and "claude auth status" in text
     assert "run it in the background and wait" in text  # the agent must not time out

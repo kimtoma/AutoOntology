@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 import pytest
 
-from autoontology.store.alignments import AlignmentRecord, AlignmentStore
-from autoontology.store.db import Store
-from autoontology.store.documents import (
+from ontology.store.alignments import AlignmentRecord, AlignmentStore
+from ontology.store.db import Store
+from ontology.store.documents import (
     ConceptRecord,
     DocumentStore,
     EvidenceRecord,
@@ -15,7 +15,7 @@ from tests.test_documents_store import _add
 
 @pytest.fixture
 def stores(tmp_path):
-    store = Store(tmp_path / "autoontology.db")
+    store = Store(tmp_path / "ontology.db")
     src = store.add_source(name="docs", kind="documents", locator="{}")
     return store, DocumentStore(store), AlignmentStore(store), src
 
@@ -135,8 +135,8 @@ def test_alias_provenance_records_the_documents_source_of_a_build_run(stores):
 
 
 def test_source_rm_removes_only_the_aliases_that_source_added(stores, tmp_path, monkeypatch):
-    from autoontology.config import Settings
-    from autoontology.structured import remove
+    from ontology.config import Settings
+    from ontology.structured import remove
 
     store, docs, aligns, a = stores
     b = store.add_source(name="other", kind="documents", locator="{}")
@@ -178,7 +178,7 @@ def test_source_rm_removes_only_the_aliases_that_source_added(stores, tmp_path, 
     def down(settings, term_id, aliases):
         raise OSError("connection refused")
 
-    import autoontology.engine.upstream_terms as upstream_terms
+    import ontology.engine.upstream_terms as upstream_terms
 
     monkeypatch.setattr(upstream_terms, "remove_term_synonyms", down)
     with pytest.raises(remove.RemoveError, match="--force"):
@@ -191,8 +191,8 @@ def test_source_rm_removes_only_the_aliases_that_source_added(stores, tmp_path, 
 def test_removing_the_last_supporting_source_removes_a_shared_alias(stores, tmp_path):
     """Recheck #4: A added 약정서, B also accepts it. Removing A keeps it (B supports it);
     removing B afterwards -- the last supporter -- must take it off the Term."""
-    from autoontology.config import Settings
-    from autoontology.structured import remove
+    from ontology.config import Settings
+    from ontology.structured import remove
 
     store, docs, aligns, a = stores
     b = store.add_source(name="other", kind="documents", locator="{}")
@@ -226,8 +226,8 @@ def test_removing_the_last_supporting_source_removes_a_shared_alias(stores, tmp_
 def test_source_rm_queues_a_failed_embedding_refresh(stores, tmp_path):
     """Recheck #7: the alias came off but the Term's re-embedding failed: the Term goes to
     the retry queue the next align drains, not silently dropped."""
-    from autoontology.config import Settings
-    from autoontology.structured import remove
+    from ontology.config import Settings
+    from ontology.structured import remove
 
     store, _docs, aligns, a = stores
     run = store.create_run(kind="build", source_id=None, params={})

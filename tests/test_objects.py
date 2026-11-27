@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
-"""The object layer (``autoontology/objects``, schema v10): the v10 migration, object type
+"""The object layer (``ontology/objects``, schema v10): the v10 migration, object type
 inference from a snapshot and its verification on the source, the read-only reader (SQL
 composition, transaction setup, identifier checks), the edit overlay (conflicts,
 operational properties, revert), the review inbox's ``objects`` category and the
 ``/api/objects`` routes.
 
 Sources are faked with :class:`FakeBackend` (the interface of
-:class:`autoontology.objects.reader.PgBackend`); the real Postgres path is covered by
-``test_objects_integration.py`` behind ``AUTOONTOLOGY_INTEGRATION=1``."""
+:class:`ontology.objects.reader.PgBackend`); the real Postgres path is covered by
+``test_objects_integration.py`` behind ``ONTOLOGY_INTEGRATION=1``."""
 
 from __future__ import annotations
 
@@ -20,18 +20,18 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.objects import binding, overlay, reader, service
-from autoontology.objects.reader import ObjectError, TableQuery
-from autoontology.ontology import model as merged
-from autoontology.store import db
-from autoontology.store.agent_tokens import AgentTokens
-from autoontology.store.db import Store
-from autoontology.store.decisions import Decision, DecisionStore
-from autoontology.structured.semantic import SemanticFK, StructuredSnapshot
-from autoontology.unstructured.align import TermInfo
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager
+from ontology.config import Settings
+from ontology.objects import binding, overlay, reader, service
+from ontology.objects.reader import ObjectError, TableQuery
+from ontology.ontology import model as merged
+from ontology.store import db
+from ontology.store.agent_tokens import AgentTokens
+from ontology.store.db import Store
+from ontology.store.decisions import Decision, DecisionStore
+from ontology.structured.semantic import SemanticFK, StructuredSnapshot
+from ontology.unstructured.align import TermInfo
+from ontology.web import app as web
+from ontology.web.runs import RunManager
 
 API = "/api"
 
@@ -132,7 +132,7 @@ def quickstart_snapshot(*, without: tuple[str, ...] = ()) -> StructuredSnapshot:
     return StructuredSnapshot(
         "quickstart",
         "db1",
-        "autoontology_src_quickstart",
+        "ontology_src_quickstart",
         kept,
         [f for f in fks if f.owner_term_id in ids and f.target_term_id in ids],
     )
@@ -146,7 +146,7 @@ CON, CUS, INV = "term-t-con", "term-t-cus", "term-t-inv"
 
 
 class FakeBackend:
-    """:class:`autoontology.objects.reader.PgBackend` over in-memory tables."""
+    """:class:`ontology.objects.reader.PgBackend` over in-memory tables."""
 
     def __init__(self, tables: dict[str, dict[str, Any]]) -> None:
         self.tables = tables
@@ -230,7 +230,7 @@ def seed(store: Store, model: merged.MergedOntology | None = None) -> int:
             name="quickstart",
             kind="files",
             locator=json.dumps({"path": "/nonexistent/quickstart"}),
-            pg_database="autoontology_src_quickstart",
+            pg_database="ontology_src_quickstart",
         )
     run = view.create_run(kind="build", source_id=None)
     return view.save_snapshot(run.id, model or quickstart_model())
@@ -286,7 +286,7 @@ def _v9_store(tmp_path, monkeypatch) -> Store:
 
 def test_v9_store_migrates_to_v10_keeping_review_decisions(tmp_path, monkeypatch):
     store = _v9_store(tmp_path, monkeypatch)
-    assert store.migrate() == 12 == db.MIGRATIONS[-1][0]
+    assert store.migrate() == 13 == db.MIGRATIONS[-1][0]
     with sqlite3.connect(store.path) as conn:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert V10_TABLES <= tables
@@ -334,7 +334,7 @@ def test_v10_is_idempotent_when_rerun(tmp_path, monkeypatch):
     )
     with sqlite3.connect(store.path) as conn:
         conn.execute("DELETE FROM schema_version WHERE version >= 10")
-    assert store.migrate() == 12
+    assert store.migrate() == 13
     assert len(store.project().object_types().list()) == 1
     assert len(DecisionStore(store).list()) == 2
 
@@ -542,7 +542,7 @@ def test_open_source_refuses_non_postgres_and_reports_unreachable(monkeypatch, s
     with pytest.raises(ObjectError) as err, reader.open_source(settings, mysql):
         pass
     assert err.value.code == "unsupported_source"
-    # a files source whose database name is not an AutoOntology one never connects
+    # a files source whose database name is not an Ontology one never connects
     bad = type("S", (), {"name": "x", "kind": "files", "pg_database": "postgres"})()
     with pytest.raises(ObjectError) as err, reader.open_source(settings, bad):
         pass
@@ -767,7 +767,7 @@ def test_review_lists_object_proposals_and_accept_binds_at_once(client, backend)
     )
     entries = [
         e["action"]
-        for e in __import__("autoontology.store.accounts", fromlist=["Accounts"])
+        for e in __import__("ontology.store.accounts", fromlist=["Accounts"])
         .Accounts(store)
         .list_audit()
     ]
@@ -817,7 +817,7 @@ def test_object_routes(client, backend):
     canon = c.get(f"{API}/projects/default/objects/{CON}/K2019-001").json()
     assert canon["key"] == "K2019-001"
     assert c.get(f"{API}/objects/{CON}/nope").status_code == 404
-    from autoontology.store.accounts import Accounts
+    from ontology.store.accounts import Accounts
 
     bound = Accounts(store).list_audit(action="object.bind")
     assert len(bound) >= 3 and bound[0]["target"] in (CON, CUS, INV)
@@ -941,7 +941,7 @@ def test_agent_tools_write_nothing(client, backend):
 def test_cli_object_commands(isolated_env, backend):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     runner = CliRunner()
 

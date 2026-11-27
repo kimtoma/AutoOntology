@@ -1,0 +1,973 @@
+# SPDX-License-Identifier: MIT
+"""``onto build``: one run over every source of a project -> one ontology snapshot.
+
+A build covers one project (:class:`~ontology.store.db.ProjectStore`; a plain store
+means the default project): "every source" below is every source *of that project*, and
+the snapshot is the project's next revision. The ontology is named after the project.
+
+Steps, in order (each persisted as a ``steps`` row of the single ``build`` run):
+
+1. every structured source, in registration order: ``structured:<name>:load`` (files
+   sources only), ``:register``, ``:ingest``, ``:compile``;
+2. every documents source: ``documents:<name>:read``, ``:extract``, ``:consolidate``;
+3. ``align:<docs-name>`` per documents source, against the union of the Terms of every
+   built structured source (skipped when there is none, or the source has no concepts);
+4. ``merge``: the unified model (:func:`ontology.ontology.model.build`) over every
+   source and the accepted alignments;
+5. ``snapshot``: the model saved as the next revision of ``ontology_snapshots``.
+
+``sources`` (``--source N``) restricts the per-source steps (the others are recorded as
+skipped); align, merge and snapshot always cover everything. ``resume`` reuses the latest
+build run (also a succeeded one): a succeeded step is kept unless its source's inputs
+changed since it ran (:func:`input_fingerprint`: the files' contents, kordoc's
+availability, or the database locator plus its live schema -- an unreachable database is
+never reused) or something it depends on runs again (a step of the same source, or -- for
+align/merge/snapshot -- any step), and align/merge/snapshot also run again when the set of
+registered sources changed since that run (:func:`source_set`); an align step also runs
+again when the upstream Terms moved since it ran (:data:`TERMS_KEY`). Unchanged inputs are no-ops
+inside the steps too (file manifests, document hashes, the consolidation fingerprint, the
+judge cache), so a plain re-run does no LLM work for what did not change.
+
+The run holds the global build gate (:func:`ontology.engine.jobs.hold_engine`: one
+build, export or apply at a time across all projects -- the installation has a single
+engine backend), then the store lease of the project itself and of every one of its
+sources, for its whole life: it refuses to start while another build, export or apply (of
+any project) or a source operation of this project is active.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from ontology import formats
+from ontology.config import Settings
+from ontology.engine import align as align_job
+from ontology.engine import extract as extract_job
+from ontology.engine import jobs
+from ontology.engine.client import BackendClient
+from ontology.engine.jobs import JobError, check_leases, hold_sources, short_error
+from ontology.store.db import (
+    LeaseLost,
+    ProjectStore,
+    Run,
+    Source,
+    Store,
+    now_iso,
+    root_store,
+    scoped,
+)
+from ontology.store.documents import DocumentStore
+from ontology.structured import pipeline
+
+logger = logging.getLogger("ontology.jobs")
+
+BUILD_KIND = "build"
+EXPORT_KIND = "export"
+#: ``onto apply`` (``engine/apply.py``): decisions -> merge -> snapshot, no model call
+APPLY_KIND = "apply"
+#: Lease name of the project itself (never a valid source name), in the project's lease
+#: namespace: build, export and apply hold it.
+WORKSPACE_LEASE = "*workspace*"
+PROJECT_LEASE = WORKSPACE_LEASE
+STRUCTURED_KINDS = ("files", "database")
+STRUCTURED_STEPS: tuple[str, ...] = ("load", "register", "ingest", "compile")
+DOCUMENTS_STEPS: tuple[str, ...] = ("read", "extract", "consolidate")
+#: Sub-step rows (one per chunk / judged concept) that are not build steps.
+SUB_STEP_PREFIXES: tuple[str, ...] = (extract_job.CHUNK_STEP_PREFIX, align_job.CONCEPT_STEP_PREFIX)
+#: Run params that change the align verdicts: a resumed build with other values re-aligns.
+ALIGN_PARAMS: tuple[str, ...] = ("min_sim", "min_conf", "top_k", "identity_policy")
+GLOBAL = "*"
+#: Step detail key: the :func:`input_fingerprint` of the source when the step ran.
+INPUTS_KEY = "inputs_sha"
+
+
+@dataclass
+class BuildResult:
+    run_id: str
+    status: str
+    steps: dict[str, str] = field(default_factory=dict)
+    details: dict[str, dict[str, Any]] = field(default_factory=dict)
+    revision: int | None = None
+    counts: dict[str, Any] = field(default_factory=dict)
+    #: what made a finished run partial (failed chunks/documents/concepts)
+    problems: list[str] = field(default_factory=list)
+    #: what a succeeded run left out on purpose (documents that need kordoc)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _Step:
+    name: str
+    group: str  # the source name, or GLOBAL for align/merge/snapshot
+    fn: Callable[[], dict[str, Any]]
+
+
+def is_top_step(name: str) -> bool:
+    """A build step (not a per-chunk/per-concept sub-step row)."""
+    return not name.startswith(SUB_STEP_PREFIXES)
+
+
+def step_names(sources: list[Source]) -> list[str]:
+    """The step names of a build over *sources* (registration order), without running it."""
+    structured = [s for s in sources if s.kind in STRUCTURED_KINDS]
+    documents = [s for s in sources if s.kind == "documents"]
+    names = [f"structured:{s.name}:{step}" for s in structured for step in STRUCTURED_STEPS]
+    names += [f"documents:{s.name}:{step}" for s in documents for step in DOCUMENTS_STEPS]
+    names += [f"align:{s.name}" for s in documents]
+    return [*names, "merge", "snapshot"]
+
+
+def kordoc_state(home: Path) -> str:
+    """What a documents read can do with kordoc files: the engine resolved (CLI path,
+    its mtime and Node), or ``none`` -- so installing kordoc changes the fingerprint."""
+    from ontology.unstructured import kordoc
+
+    try:
+        engine = kordoc.resolve_engine(home)
+        stamp = Path(engine.cli).stat().st_mtime_ns
+    except (kordoc.KordocError, OSError):
+        return "none"
+    return f"{engine.cli}:{stamp}:{engine.node}"
+
+
+#: inputs whose reading depends on the OCR models (images; scanned PDF pages)
+OCR_SUFFIXES = frozenset({".pdf"}) | formats.IMAGE_SUFFIXES
+
+
+#: the last OCR readiness a status check reported, under the home (``ocr_state``)
+OCR_STATE_FILE = Path("kordoc") / "ocr-state"
+
+
+def ocr_state(home: Path) -> str:
+    """Whether kordoc's OCR models are ready (``ready``/``missing``), or ``none`` without
+    kordoc -- so downloading the models changes the fingerprint of sources with images.
+    When the status check itself fails (a timeout on a busy machine), the last state it
+    reported is kept (``unknown`` if there is none), so the fingerprint does not flip."""
+    from ontology.unstructured import kordoc
+
+    try:
+        status = kordoc.ocr_models_status(home)
+    except (kordoc.KordocError, OSError):
+        return "none"
+    marker = Path(home) / OCR_STATE_FILE
+    if status.get("known", True):
+        state = "ready" if status["ready"] else "missing"
+        try:
+            if not marker.is_file() or marker.read_text(encoding="utf-8").strip() != state:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(state + "\n", encoding="utf-8")
+        except OSError:
+            pass
+        return state
+    try:
+        last = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        last = ""
+    return last if last in ("ready", "missing") else "unknown"
+
+
+def input_fingerprint(
+    source: Source,
+    home: Path | None = None,
+    vision_model: str = "",
+    *,
+    reader: str = "",
+    schema: str | None = None,
+) -> str:
+    """A hash of what the per-source steps of *source* read: the locator plus, for files
+    and documents sources, every input file's path and content hash -- and, for documents
+    sources holding kordoc formats, whether kordoc is available (*home*), and for those
+    holding images the OCR readiness and the vision model that captions them; for database
+    sources, the live schema (:func:`ontology.structured.pipeline.schema_fingerprint`).
+    *reader* (:func:`ontology.engine.extract.reader_settings`) adds the reader settings
+    of documents sources (table limits, byte cap), so changing one re-reads on ``--resume``.
+    "" when the inputs cannot be listed or the database cannot be reached -- never equal
+    to a recorded fingerprint, so the steps run again."""
+    digest = hashlib.sha256(f"{source.kind}\0{source.locator}\0".encode())
+    try:
+        if source.kind == "files":
+            files = pipeline.files_locator(source).files()
+        elif source.kind == "documents":
+            target, recursive = extract_job.documents_target(source)
+            files = extract_job.readers.discover_documents(target, recursive=recursive)
+            if reader:
+                digest.update(f"reader\0{reader}\0".encode())
+            if home is not None and any(
+                p.suffix.lower() in extract_job.readers.kordoc.EXTENSIONS for p in files
+            ):
+                digest.update(f"kordoc\0{kordoc_state(home)}\0".encode())
+            if home is not None and any(p.suffix.lower() in OCR_SUFFIXES for p in files):
+                digest.update(f"ocr\0{ocr_state(home)}\0".encode())
+            if vision_model and any(p.suffix.lower() in formats.IMAGE_SUFFIXES for p in files):
+                digest.update(f"vision\0{vision_model}\0".encode())
+        else:
+            files = []
+            # *schema*: the caller read it already (one connection)
+            schema = pipeline.schema_fingerprint(source) if schema is None else schema
+            if not schema:
+                return ""
+            digest.update(f"schema\0{schema}\0".encode())
+        for path in sorted(p.resolve() for p in files):
+            digest.update(f"{path}\0{extract_job.sha256_file(path)}\0".encode())
+    except Exception:  # noqa: BLE001 - a missing/unreadable input: the step reports it
+        return ""
+    return digest.hexdigest()
+
+
+def source_set(sources: list[Source]) -> list[dict[str, str]]:
+    """Every registered source of a build (id, name, kind and a hash of its
+    configuration), recorded in the run params: when a resumed build sees another set
+    (a source was removed, added or re-pointed), align/merge/snapshot run again."""
+    out = []
+    for s in sorted(sources, key=lambda x: x.id):
+        config = hashlib.sha256(f"{s.locator}\0{s.pg_database or ''}".encode()).hexdigest()
+        out.append({"id": s.id, "name": s.name, "kind": s.kind, "config": config[:16]})
+    return out
+
+
+def registration_order(store: Store | ProjectStore) -> list[Source]:
+    """The sources of *store*'s project (a plain store: the default project) in the order
+    they were registered."""
+    return sorted(scoped(store).list_sources(), key=lambda s: (s.created_at, s.name))
+
+
+class _Build:
+    """State of one build run: the run row, the backends, the model between merge and
+    snapshot."""
+
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        store: ProjectStore,
+        run: Run,
+        sources: list[Source],
+        client: BackendClient,
+        resume: bool,
+        extract_backends: extract_job.Backends | None,
+        align_backends: align_job.AlignBackends | None,
+        writer: Any,
+    ) -> None:
+        self.settings = settings
+        self.store = store
+        self.run = run
+        self.sources = sources
+        self.client = client
+        self.resume = resume
+        self.extract_backends = extract_backends or extract_job.Backends(settings)
+        self.align_backends = align_backends
+        self.writer = writer
+        self.model: Any = None
+        #: the review decisions the merge read (:class:`~ontology.store.decisions.Decision`)
+        self.decisions: list[Any] = []
+        self.reuse_concepts = True
+        #: sources whose inputs changed since the resumed run (full document re-scan)
+        self.changed: set[str] = set()
+        self._fingerprints: dict[str, str] = {}
+
+    def fingerprinted(
+        self, source: Source, fn: Callable[[], dict[str, Any]]
+    ) -> Callable[[], dict[str, Any]]:
+        """*fn*, with the source's input fingerprint (taken before the first of its steps
+        runs) recorded in the step detail for a later ``--resume``."""
+
+        def run() -> dict[str, Any]:
+            if source.name not in self._fingerprints:
+                self._fingerprints[source.name] = input_fingerprint(
+                    self.fresh(source),
+                    self.settings.home,
+                    self.settings.vision_model,
+                    reader=extract_job.reader_settings(self.settings),
+                )
+            detail = fn()
+            detail[INPUTS_KEY] = self._fingerprints[source.name]
+            return detail
+
+        return run
+
+    @property
+    def structured(self) -> list[Source]:
+        return [s for s in self.sources if s.kind in STRUCTURED_KINDS]
+
+    @property
+    def documents(self) -> list[Source]:
+        return [s for s in self.sources if s.kind == "documents"]
+
+    def fresh(self, source: Source) -> Source:
+        return self.store.get_source_by_id(source.id) or source
+
+    def built_structured(self) -> list[Source]:
+        return [s for s in (self.fresh(x) for x in self.structured) if s.catalog_database_id]
+
+    # --- per-source steps ------------------------------------------------------------
+
+    def _structured_ctx(self, source: Source) -> jobs._Ctx:
+        source = self.fresh(source)
+        return jobs._Ctx(
+            settings=self.settings,
+            store=self.store,
+            source=source,
+            run=self.run,
+            client=self.client,
+            database_name=pipeline.catalog_database_name(source),
+        )
+
+    def structured_step(self, source: Source, step: str) -> Callable[[], dict[str, Any]]:
+        fn = {
+            "load": jobs._step_load,
+            "register": jobs._step_register,
+            "ingest": jobs._step_ingest,
+            "compile": jobs._step_compile,
+        }[step]
+        return self.fingerprinted(source, lambda: fn(self._structured_ctx(source)))
+
+    def _extract_ctx(self, source: Source) -> extract_job._ExtractCtx:
+        from ontology.unstructured.extractor import workers_default
+
+        source = self.fresh(source)
+        target, recursive = extract_job.documents_target(source)
+        return extract_job._ExtractCtx(
+            settings=self.settings,
+            store=self.store,
+            docs=DocumentStore(self.store),
+            source=source,
+            run=self.run,
+            target=target,
+            recursive=recursive,
+            workers=workers_default(self.settings),
+            max_chunks=None,
+            backends=self.extract_backends,
+            full_scan=not self.resume or source.name in self.changed,
+        )
+
+    def documents_step(self, source: Source, step: str) -> Callable[[], dict[str, Any]]:
+        fn = {
+            "read": extract_job._step_read,
+            "extract": extract_job._step_extract,
+            "consolidate": extract_job._step_consolidate,
+        }[step]
+
+        def run() -> dict[str, Any]:
+            ctx = self._extract_ctx(source)
+            if step == "read" and not ctx.target.exists():
+                raise RuntimeError(f"no such file or directory: {ctx.target}")
+            return fn(ctx)
+
+        return self.fingerprinted(source, run)
+
+    # --- global steps ----------------------------------------------------------------
+
+    def align_step(self, source: Source) -> Callable[[], dict[str, Any]]:
+        def run() -> dict[str, Any]:
+            src = self.fresh(source)
+            structured = self.built_structured()
+            if not structured:
+                return {"skipped": "no built structured source to align to"}
+            if not DocumentStore(self.store).list_concepts(src.id):
+                return {"skipped": f"documents source {src.name!r} has no concepts"}
+            if not self.reuse_concepts:
+                self._forget_concept_steps(src)
+            detail = align_job.align_pass(
+                settings=self.settings,
+                store=self.store,
+                run=self.run,
+                source=src,
+                structured=structured,
+                client=self.client,
+                backends=self.align_backends,
+                writer=self.writer,
+                # align-report.md of this documents source (replaced by every align pass)
+                report_dir=self.settings.home / "reports" / "align" / src.name,
+                min_sim=self.run.params.get("min_sim"),
+                min_conf=self.run.params.get("min_conf"),
+                top_k=int(self.run.params.get("top_k") or align_job.al.DEFAULT_TOP_K),
+            )
+            # the Terms as apply left them: --resume re-aligns once they move upstream
+            detail[TERMS_KEY] = align_job.terms_fingerprint(self.store, self.client, structured)
+            return detail
+
+        return run
+
+    def _forget_concept_steps(self, source: Source) -> None:
+        """Per-concept rows of an earlier pass with other align params are not reusable."""
+        ids = {c.id for c in DocumentStore(self.store).list_concepts(source.id)}
+        stale = [
+            s.name
+            for s in self.store.get_steps(self.run.id)
+            if s.name.startswith(align_job.CONCEPT_STEP_PREFIX)
+            and s.name.removeprefix(align_job.CONCEPT_STEP_PREFIX) in ids
+        ]
+        if stale:
+            self.store.reset_steps(self.run.id, stale)
+
+    def merge(self) -> dict[str, Any]:
+        from ontology.engine.export_job import documents_inputs
+        from ontology.ontology import model as merged
+        from ontology.structured.semantic import fetch_snapshot
+
+        built = self.built_structured()
+        built_names = {b.name for b in built}
+        missing = [s.name for s in self.structured if s.name not in built_names]
+        snapshots = [fetch_snapshot(self.client, s) for s in built]
+        documents = [self.fresh(s) for s in self.documents]
+        inputs = documents_inputs(self.store, documents)
+        from ontology.store.decisions import DecisionStore
+
+        self.decisions = DecisionStore(self.store).list()
+        self.model = merged.build(
+            self.store.name,  # the project's name names its ontology
+            structured=snapshots,
+            documents=inputs,
+            base=self.settings.base_iri,
+            decisions=self.decisions,
+        )
+        counts = self.model.counts()
+        for name in missing:
+            logger.warning("  structured source %s has no built catalog: left out", name)
+        logger.info(
+            "  %d class(es) (%d Term, %d document), %d object / %d datatype propert(ies), "
+            "%d individual(s), %d document(s); %d concept(s) folded into Terms",
+            counts["classes"],
+            counts["classes_structured"],
+            counts["classes_document"],
+            counts["object_properties"],
+            counts["datatype_properties"],
+            counts["individuals"],
+            counts["documents"],
+            counts["merged_concepts"],
+        )
+        return {
+            "counts": counts,
+            "alignment": self.model.alignment_counts,
+            "structured": [s.name for s in built],
+            "documents": [s.name for s in documents],
+            "left_out": missing,
+        }
+
+    def snapshot(self) -> dict[str, Any]:
+        if self.model is None:  # merge was reused from an earlier pass of this run
+            self.merge()
+        sources = snapshot_sources(self.store, [self.fresh(s) for s in self.sources], self.model)
+        revision = self.store.save_snapshot(self.run.id, self.model, sources=sources)
+        applied = self.mark_decisions(revision)
+        counts = self.model.counts()
+        logger.info(
+            "  revision %d: %d class(es), %d propert(ies), %d individual(s), %d merged concept(s)",
+            revision,
+            counts["classes"],
+            counts["object_properties"] + counts["datatype_properties"],
+            counts["individuals"],
+            counts["merged_concepts"],
+        )
+        return {
+            "revision": revision,
+            "counts": {k: v for k, v in counts.items() if k != "by_source"},
+            **({"decisions_applied": applied} if applied else {}),
+        }
+
+    def mark_decisions(self, revision: int) -> int:
+        """Record *revision* on the pending review decisions the merged model reflects: an
+        alias or concept decision always, an alignment one once its row carries it. A
+        pending concept or alignment decision whose concept is gone (its documents source
+        was removed) is retired instead: marked with *revision* and ``retired`` in its
+        payload, the row kept for the audit trail, never pending again."""
+        from ontology.engine.overlay import reflects
+        from ontology.store.alignments import AlignmentStore
+        from ontology.store.decisions import CONCEPT_KINDS, DecisionStore
+
+        aligns, docs = AlignmentStore(self.store), DocumentStore(self.store)
+        decisions = DecisionStore(self.store)
+        pending = [d for d in self.decisions if d.applied_revision is None]
+        gone = [
+            d
+            for d in pending
+            if d.kind in CONCEPT_KINDS and docs.get_concept(d.subject_key) is None
+        ]
+        done = [
+            d
+            for d in pending
+            if d not in gone and (d.kind != "alignment" or reflects(aligns.get(d.subject_key), d))
+        ]
+        retired = decisions.retire(gone, revision, "subject_gone") if gone else 0
+        if retired:
+            logger.info("  retired %d decision(s) whose concept is gone", retired)
+        return decisions.mark_applied(done, revision) if done else 0
+
+
+def snapshot_sources(store: Store, sources: list[Source], model: Any) -> list[dict[str, Any]]:
+    """The ``sources`` list of a snapshot: name, kind and what the model holds of each."""
+    by_source = model.counts().get("by_source", {})
+    included = set(model.structured_sources) | set(model.documents_sources)
+    out = []
+    for s in sources:
+        entry: dict[str, Any] = {
+            "name": s.name,
+            "kind": "documents" if s.kind == "documents" else "structured",
+            "source_kind": s.kind,
+            "included": s.name in included,
+            "counts": by_source.get(s.name, {}),
+        }
+        if s.kind in STRUCTURED_KINDS:
+            entry["database"] = pipeline.catalog_database_name(s)
+        else:
+            entry["documents"] = len(DocumentStore(store).list_documents(s.id))
+        out.append(entry)
+    return out
+
+
+def _previous_build(store: ProjectStore) -> Run | None:
+    return store.latest_project_run(BUILD_KIND)
+
+
+def refuse_if_active(store: Store | ProjectStore, *, log_path: Path | None = None) -> None:
+    """A :class:`JobError` while another build, export or apply run -- of any project: the
+    v1 global build gate -- is really active (runs left 'running' by a dead process are
+    reaped first)."""
+    root = root_store(store)
+    for run in root.active_runs():
+        if run.kind not in (BUILD_KIND, EXPORT_KIND, APPLY_KIND):
+            continue
+        reason = jobs.stale_reason(root, run)
+        if reason is not None:
+            jobs.reap_run(root, run, reason)
+            continue
+        where = ""
+        if isinstance(store, ProjectStore) and run.project_id != store.id:
+            owner = root.get_project(run.project_id)
+            where = f" in project {owner.slug if owner else run.project_id!r}"
+        raise JobError(
+            f"another {run.kind} run {run.id} is active{where}; one build, export or apply "
+            "runs at a time: wait for it to finish",
+            log_path=log_path,
+        )
+
+
+def _resume_reuse(
+    store: Store, run: Run, sources: list[Source], settings: Settings
+) -> tuple[set[str], set[str]]:
+    """``(steps, changed)``: the succeeded steps of the resumed *run* that can be reused as
+    they are, and the sources whose inputs changed since their steps ran (all their steps
+    run again). Mirrors the per-kind resume rules too: re-read documents that failed,
+    re-enter an extraction that left chunks, re-consolidate an incomplete/stale
+    consolidation, re-align after failed concepts."""
+    from ontology.unstructured import consolidate
+
+    rows = {s.name: s for s in store.get_steps(run.id)}
+    already = {n for n, s in rows.items() if s.status == "succeeded" and is_top_step(n)}
+    changed: set[str] = set()
+    for source in sources:
+        group = "documents" if source.kind == "documents" else "structured"
+        kept = {n for n in already if n.startswith(f"{group}:{source.name}:")}
+        if not kept:
+            continue
+        current = input_fingerprint(
+            source,
+            settings.home,
+            settings.vision_model,
+            reader=extract_job.reader_settings(settings),
+        )
+        if not current or any(rows[n].detail.get(INPUTS_KEY) != current for n in kept):
+            logger.info("--resume: inputs of %s changed since run %s: rebuilt", source.name, run.id)
+            already -= kept
+            changed.add(source.name)
+    docs = DocumentStore(store)
+    for source in sources:
+        if source.kind != "documents":
+            continue
+        prefix = f"documents:{source.name}:"
+        read = rows.get(prefix + "read")
+        if read is not None and read.detail.get("failed"):
+            already.discard(prefix + "read")
+        extract = rows.get(prefix + "extract")
+        if extract is not None and (
+            extract.detail.get("remaining") or extract.detail.get("failed")
+        ):
+            already.discard(prefix + "extract")
+        consolidated = rows.get(prefix + "consolidate")
+        if consolidated is not None and prefix + "consolidate" in already:
+            config = extract_job.consolidation_config(
+                settings, consolidate.threshold_from_env(), consolidate.max_judge_from_env()
+            )
+            identity = consolidated.detail.get("ontology_sha")
+            if (
+                extract_job._consolidation_incomplete(consolidated.detail)
+                or consolidated.detail.get("config") != config
+                or not identity
+                or identity != docs.ontology_identity(source.id)
+            ):
+                already.discard(prefix + "consolidate")
+        aligned = rows.get(f"align:{source.name}")
+        if aligned is not None and aligned.detail.get("partial"):
+            already.discard(f"align:{source.name}")
+    return already, changed
+
+
+#: ``align:<docs>`` step detail: :func:`align_job.terms_fingerprint` after the pass.
+TERMS_KEY = "terms_fingerprint"
+
+
+def _terms_moved(
+    store: Store, run: Run, sources: list[Source], client: BackendClient, already: set[str]
+) -> set[str]:
+    """The reusable ``align:<docs>`` steps whose recorded Terms fingerprint differs from the
+    upstream Terms now (a Term edited, added or removed); unreadable means moved."""
+    rows = {s.name: s for s in store.get_steps(run.id)}
+    names = [
+        n for n in sorted(already) if n.startswith("align:") and "skipped" not in rows[n].detail
+    ]
+    if not names:
+        return set()
+    structured = [s for s in sources if s.kind in STRUCTURED_KINDS and s.catalog_database_id]
+    try:
+        current = align_job.terms_fingerprint(store, client, structured) if structured else ""
+    except Exception:  # noqa: BLE001 - cannot compare: align again
+        logger.warning("--resume: could not read the upstream Terms: aligning again")
+        current = ""
+    return {n for n in names if not current or rows[n].detail.get(TERMS_KEY) != current}
+
+
+def _align_params() -> dict[str, Any]:
+    from ontology.unstructured import align as al
+
+    try:
+        return {
+            "min_sim": al.min_sim_from_env(),
+            "min_conf": al.min_conf_from_env(),
+            "top_k": al.DEFAULT_TOP_K,
+            "identity_policy": al.IDENTITY_POLICY_VERSION,
+        }
+    except ValueError as exc:
+        raise JobError(str(exc)) from exc
+
+
+def run_build(
+    store: Store,
+    settings: Settings,
+    *,
+    sources: list[str] | None = None,
+    resume: bool = False,
+    log: Callable[[str], None] | None = None,
+    client: BackendClient | None = None,
+    extract_backends: extract_job.Backends | None = None,
+    align_backends: align_job.AlignBackends | None = None,
+    writer: Any = None,
+    check_service: bool = True,
+    project: str | None = None,
+) -> BuildResult:
+    """Build every source of the project into one snapshot (module docstring). *store* is
+    the project's :class:`ProjectStore`, or a plain store with *project* (an id or slug;
+    None = the default project).
+
+    *log* receives one line per step outcome (the CLI prints them); everything also goes
+    to ``<home>/logs/jobs.log``."""
+    log_path = jobs.setup_job_logging(settings)
+    store = scoped(store, project)
+    registered = registration_order(store)
+    if not registered:
+        raise JobError(
+            "no sources: add one with `onto source add <path> --name <name>`",
+            log_path=log_path,
+        )
+    only = list(dict.fromkeys(sources or []))
+    unknown = [n for n in only if n not in {s.name for s in registered}]
+    if unknown:
+        raise JobError(f"unknown source {unknown[0]!r} (see `onto source list`)", log_path=log_path)
+    names = [WORKSPACE_LEASE, *(s.name for s in registered)]
+    with (
+        jobs.hold_engine(store, BUILD_KIND, log_path=log_path),
+        hold_sources(store, names, BUILD_KIND, log_path=log_path),
+    ):
+        registered = jobs.verify_sources(store, registered, log_path=log_path)
+        refuse_if_active(store, log_path=log_path)
+        return _run_held(
+            store,
+            settings,
+            registered=registered,
+            only=only,
+            resume=resume,
+            log=log or (lambda _line: None),
+            client=client,
+            extract_backends=extract_backends,
+            align_backends=align_backends,
+            writer=writer,
+            check_service=check_service,
+            log_path=log_path,
+        )
+
+
+def _run_held(
+    store: ProjectStore,
+    settings: Settings,
+    *,
+    registered: list[Source],
+    only: list[str],
+    resume: bool,
+    log: Callable[[str], None],
+    client: BackendClient | None,
+    extract_backends: extract_job.Backends | None,
+    align_backends: align_job.AlignBackends | None,
+    writer: Any,
+    check_service: bool,
+    log_path: Path,
+) -> BuildResult:
+    client = client or BackendClient(settings.backend_url)
+    if any(s.kind in STRUCTURED_KINDS for s in registered):
+        client.health()  # BackendUnavailable -> "run onto up"
+    if check_service:
+        jobs.require_llm_proxy(settings, log_path=log_path)
+    params: dict[str, Any] = {
+        "sources": only or None,
+        "resume": resume,
+        "pid": os.getpid(),
+        "source_set": source_set(registered),
+        **_align_params(),
+    }
+    previous = _previous_build(store) if resume else None
+    reuse_concepts = True
+    changed: set[str] = set()
+    if previous is not None:
+        already, changed = _resume_reuse(store, previous, registered, settings)
+        if any(previous.params.get(k) != params[k] for k in ALIGN_PARAMS):
+            logger.info(
+                "--resume: align settings changed since run %s: aligning again", previous.id
+            )
+            already = {n for n in already if not n.startswith("align:")}
+            reuse_concepts = False
+        moved = _terms_moved(store, previous, registered, client, already)
+        if moved:
+            logger.info(
+                "--resume: upstream Terms changed since run %s: aligning again (%s)",
+                previous.id,
+                ", ".join(sorted(moved)),
+            )
+            already -= moved
+        if previous.params.get("source_set") != params["source_set"]:
+            logger.info(
+                "--resume: the registered sources changed since run %s: aligning, merging "
+                "and snapshotting again",
+                previous.id,
+            )
+            already = {
+                n for n in already if not n.startswith("align:") and n not in ("merge", "snapshot")
+            }
+        store.update_run(
+            previous.id,
+            status="running",
+            params={**previous.params, **params, "resumed_at": now_iso()},
+        )
+        run = store.get_run(previous.id)
+        assert run is not None
+        logger.info(
+            "resuming build run %s (reusable: %s)", run.id, ", ".join(sorted(already)) or "-"
+        )
+    else:
+        if resume:
+            logger.info("no earlier build run; starting a new one")
+        run = store.create_run(kind=BUILD_KIND, source_id=None, params=params)
+        already = set()
+        logger.info(
+            "build run %s: %s",
+            run.id,
+            ", ".join(f"{s.name} ({s.kind})" for s in registered),
+        )
+    build = _Build(
+        settings=settings,
+        store=store,
+        run=run,
+        sources=registered,
+        client=client,
+        resume=previous is not None,
+        extract_backends=extract_backends,
+        align_backends=align_backends,
+        writer=writer,
+    )
+    build.reuse_concepts = reuse_concepts
+    build.changed = changed
+    plan: list[_Step] = []
+    skip: dict[str, str] = {}
+    for s in build.structured:
+        for step in STRUCTURED_STEPS:
+            name = f"structured:{s.name}:{step}"
+            plan.append(_Step(name, s.name, build.structured_step(s, step)))
+            if step == "load" and s.kind != "files":
+                skip[name] = "database source: data stays in the external database"
+    for s in build.documents:
+        for step in DOCUMENTS_STEPS:
+            name = f"documents:{s.name}:{step}"
+            plan.append(_Step(name, s.name, build.documents_step(s, step)))
+    if only:
+        for step in plan:
+            if step.group not in only:
+                skip.setdefault(step.name, f"--source {', '.join(only)}")
+    for s in build.documents:
+        plan.append(_Step(f"align:{s.name}", GLOBAL, build.align_step(s)))
+    plan.append(_Step("merge", GLOBAL, build.merge))
+    plan.append(_Step("snapshot", GLOBAL, build.snapshot))
+    result = _execute(build, plan, already=already, skip=skip, log=log, log_path=log_path)
+    return _finish(build, result)
+
+
+def _execute(
+    build: _Build,
+    plan: list[_Step],
+    *,
+    already: set[str],
+    skip: dict[str, str],
+    log: Callable[[str], None],
+    log_path: Path,
+) -> BuildResult:
+    """Run *plan* in order, persisting each step row (like :func:`jobs._execute`, with
+    dependency-aware reuse: a step that runs again invalidates the later steps of its own
+    source and every global step, nothing else)."""
+    store, run = build.store, build.run
+    result = BuildResult(run_id=run.id, status="running")
+    total = len(plan)
+    dirty: set[str] = set()
+    for index, step in enumerate(plan, start=1):
+        label = f"[{index}/{total}] {step.name}"
+        stale = step.group in dirty or (step.group == GLOBAL and dirty)
+        if step.name in already and not stale:
+            logger.info("%s: already succeeded in run %s, kept (--resume)", label, run.id)
+            log(f"{label}: kept")
+            result.steps[step.name] = "succeeded"
+            continue
+        if step.name in skip:
+            store.finish_step(
+                run.id, step.name, status="skipped", detail={"reason": skip[step.name]}
+            )
+            logger.info("%s: skipped (%s)", label, skip[step.name])
+            log(f"{label}: skipped ({skip[step.name]})")
+            result.steps[step.name] = "skipped"
+            continue
+        try:
+            check_leases()  # never mutate after another operation took the sources over
+        except LeaseLost as exc:
+            store.update_run(run.id, status="failed", error=f"{step.name}: {exc}")
+            logger.error("%s: %s", label, exc)
+            raise JobError(
+                f"step {step.name} not started: {exc}",
+                run_id=run.id,
+                step=step.name,
+                log_path=log_path,
+            ) from exc
+        logger.info("%s ...", label)
+        store.start_step(run.id, step.name)
+        started = time.monotonic()
+        try:
+            detail = step.fn()
+        except BaseException as exc:
+            seconds = round(time.monotonic() - started, 1)
+            interrupted = not isinstance(exc, Exception)
+            message = "interrupted" if interrupted else short_error(exc)
+            store.finish_step(
+                run.id, step.name, status="failed", detail={"error": message, "seconds": seconds}
+            )
+            store.update_run(
+                run.id,
+                status="cancelled" if interrupted else "failed",
+                error=f"{step.name}: {message}",
+            )
+            logger.exception("%s failed after %.1fs", label, seconds)
+            log(f"{label}: FAILED ({message})")
+            if interrupted:
+                raise
+            raise JobError(
+                f"step {step.name} failed: {message}",
+                run_id=run.id,
+                step=step.name,
+                log_path=log_path,
+            ) from exc
+        detail["seconds"] = round(time.monotonic() - started, 1)
+        status = "skipped" if detail.get("skipped") else "succeeded"
+        store.finish_step(run.id, step.name, status=status, detail=detail)
+        dirty.add(step.group)
+        outcome = "ok" if status == "succeeded" else f"skipped ({detail['skipped']})"
+        logger.info("%s: %s (%.1fs)", label, outcome, detail["seconds"])
+        log(f"{label}: {'ok' if status == 'succeeded' else 'skipped'} ({detail['seconds']}s)")
+        result.steps[step.name] = status
+        result.details[step.name] = detail
+    return result
+
+
+def _problems(store: Store, run_id: str, planned: set[str] | None = None) -> list[str]:
+    """Why a finished build is partial: failed documents/chunks, an incomplete
+    consolidation, failed align judgements (all retried by ``--resume``); only the steps
+    in *planned* (when given)."""
+    out: list[str] = []
+    for step in store.get_steps(run_id):
+        if planned is not None and step.name not in planned:
+            continue
+        d = step.detail
+        if step.name.endswith(":read") and d.get("failed"):
+            out.append(f"{step.name}: {len(d['failed'])} document(s) failed to read")
+        if step.name.endswith(":extract") and d.get("failed"):
+            out.append(f"{step.name}: {d['failed']} of {d.get('attempted', '?')} chunk(s) failed")
+        if step.name.endswith(":consolidate") and d.get("partial"):
+            out.append(f"{step.name}: consolidation incomplete")
+        if step.name.startswith("align:") and d.get("partial"):
+            out.append(f"{step.name}: {d.get('failed', 0)} concept(s) failed")
+    return out
+
+
+def _warnings(store: Store, run_id: str, planned: set[str] | None = None) -> list[str]:
+    """What the run skipped without failing: documents that need the kordoc engine or its
+    OCR models (only the steps in *planned*, when given)."""
+    from ontology.unstructured.kordoc import INSTALL_COMMAND
+    from ontology.unstructured.report import display_path
+
+    out = []
+    for step in store.get_steps(run_id):
+        if planned is not None and step.name not in planned:
+            continue
+        skipped = step.detail.get("needs_kordoc") if step.name.endswith(":read") else None
+        if skipped:
+            names = ", ".join(display_path(f["path"]) for f in skipped)
+            out.append(
+                f"{step.name}: {len(skipped)} document(s) need kordoc and were skipped "
+                f"({names}): run `{INSTALL_COMMAND}`, then build again"
+            )
+        no_ocr = step.detail.get("needs_ocr") if step.name.endswith(":read") else None
+        if no_ocr:
+            names = ", ".join(display_path(f["path"]) for f in no_ocr)
+            out.append(
+                f"{step.name}: {len(no_ocr)} image(s) or scanned PDF(s) need the OCR models "
+                "and were skipped "
+                f"({names}): run `{INSTALL_COMMAND}`, then build again"
+            )
+    return out
+
+
+def _finish(build: _Build, result: BuildResult) -> BuildResult:
+    store, run = build.store, build.run
+    snap = next(
+        (s for s in store.get_steps(run.id) if s.name == "snapshot" and s.status == "succeeded"),
+        None,
+    )
+    if snap is not None:
+        result.revision = snap.detail.get("revision")
+        result.counts = snap.detail.get("counts", {})
+    # only the steps of this run's plan: a resumed run keeps the rows of removed sources
+    planned = set(step_names(build.sources))
+    result.problems = _problems(store, run.id, planned)
+    result.warnings = _warnings(store, run.id, planned)  # the CLI prints them after the run
+    if result.problems:
+        error = "partial: " + " | ".join(result.problems)
+        store.update_run(
+            run.id,
+            status="failed",
+            error=error,
+            params={**(store.get_run(run.id) or run).params, "partial": True},
+        )
+        result.status = "failed"
+        logger.warning("build run %s: %s (retry with --resume)", run.id, error)
+    else:
+        store.update_run(run.id, status="succeeded")
+        result.status = "succeeded"
+    return result

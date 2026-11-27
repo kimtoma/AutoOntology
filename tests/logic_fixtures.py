@@ -8,12 +8,12 @@ import json
 from contextlib import contextmanager
 from typing import Any
 
-from autoontology.config import Settings
-from autoontology.objects import binding, reader, service
-from autoontology.ontology import model as merged
-from autoontology.store.db import Store
-from autoontology.structured.semantic import SemanticFK, StructuredSnapshot
-from autoontology.unstructured.align import TermInfo
+from ontology.config import Settings
+from ontology.objects import binding, reader, service
+from ontology.ontology import model as merged
+from ontology.store.db import Store
+from ontology.structured.semantic import SemanticFK, StructuredSnapshot
+from ontology.unstructured.align import TermInfo
 from tests.test_objects import FakeBackend
 
 CONTRACTS = [
@@ -141,7 +141,7 @@ def snapshot(labels: dict[str, str] | None = None) -> StructuredSnapshot:
         SemanticFK("t-con", "t-cus", "fk-a", "고객ID", "public.contracts.고객ID"),
         SemanticFK("t-inv", "t-con", "fk-b", "계약ID", "public.invoices.계약ID"),
     ]
-    return StructuredSnapshot("quickstart", "db1", "autoontology_src_quickstart", terms, fks)
+    return StructuredSnapshot("quickstart", "db1", "ontology_src_quickstart", terms, fks)
 
 
 def model(labels: dict[str, str] | None = None) -> merged.MergedOntology:
@@ -175,7 +175,7 @@ def seed(store: Store, m: merged.MergedOntology | None = None, *, activate=(CON,
             name="quickstart",
             kind="files",
             locator=json.dumps({"path": "/nonexistent/quickstart"}),
-            pg_database="autoontology_src_quickstart",
+            pg_database="ontology_src_quickstart",
         )
     run = view.create_run(kind="build", source_id=None)
     view.save_snapshot(run.id, m or model())

@@ -9,9 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from autoontology.playground.store import IndexRow, PlaygroundStore
-from autoontology.store.agent_tokens import AgentTokens
-from autoontology.store.db import (
+from ontology.playground.store import IndexRow, PlaygroundStore
+from ontology.store.agent_tokens import AgentTokens
+from ontology.store.db import (
     DEFAULT_PROJECT_ID,
     MIGRATIONS,
     ProjectNotFound,
@@ -19,7 +19,7 @@ from autoontology.store.db import (
     Store,
     project_slug_from_workspace,
 )
-from autoontology.store.decisions import Decision, DecisionStore
+from ontology.store.decisions import Decision, DecisionStore
 
 V8 = 8
 
@@ -58,7 +58,7 @@ def _make_v7(path) -> None:
     ex(
         "INSERT INTO sources (id, name, kind, locator, pg_database, catalog_database_id, "
         "created_at, updated_at) VALUES "
-        "('s1', 'sales', 'files', '{}', 'autoontology_src_sales', 'db1', 'x', 'x'), "
+        "('s1', 'sales', 'files', '{}', 'ontology_src_sales', 'db1', 'x', 'x'), "
         "('s2', 'docs', 'documents', '{}', NULL, NULL, 'x', 'x')"
     )
     ex(
@@ -141,7 +141,7 @@ def _counts(path) -> dict[str, int]:
 
 @pytest.fixture
 def v7(tmp_path):
-    path = tmp_path / "autoontology.db"
+    path = tmp_path / "ontology.db"
     _make_v7(path)
     return path
 
@@ -305,11 +305,11 @@ def test_project_slug_from_workspace(workspace, slug):
 
 @pytest.mark.parametrize("slug", ["r0001", "r2026", "r123456"])
 def test_legacy_export_folder_names_are_reserved_slugs(tmp_path, slug):
-    from autoontology.store.db import validate_slug
+    from ontology.store.db import validate_slug
 
     with pytest.raises(ValueError, match="reserved"):
         validate_slug(slug)
-    store = Store(tmp_path / "autoontology.db")
+    store = Store(tmp_path / "ontology.db")
     with pytest.raises(ValueError, match="reserved"):
         store.create_project(slug)
     beta = store.create_project("beta")
@@ -319,7 +319,7 @@ def test_legacy_export_folder_names_are_reserved_slugs(tmp_path, slug):
 
 
 def test_default_slug_is_set_once_from_the_workspace(tmp_path):
-    path = tmp_path / "autoontology.db"
+    path = tmp_path / "ontology.db"
     assert Store(path).default_project().slug == "default"  # no workspace given: pending
     assert Store(path, default_project_slug="ops-ui").default_project().slug == "ops-ui"
     # later opens (another workspace value, a user rename) never override it
@@ -340,7 +340,7 @@ def test_for_home_passes_the_workspace_slug(tmp_path):
 
 @pytest.fixture
 def store(tmp_path):
-    return Store(tmp_path / "autoontology.db", default_project_slug="ops-ui")
+    return Store(tmp_path / "ontology.db", default_project_slug="ops-ui")
 
 
 @pytest.mark.parametrize("slug", ["", "a", "A-b", "1ab", "ab_c", "a" * 25, "ab c", "-ab"])

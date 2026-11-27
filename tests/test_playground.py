@@ -12,24 +12,24 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.engine import export_job
-from autoontology.export import rdf
-from autoontology.ontology import model as merged
-from autoontology.playground import prompts, sparql
-from autoontology.playground.elements import elements_from_model
-from autoontology.playground.index import ElementIndex, build_index
-from autoontology.playground.llm import LLMError, LLMTruncated, RouterLLM, llm_for
-from autoontology.playground.service import Playground
-from autoontology.playground.sparql import (
+from ontology.config import Settings
+from ontology.engine import export_job
+from ontology.export import rdf
+from ontology.ontology import model as merged
+from ontology.playground import prompts, sparql
+from ontology.playground.elements import elements_from_model
+from ontology.playground.index import ElementIndex, build_index
+from ontology.playground.llm import LLMError, LLMTruncated, RouterLLM, llm_for
+from ontology.playground.service import Playground
+from ontology.playground.sparql import (
     EXAMPLES,
     SparqlError,
     SparqlRunner,
 )
-from autoontology.playground.store import PlaygroundStore
-from autoontology.store.alignments import AlignmentRecord, AlignmentStore
-from autoontology.store.db import Store
-from autoontology.store.documents import (
+from ontology.playground.store import PlaygroundStore
+from ontology.store.alignments import AlignmentRecord, AlignmentStore
+from ontology.store.db import Store
+from ontology.store.documents import (
     ConceptRecord,
     ConceptRow,
     DocumentRow,
@@ -39,11 +39,11 @@ from autoontology.store.documents import (
     RelationRow,
     concept_id,
 )
-from autoontology.structured.semantic import SemanticFK, StructuredSnapshot
-from autoontology.unstructured.align import TermInfo
-from autoontology.web import app as web
-from autoontology.web import playground_api
-from autoontology.web.api import ApiError
+from ontology.structured.semantic import SemanticFK, StructuredSnapshot
+from ontology.unstructured.align import TermInfo
+from ontology.web import app as web
+from ontology.web import playground_api
+from ontology.web.api import ApiError
 
 API = "/api/playground"
 CID = {
@@ -89,7 +89,7 @@ def _snapshot():
     return StructuredSnapshot(
         "hanbit",
         "db1",
-        "autoontology_src_hanbit",
+        "ontology_src_hanbit",
         [contracts, customers],
         [SemanticFK("t-c", "t-k", "a3", "고객id", "public.contracts.고객id")],
     )
@@ -390,7 +390,7 @@ def test_sparql_examples_all_execute(ttl):
     assert all(r["type"] == "SELECT" for r in results.values())
     labels = {row[1] for row in results["classes"]["rows"]}
     assert {"Contracts", "Customers", "담당자"} <= labels
-    assert results["classes"]["rows"][0][0].startswith("ao:")
+    assert results["classes"]["rows"][0][0].startswith("onto:")
     syn = {r[1]: r[2] for r in results["term-synonyms"]["rows"]}
     assert "계약서" in syn["Contracts"]
     assert any(r[0] == "신규 계약" for r in results["aligned-concepts"]["rows"])
@@ -684,8 +684,8 @@ def test_llm_for_uses_the_selected_provider(isolated_env, monkeypatch):
     llm = llm_for(Settings.from_env())
     assert (llm.provider, llm.model_name) == ("ollama", "openai/qwen3:8b")
     assert llm.base_url.endswith(":7800")
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "gpt-x")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_CHAT_MODEL", "gpt-x")
     llm = llm_for(Settings.from_env())
     assert (llm.provider, llm.model, llm.model_name) == ("openai", "gpt-x", "openai/gpt-x")
 
@@ -734,7 +734,7 @@ def _seed(settings):
         [RelationRecord("담당자", "owns", "계약", "담당자가 계약을 관리", ev)],
     )
     structured = store.add_source(
-        name="hanbit", kind="files", locator='{"path": "/y"}', pg_database="autoontology_src_hanbit"
+        name="hanbit", kind="files", locator='{"path": "/y"}', pg_database="ontology_src_hanbit"
     )
     store.set_catalog_database_id(structured.id, "db1")
     AlignmentStore(store).put(
@@ -965,7 +965,7 @@ def test_sql_passthrough_relays_events_and_handles_storage_and_409(client, monke
     assert events[2][1]["answer"]["sql_code"].startswith("SELECT")
     assert events[2][1]["answer_kind"] == "sql"
     headers, body = seen[0]
-    assert headers["x-auto-ontology-user-id"] == "autoontology"
+    assert headers["x-auto-ontology-user-id"] == "ontology"
     # project-qualified: the upstream user is shared by every project
     pid = c.app.state.api.store.default_project_id
     assert body["conversation_id"] == playground_api.upstream_conversation_id(pid, conv)
@@ -1063,7 +1063,7 @@ def test_labels_and_history_are_escaped_in_prompts(model):
 
 
 def test_graph_links_are_encoded_and_only_for_graph_nodes():
-    from autoontology.ontology.model import LITERAL, MergedOntology, OClass, OProperty
+    from ontology.ontology.model import LITERAL, MergedOntology, OClass, OProperty
 
     m = MergedOntology(name="x", base="https://x#")
     m.classes["term-a b"] = OClass("term-a b", "A", "structured")
@@ -1105,7 +1105,7 @@ def test_graph_links_are_encoded_and_only_for_graph_nodes():
 
 
 def test_embedder_follows_the_selection(isolated_env, monkeypatch):
-    from autoontology.playground import service as svc
+    from ontology.playground import service as svc
 
     built = []
 
@@ -1116,11 +1116,11 @@ def test_embedder_follows_the_selection(isolated_env, monkeypatch):
     import auto_ontology.utils.embedding as emb  # noqa: F401 - patched below
 
     monkeypatch.setattr(emb, "EmbedParams", FakeParams)
-    monkeypatch.setattr("autoontology.engine.jobs.prepare_upstream_env", lambda s: None)
+    monkeypatch.setattr("ontology.engine.jobs.prepare_upstream_env", lambda s: None)
     state = {"model": "bge-m3"}
 
     def settings():
-        monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_EMBED_MODEL", state["model"])
+        monkeypatch.setenv("ONTOLOGY_OLLAMA_EMBED_MODEL", state["model"])
         return Settings.from_env()
 
     cache = svc.EmbedderCache(settings, Settings.from_env())
@@ -1132,7 +1132,7 @@ def test_embedder_follows_the_selection(isolated_env, monkeypatch):
 
 
 def test_conversation_delete_and_pruning(tmp_path, monkeypatch, client):
-    from autoontology.playground import store as pstore
+    from ontology.playground import store as pstore
 
     store, src = _store(tmp_path)
     pg = PlaygroundStore(store)
@@ -1165,7 +1165,7 @@ def test_sparql_query_length_cap(ttl, client):
 def _cli(monkeypatch, routes):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     def handler(request):
         out = routes[request.url.path.removeprefix("/api/playground")]
@@ -1466,7 +1466,7 @@ def test_sql_translation_failure_is_skipped_silently(client, monkeypatch, caplog
     _english_upstream(monkeypatch, ENGLISH_ANSWER)
     for bad in (FailingLLM(), EnglishLLM()):
         app.state.playground.llm_factory = lambda bad=bad: bad
-        with caplog.at_level(logging.WARNING, logger="autoontology.web"):
+        with caplog.at_level(logging.WARNING, logger="ontology.web"):
             events = _sse(c.post(f"{API}/sql", json={"question": "고객은 몇 명인가요?"}).text)
         names = [n for n, _ in events]
         assert names[-3:] == ["translation", "translation", "done"] and "error" not in names
@@ -1505,7 +1505,7 @@ def test_sql_translation_can_be_turned_off(client, monkeypatch, value):
     c, _settings, app, _llm, _embed = client
     llm = TranslatingLLM()
     app.state.playground.llm_factory = lambda: llm
-    monkeypatch.setenv("AUTOONTOLOGY_SQL_TRANSLATE", value)
+    monkeypatch.setenv("ONTOLOGY_SQL_TRANSLATE", value)
     _english_upstream(monkeypatch, ENGLISH_ANSWER)
     events = _sse(c.post(f"{API}/sql", json={"question": "고객은 몇 명인가요?"}).text)
     assert "translation" not in [n for n, _ in events] and llm.messages == []
@@ -1585,7 +1585,7 @@ def test_sql_slots_release_once():
     with pytest.raises(ApiError) as err:
         slots.take(2)
     assert err.value.status == 429 and err.value.error == "sql_busy"
-    assert "AUTOONTOLOGY_SQL_CONCURRENCY" in err.value.detail
+    assert "ONTOLOGY_SQL_CONCURRENCY" in err.value.detail
     first()
     first()  # idempotent: the stream's finally and the background task both release
     assert slots.active == 1

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""The object reader against a real Postgres: a throwaway ``autoontology_src_objtest``
+"""The object reader against a real Postgres: a throwaway ``ontology_src_objtest``
 database with the quickstart tables. Run with
-``AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_objects_integration.py``."""
+``ONTOLOGY_INTEGRATION=1 uv run pytest -m integration tests/test_objects_integration.py``."""
 
 from __future__ import annotations
 
@@ -11,16 +11,16 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from autoontology.config import Settings, validate_pg_database_name
-from autoontology.engine import pg
-from autoontology.objects import binding, reader, service
-from autoontology.objects.reader import ObjectError, TableQuery
-from autoontology.store.db import Store
+from ontology.config import Settings, validate_pg_database_name
+from ontology.engine import pg
+from ontology.objects import binding, reader, service
+from ontology.objects.reader import ObjectError, TableQuery
+from ontology.store.db import Store
 from tests.test_objects import CON, CONTRACTS, INV, INVOICES, quickstart_model
 
 pytestmark = pytest.mark.integration
 
-DB = validate_pg_database_name("autoontology_src_objtest")
+DB = validate_pg_database_name("ontology_src_objtest")
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ def source_db(tmp_path):
                 conn.execute(
                     "INSERT INTO public.invoices VALUES (%s, %s, %s, %s)", list(r.values())
                 )
-        store = Store(tmp_path / "home" / "autoontology.db")
+        store = Store(tmp_path / "home" / "ontology.db")
         view = store.project()
         view.add_source(
             name="objtest",

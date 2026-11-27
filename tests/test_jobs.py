@@ -4,12 +4,12 @@ import os
 
 import pytest
 
-from autoontology.config import Settings
-from autoontology.engine import jobs
-from autoontology.engine.client import BackendUnavailable
-from autoontology.store.db import Store
-from autoontology.structured import pipeline
-from autoontology.structured.loaders import LoadReport, TableReport
+from ontology.config import Settings
+from ontology.engine import jobs
+from ontology.engine.client import BackendUnavailable
+from ontology.store.db import Store
+from ontology.structured import pipeline
+from ontology.structured.loaders import LoadReport, TableReport
 
 
 class FakeClient:
@@ -26,7 +26,7 @@ class FakeClient:
 
     def health(self):
         if self.down:
-            raise BackendUnavailable("upstream backend not reachable; `uv run autoontology up`")
+            raise BackendUnavailable("upstream backend not reachable; `uv run onto up`")
         return {"status": "ok"}
 
     def connection_exists(self, name):
@@ -113,7 +113,7 @@ def env(isolated_env, monkeypatch, tmp_path):
         calls.append(f"compile:{db}")
         return {"tables_compiled": 1}
 
-    monkeypatch.setattr("autoontology.structured.loaders.load_files_to_postgres", fake_load)
+    monkeypatch.setattr("ontology.structured.loaders.load_files_to_postgres", fake_load)
     monkeypatch.setattr(jobs, "upstream_ingest", fake_ingest)
     monkeypatch.setattr(jobs, "upstream_compile", fake_compile)
     monkeypatch.setattr(
@@ -133,13 +133,13 @@ def test_full_build_sequence_and_exports(env):
     settings, store, client, calls = env
     result = build(env)
     assert calls == [
-        "load:autoontology_src_demo:1",
-        "ingest:autoontology_src_demo",
-        "compile:autoontology_src_demo",
+        "load:ontology_src_demo:1",
+        "ingest:ontology_src_demo",
+        "compile:ontology_src_demo",
     ]
     assert result.status == "succeeded" and list(result.steps) == list(jobs.STEP_ORDER)
     conn = client.created[0]
-    assert conn["type"] == "postgres" and conn["database"] == "autoontology_src_demo"
+    assert conn["type"] == "postgres" and conn["database"] == "ontology_src_demo"
     assert conn["password"]  # upstream requires a non-empty password
     run = store.get_run(result.run_id)
     assert run.status == "succeeded" and run.finished_at
@@ -200,7 +200,7 @@ def test_new_build_without_resume_reruns_everything(env):
     assert second.run_id != first.run_id
     assert calls[0].startswith("load:") and len(client.created) == 1  # connection reused
     assert store.get_steps(second.run_id)[1].detail["action"] == "updated"
-    assert client.updated == [("autoontology_src_demo", client.created[0])]  # always PUT
+    assert client.updated == [("ontology_src_demo", client.created[0])]  # always PUT
 
 
 def test_skip_flags_record_skipped_steps(env):
@@ -214,13 +214,13 @@ def test_skip_flags_record_skipped_steps(env):
     # resume later runs the steps that were skipped
     calls.clear()
     resumed = build(env, resume=True)
-    assert calls == ["compile:autoontology_src_demo"] and resumed.export_dir
+    assert calls == ["compile:ontology_src_demo"] and resumed.export_dir
 
 
 def test_backend_down_is_clear_error(env):
     _, store, client, _ = env
     client.down = True
-    with pytest.raises(BackendUnavailable, match="autoontology up"):
+    with pytest.raises(BackendUnavailable, match="onto up"):
         build(env)
     assert store.list_runs() == []
 
@@ -248,16 +248,14 @@ def test_unknown_source(env):
 
 def test_ingest_job_for_source_and_skip_when_build_active(env):
     settings, store, client, calls = env
-    result = jobs.run_ingest_job(
-        "AUTOONTOLOGY_SRC_DEMO", settings=settings, store=store, client=client
-    )
-    assert result.status == "succeeded" and calls == ["ingest:AUTOONTOLOGY_SRC_DEMO"]
+    result = jobs.run_ingest_job("ONTOLOGY_SRC_DEMO", settings=settings, store=store, client=client)
+    assert result.status == "succeeded" and calls == ["ingest:ONTOLOGY_SRC_DEMO"]
     run = store.get_run(result.run_id)
     assert run.kind == "ingest" and run.source_id == store.get_source("demo").id
     src = store.get_source("demo")
     store.create_run(kind="build", source_id=src.id, params={"pid": os.getppid()})
     assert (
-        jobs.run_ingest_job("autoontology_src_demo", settings=settings, store=store, client=client)
+        jobs.run_ingest_job("ontology_src_demo", settings=settings, store=store, client=client)
         is None
     )
 
@@ -374,7 +372,7 @@ def test_build_requires_service_when_chat_goes_through_proxy(env, monkeypatch):
     settings = Settings.from_env()
     assert jobs.uses_llm_proxy(settings)
     monkeypatch.setattr(jobs, "service_alive", lambda s: False)
-    with pytest.raises(jobs.JobError, match="autoontology up"):
+    with pytest.raises(jobs.JobError, match="onto up"):
         jobs.run_structured("demo", resume=False, settings=settings, store=store, client=client)
     assert calls == []  # nothing ran
     monkeypatch.setattr(jobs, "service_alive", lambda s: True)
@@ -388,7 +386,7 @@ def test_build_requires_service_when_chat_goes_through_proxy(env, monkeypatch):
 
 def test_both_chat_providers_go_through_the_service(isolated_env, monkeypatch):
     assert jobs.uses_llm_proxy(Settings.from_env())
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")
     assert jobs.uses_llm_proxy(Settings.from_env())
 
 
@@ -411,7 +409,7 @@ def test_prepare_upstream_env_applies_once_under_lock(isolated_env, monkeypatch)
 
 
 def test_vector_tables_hold_an_advisory_lock(isolated_env, monkeypatch):
-    from autoontology.engine import pg
+    from ontology.engine import pg
 
     events = []
 
@@ -475,7 +473,7 @@ def test_partial_fallback_is_warned_and_recorded(env, caplog):
             "description": "Business entity represented by table invoices",
         },
     ]
-    with caplog.at_level("WARNING", logger="autoontology.jobs"):
+    with caplog.at_level("WARNING", logger="ontology.jobs"):
         result = build(env)
     assert result.status == "succeeded"
     assert "1 of 2 Term(s) are upstream fallbacks" in caplog.text and "Invoices" in caplog.text
@@ -502,9 +500,9 @@ def test_advisory_lock_times_out_with_named_error(monkeypatch):
 
 
 def test_advisory_lock_timeout_from_env(monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_LOCK_TIMEOUT_S", "7")
+    monkeypatch.setenv("ONTOLOGY_LOCK_TIMEOUT_S", "7")
     assert jobs.lock_timeout_s() == 7.0
-    monkeypatch.delenv("AUTOONTOLOGY_LOCK_TIMEOUT_S")
+    monkeypatch.delenv("ONTOLOGY_LOCK_TIMEOUT_S")
     assert jobs.lock_timeout_s() == 300.0
 
 
@@ -531,7 +529,7 @@ def test_concurrent_builds_one_fails_busy(env, monkeypatch):
         with pytest.raises(jobs.JobError, match="already has an active build"):
             build(env)
         # source rm overlapping the build is refused too (nothing torn down)
-        from autoontology.structured.remove import RemoveError, remove_source
+        from ontology.structured.remove import RemoveError, remove_source
 
         with pytest.raises(RemoveError, match="already has an active build"):
             remove_source(settings, store, store.get_source("demo"), drop_db=True)
@@ -592,9 +590,7 @@ def test_ingest_shim_skips_while_a_build_holds_the_source(env):
     settings, store, client, calls = env
     with store.lease(["demo"], "build"):
         assert (
-            jobs.run_ingest_job(
-                "autoontology_src_demo", settings=settings, store=store, client=client
-            )
+            jobs.run_ingest_job("ontology_src_demo", settings=settings, store=store, client=client)
             is None
         )
     assert calls == []
@@ -618,7 +614,7 @@ def test_resume_reruns_steps_after_one_that_runs_again(env):
     client.export_model = tracked
     second = build(env, resume=True)
     assert second.run_id == first.run_id
-    assert calls == ["compile:autoontology_src_demo"]
+    assert calls == ["compile:ontology_src_demo"]
     assert second.details.get("export") and exported  # export executed, not reused
     steps = {s.name: s.status for s in store.get_steps(second.run_id)}
     assert steps["compile"] == "succeeded" and steps["export"] == "succeeded"
@@ -635,7 +631,7 @@ def _manifest(**tables):
 
 def _schema_env(env, monkeypatch, manifests):
     """A fake loader that diffs like the real one and records the call order."""
-    from autoontology.structured.loaders import diff_manifest
+    from ontology.structured.loaders import diff_manifest
 
     settings, store, client, calls = env
     resets = []
@@ -658,7 +654,7 @@ def _schema_env(env, monkeypatch, manifests):
         resets.append(db)
         return {"vectors_removed": 3, "detached_terms": []}
 
-    monkeypatch.setattr("autoontology.structured.loaders.load_files_to_postgres", fake_load)
+    monkeypatch.setattr("ontology.structured.loaders.load_files_to_postgres", fake_load)
     monkeypatch.setattr(jobs, "upstream_reset_semantic", fake_reset)
     return resets
 
@@ -687,14 +683,14 @@ def test_changed_schema_resets_semantic_layer_before_writing(env, monkeypatch):
     calls.clear()
     result = build(env)
     assert result.status == "succeeded"
-    assert calls[:2] == ["reset:autoontology_src_demo", "write:customers,orders"]
+    assert calls[:2] == ["reset:ontology_src_demo", "write:customers,orders"]
     load = result.details["load"]
     assert load["schema_changes"]["changed"] == ["customers"]
     assert load["invalidated"]["semantic_reset"] is True
-    assert "compile:autoontology_src_demo" in calls  # recompiles every table
+    assert "compile:ontology_src_demo" in calls  # recompiles every table
     calls.clear()
     build(env)  # unchanged inputs: no reset
-    assert resets == ["autoontology_src_demo"]
+    assert resets == ["ontology_src_demo"]
 
 
 def test_removed_input_drops_table_and_resets(env, monkeypatch):
@@ -710,7 +706,7 @@ def test_removed_input_drops_table_and_resets(env, monkeypatch):
     build(env)
     result = build(env)
     load = result.details["load"]
-    assert load["dropped_tables"] == ["orders"] and resets == ["autoontology_src_demo"]
+    assert load["dropped_tables"] == ["orders"] and resets == ["ontology_src_demo"]
     assert set(store.get_file_manifest(store.get_source("demo").id)) == {"customers"}
 
 
@@ -987,8 +983,8 @@ def _replace_on_lease(store, name, monkeypatch):
 
 
 def test_stale_remove_never_touches_the_replacement(env, monkeypatch):
-    from autoontology.engine import pg
-    from autoontology.structured import remove
+    from ontology.engine import pg
+    from ontology.structured import remove
 
     settings, store, client, calls = env
     old = store.get_source("demo")
@@ -996,7 +992,7 @@ def test_stale_remove_never_touches_the_replacement(env, monkeypatch):
     replacement = pipeline.add_source(store, json.loads(old.locator)["path"], name="demo")
     touched = []
     monkeypatch.setattr(pg, "connect", lambda *a, **k: touched.append(a) or None)
-    import autoontology.engine.client as client_mod
+    import ontology.engine.client as client_mod
 
     monkeypatch.setattr(
         client_mod, "BackendClient", lambda *a, **k: touched.append("backend") or None

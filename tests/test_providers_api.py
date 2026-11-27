@@ -9,11 +9,11 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology import doctor
-from autoontology.config import Settings
-from autoontology.web import api as web_api
-from autoontology.web import app as web
-from autoontology.web.providers import probe
+from ontology import doctor
+from ontology.config import Settings
+from ontology.web import api as web_api
+from ontology.web import app as web
+from ontology.web.providers import probe
 from tests.test_providers_cli import _settings, fakes  # noqa: F401 - fixture
 
 API = "/api"
@@ -22,7 +22,7 @@ API = "/api"
 @pytest.fixture
 def offline(monkeypatch):
     """No backend and no Postgres: /api/status reports them down quickly."""
-    from autoontology.engine import pg
+    from ontology.engine import pg
 
     def refused(*a, **k):
         raise httpx.ConnectError("refused")
@@ -111,7 +111,7 @@ def test_provider_test_is_one_at_a_time_and_same_origin(fakes, offline):  # noqa
 def test_run_test_uses_a_temporary_service_when_none_runs(fakes, monkeypatch):  # noqa: F811
     with socket.socket() as sock:  # a port where no service runs
         sock.bind(("127.0.0.1", 0))
-        monkeypatch.setenv("AUTOONTOLOGY_PORT", str(sock.getsockname()[1]))
+        monkeypatch.setenv("ONTOLOGY_PORT", str(sock.getsockname()[1]))
     out = probe.run_test(Settings.from_env(), "codex")
     assert out["via"] == "in-process" and out["ok"] is True, out
     assert out["model"] == "openai/chatgpt:gpt-6-astra"
@@ -139,7 +139,7 @@ def _stub_doctor(monkeypatch):
     [("claude", "claude-sonnet-5-5", "claude auth login"), ("codex", "gpt-6-astra", "codex login")],
 )
 def test_doctor_rows_for_cli_providers(fakes, monkeypatch, provider, model, remedy):  # noqa: F811
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", provider)
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", provider)
     _stub_doctor(monkeypatch)
     checks = {c.name: c for c in doctor.run_checks(Settings.from_env())}
     assert checks["chat provider"].status == "OK", checks["chat provider"]
@@ -157,9 +157,9 @@ def test_doctor_rows_for_cli_providers(fakes, monkeypatch, provider, model, reme
 
 
 def test_doctor_warns_about_an_unknown_cli_model(fakes, monkeypatch):  # noqa: F811
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
-    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_MODEL", "claude-unknown-9")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "claude")
+    monkeypatch.setenv("ONTOLOGY_CLAUDE_MODEL", "claude-unknown-9")
     check = doctor.check_profile(Settings.from_env())
-    assert check.status == "WARN" and "AUTOONTOLOGY_CLAUDE_MODEL" in check.detail
-    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_MODEL", "-p bad")
+    assert check.status == "WARN" and "ONTOLOGY_CLAUDE_MODEL" in check.detail
+    monkeypatch.setenv("ONTOLOGY_CLAUDE_MODEL", "-p bad")
     assert doctor.check_profile(Settings.from_env()).status == "FAIL"

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""``ao user create|list|disable|enable|link``: the server-side admin commands."""
+"""``onto user create|list|disable|enable|link``: the server-side admin commands."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-from autoontology.cli import app
-from autoontology.config import Settings
-from autoontology.store import accounts as acc
-from autoontology.store.accounts import Accounts
-from autoontology.store.db import Store
+from ontology.cli import app
+from ontology.config import Settings
+from ontology.store import accounts as acc
+from ontology.store.accounts import Accounts
+from ontology.store.db import Store
 
 runner = CliRunner()
 PW = "correct horse battery"
@@ -31,11 +31,11 @@ def accounts(isolated_env):
 
 
 def test_create_without_a_password_prints_an_invite_link(accounts, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_PUBLIC_URL", "https://ao.example.com")
+    monkeypatch.setenv("ONTOLOGY_PUBLIC_URL", "https://onto.example.com")
     result = runner.invoke(app, ["user", "create", "Kim@Example.com", "--name", "Kim", "--admin"])
     assert result.exit_code == 0, result.output
     link = re.search(
-        r"https://ao\.example\.com/ui/invite#token=([\w-]+)&purpose=invite", result.output
+        r"https://onto\.example\.com/ui/invite#token=([\w-]+)&purpose=invite", result.output
     )
     assert link, result.output
     user = accounts().by_email("kim@example.com")
@@ -88,7 +88,7 @@ def test_list_disable_enable(accounts):
 
 
 def test_link_magic_and_reset(accounts, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     runner.invoke(app, ["user", "create", "a@example.com"])
     out = runner.invoke(app, ["user", "link", "a@example.com"])
     assert out.exit_code == 0, out.output
@@ -107,7 +107,7 @@ def test_link_magic_and_reset(accounts, monkeypatch):
 def test_link_warns_when_accounts_are_off(accounts):
     runner.invoke(app, ["user", "create", "a@example.com"])
     out = runner.invoke(app, ["user", "link", "a@example.com"])
-    assert out.exit_code == 0 and "AUTOONTOLOGY_AUTH=accounts" in out.output
+    assert out.exit_code == 0 and "ONTOLOGY_AUTH=accounts" in out.output
 
 
 # --- members and audit -----------------------------------------------------------------
@@ -154,13 +154,13 @@ def test_member_commands(accounts):
 
 
 def test_service_client_sends_the_local_key_with_accounts_on(isolated_env, monkeypatch):
-    from autoontology import cli_ops
-    from autoontology.config import INTERNAL_AS_HEADER, INTERNAL_HEADER
+    from ontology import cli_ops
+    from ontology.config import INTERNAL_AS_HEADER, INTERNAL_HEADER
 
     off = cli_ops.ServiceClient(Settings.from_env())
     assert INTERNAL_HEADER not in off.client.headers
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
-    from autoontology import cli
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
+    from ontology import cli
 
     monkeypatch.setattr(cli, "_as_ref", "a@example.com")
     on = cli_ops.ServiceClient(Settings.from_env())

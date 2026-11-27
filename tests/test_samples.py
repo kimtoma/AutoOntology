@@ -3,7 +3,7 @@
 
 Unit tests need no services. The kordoc-backed documents are read only when the kordoc
 engine resolves (``KORDOC_CLI`` in the shell or ``data/kordoc``), else skipped; OCR of the
-images is an integration test (``AUTOONTOLOGY_INTEGRATION=1``, OCR models installed).
+images is an integration test (``ONTOLOGY_INTEGRATION=1``, OCR models installed).
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from autoontology import formats
-from autoontology.config import REPO_ROOT
-from autoontology.unstructured import kordoc, readers
+from ontology import formats
+from ontology.config import REPO_ROOT
+from ontology.unstructured import kordoc, readers
 
 SAMPLES = REPO_ROOT / "samples"
 HANBIT = SAMPLES / "hanbit"
@@ -381,12 +381,12 @@ def test_quality_procedure_defines_document_only_concepts(hanbit):
 @pytest.mark.integration
 @pytest.mark.parametrize("name", sorted(OCR_TERMS))
 def test_image_ocr_contains_key_terms(name):
-    from autoontology.config import Settings
+    from ontology.config import Settings
 
     home = Settings.from_env().home
     engine = kordoc.resolve_engine(home)
     if not kordoc.ocr_models_status(home, engine=engine)["ready"]:
-        pytest.skip("OCR models missing: uv run autoontology tools install-kordoc")
+        pytest.skip("OCR models missing: uv run onto tools install-kordoc")
     text = _text(readers.read_document(HANBIT / "images" / name, engine=engine))
     missing = [t for t in OCR_TERMS[name] if t not in text]
     assert not missing, f"{name}: {missing}\n{text[:400]}"

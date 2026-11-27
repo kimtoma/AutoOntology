@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The action runner (``autoontology/logic/actions.py``): preview, submit, idempotency,
+"""The action runner (``ontology/logic/actions.py``): preview, submit, idempotency,
 approval (four-eyes, reject, preconditions changed meanwhile), revert and superseded
 edits, permissions, notifications and agents' modes -- over the quickstart sample specs
 with the sources faked."""
@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from autoontology.config import Settings
-from autoontology.logic import actions, functions, registry, specs
-from autoontology.logic.actions import Caller
-from autoontology.objects import service
-from autoontology.objects.reader import ObjectError
-from autoontology.store.db import Store
+from ontology.config import Settings
+from ontology.logic import actions, functions, registry, specs
+from ontology.logic.actions import Caller
+from ontology.objects import service
+from ontology.objects.reader import ObjectError
+from ontology.store.db import Store
 from tests import logic_fixtures as fx
 from tests.logic_fixtures import INV
 from tests.test_logic import TODAY
@@ -434,9 +434,9 @@ def test_available_actions_for_an_object(setup):
 
 def test_notifications_to_roles_emails_and_fields(setup, monkeypatch):
     settings, view, _ = setup
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     settings = Settings.from_env()
-    from autoontology.store.accounts import Accounts
+    from ontology.store.accounts import Accounts
 
     acc = Accounts(view.store)
     for email, role in (

@@ -24,7 +24,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      # Integration tests (real Postgres + Ollama) are skipped unless AUTOONTOLOGY_INTEGRATION=1.
+      # Integration tests (real Postgres + Ollama) are skipped unless ONTOLOGY_INTEGRATION=1.
       - run: uv run pytest -q
 
   ui:

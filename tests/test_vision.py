@@ -6,8 +6,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from autoontology.unstructured import vision
-from autoontology.unstructured.readers import Document, Section
+from ontology.unstructured import vision
+from ontology.unstructured.readers import Document, Section
 
 
 def _doc(path: Path) -> Document:
@@ -70,15 +70,15 @@ def test_connect_error_is_a_vision_error(tmp_path):
 
 
 def test_doctor_vision_model_row(monkeypatch, tmp_path):
-    from autoontology import doctor
-    from autoontology.config import Settings
-    from autoontology.engine import ollama
+    from ontology import doctor
+    from ontology.config import Settings
+    from ontology.engine import ollama
 
     assert doctor.check_vision_model(Settings(home=tmp_path)).status == "SKIP"
     settings = Settings(home=tmp_path, vision_model="gemma4:e4b")
     monkeypatch.setattr(ollama, "list_models", lambda endpoint, client=None: {"qwen3:8b"})
     check = doctor.check_vision_model(settings)
-    assert check.status == "FAIL" and check.remedy == "uv run autoontology setup"
+    assert check.status == "FAIL" and check.remedy == "uv run onto setup"
     monkeypatch.setattr(ollama, "list_models", lambda endpoint, client=None: {"gemma4:e4b"})
     assert doctor.check_vision_model(settings).status == "OK"
 
@@ -90,15 +90,15 @@ def test_doctor_vision_model_row(monkeypatch, tmp_path):
 
 
 def test_settings_read_the_new_variables(monkeypatch, tmp_path):
-    from autoontology.config import Settings
+    from ontology.config import Settings
 
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(tmp_path / "none.env"))
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(tmp_path / "none.env"))
     defaults = Settings.from_env()
     assert defaults.vision_model == "" and defaults.doc_table_max_rows == 200
-    monkeypatch.setenv("AUTOONTOLOGY_VISION_MODEL", " gemma4:e4b ")
-    monkeypatch.setenv("AUTOONTOLOGY_DOC_TABLE_MAX_ROWS", "50")
+    monkeypatch.setenv("ONTOLOGY_VISION_MODEL", " gemma4:e4b ")
+    monkeypatch.setenv("ONTOLOGY_DOC_TABLE_MAX_ROWS", "50")
     s = Settings.from_env()
     assert s.vision_model == "gemma4:e4b" and s.doc_table_max_rows == 50
     assert defaults.doc_max_bytes == 50 * 1024 * 1024
-    monkeypatch.setenv("AUTOONTOLOGY_DOC_MAX_BYTES", "1000")
+    monkeypatch.setenv("ONTOLOGY_DOC_MAX_BYTES", "1000")
     assert Settings.from_env().doc_max_bytes == 1000

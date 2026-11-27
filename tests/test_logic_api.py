@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """The logic routes (``/api/logic``), computed values on ``/api/objects``, the
-``ao logic`` commands and the agent tools ``list_functions`` / ``call_function``
+``onto logic`` commands and the agent tools ``list_functions`` / ``call_function``
 (sources faked; roles in ``test_permissions.py``)."""
 
 from __future__ import annotations
@@ -11,11 +11,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.logic import functions
-from autoontology.store.db import Store
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager
+from ontology.config import Settings
+from ontology.logic import functions
+from ontology.store.db import Store
+from ontology.web import app as web
+from ontology.web.runs import RunManager
 from tests import logic_fixtures as fx
 from tests.logic_fixtures import CON, INV
 from tests.test_logic import FUNCS, MIUSU, TODAY
@@ -224,7 +224,7 @@ def test_agent_function_tools(client):
 def test_cli_logic_commands(client, tmp_path):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     runner = CliRunner()
 

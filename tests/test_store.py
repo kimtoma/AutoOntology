@@ -3,27 +3,27 @@ import sqlite3
 
 import pytest
 
-from autoontology.store.db import MIGRATIONS, Store
+from ontology.store.db import MIGRATIONS, Store
 
 
 @pytest.fixture
 def store(tmp_path):
-    return Store(tmp_path / "autoontology.db")
+    return Store(tmp_path / "ontology.db")
 
 
 def test_schema_created_versioned_and_wal(store, tmp_path):
     assert store.schema_version() == MIGRATIONS[-1][0]
     assert store.migrate() == MIGRATIONS[-1][0]  # idempotent
-    conn = sqlite3.connect(tmp_path / "autoontology.db")
+    conn = sqlite3.connect(tmp_path / "ontology.db")
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     tables = {r[0] for r in conn.execute("select name from sqlite_master where type='table'")}
     assert {"schema_version", "sources", "runs", "steps"} <= tables
-    assert (tmp_path / "autoontology.db").stat().st_mode & 0o077 == 0
+    assert (tmp_path / "ontology.db").stat().st_mode & 0o077 == 0
 
 
 def test_source_crud(store):
     src = store.add_source(
-        name="hanbit", kind="files", locator="{}", pg_database="autoontology_src_hanbit"
+        name="hanbit", kind="files", locator="{}", pg_database="ontology_src_hanbit"
     )
     assert store.get_source("hanbit") == src
     assert store.get_source_by_id(src.id) == src
@@ -76,7 +76,7 @@ def test_interrupted_migration_leaves_no_partial_schema(tmp_path, monkeypatch):
     the DDL back, so the retry applies the migration cleanly."""
     import sqlite3
 
-    from autoontology.store import db
+    from ontology.store import db
 
     path = tmp_path / "s.db"
     Store(path)  # all shipped migrations
@@ -97,7 +97,7 @@ def test_interrupted_migration_leaves_no_partial_schema(tmp_path, monkeypatch):
 def test_interrupted_initial_migration_leaves_no_tables(tmp_path, monkeypatch):
     import sqlite3
 
-    from autoontology.store import db
+    from ontology.store import db
 
     path = tmp_path / "fresh.db"
     first_sql = db.MIGRATIONS[0][1] + "; INSERT INTO no_such VALUES (1)"
@@ -112,7 +112,7 @@ def test_interrupted_initial_migration_leaves_no_tables(tmp_path, monkeypatch):
 def test_concurrent_migrators_apply_each_migration_once(tmp_path):
     import threading
 
-    from autoontology.store.db import MIGRATIONS
+    from ontology.store.db import MIGRATIONS
 
     path = tmp_path / "c.db"
     errors = []
@@ -177,14 +177,14 @@ def _hold_write_lock(path):
 
 
 def test_lock_wait_is_bounded_by_the_store_deadline(tmp_path, monkeypatch):
-    """A lock that never clears fails after AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S with a clear
+    """A lock that never clears fails after ONTOLOGY_STORE_LOCK_TIMEOUT_S with a clear
     error, not after every retry's full busy timeout (~30 min)."""
     import time
 
-    from autoontology.store.db import StoreLocked
+    from ontology.store.db import StoreLocked
 
     store = Store(tmp_path / "s.db")
-    monkeypatch.setenv("AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S", "0.5")
+    monkeypatch.setenv("ONTOLOGY_STORE_LOCK_TIMEOUT_S", "0.5")
     holder = _hold_write_lock(store.path)
     started = time.monotonic()
     try:
@@ -201,7 +201,7 @@ def test_lock_wait_succeeds_after_release(tmp_path, monkeypatch):
     import threading
 
     store = Store(tmp_path / "s.db")
-    monkeypatch.setenv("AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S", "10")
+    monkeypatch.setenv("ONTOLOGY_STORE_LOCK_TIMEOUT_S", "10")
     holder = _hold_write_lock(store.path)
 
     def release():
@@ -217,7 +217,7 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
     at upgrade in ``term_legacy_descriptions`` (which apply never writes)."""
     import json
 
-    path = tmp_path / "autoontology.db"
+    path = tmp_path / "ontology.db"
     Store(path)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = OFF")
@@ -262,8 +262,8 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
     # a store already at v4 without the row: the read path backfills it the same way
     with sqlite3.connect(path) as conn:
         conn.execute("DELETE FROM term_legacy_descriptions")
-    from autoontology.store.alignments import AlignmentStore
-    from autoontology.unstructured.align import ANY_DESCRIPTION, LEGACY_BASELINE
+    from ontology.store.alignments import AlignmentStore
+    from ontology.unstructured.align import ANY_DESCRIPTION, LEGACY_BASELINE
 
     described = AlignmentStore(store).auto_descriptions()
     assert described["t-conf"] == {LEGACY_BASELINE, "기준 설명"}

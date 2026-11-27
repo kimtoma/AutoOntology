@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The workflow routes (``/api/workflows``) and the ``ao workflow`` commands: list with
+"""The workflow routes (``/api/workflows``) and the ``onto workflow`` commands: list with
 the next slot, manual runs (background and ``wait``), runs and their action runs, cancel,
 approvals resuming through the API, and accounts mode roles (sources faked; the runner in
 ``test_workflows.py``)."""
@@ -12,13 +12,13 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.logic import actions, functions, registry, workflows
-from autoontology.store import accounts as acc
-from autoontology.store.accounts import Accounts
-from autoontology.store.db import Store
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager
+from ontology.config import Settings
+from ontology.logic import actions, functions, registry, workflows
+from ontology.store import accounts as acc
+from ontology.store.accounts import Accounts
+from ontology.store.db import Store
+from ontology.web import app as web
+from ontology.web.runs import RunManager
 from tests import logic_fixtures as fx
 from tests.test_actions import activate_samples
 from tests.test_logic import TODAY
@@ -44,7 +44,7 @@ def _seed(store: Store, actor: str = "local") -> None:
 
 @pytest.fixture
 def client(isolated_env, backend, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_TZ", "Asia/Seoul")
+    monkeypatch.setenv("ONTOLOGY_TZ", "Asia/Seoul")
     settings = Settings.from_env()
     with TestClient(web.create_app(settings, runs=RunManager(settings, jobs=dict))) as c:
         store = Store.for_home(settings.home)
@@ -122,8 +122,8 @@ def test_cancel_route_and_audit(client):
 def test_cli_workflow_commands(client, monkeypatch):
     from typer.testing import CliRunner
 
-    from autoontology import cli_ops
-    from autoontology.cli import app
+    from ontology import cli_ops
+    from ontology.cli import app
 
     def down(*a, **kw):
         raise cli_ops.ServiceDown("http://127.0.0.1:0")
@@ -182,7 +182,7 @@ class _Down:
 def accounts_env(isolated_env, backend, monkeypatch):
     monkeypatch.setattr(acc, "PBKDF2_ROUNDS", 1000)
     monkeypatch.setattr(acc, "_DUMMY_HASH", None)
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     settings = Settings.from_env()
     app = web.create_app(settings, runs=RunManager(settings, jobs=dict))
     store = Store.for_home(settings.home)
@@ -194,7 +194,7 @@ def accounts_env(isolated_env, backend, monkeypatch):
         accounts.add_member(view.id, user.id, role)
         raw, _ = accounts.create_session(user.id)
         c = TestClient(app)
-        c.cookies.set("ao_session", raw)
+        c.cookies.set("onto_session", raw)
         return c
 
     owner = client("boss@example.com", "owner")

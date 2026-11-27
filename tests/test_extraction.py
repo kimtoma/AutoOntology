@@ -4,8 +4,8 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from autoontology.unstructured import consolidate, extractor, prompts, schemas
-from autoontology.unstructured.schemas import (
+from ontology.unstructured import consolidate, extractor, prompts, schemas
+from ontology.unstructured.schemas import (
     ChunkExtraction,
     MergeDecision,
     ValidatedConcept,
@@ -210,8 +210,8 @@ def test_extractor_switches_to_json_after_streak():
 
 
 def test_extract_mode_env(monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_EXTRACT_MODE", "bogus")
-    with pytest.raises(ValueError, match="AUTOONTOLOGY_EXTRACT_MODE"):
+    monkeypatch.setenv("ONTOLOGY_EXTRACT_MODE", "bogus")
+    with pytest.raises(ValueError, match="ONTOLOGY_EXTRACT_MODE"):
         extractor.extract_mode()
 
 
@@ -346,10 +346,10 @@ def test_judge_fail_closed():
 
 
 def test_merge_env(monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_MERGE_THRESHOLD", "1.5")
+    monkeypatch.setenv("ONTOLOGY_MERGE_THRESHOLD", "1.5")
     with pytest.raises(ValueError):
         consolidate.threshold_from_env()
-    monkeypatch.setenv("AUTOONTOLOGY_MERGE_THRESHOLD", "0.9")
+    monkeypatch.setenv("ONTOLOGY_MERGE_THRESHOLD", "0.9")
     assert consolidate.threshold_from_env() == 0.9
 
 
@@ -372,12 +372,12 @@ def test_evidence_ignores_quote_marks_but_not_typos():
 
 
 def test_workers_default_is_one_for_ollama(isolated_env, monkeypatch):
-    from autoontology.config import Settings
+    from ontology.config import Settings
 
     assert extractor.workers_default(Settings.from_env()) == 1
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")
     assert extractor.workers_default(Settings.from_env()) == 3
-    monkeypatch.setenv("AUTOONTOLOGY_LLM_WORKERS", "5")
+    monkeypatch.setenv("ONTOLOGY_LLM_WORKERS", "5")
     assert extractor.workers_default(Settings.from_env()) == 5
 
 
@@ -548,7 +548,7 @@ def test_retry_counter_matches_the_vendored_upstream_wording():
     upstream bump that rewords them fails here (over_timeout stays the robust signal)."""
     import logging
 
-    from autoontology.config import VENDOR_DIR
+    from ontology.config import VENDOR_DIR
 
     source = (VENDOR_DIR / "auto_ontology" / "utils" / "llm_invoke.py").read_text()
     templates = [

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The workflow scheduler (``autoontology/logic/scheduler.py``): slots of daily / hourly /
+"""The workflow scheduler (``ontology/logic/scheduler.py``): slots of daily / hourly /
 weekly schedules in a fixed zone, the grace window and activation time, one firing per
 slot across ticks and schedulers, the off setting, reconciling on every tick, the thread's
 start and stop, and the service lifespan."""
@@ -13,9 +13,9 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.logic import scheduler, workflows
-from autoontology.logic.scheduler import latest_slot, next_slot, slot_key
+from ontology.config import Settings
+from ontology.logic import scheduler, workflows
+from ontology.logic.scheduler import latest_slot, next_slot, slot_key
 from tests.test_workflows import WORKFLOW, _activate, env, sample_workflow  # noqa: F401
 
 UTC = dt.timezone.utc
@@ -50,13 +50,13 @@ def test_slots(schedule, now, latest, following):
 
 
 def test_local_zone_from_settings(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_TZ", "Asia/Seoul")
+    monkeypatch.setenv("ONTOLOGY_TZ", "Asia/Seoul")
     settings = Settings.from_env()
     assert settings.tz == "Asia/Seoul" and settings.workflows == "on"
     assert scheduler.local_now(settings).utcoffset() == dt.timedelta(hours=9)
-    monkeypatch.setenv("AUTOONTOLOGY_TZ", "Not/AZone")
+    monkeypatch.setenv("ONTOLOGY_TZ", "Not/AZone")
     assert scheduler.local_zone(Settings.from_env()) is not None  # falls back to local
-    monkeypatch.setenv("AUTOONTOLOGY_WORKFLOWS", "maybe")
+    monkeypatch.setenv("ONTOLOGY_WORKFLOWS", "maybe")
     with pytest.raises(ValueError):
         Settings.from_env()
 
@@ -127,11 +127,11 @@ def test_off_fires_nothing_but_still_reconciles(env, monkeypatch):  # noqa: F811
     run = workflows.run(settings, view, WORKFLOW, trigger="manual", fire_slot="m1", started_by="t")
     pending = view.action_runs().list(workflow_run_id=run.id, status="pending_approval")[0]
     workflows.uninstall()
-    from autoontology.logic import actions
+    from ontology.logic import actions
     from tests.test_workflows import OWNER
 
     actions.approve(settings, view, pending.id, OWNER)
-    monkeypatch.setenv("AUTOONTOLOGY_WORKFLOWS", "off")
+    monkeypatch.setenv("ONTOLOGY_WORKFLOWS", "off")
     off = Settings.from_env()
     now = latest_slot("daily 02:00", dt.datetime.now(KST)) + dt.timedelta(minutes=3)
     assert scheduler.Scheduler(off, view.store, background=False).tick(now) == []
@@ -195,7 +195,7 @@ def test_a_failing_tick_never_stops_the_thread(env, monkeypatch):  # noqa: F811
 
 
 def test_lifespan_starts_only_when_asked(isolated_env, monkeypatch):
-    from autoontology.web import app as web
+    from ontology.web import app as web
 
     settings = Settings.from_env()
     with TestClient(web.create_app(settings)) as client:

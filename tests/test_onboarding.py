@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from autoontology import onboarding
-from autoontology.config import Settings
-from autoontology.onboarding import (
+from ontology import onboarding
+from ontology.config import Settings
+from ontology.onboarding import (
     INIT_BLOCK,
     Detection,
     EnvFile,
@@ -17,7 +17,7 @@ from autoontology.onboarding import (
     describe_change,
     recommend_provider,
 )
-from autoontology.store.db import Store
+from ontology.store.db import Store
 
 
 def detection(**providers) -> Detection:
@@ -57,8 +57,8 @@ def test_recommend_provider_order(providers, expected):
 
 
 def test_detect_environment_uses_the_checks(isolated_env, monkeypatch):
-    from autoontology import doctor
-    from autoontology.doctor import Check
+    from ontology import doctor
+    from ontology.doctor import Check
 
     monkeypatch.setattr(doctor, "check_postgres", lambda s: [Check("postgres", "FAIL", "down")])
     monkeypatch.setattr(doctor, "check_node", lambda: Check("node", "OK", "v22"))
@@ -77,7 +77,7 @@ def test_detect_environment_uses_the_checks(isolated_env, monkeypatch):
 
 
 def test_provider_info_never_raises(isolated_env, monkeypatch):
-    from autoontology.web.providers import router
+    from ontology.web.providers import router
 
     def boom(self, *a, **k):
         raise RuntimeError("x")
@@ -88,7 +88,7 @@ def test_provider_info_never_raises(isolated_env, monkeypatch):
 
 
 def test_provider_info_for_a_missing_cli(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_CLAUDE_BIN", str(Path(isolated_env) / "no-claude"))
+    monkeypatch.setenv("ONTOLOGY_CLAUDE_BIN", str(Path(isolated_env) / "no-claude"))
     monkeypatch.setenv("PATH", str(isolated_env))
     info = onboarding.provider_info(Settings.from_env(), "claude")
     assert not info.found and not info.logged_in and info.remedy
@@ -96,41 +96,38 @@ def test_provider_info_for_a_missing_cli(isolated_env, monkeypatch):
 
 # --- EnvFile ----------------------------------------------------------------------------
 
-TEMPLATE = """# AutoOntology configuration.
+TEMPLATE = """# Ontology configuration.
 # --- Model providers ---
 # Chat provider: ollama | openai | claude | codex.
-AUTOONTOLOGY_CHAT_PROVIDER=ollama
+ONTOLOGY_CHAT_PROVIDER=ollama
 
 # Claude model.
-# AUTOONTOLOGY_CLAUDE_MODEL=claude-sonnet-5-5
+# ONTOLOGY_CLAUDE_MODEL=claude-sonnet-5-5
 POSTGRES_USER=me
 """
 
 
 def test_set_replaces_active_and_commented_lines_in_place():
     env = EnvFile(TEMPLATE, existed=True)
-    env.set("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
-    env.set("AUTOONTOLOGY_CLAUDE_MODEL", "claude-opus-5-5")
+    env.set("ONTOLOGY_CHAT_PROVIDER", "claude")
+    env.set("ONTOLOGY_CLAUDE_MODEL", "claude-opus-5-5")
     out = env.render()
     assert out == TEMPLATE.replace(
-        "AUTOONTOLOGY_CHAT_PROVIDER=ollama", "AUTOONTOLOGY_CHAT_PROVIDER=claude"
-    ).replace(
-        "# AUTOONTOLOGY_CLAUDE_MODEL=claude-sonnet-5-5", "AUTOONTOLOGY_CLAUDE_MODEL=claude-opus-5-5"
-    )
+        "ONTOLOGY_CHAT_PROVIDER=ollama", "ONTOLOGY_CHAT_PROVIDER=claude"
+    ).replace("# ONTOLOGY_CLAUDE_MODEL=claude-sonnet-5-5", "ONTOLOGY_CLAUDE_MODEL=claude-opus-5-5")
     assert INIT_BLOCK not in out
     assert env.changes() == [
-        ("AUTOONTOLOGY_CHAT_PROVIDER", "ollama", "claude"),
-        ("AUTOONTOLOGY_CLAUDE_MODEL", None, "claude-opus-5-5"),
+        ("ONTOLOGY_CHAT_PROVIDER", "ollama", "claude"),
+        ("ONTOLOGY_CLAUDE_MODEL", None, "claude-opus-5-5"),
     ]
 
 
 def test_set_appends_new_keys_under_one_block():
     env = EnvFile("A=1", existed=True)  # no trailing newline
-    env.set("AUTOONTOLOGY_VISION_MODEL", "gemma4:e4b")
-    env.set("AUTOONTOLOGY_EMBED_PROVIDER", "ollama")
+    env.set("ONTOLOGY_VISION_MODEL", "gemma4:e4b")
+    env.set("ONTOLOGY_EMBED_PROVIDER", "ollama")
     assert env.render() == (
-        f"A=1\n\n{INIT_BLOCK}\nAUTOONTOLOGY_VISION_MODEL=gemma4:e4b\n"
-        "AUTOONTOLOGY_EMBED_PROVIDER=ollama\n"
+        f"A=1\n\n{INIT_BLOCK}\nONTOLOGY_VISION_MODEL=gemma4:e4b\nONTOLOGY_EMBED_PROVIDER=ollama\n"
     )
     # the block is reused when lines follow it
     env.lines += ["\n", "# user note\n", "B=2\n"]
@@ -143,11 +140,11 @@ def test_set_appends_new_keys_under_one_block():
 def test_set_is_idempotent_and_quotes_odd_values():
     env = EnvFile(TEMPLATE, existed=True)
     for _ in range(3):
-        env.set("AUTOONTOLOGY_CHAT_PROVIDER", "codex")
+        env.set("ONTOLOGY_CHAT_PROVIDER", "codex")
         env.set("X_URL", "http://h:1/v1")
         env.set("X_TEXT", 'a b "c" #d')
     once = env.render()
-    env.set("AUTOONTOLOGY_CHAT_PROVIDER", "codex")
+    env.set("ONTOLOGY_CHAT_PROVIDER", "codex")
     assert env.render() == once and once.count("X_URL=") == 1
     assert env.get("X_TEXT") == 'a b "c" #d' and env.get("X_URL") == "http://h:1/v1"
     with pytest.raises(ValueError):
@@ -180,18 +177,18 @@ def test_write_is_atomic_with_backup_and_never_widens_the_mode(tmp_path):
     path.write_text(TEMPLATE, encoding="utf-8")
     os.chmod(path, 0o640)
     env = EnvFile.load(path)
-    env.set("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
+    env.set("ONTOLOGY_CHAT_PROVIDER", "claude")
     backup = env.write(path)
     assert backup is not None and backup.name.startswith(".env.bak-")
-    # secret values are scrubbed from backups (AUTOONTOLOGY_ENV_BACKUP_SECRETS=1 keeps them)
+    # secret values are scrubbed from backups (ONTOLOGY_ENV_BACKUP_SECRETS=1 keeps them)
     assert backup.read_text(encoding="utf-8") == onboarding.scrub_secrets(TEMPLATE)
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in path.read_text(encoding="utf-8")
+    assert "ONTOLOGY_CHAT_PROVIDER=claude" in path.read_text(encoding="utf-8")
     assert stat.S_IMODE(path.stat().st_mode) == 0o600  # 0640 narrowed to owner-only
     assert not [p for p in tmp_path.iterdir() if ".tmp-" in p.name]
     # a second write of the same content changes nothing
     assert env.changes() == [] and env.write(path) is None
     # another change on the same second gets its own backup
-    env.set("AUTOONTOLOGY_CHAT_PROVIDER", "codex")
+    env.set("ONTOLOGY_CHAT_PROVIDER", "codex")
     second = env.write(path)
     assert second is not None and second != backup and backup.exists()
 
@@ -201,7 +198,7 @@ def test_new_file_from_template_is_0600(tmp_path):
     template.write_text(TEMPLATE, encoding="utf-8")
     path = tmp_path / "sub" / ".env"
     env = EnvFile.load(path, template=template)
-    env.set("AUTOONTOLOGY_CHAT_PROVIDER", "ollama")
+    env.set("ONTOLOGY_CHAT_PROVIDER", "ollama")
     assert ("POSTGRES_USER", None, "me") in env.changes()  # a new file: every key is new
     assert env.write() is None  # a new file has no backup
     assert path.read_text(encoding="utf-8") == TEMPLATE
@@ -210,8 +207,8 @@ def test_new_file_from_template_is_0600(tmp_path):
 
 
 def test_describe_change_hides_secrets():
-    assert describe_change("AUTOONTOLOGY_OPENAI_API_KEY", None, "sk-x") == (
-        "AUTOONTOLOGY_OPENAI_API_KEY: (unset) -> (hidden)"
+    assert describe_change("ONTOLOGY_OPENAI_API_KEY", None, "sk-x") == (
+        "ONTOLOGY_OPENAI_API_KEY: (unset) -> (hidden)"
     )
     assert describe_change("A", "1", "2") == "A: 1 -> 2"
 
@@ -237,7 +234,7 @@ def _samples(root: Path) -> Path:
 
 
 def _settings(isolated_env, monkeypatch) -> Settings:
-    monkeypatch.setenv("AUTOONTOLOGY_SAMPLES_DIR", str(_samples(Path(isolated_env))))
+    monkeypatch.setenv("ONTOLOGY_SAMPLES_DIR", str(_samples(Path(isolated_env))))
     return Settings.from_env()
 
 
@@ -301,7 +298,7 @@ def test_register_sample_set_is_idempotent_and_replaces_moved_paths(isolated_env
 
 
 def test_missing_set_folder_says_what_to_do(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_SAMPLES_DIR", str(Path(isolated_env) / "none"))
+    monkeypatch.setenv("ONTOLOGY_SAMPLES_DIR", str(Path(isolated_env) / "none"))
     settings = Settings.from_env()
     with pytest.raises(onboarding.SampleSetError, match="git pull"):
         onboarding.sample_sources(settings, "hanbit")
@@ -316,11 +313,11 @@ def test_duration_rows_mark_estimates_and_the_current_provider():
 
 
 def test_set_keeps_an_export_prefix():
-    env = EnvFile("export AUTOONTOLOGY_CHAT_PROVIDER=ollama\n  export  A=1\n", existed=True)
-    env.set("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
+    env = EnvFile("export ONTOLOGY_CHAT_PROVIDER=ollama\n  export  A=1\n", existed=True)
+    env.set("ONTOLOGY_CHAT_PROVIDER", "claude")
     env.set("A", "2")
-    assert env.render() == "export AUTOONTOLOGY_CHAT_PROVIDER=claude\nexport A=2\n"
-    assert env.values() == {"AUTOONTOLOGY_CHAT_PROVIDER": "claude", "A": "2"}
+    assert env.render() == "export ONTOLOGY_CHAT_PROVIDER=claude\nexport A=2\n"
+    assert env.values() == {"ONTOLOGY_CHAT_PROVIDER": "claude", "A": "2"}
 
 
 def test_duration_comment_and_hanbit_counts_are_current():
@@ -343,7 +340,7 @@ def test_env_backup_is_0600_from_creation(tmp_path, monkeypatch):
     """The backup holds the same credentials as `.env`: it is never readable by others,
     not even while its bytes are being written (umask 022, traversable checkout)."""
     path = tmp_path / ".env"
-    path.write_text(TEMPLATE + "AUTOONTOLOGY_OPENAI_API_KEY=sk-secret\n", encoding="utf-8")
+    path.write_text(TEMPLATE + "ONTOLOGY_OPENAI_API_KEY=sk-secret\n", encoding="utf-8")
     os.chmod(path, 0o600)
     old_umask = os.umask(0o022)
     seen: list[tuple[str, int]] = []
@@ -356,7 +353,7 @@ def test_env_backup_is_0600_from_creation(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "write", watching_write)
     try:
         env = EnvFile.load(path)
-        env.set("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
+        env.set("ONTOLOGY_CHAT_PROVIDER", "claude")
         backup = env.write(path)
     finally:
         os.umask(old_umask)
@@ -365,7 +362,7 @@ def test_env_backup_is_0600_from_creation(tmp_path, monkeypatch):
     assert seen and all(mode & 0o077 == 0 for _n, mode in seen)
     assert stat.S_IMODE(backup.stat().st_mode) == 0o600
     assert "sk-secret" not in backup.read_text(encoding="utf-8")
-    assert "AUTOONTOLOGY_OPENAI_API_KEY=***" in backup.read_text(encoding="utf-8")
+    assert "ONTOLOGY_OPENAI_API_KEY=***" in backup.read_text(encoding="utf-8")
 
 
 def test_failed_env_backup_leaves_no_partial_file(tmp_path, monkeypatch):
@@ -373,7 +370,7 @@ def test_failed_env_backup_leaves_no_partial_file(tmp_path, monkeypatch):
     path.write_text(TEMPLATE, encoding="utf-8")
     os.chmod(path, 0o600)
     env = EnvFile.load(path)
-    env.set("AUTOONTOLOGY_CHAT_PROVIDER", "claude")
+    env.set("ONTOLOGY_CHAT_PROVIDER", "claude")
 
     def broken_write(fd, data):
         raise OSError(28, "No space left on device")
@@ -406,7 +403,7 @@ def test_sample_load_never_removes_a_source_registered_after_the_preflight(
 
     def preflight_then_concurrent_registration(*args, **kwargs):
         out = real_preflight(*args, **kwargs)
-        from autoontology.engine.extract import ensure_documents_source
+        from ontology.engine.extract import ensure_documents_source
 
         ensure_documents_source(store, "quick-docs", other)  # the interleaved request
         return out
@@ -427,10 +424,10 @@ def _mode(path):
 
 def test_env_write_is_never_more_open_than_0600_at_any_step(tmp_path, monkeypatch):
     """The temp file, the backup and the result are owner-only, even for a 0644 .env."""
-    from autoontology import onboarding as ob
+    from ontology import onboarding as ob
 
     path = tmp_path / ".env"
-    path.write_text("A=1\nAUTOONTOLOGY_OPENAI_API_KEY=sk-oldsecret123\n")
+    path.write_text("A=1\nONTOLOGY_OPENAI_API_KEY=sk-oldsecret123\n")
     path.chmod(0o644)
     seen = []
     real_replace = os.replace
@@ -441,7 +438,7 @@ def test_env_write_is_never_more_open_than_0600_at_any_step(tmp_path, monkeypatc
 
     monkeypatch.setattr(ob.os, "replace", replace)
     env = ob.EnvFile.load(path)
-    env.set("AUTOONTOLOGY_OPENAI_API_KEY", "sk-newsecret456")
+    env.set("ONTOLOGY_OPENAI_API_KEY", "sk-newsecret456")
     backup = env.write(path)
     assert seen == [("tmp", 0o600)]
     assert _mode(path) == 0o600 and _mode(backup) == 0o600
@@ -454,32 +451,30 @@ def test_env_write_is_never_more_open_than_0600_at_any_step(tmp_path, monkeypatc
 
 
 def test_env_backups_hold_no_secret_values_unless_asked(tmp_path, monkeypatch):
-    from autoontology import onboarding as ob
+    from ontology import onboarding as ob
 
     path = tmp_path / ".env"
-    path.write_text(
-        "# keep\nA=1\nAUTOONTOLOGY_OPENAI_API_KEY=sk-oldsecret123\nPOSTGRES_PASSWORD=pw\n"
-    )
+    path.write_text("# keep\nA=1\nONTOLOGY_OPENAI_API_KEY=sk-oldsecret123\nPOSTGRES_PASSWORD=pw\n")
     env = ob.EnvFile.load(path)
-    env.unset("AUTOONTOLOGY_OPENAI_API_KEY")
+    env.unset("ONTOLOGY_OPENAI_API_KEY")
     backup = env.write(path)
     text = backup.read_text()
     assert "sk-oldsecret123" not in text and "pw\n" not in text
-    assert "AUTOONTOLOGY_OPENAI_API_KEY=***" in text and "# keep\nA=1\n" in text
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_BACKUP_SECRETS", "1")
+    assert "ONTOLOGY_OPENAI_API_KEY=***" in text and "# keep\nA=1\n" in text
+    monkeypatch.setenv("ONTOLOGY_ENV_BACKUP_SECRETS", "1")
     env.set("A", "2")
     kept = env.write(path)
     assert "POSTGRES_PASSWORD=pw" in kept.read_text()
 
 
 def test_commented_out_secrets_are_scrubbed_from_backups_too():
-    from autoontology.onboarding import scrub_secrets
+    from ontology.onboarding import scrub_secrets
 
     text = (
-        "# AUTOONTOLOGY_OPENAI_API_KEY=sk-oldcomment123\n#POSTGRES_PASSWORD=pw\n"
-        "# a plain comment = fine\n# AUTOONTOLOGY_CHAT_PROVIDER=claude\n"
+        "# ONTOLOGY_OPENAI_API_KEY=sk-oldcomment123\n#POSTGRES_PASSWORD=pw\n"
+        "# a plain comment = fine\n# ONTOLOGY_CHAT_PROVIDER=claude\n"
     )
     out = scrub_secrets(text)
     assert "sk-oldcomment123" not in out and "=pw" not in out
-    assert "# AUTOONTOLOGY_OPENAI_API_KEY=***\n#POSTGRES_PASSWORD=***\n" in out
-    assert "# a plain comment = fine\n# AUTOONTOLOGY_CHAT_PROVIDER=claude\n" in out
+    assert "# ONTOLOGY_OPENAI_API_KEY=***\n#POSTGRES_PASSWORD=***\n" in out
+    assert "# a plain comment = fine\n# ONTOLOGY_CHAT_PROVIDER=claude\n" in out

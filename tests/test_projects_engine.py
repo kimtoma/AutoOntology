@@ -11,19 +11,19 @@ from pathlib import Path
 
 import pytest
 
-from autoontology import config
-from autoontology.config import Settings
-from autoontology.engine import build as bj
-from autoontology.engine import export_job, jobs, upstream_semantic, upstream_terms
-from autoontology.engine import extract as ex
-from autoontology.engine.jobs import JobError
-from autoontology.ontology import model as merged
-from autoontology.ontology.model import MergedOntology
-from autoontology.store import db
-from autoontology.store.db import ProjectStore, Store, root_store, scoped
-from autoontology.store.decisions import DecisionStore
-from autoontology.structured import pipeline, remove
-from autoontology.structured.pipeline import SourceError
+from ontology import config
+from ontology.config import Settings
+from ontology.engine import build as bj
+from ontology.engine import export_job, jobs, upstream_semantic, upstream_terms
+from ontology.engine import extract as ex
+from ontology.engine.jobs import JobError
+from ontology.ontology import model as merged
+from ontology.ontology.model import MergedOntology
+from ontology.store import db
+from ontology.store.db import ProjectStore, Store, root_store, scoped
+from ontology.store.decisions import DecisionStore
+from ontology.structured import pipeline, remove
+from ontology.structured.pipeline import SourceError
 from tests.test_build import FakeLLM, env, run  # noqa: F401 - the build fixture and runner
 
 # --- the project view ----------------------------------------------------------------------
@@ -148,7 +148,7 @@ def test_an_active_run_of_another_project_refuses_a_build(env):  # noqa: F811
 
 
 def test_the_run_manager_gates_builds_across_projects(isolated_env):
-    from autoontology.web.runs import RunManager, RunStartError
+    from ontology.web.runs import RunManager, RunStartError
 
     settings = Settings.from_env()
     store = Store.for_home(settings.home)
@@ -191,7 +191,7 @@ def test_the_run_manager_gates_builds_across_projects(isolated_env):
 def test_release_never_frees_the_other_kind_of_claim(isolated_env):
     """A project's claim (a rename) and an installation-wide claim (a restart) of the same
     name are released by their own method only."""
-    from autoontology.web.runs import WORKSPACE, RunManager
+    from ontology.web.runs import WORKSPACE, RunManager
 
     settings = Settings.from_env()
     manager = RunManager(settings, jobs=lambda: {})
@@ -211,18 +211,18 @@ def test_release_never_frees_the_other_kind_of_claim(isolated_env):
 
 
 def test_source_database_names_per_project_and_their_length_budget():
-    assert pipeline.pg_database_for("orders") == "autoontology_src_orders"
-    assert pipeline.pg_database_for("orders", "sales-eu") == "autoontology_src_sales_eu__orders"
+    assert pipeline.pg_database_for("orders") == "ontology_src_orders"
+    assert pipeline.pg_database_for("orders", "sales-eu") == "ontology_src_sales_eu__orders"
     assert config.PROJECT_SLUG_MAX_LEN == db.SLUG_MAX == 24
-    assert config.PROJECT_SOURCE_NAME_MAX_LEN == 63 - 17 - 24 - 2 == 20
-    assert config.source_name_max_len(None) == 46
-    assert config.source_name_max_len("ab") == 46 - 2 - 2
+    assert config.PROJECT_SOURCE_NAME_MAX_LEN == 63 - 13 - 24 - 2 == 24
+    assert config.source_name_max_len(None) == 50
+    assert config.source_name_max_len("ab") == 50 - 2 - 2
     slug = "a" * 24
-    name = "n" * 20
+    name = "n" * 24
     assert pipeline.validate_source_name(name, slug) == name
     assert len(pipeline.pg_database_for(name, slug)) == 63
     assert config.PG_DATABASE_RE.fullmatch(pipeline.pg_database_for(name, slug))
-    with pytest.raises(SourceError, match=f"at most 20 characters in project '{slug}'"):
+    with pytest.raises(SourceError, match=f"at most 24 characters in project '{slug}'"):
         pipeline.validate_source_name(name + "x", slug)
     with pytest.raises(ValueError, match="63"):
         config.source_database_name(name + "x", slug)
@@ -235,17 +235,17 @@ def test_new_sources_of_another_project_get_slugged_databases(store, tmp_path):
     beta = store.create_project("sales-eu")
     mine = pipeline.add_source(store, str(data), name="orders")
     theirs = pipeline.add_source(beta, str(data), name="orders")
-    assert mine.pg_database == "autoontology_src_orders"
-    assert theirs.pg_database == "autoontology_src_sales_eu__orders"
+    assert mine.pg_database == "ontology_src_orders"
+    assert theirs.pg_database == "ontology_src_sales_eu__orders"
     assert theirs.project_id == beta.id
-    assert pipeline.catalog_database_name(theirs) == "autoontology_src_sales_eu__orders"
+    assert pipeline.catalog_database_name(theirs) == "ontology_src_sales_eu__orders"
     # an existing row keeps the database it stores
     legacy = beta.add_source(
-        name="legacy", kind="files", locator=mine.locator, pg_database="autoontology_src_legacy"
+        name="legacy", kind="files", locator=mine.locator, pg_database="ontology_src_legacy"
     )
-    assert pipeline.catalog_database_name(legacy) == "autoontology_src_legacy"
-    with pytest.raises(SourceError, match="at most 36 characters in project 'sales-eu'"):
-        pipeline.add_source(beta, str(data), name="x" * 37)
+    assert pipeline.catalog_database_name(legacy) == "ontology_src_legacy"
+    with pytest.raises(SourceError, match="at most 40 characters in project 'sales-eu'"):
+        pipeline.add_source(beta, str(data), name="x" * 41)
     # a default-project name that spells a project database is refused there too
     store.create_project("beta")
     pipeline.add_source(store, str(data), name="beta__x")
@@ -274,18 +274,18 @@ def test_orphan_connections_count_every_projects_sources(store, isolated_env):
     class Client:
         def list_connections(self):
             return [
-                {"database_name": "autoontology_src_beta__orders"},
-                {"database_name": "autoontology_src_gone"},
+                {"database_name": "ontology_src_beta__orders"},
+                {"database_name": "ontology_src_gone"},
             ]
 
     orphans = remove.find_orphan_connections(
         Settings.from_env(), store, Client(), database_exists=lambda name: True
     )
-    assert [o.name for o in orphans] == ["autoontology_src_gone"]
+    assert [o.name for o in orphans] == ["ontology_src_gone"]
 
 
 def test_ingest_delete_refuses_another_projects_database(store):
-    from autoontology.web.app import delete_refusal
+    from ontology.web.app import delete_refusal
 
     beta = store.create_project("beta")
     pipeline.add_source(store, "postgresql://u:p@h/shop", name="shop")
@@ -301,7 +301,7 @@ def test_ingest_delete_refuses_another_projects_database(store):
 
 def test_upstream_term_writes_are_limited_to_the_projects_databases(monkeypatch):
     monkeypatch.setattr(upstream_semantic, "term_databases_statement", lambda s, t: ("q", t))
-    rows = [{"name": "autoontology_src_beta__orders"}]
+    rows = [{"name": "ontology_src_beta__orders"}]
 
     class Upstream:
         def query_write(self, statement):
@@ -310,12 +310,12 @@ def test_upstream_term_writes_are_limited_to_the_projects_databases(monkeypatch)
 
     up = {"s": None, "store": Upstream}
     upstream_terms._guard(up, "term-1", None)  # no project given: no check
-    upstream_terms._guard(up, "term-1", ["AUTOONTOLOGY_SRC_BETA__ORDERS"])
+    upstream_terms._guard(up, "term-1", ["ONTOLOGY_SRC_BETA__ORDERS"])
     with pytest.raises(upstream_terms.TermNotInProject, match="term-1"):
-        upstream_terms._guard(up, "term-1", ["autoontology_src_orders"])
+        upstream_terms._guard(up, "term-1", ["ontology_src_orders"])
     rows.clear()  # a Term no table represents: no project owns it
     with pytest.raises(upstream_terms.TermNotInProject):
-        upstream_terms._guard(up, "term-1", ["autoontology_src_beta__orders"])
+        upstream_terms._guard(up, "term-1", ["ontology_src_beta__orders"])
 
 
 def test_the_term_databases_statement_joins_the_catalog():
@@ -431,7 +431,7 @@ def _snapshot(view: ProjectStore, name: str) -> int:
 
 
 def test_playground_scopes_are_per_project(store):
-    from autoontology.playground.service import Playground, PlaygroundError
+    from ontology.playground.service import Playground, PlaygroundError
 
     beta = store.create_project("beta", name="Beta")
     _snapshot(store.project(), "default")
@@ -458,8 +458,8 @@ def test_playground_scopes_are_per_project(store):
 
 
 def test_an_agent_token_reads_only_its_project(isolated_env):
-    from autoontology.web.agent_api import AgentService, ToolError
-    from autoontology.web.api import Api
+    from ontology.web.agent_api import AgentService, ToolError
+    from ontology.web.api import Api
 
     settings = Settings.from_env()
     api = Api(settings)

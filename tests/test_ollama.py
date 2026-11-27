@@ -5,8 +5,8 @@ import subprocess
 import httpx
 import pytest
 
-from autoontology.engine import ollama
-from autoontology.engine.ollama import NEW1, NEW2, OLD1, OLD2, TemplatePatchError
+from ontology.engine import ollama
+from ontology.engine.ollama import NEW1, NEW2, OLD1, OLD2, TemplatePatchError
 
 BASE_TEMPLATE = "{{- range $i, $_ := .Messages }}\n" + OLD1 + "\nmiddle\n" + OLD2 + "{{ end }}\n"
 

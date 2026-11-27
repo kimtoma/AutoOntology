@@ -5,13 +5,13 @@ import datetime as dt
 
 import pytest
 
-from autoontology.config import PG_MAINTENANCE_DB, Settings
-from autoontology.engine import pg
-from autoontology.structured.loaders import discover_files, load_files_to_postgres
+from ontology.config import PG_MAINTENANCE_DB, Settings
+from ontology.engine import pg
+from ontology.structured.loaders import discover_files, load_files_to_postgres
 
 pytestmark = pytest.mark.integration
 
-DB = "autoontology_src_pytest_loader"
+DB = "ontology_src_pytest_loader"
 
 
 @pytest.fixture

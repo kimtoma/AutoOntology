@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.store.db import Store
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager
+from ontology.config import Settings
+from ontology.store.db import Store
+from ontology.web import app as web
+from ontology.web.runs import RunManager
 from tests.test_web_api import API, FakeJobs
 
 
@@ -23,7 +23,7 @@ def client(isolated_env, monkeypatch):
     (root / "secret").mkdir()  # outside the allowlist: never listed
     (root / "secret" / "structured").mkdir()
     (root / "secret" / "structured" / "x.csv").write_text("a\n1\n")
-    monkeypatch.setenv("AUTOONTOLOGY_SAMPLES_DIR", str(root))
+    monkeypatch.setenv("ONTOLOGY_SAMPLES_DIR", str(root))
     settings = Settings.from_env()
     manager = RunManager(settings, jobs=FakeJobs().table)
     return TestClient(web.create_app(settings, runs=manager)), settings, manager
@@ -47,7 +47,7 @@ def test_list_samples(client):
 def test_list_samples_names_formats_and_expected_build_times(client):
     """The UI's "Load sample data" dialog shows each source's formats and the expected
     build time per provider (the table `demo` prints)."""
-    from autoontology.onboarding import DEMO_DURATIONS
+    from ontology.onboarding import DEMO_DURATIONS
 
     c, *_ = client
     quick = c.get(f"{API}/samples").json()[0]
@@ -113,7 +113,7 @@ def test_load_rejects_path_shaped_names(client, name):
 
 
 def test_replacing_a_source_needs_replace_true(client, monkeypatch):
-    from autoontology.structured import remove
+    from ontology.structured import remove
 
     c, settings, _ = client
     removed = []
@@ -144,8 +144,8 @@ def test_replacing_a_source_needs_replace_true(client, monkeypatch):
 
 def test_load_holds_the_workspace_while_registering(client, monkeypatch):
     """No run can start between the run-active check and the registration."""
-    from autoontology import onboarding
-    from autoontology.web.runs import RunStartError
+    from ontology import onboarding
+    from ontology.web.runs import RunStartError
 
     c, _settings, manager = client
     seen = []
@@ -165,7 +165,7 @@ def test_load_holds_the_workspace_while_registering(client, monkeypatch):
 def test_source_registration_during_a_sample_load_is_409_busy(client, monkeypatch, tmp_path):
     """A JSON `POST /api/sources` while a sample load holds the workspace is refused (409
     `busy`) instead of registering a source the load could then remove."""
-    from autoontology import onboarding
+    from ontology import onboarding
 
     c, settings, manager = client
     other = tmp_path / "mine"

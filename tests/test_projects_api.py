@@ -15,15 +15,15 @@ import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from autoontology import cli_ops
-from autoontology.cli import app as cli_app
-from autoontology.config import Settings
-from autoontology.ontology import model as merged
-from autoontology.store.db import Store
-from autoontology.store.decisions import Decision
-from autoontology.web import api as web_api
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager
+from ontology import cli_ops
+from ontology.cli import app as cli_app
+from ontology.config import Settings
+from ontology.ontology import model as merged
+from ontology.store.db import Store
+from ontology.store.decisions import Decision
+from ontology.web import api as web_api
+from ontology.web import app as web
+from ontology.web.runs import RunManager
 from tests.test_build import env  # noqa: F401 - the build fixture (the ops fixture's)
 from tests.test_decisions import _rows, ops  # noqa: F401
 from tests.test_web_api import FakeJobs
@@ -31,7 +31,7 @@ from tests.test_web_api import FakeJobs
 API = "/api"
 BETA = f"{API}/projects/beta"
 runner = CliRunner()
-log = logging.getLogger("autoontology.jobs")
+log = logging.getLogger("ontology.jobs")
 
 
 @pytest.fixture
@@ -142,8 +142,8 @@ def test_archived_projects_are_read_only(web_env, isolated_env):
 def test_permission_hooks_cover_reads_settings_and_conversations(web_env, monkeypatch):
     """Every project request asks for project.read; deleting a conversation asks for
     playground.manage; the settings and provider-test routes ask installation-wide."""
-    from autoontology.web import projects, settings_api
-    from autoontology.web.api import ApiError
+    from ontology.web import projects, settings_api
+    from ontology.web.api import ApiError
 
     c = web_env["c"]
     asked: list[str] = []
@@ -357,7 +357,7 @@ def test_samples_load_into_the_context_project(web_env, isolated_env, monkeypatc
     (root / "quickstart" / "structured" / "customers.csv").write_text("id\n1\n2\n")
     (root / "quickstart" / "documents").mkdir()
     (root / "quickstart" / "documents" / "규정.md").write_text("# 규정\n본문\n", encoding="utf-8")
-    monkeypatch.setenv("AUTOONTOLOGY_SAMPLES_DIR", str(root))
+    monkeypatch.setenv("ONTOLOGY_SAMPLES_DIR", str(root))
     settings = Settings.from_env()
     c = TestClient(web.create_app(settings, runs=RunManager(settings, jobs=FakeJobs().table)))
     resp = c.post(f"{BETA}/samples/load", json={"set": "quickstart"})
@@ -432,7 +432,7 @@ def test_playground_conversations_survive_a_project_rename(web_env):
     """The playground keys conversations by the project id: a rename and the next build
     (whose ontology takes the new name) keep them; rows of the old name-keyed scope are
     adopted, with their element index."""
-    from autoontology.playground.store import IndexRow
+    from ontology.playground.store import IndexRow
 
     c, store = web_env["c"], web_env["store"]
     beta = store.project("beta")
@@ -460,7 +460,7 @@ def test_playground_sql_targets_only_the_projects_databases(web_env, isolated_en
     """No built structured source: 400 before anything goes upstream (the agent would pick
     any database of the shared catalog). Another project's source is unknown; the client's
     conversation id is never forwarded as is."""
-    from autoontology.web import playground_api
+    from ontology.web import playground_api
 
     c, store = web_env["c"], web_env["store"]
     seen: list[dict] = []
@@ -535,7 +535,7 @@ def _down(settings):
 @pytest.fixture
 def cli_env(isolated_env, monkeypatch):
     monkeypatch.setattr(cli_ops, "http_client", _down)
-    monkeypatch.delenv("AUTOONTOLOGY_PROJECT", raising=False)
+    monkeypatch.delenv("ONTOLOGY_PROJECT", raising=False)
     settings = Settings.from_env()
     store = Store.for_home(settings.home, default_project_slug=settings.workspace)
     return {"settings": settings, "store": store}
@@ -601,9 +601,9 @@ def test_cli_project_option_scopes_store_and_api_calls(cli_env, isolated_env, mo
     assert [r["revision"] for r in revs["revisions"]] == [1]
     revs = json.loads(_ok(["ontology", "revisions", "--json"]).output)
     assert [r["revision"] for r in revs["revisions"]] == [2, 1]
-    monkeypatch.setenv("AUTOONTOLOGY_PROJECT", "beta")
+    monkeypatch.setenv("ONTOLOGY_PROJECT", "beta")
     assert json.loads(_ok(["ontology", "--json"]).output)["workspace"] == "Beta"
-    monkeypatch.delenv("AUTOONTOLOGY_PROJECT")
+    monkeypatch.delenv("ONTOLOGY_PROJECT")
     tok = json.loads(_ok(["-p", "beta", "agent", "tokens", "create", "a", "--json"]).output)
     assert json.loads(_ok(["agent", "tokens", "list", "--json"]).output)["tokens"] == []
     listed = json.loads(_ok(["-p", "beta", "agent", "tokens", "list", "--json"]).output)

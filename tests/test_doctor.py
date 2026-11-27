@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: MIT
 import pytest
 
-from autoontology import doctor
-from autoontology.config import Settings
-from autoontology.doctor import Check, exit_code, format_checks
+from ontology import doctor
+from ontology.config import Settings
+from ontology.doctor import Check, exit_code, format_checks
 
 
 def test_format_checks_aligns_columns():
     checks = [
         Check(".env", "OK", "/x/.env"),
-        Check("alembic", "WARN", "current none", "run `autoontology migrate`"),
+        Check("alembic", "WARN", "current none", "run `onto migrate`"),
         Check("postgres", "FAIL", "refused", "docker compose up -d"),
     ]
     lines = format_checks(checks).splitlines()
     assert lines[0].split() == ["CHECK", "STATUS", "DETAIL", "REMEDY"]
     status_col = lines[0].index("STATUS")
     assert [line[status_col : status_col + 4] for line in lines[1:]] == ["OK  ", "WARN", "FAIL"]
-    assert lines[2].endswith("run `autoontology migrate`")
+    assert lines[2].endswith("run `onto migrate`")
 
 
 def test_exit_code_only_fails_on_fail():
@@ -49,12 +49,12 @@ def test_skip_models(isolated_env, monkeypatch):
 
 
 def _openai(monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")
-    monkeypatch.setenv("AUTOONTOLOGY_EMBED_PROVIDER", "openai")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_BASE_URL", "https://llm.example.test/v1")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_API_KEY", "sk-real")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_CHAT_MODEL", "m")
-    monkeypatch.setenv("AUTOONTOLOGY_OPENAI_EMBED_MODEL", "e")
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_EMBED_PROVIDER", "openai")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_BASE_URL", "https://llm.example.test/v1")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_API_KEY", "sk-real")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_CHAT_MODEL", "m")
+    monkeypatch.setenv("ONTOLOGY_OPENAI_EMBED_MODEL", "e")
 
 
 def test_ollama_check_only_for_ollama_profile(isolated_env, monkeypatch):
@@ -70,17 +70,17 @@ def test_ollama_check_only_for_ollama_profile(isolated_env, monkeypatch):
 
 def test_invalid_profile_skips_network_checks(isolated_env, monkeypatch):
     _stub_infra(monkeypatch)
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", "openai")  # no base URL nor key
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", "openai")  # no base URL nor key
     checks = doctor.run_checks(Settings.from_env())
     profile = next(c for c in checks if c.name.startswith("model profile"))
-    assert profile.status == "FAIL" and "AUTOONTOLOGY_OPENAI_BASE_URL" in profile.detail
+    assert profile.status == "FAIL" and "ONTOLOGY_OPENAI_BASE_URL" in profile.detail
     assert [c.status for c in checks if "endpoint" in c.name] == ["SKIP", "SKIP"]
 
 
 def test_openai_chat_check_calls_the_endpoint_directly(isolated_env, monkeypatch):
     import httpx
 
-    from autoontology.web.providers import passthrough
+    from ontology.web.providers import passthrough
 
     _openai(monkeypatch)
     seen = []
@@ -144,19 +144,19 @@ class _FakeConn:
 def test_postgres_errors_after_connect_become_fail_rows(isolated_env, monkeypatch):
     import psycopg
 
-    from autoontology.engine import pg
+    from ontology.engine import pg
 
     settings = Settings.from_env()
     monkeypatch.setattr(pg, "connect", lambda *a, **k: _FakeConn())
 
     def refuse(*_a, **_k):
-        raise psycopg.OperationalError("connection to autoontology refused\\ndetail")
+        raise psycopg.OperationalError("connection to ontology refused\\ndetail")
 
     monkeypatch.setattr(pg, "database_exists", refuse)
     checks = doctor.check_postgres(settings)
     assert [(c.name, c.status) for c in checks] == [
         ("postgres", "OK"),
-        ("database autoontology", "FAIL"),
+        ("database ontology", "FAIL"),
     ]
     assert "OperationalError" in checks[1].detail
 
@@ -184,7 +184,7 @@ def test_ollama_check_wants_the_no_think_alias(isolated_env, monkeypatch):
     monkeypatch.setattr(doctor.httpx, "get", lambda *a, **k: _Resp(["qwen3:8b", "bge-m3:latest"]))
     check = doctor.check_ollama(settings)
     assert check.status == "FAIL" and "openai/qwen3:8b" in check.detail
-    assert check.remedy == "uv run autoontology setup"
+    assert check.remedy == "uv run onto setup"
     monkeypatch.setattr(
         doctor.httpx, "get", lambda *a, **k: _Resp(["openai/qwen3:8b", "bge-m3:latest"])
     )
@@ -192,7 +192,7 @@ def test_ollama_check_wants_the_no_think_alias(isolated_env, monkeypatch):
 
 
 def test_no_think_check_reports_completion_tokens(isolated_env, monkeypatch):
-    from autoontology.engine import ollama
+    from ontology.engine import ollama
 
     settings = Settings.from_env()
     monkeypatch.setattr(ollama, "chat_probe", lambda *a, **k: ("pong", 2))
@@ -201,11 +201,11 @@ def test_no_think_check_reports_completion_tokens(isolated_env, monkeypatch):
     monkeypatch.setattr(ollama, "chat_probe", lambda *a, **k: ("<think>..", 190))
     check = doctor.check_no_think(settings)
     assert check.status == "FAIL" and "completion_tokens 190" in check.detail
-    assert "autoontology setup" in check.remedy
+    assert "onto setup" in check.remedy
 
 
 def test_vector_table_dimension_row(isolated_env, monkeypatch):
-    from autoontology.engine import jobs
+    from ontology.engine import jobs
 
     settings = Settings.from_env()
     monkeypatch.setattr(jobs, "embedding_dimension", lambda s: 1024)
@@ -266,7 +266,7 @@ def test_ollama_profile_runs_no_think_and_vector_rows(isolated_env, monkeypatch)
 def test_ollama_chat_check_uses_proxy_payload_directly(isolated_env, monkeypatch):
     import httpx
 
-    from autoontology.engine import ollama
+    from ontology.engine import ollama
 
     settings = Settings.from_env()
     seen = {}
@@ -297,7 +297,7 @@ def test_kordoc_row_warns_with_install_command(isolated_env, monkeypatch):
     monkeypatch.delenv("KORDOC_CLI", raising=False)
     monkeypatch.setenv("PATH", str(isolated_env / "nobin"))
     check = doctor.check_kordoc(Settings.from_env())
-    assert check.status == "WARN" and check.remedy == "uv run autoontology tools install-kordoc"
+    assert check.status == "WARN" and check.remedy == "uv run onto tools install-kordoc"
     assert "MD/TXT/HTML work" in check.detail
     node = doctor.check_node()
     assert node.status == "WARN" and "Node.js 20+" in node.remedy
@@ -310,7 +310,7 @@ def test_kordoc_row_ok_and_omit_optional(isolated_env, monkeypatch):
 
     if shutil.which("node") is None:
         pytest.skip("needs node")
-    from autoontology.unstructured import kordoc
+    from ontology.unstructured import kordoc
 
     settings = Settings.from_env()
     cli = kordoc.home_cli(settings.home)
@@ -326,10 +326,10 @@ def test_kordoc_row_ok_and_omit_optional(isolated_env, monkeypatch):
 
 def test_ollama_chat_model_without_router_prefix_warns(isolated_env, monkeypatch):
     """Review M-7: upstream picks ChatNVIDIA (60 s timeout) for names without openai/."""
-    monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_CHAT_MODEL", "qwen3:8b")
+    monkeypatch.setenv("ONTOLOGY_OLLAMA_CHAT_MODEL", "qwen3:8b")
     check = doctor.check_profile(Settings.from_env())
     assert check.status == "WARN" and "openai/ prefix" in check.detail
-    monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_CHAT_MODEL", "openai/qwen3:8b")
+    monkeypatch.setenv("ONTOLOGY_OLLAMA_CHAT_MODEL", "openai/qwen3:8b")
     assert doctor.check_profile(Settings.from_env()).status == "OK"
 
 
@@ -340,14 +340,14 @@ def _boom(*_a, **_k):
 @pytest.mark.parametrize("chat", ["ollama", "claude", "openai"])
 def test_every_fail_or_warn_row_has_a_remedy(isolated_env, monkeypatch, chat):
     """Whatever goes wrong, each FAIL/WARN row says what to do."""
-    from autoontology.web.providers import router
+    from ontology.web.providers import router
 
-    monkeypatch.setenv("AUTOONTOLOGY_CHAT_PROVIDER", chat)
+    monkeypatch.setenv("ONTOLOGY_CHAT_PROVIDER", chat)
     monkeypatch.setenv("POSTGRES_PORT", "1")  # nothing listens there
-    monkeypatch.setenv("AUTOONTOLOGY_OLLAMA_ENDPOINT", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("ONTOLOGY_OLLAMA_ENDPOINT", "http://127.0.0.1:1/v1")
     for name in ("check_node", "check_kordoc", "check_ocr_models", "check_embed_provider"):
         monkeypatch.setattr(doctor, name, _boom)
-    monkeypatch.setenv("AUTOONTOLOGY_VISION_MODEL", "gemma4:e4b")
+    monkeypatch.setenv("ONTOLOGY_VISION_MODEL", "gemma4:e4b")
     monkeypatch.setattr(
         router.Registry,
         "status",
@@ -363,29 +363,29 @@ def test_every_fail_or_warn_row_has_a_remedy(isolated_env, monkeypatch, chat):
 
 def test_missing_env_file_points_at_init(isolated_env):
     check = doctor.check_env_file()
-    assert check.status == "WARN" and "autoontology init" in check.remedy
+    assert check.status == "WARN" and "onto init" in check.remedy
 
 
 def test_no_think_remedy_names_an_existing_setup_flag(monkeypatch):
     """`setup` has --force-alias, not --force: the remedy must be runnable as printed."""
-    from autoontology.engine import ollama
+    from ontology.engine import ollama
 
     monkeypatch.setattr(ollama, "chat_probe", lambda endpoint, model: ("thinking…", 999))
     check = doctor.check_no_think(Settings.from_env())
     assert check.status == "FAIL"
-    assert check.remedy == "uv run autoontology setup --force-alias"
+    assert check.remedy == "uv run onto setup --force-alias"
 
 
 def test_vendored_migrations_have_one_head_at_the_engine_13_revision():
     """Engine c96048c4 (1.3.x) adds 7d864cacef9c (term_family) -> 84dd4f50dbba
     (catalog_column.distinct_ratio) -> caee572fa81c (catalog_column.distinct_values) on top
     of 99d4d343dd0b. Doctor compares the catalog against this head, so an existing install
-    reports `alembic` WARN until `autoontology setup` upgrades it. Pinned so the next engine
+    reports `alembic` WARN until `onto setup` upgrades it. Pinned so the next engine
     bump notices new migrations."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
-    from autoontology.engine.migrate import VENDOR_DIR, head_revision
+    from ontology.engine.migrate import VENDOR_DIR, head_revision
 
     assert head_revision() == "caee572fa81c"
     config = Config(str(VENDOR_DIR / "alembic.ini"))
@@ -399,28 +399,28 @@ def test_vendored_migrations_have_one_head_at_the_engine_13_revision():
     [
         ("off", "", None),
         ("accounts", "", "WARN"),
-        ("accounts", "http://ao.example.com", "WARN"),
-        ("accounts", "https://ao.example.com", "OK"),
+        ("accounts", "http://onto.example.com", "WARN"),
+        ("accounts", "https://onto.example.com", "OK"),
     ],
 )
 def test_public_url_check_in_accounts_mode(isolated_env, monkeypatch, auth, url, status):
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", auth)
+    monkeypatch.setenv("ONTOLOGY_AUTH", auth)
     if url:
-        monkeypatch.setenv("AUTOONTOLOGY_PUBLIC_URL", url)
+        monkeypatch.setenv("ONTOLOGY_PUBLIC_URL", url)
     check = doctor.check_public_url(Settings.from_env())
     if status is None:
         assert check is None
         return
     assert check is not None and check.status == status
     if status == "WARN":
-        assert "AUTOONTOLOGY_PUBLIC_URL" in check.remedy
-        from autoontology.i18n import remedy
+        assert "ONTOLOGY_PUBLIC_URL" in check.remedy
+        from ontology.i18n import remedy
 
         assert "https" in remedy(check.remedy, "ko") and "설정" in remedy(check.remedy, "ko")
 
 
 def test_run_checks_lists_the_public_url_row_with_accounts_on(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+    monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
     _stub_infra(monkeypatch)
     monkeypatch.setattr(doctor, "check_ollama", lambda s: Check("ollama", "OK"))
     checks = doctor.run_checks(Settings.from_env(), skip_models=True)

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """The action routes (``/api/actions``), ``actions`` on object details, the
-``approvals`` count, the ``ao action`` commands, token scopes and the agent action tools
+``approvals`` count, the ``onto action`` commands, token scopes and the agent action tools
 -- off mode and accounts mode (sources faked; the runner in ``test_actions.py``)."""
 
 from __future__ import annotations
@@ -11,13 +11,13 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.logic import actions, functions
-from autoontology.store import accounts as acc
-from autoontology.store.accounts import Accounts
-from autoontology.store.db import Store
-from autoontology.web import app as web
-from autoontology.web.runs import RunManager
+from ontology.config import Settings
+from ontology.logic import actions, functions
+from ontology.store import accounts as acc
+from ontology.store.accounts import Accounts
+from ontology.store.db import Store
+from ontology.web import app as web
+from ontology.web.runs import RunManager
 from tests import logic_fixtures as fx
 from tests.logic_fixtures import INV
 from tests.test_actions import ACTION, activate_samples, sample_specs
@@ -143,7 +143,7 @@ def test_action_routes_off_mode(client):
 def test_cli_action_commands(client):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     runner = CliRunner()
 
@@ -262,7 +262,7 @@ def test_token_scopes_and_agent_action_tools(client):
         ).json()["result"]["instructions"]
     )
     # spec agent: none refuses every token
-    from autoontology.logic import registry
+    from ontology.logic import registry
 
     view = store.project()
     registry.save(view, {**sample_specs("actions.yaml")[0], "agent": "none"})
@@ -276,12 +276,12 @@ def test_token_scopes_and_agent_action_tools(client):
 
 class AccountsEnv:
     def __init__(self, monkeypatch):
-        from autoontology.engine import jobs
+        from ontology.engine import jobs
 
         monkeypatch.setattr(acc, "PBKDF2_ROUNDS", 1000)
         monkeypatch.setattr(acc, "_DUMMY_HASH", None)
         monkeypatch.setattr(jobs, "_APPLIED_ENV", jobs._APPLIED_ENV)
-        monkeypatch.setenv("AUTOONTOLOGY_AUTH", "accounts")
+        monkeypatch.setenv("ONTOLOGY_AUTH", "accounts")
         self.settings = Settings.from_env()
         self.app = web.create_app(self.settings, runs=RunManager(self.settings, jobs=dict))
         self.store = Store.for_home(self.settings.home)
@@ -295,7 +295,7 @@ class AccountsEnv:
         if role:
             self.accounts.add_member(self.view.id, user.id, role)
         raw, _ = self.accounts.create_session(user.id)
-        c.cookies.set("ao_session", raw)
+        c.cookies.set("onto_session", raw)
         return c
 
 
@@ -355,7 +355,7 @@ def test_accounts_permissions_and_four_eyes(aenv):
 
 
 def test_accounts_execute_tokens_and_creator_role(aenv):
-    from autoontology.logic import registry
+    from ontology.logic import registry
 
     editor = aenv.client("e@x.io", "editor")
     owner = aenv.client("o@x.io", "owner")

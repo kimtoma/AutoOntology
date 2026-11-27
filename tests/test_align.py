@@ -3,14 +3,14 @@ import copy
 
 import pytest
 
-from autoontology.config import Settings
-from autoontology.engine import align as aj
-from autoontology.engine.jobs import JobError
-from autoontology.store.alignments import AlignmentStore
-from autoontology.store.db import Store
-from autoontology.store.documents import ConceptRecord, DocumentStore, EvidenceRecord
-from autoontology.unstructured import align as al
-from autoontology.unstructured.schemas import AlignmentVerdict, validate_verdict
+from ontology.config import Settings
+from ontology.engine import align as aj
+from ontology.engine.jobs import JobError
+from ontology.store.alignments import AlignmentStore
+from ontology.store.db import Store
+from ontology.store.documents import ConceptRecord, DocumentStore, EvidenceRecord
+from ontology.unstructured import align as al
+from ontology.unstructured.schemas import AlignmentVerdict, validate_verdict
 from tests.test_documents_store import C
 
 CANDS = {"t-contract": "Contracts", "t-customer": "Customers"}
@@ -422,7 +422,7 @@ class FlakyJudge(FakeJudge):
 
 def test_partial_failure_then_resume_judges_only_the_failed(env, monkeypatch):
     settings, store = env
-    monkeypatch.setenv("AUTOONTOLOGY_EXTRACT_MODE", "structured")
+    monkeypatch.setenv("ONTOLOGY_EXTRACT_MODE", "structured")
     client, judge = FakeClient(), FlakyJudge("고객")
     result = _align(settings, store, client, judge, [])
     assert result.status == "failed" and result.details["judge"]["failed"] == 1
@@ -477,10 +477,10 @@ def test_run_align_validation(env):
 
 
 def test_snapshot_derives_semantic_fks_from_referenced_columns():
-    from autoontology.store.db import Source
-    from autoontology.structured.semantic import fetch_snapshot
+    from ontology.store.db import Source
+    from ontology.structured.semantic import fetch_snapshot
 
-    src = Source("id", "hanbit", "files", "{}", "autoontology_src_hanbit", "db1", "", "")
+    src = Source("id", "hanbit", "files", "{}", "ontology_src_hanbit", "db1", "", "")
     snap = fetch_snapshot(FakeClient(), src)
     assert [t.name for t in snap.terms] == ["Contract", "Customer"]
     [fk] = snap.fks
@@ -503,8 +503,8 @@ def test_snapshot_prefers_the_column_text_over_the_engine_attribute_sentence():
     without text of its own comes back with the attribute sentence, never blank while an
     attribute has one. The attribute's own description is only the fallback for a column
     the listing does not return."""
-    from autoontology.store.db import Source
-    from autoontology.structured.semantic import fetch_snapshot
+    from ontology.store.db import Source
+    from ontology.structured.semantic import fetch_snapshot
 
     client = FakeClient()
     client.attrs["t-contract"][0]["description"] = "Identifies the contract."
@@ -515,7 +515,7 @@ def test_snapshot_prefers_the_column_text_over_the_engine_attribute_sentence():
         # no own text: upstream's coalesce returns the attribute's sentence
         "tb-k": [{"column_name": "고객id", "description": "Identifies the customer."}],
     }
-    src = Source("id", "hanbit", "files", "{}", "autoontology_src_hanbit", "db1", "", "")
+    src = Source("id", "hanbit", "files", "{}", "ontology_src_hanbit", "db1", "", "")
     terms = fetch_snapshot(client, src).term_map()
     assert terms["t-contract"].attributes[0]["description"] == "계약 식별자"
     assert terms["t-customer"].attributes[0]["description"] == "Identifies the customer."
@@ -565,7 +565,7 @@ def test_dry_run_persists_nothing_accepted_and_a_real_run_then_accepts(env):
 
 def test_resumed_dry_run_becomes_accepted_on_a_real_resume(env, monkeypatch):
     settings, store = env
-    monkeypatch.setenv("AUTOONTOLOGY_EXTRACT_MODE", "structured")
+    monkeypatch.setenv("ONTOLOGY_EXTRACT_MODE", "structured")
     client, judge = FakeClient(), FlakyJudge("고객")
     first = _align(settings, store, client, judge, [], dry_run=True)
     assert first.status == "failed"
@@ -616,7 +616,7 @@ def test_metric_same_is_configurable(monkeypatch):
     verdict = lambda: al.ValidatedVerdict("t", "same", 0.9, "")  # noqa: E731
     metric = al.ConceptInfo("c", "월매출", "metric")
     assert al.apply_kind_guard(verdict(), metric, term).relation == "related"
-    monkeypatch.setenv("AUTOONTOLOGY_ALIGN_ALLOW_METRIC_SAME", "1")
+    monkeypatch.setenv("ONTOLOGY_ALIGN_ALLOW_METRIC_SAME", "1")
     assert al.apply_kind_guard(verdict(), metric, term).relation == "same"
     attribute = al.ConceptInfo("c", "상태값", "attribute")
     assert al.apply_kind_guard(verdict(), attribute, term).relation == "related"
@@ -638,8 +638,8 @@ def test_summary_is_scoped_to_the_structured_source(env):
 
 
 def _export_model(store):
-    from autoontology.engine.export_job import documents_inputs
-    from autoontology.ontology import model as merged
+    from ontology.engine.export_job import documents_inputs
+    from ontology.ontology import model as merged
 
     docs = store.get_source("hanbit-docs")
     return merged.build("x", documents=documents_inputs(store, [docs]))
@@ -670,10 +670,10 @@ def test_dry_run_after_a_real_run_keeps_committed_verdicts(env):
 
 
 def test_dry_run_verdicts_never_reach_the_export(env):
-    from autoontology.engine.export_job import documents_inputs
-    from autoontology.ontology import model as merged
-    from autoontology.store.alignments import AlignmentRecord
-    from autoontology.structured.semantic import fetch_snapshot
+    from ontology.engine.export_job import documents_inputs
+    from ontology.ontology import model as merged
+    from ontology.store.alignments import AlignmentRecord
+    from ontology.structured.semantic import fetch_snapshot
 
     settings, store = env
     src = store.get_source("hanbit-docs")
@@ -742,7 +742,7 @@ def test_resume_with_another_threshold_starts_a_new_run(env):
 def test_align_and_build_reread_sources_under_the_lease(env, monkeypatch):
     """Fix wave 2 #7: a source replaced while align/build waited for the lease is refused,
     not used through the stale object."""
-    from autoontology.engine import build
+    from ontology.engine import build
     from tests.test_jobs import _replace_on_lease
 
     settings, store = env

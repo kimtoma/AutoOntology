@@ -11,11 +11,11 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from autoontology import doctor, i18n, onboarding
-from autoontology.cli import app
-from autoontology.doctor import Check
-from autoontology.i18n_catalog import en, ko
-from autoontology.onboarding import ProviderInfo
+from ontology import doctor, i18n, onboarding
+from ontology.cli import app
+from ontology.doctor import Check
+from ontology.i18n_catalog import en, ko
+from ontology.onboarding import ProviderInfo
 
 runner = CliRunner()
 HANGUL = re.compile(r"[가-힣]")
@@ -60,13 +60,13 @@ def test_backticked_commands_survive_translation():
         ({"LANG": "ko_KR.UTF-8"}, "ko"),
         ({"LANG": "en_US.UTF-8", "LC_ALL": "ko_KR.UTF-8"}, "ko"),
         ({"LC_MESSAGES": "C", "LANG": "ko_KR.UTF-8"}, "en"),
-        ({"LANG": "ko_KR.UTF-8", "AUTOONTOLOGY_LANG": "en"}, "en"),
-        ({"AUTOONTOLOGY_LANG": "KO"}, "ko"),
-        ({"AUTOONTOLOGY_LANG": " "}, "en"),
+        ({"LANG": "ko_KR.UTF-8", "ONTOLOGY_LANG": "en"}, "en"),
+        ({"ONTOLOGY_LANG": "KO"}, "ko"),
+        ({"ONTOLOGY_LANG": " "}, "en"),
     ],
 )
 def test_current_lang_order(monkeypatch, env, expected):
-    for name in ("AUTOONTOLOGY_LANG", "LC_ALL", "LC_MESSAGES", "LANG"):
+    for name in ("ONTOLOGY_LANG", "LC_ALL", "LC_MESSAGES", "LANG"):
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -75,9 +75,9 @@ def test_current_lang_order(monkeypatch, env, expected):
 
 def test_lang_from_dotenv(monkeypatch, tmp_path):
     env = tmp_path / ".env"
-    env.write_text("AUTOONTOLOGY_LANG=ko\n", encoding="utf-8")
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env))
-    monkeypatch.delenv("AUTOONTOLOGY_LANG", raising=False)
+    env.write_text("ONTOLOGY_LANG=ko\n", encoding="utf-8")
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(env))
+    monkeypatch.delenv("ONTOLOGY_LANG", raising=False)
     monkeypatch.setenv("LANG", "en_US.UTF-8")
     assert i18n.current_lang() == "ko"
 
@@ -95,7 +95,7 @@ def test_display_width_pads_hangul_as_double_width():
 
 
 def test_remedy_translation_keeps_commands():
-    assert i18n.remedy("uv run autoontology setup", "ko") == "uv run autoontology setup"
+    assert i18n.remedy("uv run onto setup", "ko") == "uv run onto setup"
     assert i18n.remedy("start Postgres (`docker compose up -d`); see the postgres row", "ko") == (
         "Postgres 시작 (`docker compose up -d`); postgres 행 참고"
     )
@@ -107,7 +107,7 @@ def test_every_doctor_remedy_has_a_korean_text_or_is_a_command(isolated_env, mon
     either translated or a bare command."""
     import httpx
 
-    from autoontology.config import Settings
+    from ontology.config import Settings
 
     def down(*a, **k):
         raise httpx.ConnectError("refused")
@@ -126,7 +126,7 @@ def test_every_doctor_remedy_has_a_korean_text_or_is_a_command(isolated_env, mon
 
 
 def test_doctor_prints_korean_headers(isolated_env, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_LANG", "ko")
+    monkeypatch.setenv("ONTOLOGY_LANG", "ko")
     monkeypatch.setattr(
         doctor,
         "run_checks",
@@ -135,7 +135,7 @@ def test_doctor_prints_korean_headers(isolated_env, monkeypatch):
                 ".env",
                 "WARN",
                 "missing",
-                "uv run autoontology init (writes .env; or cp .env.example .env)",
+                "uv run onto init (writes .env; or cp .env.example .env)",
             ),
             Check("ollama", "FAIL", "down", "start Ollama (`ollama serve`)"),
         ],
@@ -157,12 +157,12 @@ def test_doctor_stays_english_by_default(isolated_env, monkeypatch):
 
 
 def test_init_yes_prints_korean(isolated_env, monkeypatch):
-    from autoontology import cli
-    from autoontology.engine import pg
+    from ontology import cli
+    from ontology.engine import pg
     from tests.test_cli_onboarding import _det
 
-    monkeypatch.setenv("AUTOONTOLOGY_LANG", "ko")
-    monkeypatch.setattr(pg, "setup_database", lambda s: "database autoontology exists")
+    monkeypatch.setenv("ONTOLOGY_LANG", "ko")
+    monkeypatch.setattr(pg, "setup_database", lambda s: "database ontology exists")
     monkeypatch.setattr(
         onboarding, "detect_environment", lambda s, env_path=None: _det(env_path, claude=True)
     )
@@ -170,16 +170,16 @@ def test_init_yes_prints_korean(isolated_env, monkeypatch):
     env = Path(isolated_env) / "conf" / ".env"
     res = runner.invoke(app, ["init", "--yes", "--env", str(env)])
     assert res.exit_code == 0, res.output
-    assert res.output.splitlines()[0] == "English: AUTOONTOLOGY_LANG=en"
+    assert res.output.splitlines()[0] == "English: ONTOLOGY_LANG=en"
     for text in ("[2/7] 채팅 제공자", "제공자", "로그인", "[7/7] 요약", "항목", "값"):
         assert text in res.output, text
-    assert "다음: uv run autoontology demo --set hanbit" in res.output
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in env.read_text(encoding="utf-8")
+    assert "다음: uv run onto demo --set hanbit" in res.output
+    assert "ONTOLOGY_CHAT_PROVIDER=claude" in env.read_text(encoding="utf-8")
 
 
 def test_init_english_hint_points_to_korean(isolated_env, monkeypatch):
-    from autoontology import cli
-    from autoontology.engine import pg
+    from ontology import cli
+    from ontology.engine import pg
     from tests.test_cli_onboarding import _det
 
     monkeypatch.setattr(pg, "setup_database", lambda s: "ok")
@@ -187,14 +187,14 @@ def test_init_english_hint_points_to_korean(isolated_env, monkeypatch):
     monkeypatch.setattr(cli, "_init_setup", lambda docs: None)
     res = runner.invoke(app, ["init", "--yes", "--env", str(Path(isolated_env) / ".env")])
     assert res.exit_code == 0, res.output
-    assert res.output.splitlines()[0] == "한국어: AUTOONTOLOGY_LANG=ko"
+    assert res.output.splitlines()[0] == "한국어: ONTOLOGY_LANG=ko"
     assert "[2/7] Chat provider" in res.output
 
 
 def test_provider_status_in_korean(isolated_env, monkeypatch):
-    from autoontology.web.providers import probe
+    from ontology.web.providers import probe
 
-    monkeypatch.setenv("AUTOONTOLOGY_LANG", "ko")
+    monkeypatch.setenv("ONTOLOGY_LANG", "ko")
     monkeypatch.setattr(
         onboarding,
         "provider_info",
@@ -220,8 +220,8 @@ def test_provider_status_in_korean(isolated_env, monkeypatch):
 
 def test_source_rm_notices_in_korean():
     assert i18n.notice("removed source quick", "ko") == "소스 quick 제거됨"
-    assert i18n.notice("dropped database autoontology_src_quick", "ko") == (
-        "데이터베이스 autoontology_src_quick 삭제됨"
+    assert i18n.notice("dropped database ontology_src_quick", "ko") == (
+        "데이터베이스 ontology_src_quick 삭제됨"
     )
     assert i18n.notice("something else", "ko") == "something else"
     assert i18n.notice("removed source quick", "en") == "removed source quick"
@@ -229,13 +229,13 @@ def test_source_rm_notices_in_korean():
 
 def test_help_texts_follow_the_language(tmp_path):
     env = {
-        **{k: v for k, v in os.environ.items() if not k.startswith("AUTOONTOLOGY_")},
-        "AUTOONTOLOGY_LANG": "ko",
-        "AUTOONTOLOGY_ENV_FILE": str(tmp_path / "absent.env"),
+        **{k: v for k, v in os.environ.items() if not k.startswith(("ONTOLOGY_", "AUTOONTOLOGY_"))},
+        "ONTOLOGY_LANG": "ko",
+        "ONTOLOGY_ENV_FILE": str(tmp_path / "absent.env"),
         "COLUMNS": "200",
     }
     out = subprocess.run(
-        [sys.executable, "-m", "autoontology", "init", "--help"],
+        [sys.executable, "-m", "ontology", "init", "--help"],
         env=env,
         capture_output=True,
         text=True,
@@ -295,18 +295,18 @@ HELP_SCREENS = {
 }
 
 
-@pytest.mark.parametrize("args", list(HELP_SCREENS), ids=lambda a: " ".join(a) or "ao")
+@pytest.mark.parametrize("args", list(HELP_SCREENS), ids=lambda a: " ".join(a) or "onto")
 def test_korean_help_is_intact_at_80_columns(tmp_path, args):
     """Rich cuts wide-character lines it cannot wrap ("비 …"): every Korean help text must
     survive an 80-column terminal whole."""
     env = {
-        **{k: v for k, v in os.environ.items() if not k.startswith("AUTOONTOLOGY_")},
-        "AUTOONTOLOGY_LANG": "ko",
-        "AUTOONTOLOGY_ENV_FILE": str(tmp_path / "absent.env"),
+        **{k: v for k, v in os.environ.items() if not k.startswith(("ONTOLOGY_", "AUTOONTOLOGY_"))},
+        "ONTOLOGY_LANG": "ko",
+        "ONTOLOGY_ENV_FILE": str(tmp_path / "absent.env"),
         "COLUMNS": "80",
     }
     out = subprocess.run(
-        [sys.executable, "-m", "autoontology", *args, "--help"],
+        [sys.executable, "-m", "ontology", *args, "--help"],
         env=env,
         capture_output=True,
         text=True,
@@ -319,8 +319,8 @@ def test_korean_help_is_intact_at_80_columns(tmp_path, args):
 
 
 def test_provider_status_remedies_and_times_in_korean():
-    assert i18n.remedy("set AUTOONTOLOGY_OPENAI_BASE_URL in .env", "ko") == (
-        ".env에 AUTOONTOLOGY_OPENAI_BASE_URL을 설정하세요"
+    assert i18n.remedy("set ONTOLOGY_OPENAI_BASE_URL in .env", "ko") == (
+        ".env에 ONTOLOGY_OPENAI_BASE_URL을 설정하세요"
     )
     text = i18n.remedy(
         "install the claude CLI and log in "

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
-from autoontology import formats
-from autoontology.structured import loaders
-from autoontology.unstructured import kordoc, readers
+from ontology import formats
+from ontology.structured import loaders
+from ontology.unstructured import kordoc, readers
 
 
 def test_readers_and_loaders_use_the_formats_module():

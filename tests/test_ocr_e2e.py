@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Integration: the real kordoc OCR (PP-OCRv5 korean, ``autoontology tools install-kordoc``)
+"""Integration: the real kordoc OCR (PP-OCRv5 korean, ``onto tools install-kordoc``)
 on ``tests/fixtures/images/scan_page1.png`` -- page 1 of the HWP fixture rendered to PNG
 with ``kordoc render biz_plan.hwp --format png --pages 1`` -- must recover the Korean
 words the HWP itself holds."""
@@ -10,7 +10,7 @@ import re
 
 import pytest
 
-from autoontology.config import REPO_ROOT, Settings
+from ontology.config import REPO_ROOT, Settings
 
 pytestmark = pytest.mark.integration
 
@@ -21,7 +21,7 @@ HANGUL_WORD = re.compile(r"[가-힣]{2,}")
 
 
 def test_real_ocr_reads_the_scanned_page(monkeypatch):
-    from autoontology.unstructured import kordoc, readers
+    from ontology.unstructured import kordoc, readers
 
     monkeypatch.delenv("KORDOC_CLI", raising=False)
     home = Settings.from_env().home

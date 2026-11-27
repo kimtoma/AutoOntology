@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
-"""Every `autoontology ...` command the docs show must exist with the options it uses.
+"""Every `onto ...` command the docs show must exist with the options it uses.
 
 Parses fenced code blocks and inline code spans of README.md, walks
-the typer/click command tree for each `autoontology <cmd> [<sub>] [--opt ...]` and checks
+the typer/click command tree for each `onto <cmd> [<sub>] [--opt ...]` and checks
 the command path and every `--option`.
 """
 
@@ -15,13 +15,13 @@ from pathlib import Path
 import pytest
 import typer.main
 
-from autoontology.cli import app
+from ontology.cli import app
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = [ROOT / "README.md"]
 FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 INLINE = re.compile(r"`([^`\n]+)`")
-INVOCATION = re.compile(r"(?:^\s*|\buv run\s+)autoontology\s+([a-z][^\n#;&|)`]*)")
+INVOCATION = re.compile(r"(?:^\s*|\buv run\s+)(?:onto|ontology)\s+([a-z][^\n#;&|)`]*)")
 
 
 def invocations(text: str) -> list[str]:
@@ -45,7 +45,7 @@ def resolve(root, args: list[str]):
         name = rest.pop(0)
         sub = command.commands.get(name)
         if sub is None:
-            raise AssertionError(f"unknown command {name!r} in `autoontology {' '.join(args)}`")
+            raise AssertionError(f"unknown command {name!r} in `ontology {' '.join(args)}`")
         command = sub
     return command, rest
 
@@ -56,10 +56,10 @@ def option_names(command) -> set[str]:
 
 def test_invocation_parser():
     text = (
-        "```bash\nuv run autoontology build hanbit --resume   # comment\n"
-        "uv run autoontology up && uv run autoontology status\n```\n"
-        "text `uv run autoontology source rm x --drop-db` and `autoontology.config`, "
-        "`autoontology_src_<name>`, `pg_restore -d autoontology x.dump`, `autoontology doctor`.\n"
+        "```bash\nuv run onto build hanbit --resume   # comment\n"
+        "uv run onto up && uv run onto status\n```\n"
+        "text `uv run onto source rm x --drop-db` and `ontology.config`, "
+        "`ontology_src_<name>`, `pg_restore -d ontology x.dump`, `onto doctor`.\n"
     )
     assert invocations(text) == [
         "build hanbit --resume",
@@ -82,7 +82,7 @@ def test_resolve_rejects_unknown():
 def test_documented_commands_exist(doc: Path):
     root = typer.main.get_command(app)
     calls = invocations(doc.read_text(encoding="utf-8"))
-    assert len(calls) >= 5, f"suspiciously few autoontology invocations in {doc.name}"
+    assert len(calls) >= 5, f"suspiciously few ontology invocations in {doc.name}"
     problems = []
     for call in calls:
         try:
@@ -96,11 +96,13 @@ def test_documented_commands_exist(doc: Path):
             problems.append(str(exc))
             continue
         if is_group(command) and not command.invoke_without_command:
-            problems.append(f"`autoontology {call}` names a group, not a command")
+            if not rest and len(tokens) == 1:
+                continue  # a bare group named in prose (`onto logic`)
+            problems.append(f"`onto {call}` names a group, not a command")
             continue
         known = option_names(command)
         for token in rest:
             flag = token.strip("[]").split("=", 1)[0]
             if flag.startswith("--") and flag not in known:
-                problems.append(f"`autoontology {call}`: {command.name} has no option {flag}")
+                problems.append(f"`onto {call}`: {command.name} has no option {flag}")
     assert not problems, "\n".join(problems)

@@ -10,8 +10,8 @@ import json
 
 import pytest
 
-from autoontology.web import app as web
-from autoontology.web.providers.openai_compat import (
+from ontology.web import app as web
+from ontology.web.providers.openai_compat import (
     MAX_TOOL_OUTPUT_CHARS,
     ProviderError,
     parse_request,
@@ -141,7 +141,7 @@ def test_single_tool_is_forced_output_unless_tool_choice_is_auto():
 
 
 def test_too_many_tools_are_400_too_large():
-    from autoontology.web.providers import openai_compat
+    from ontology.web.providers import openai_compat
 
     many = [
         {"type": "function", "function": {"name": f"t{i}", "parameters": {"type": "object"}}}
@@ -154,7 +154,7 @@ def test_too_many_tools_are_400_too_large():
 
 
 def test_oversized_tool_schemas_are_400_too_large():
-    from autoontology.web.providers import openai_compat
+    from ontology.web.providers import openai_compat
 
     big = {
         "type": "function",
@@ -267,7 +267,7 @@ def test_huge_tool_output_is_truncated_with_a_marker():
 
 
 def test_long_histories_shrink_older_tool_results_first():
-    from autoontology.web.providers import openai_compat
+    from ontology.web.providers import openai_compat
 
     history = list(MSGS)
     for i in range(40):
@@ -300,7 +300,7 @@ def test_long_histories_shrink_older_tool_results_first():
 
 
 def _resp(content):
-    from autoontology.web.providers.openai_compat import ChatResponse
+    from ontology.web.providers.openai_compat import ChatResponse
 
     return ChatResponse(content=content, model="m", prompt_tokens=1, completion_tokens=2)
 

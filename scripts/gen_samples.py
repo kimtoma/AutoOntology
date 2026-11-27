@@ -11,7 +11,7 @@ same business concepts, and six images for OCR. Every foreign key resolves.
 
 Needs macOS (``/usr/bin/textutil`` for ``.doc``, the AppleGothic font), the dev dependency
 group (pillow, matplotlib, python-pptx, python-docx, openpyxl, xlwt, pymupdf) and kordoc
-for ``.hwpx`` (``KORDOC_CLI`` or ``<AUTOONTOLOGY_HOME>/kordoc``). The run is idempotent:
+for ``.hwpx`` (``KORDOC_CLI`` or ``<ONTOLOGY_HOME>/kordoc``). The run is idempotent:
 timestamps inside the generated files are pinned and a file is only rewritten when its
 bytes change. It prints a manifest (path, bytes, rows/pages) at the end.
 
@@ -611,7 +611,7 @@ def write_xlsx(path: Path, sheets: dict[str, list[list]]) -> None:
             ws.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = min(
                 60, 4 + width * 1.6
             )
-    wb.properties.creator = "AutoOntology samples"
+    wb.properties.creator = "Ontology samples"
     wb.properties.created = wb.properties.modified = PINNED
     buf = io.BytesIO()
     wb.save(buf)
@@ -739,11 +739,11 @@ def pdf_bytes(text: str, title: str, *, font_pt: float = 10.5, extra_css: str = 
     doc.set_metadata(
         {
             "title": title,
-            "author": "AutoOntology samples",
+            "author": "Ontology samples",
             "creationDate": stamp,
             "modDate": stamp,
-            "producer": "AutoOntology samples",
-            "creator": "AutoOntology samples",
+            "producer": "Ontology samples",
+            "creator": "Ontology samples",
         }
     )
     doc.subset_fonts()  # the full AppleGothic face is ~15 MB
@@ -765,7 +765,7 @@ def docx_bytes(text: str, title: str) -> bytes:
 
     document = docx.Document()
     props = document.core_properties
-    props.title, props.author, props.last_modified_by = title, "AutoOntology samples", ""
+    props.title, props.author, props.last_modified_by = title, "Ontology samples", ""
     props.created = props.modified = PINNED
     props.revision = 1
     lines = text.splitlines()
@@ -805,13 +805,13 @@ def kordoc_cli() -> Path:
         found = re.search(r"^KORDOC_CLI=(.+)$", env_file.read_text("utf-8"), re.M)
         cli = found.group(1).strip() if found else None
     candidates = [Path(cli)] if cli else []
-    home = Path(os.environ.get("AUTOONTOLOGY_HOME", ROOT / "data"))
+    home = Path(os.environ.get("ONTOLOGY_HOME", ROOT / "data"))
     candidates.append(home / "kordoc" / "node_modules" / "kordoc" / "dist" / "cli.js")
     for path in candidates:
         if path.is_file():
             return path
     raise SystemExit(
-        "kordoc not found: set KORDOC_CLI or run `uv run autoontology tools "
+        "kordoc not found: set KORDOC_CLI or run `uv run onto tools "
         "install-kordoc` (needed for .hwpx)"
     )
 
@@ -911,7 +911,7 @@ def pptx_bytes(text: str) -> bytes:
                     cell.text = value
                     cell.text_frame.paragraphs[0].font.size = Pt(12)
     props = prs.core_properties
-    props.title, props.author, props.last_modified_by = title, "AutoOntology samples", ""
+    props.title, props.author, props.last_modified_by = title, "Ontology samples", ""
     props.created = props.modified = PINNED
     props.revision = 1
     buf = io.BytesIO()
@@ -934,7 +934,7 @@ h3 {{margin-bottom: .2rem}}</style>
 <nav><a href="#">홈</a> | <a href="#">제품 안내</a> | <a href="#">고객지원</a></nav>
 <main>
 {md_html(text)}</main>
-<footer>한빛상사 고객지원팀 · 이 페이지는 AutoOntology 예제용 가상 회사의 안내문입니다.</footer>
+<footer>한빛상사 고객지원팀 · 이 페이지는 Ontology 예제용 가상 회사의 안내문입니다.</footer>
 </body>
 </html>
 """

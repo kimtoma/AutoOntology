@@ -2,22 +2,22 @@
 import pytest
 from dotenv import dotenv_values
 
-from autoontology.config import Settings, postgres_env, validate_pg_database_name
-from autoontology.engine import pg
+from ontology.config import Settings, postgres_env, validate_pg_database_name
+from ontology.engine import pg
 
-GOOD = ["autoontology", "autoontology_src_crm", "autoontology_src_a1_b2"]
+GOOD = ["ontology", "ontology_src_crm", "ontology_src_a1_b2"]
 BAD = [
     "",
     "postgres",
     "moneybook",
-    "autoontology2",
-    "autoontology_src_",
-    "autoontology_src_CRM",
-    "autoontology_x",
-    "AutoOntology",
-    "autoontology_src_a-b",
-    "autoontology; drop",
-    " autoontology",
+    "ontology2",
+    "ontology_src_",
+    "ontology_src_CRM",
+    "ontology_x",
+    "Ontology",
+    "ontology_src_a-b",
+    "ontology; drop",
+    " ontology",
 ]
 
 
@@ -45,7 +45,7 @@ def test_settings_constructor_and_postgres_env_reject(isolated_env, monkeypatch)
         Settings(home=settings.home, postgres_database="other_app")
     with pytest.raises(ValueError):
         postgres_env(settings, "other_app")
-    assert postgres_env(settings, "autoontology_src_x")["POSTGRES_DATABASE"] == "autoontology_src_x"
+    assert postgres_env(settings, "ontology_src_x")["POSTGRES_DATABASE"] == "ontology_src_x"
 
 
 def test_pg_connect_rejects_foreign_database(isolated_env, monkeypatch):
@@ -56,8 +56,8 @@ def test_pg_connect_rejects_foreign_database(isolated_env, monkeypatch):
     with pytest.raises(ValueError):
         pg.connect(settings, "other_app")
     pg.connect(settings, "postgres")  # maintenance DB for existence checks only
-    pg.connect(settings, "autoontology_src_x")
-    assert [c["dbname"] for c in called] == ["postgres", "autoontology_src_x"]
+    pg.connect(settings, "ontology_src_x")
+    assert [c["dbname"] for c in called] == ["postgres", "ontology_src_x"]
 
 
 # --- engine.pg.setup_database (Python; no psql/createdb needed) -------------------------
@@ -111,10 +111,10 @@ def test_setup_database_creates_db_and_extensions_idempotently(isolated_env, mon
     assert ("created" if not exists else "exists") in line
     assert "vector 0.8.0" in line and "pg_trgm 1.6" in line
     statements = [t for _, t in server.log]
-    assert any(t == 'create database "autoontology"' for t in statements) is (not exists)
+    assert any(t == 'create database "ontology"' for t in statements) is (not exists)
     # create database runs on the maintenance DB, extensions in the catalog DB
     assert all(db == "postgres" for db, t in server.log if "database" in t)
-    exts = [t for db, t in server.log if db == "autoontology" and t.startswith("create extension")]
+    exts = [t for db, t in server.log if db == "ontology" and t.startswith("create extension")]
     assert exts == [
         'create extension if not exists "vector"',
         'create extension if not exists "pg_trgm"',
@@ -133,7 +133,7 @@ def test_setup_database_treats_a_concurrent_create_as_exists(isolated_env, monke
         def racing(query, params=None):
             text = query if isinstance(query, str) else query.as_string(None)
             if text.startswith("create database"):
-                raise pg.psycopg.errors.DuplicateDatabase('database "autoontology" already exists')
+                raise pg.psycopg.errors.DuplicateDatabase('database "ontology" already exists')
             return execute(query, params)
 
         conn.execute = racing
@@ -159,14 +159,14 @@ def test_setup_database_reports_connection_errors(isolated_env, monkeypatch):
         raise pg.psycopg.OperationalError("connection refused")
 
     monkeypatch.setattr(pg.psycopg, "connect", refuse)
-    with pytest.raises(pg.SetupError, match="cannot prepare database autoontology"):
+    with pytest.raises(pg.SetupError, match="cannot prepare database ontology"):
         pg.setup_database(Settings.from_env())
 
 
 def test_settings_read_postgres_values_like_python_dotenv(isolated_env, monkeypatch):
     env_file = isolated_env / ".env"
     env_file.write_text(DOTENV_CASES)
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(env_file))
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(env_file))
     want = dotenv_values(env_file)
     s = Settings.from_env()
     assert (
@@ -190,14 +190,14 @@ export POSTGRES_HOST=db.local   # inline comment
 POSTGRES_PORT = 5433
 POSTGRES_USER="quoted user" # trailing
 POSTGRES_PASSWORD=p#ss  # only whitespace-prefixed # starts a comment
-export POSTGRES_DATABASE='autoontology' # quoted
+export POSTGRES_DATABASE='ontology' # quoted
 """
 
 
 def test_cli_reports_bad_database_name_without_traceback(isolated_env, monkeypatch):
     from typer.testing import CliRunner
 
-    from autoontology.cli import app
+    from ontology.cli import app
 
     monkeypatch.setenv("POSTGRES_DATABASE", "moneybook")
     result = CliRunner().invoke(app, ["status"])
@@ -208,29 +208,29 @@ def test_cli_reports_bad_database_name_without_traceback(isolated_env, monkeypat
 def test_overlong_database_and_source_names_are_refused():
     """Postgres truncates identifiers to 63 bytes, so two names sharing a 63-byte prefix
     would address the same database; the longer one must never validate."""
-    from autoontology.config import SOURCE_NAME_MAX_LEN
-    from autoontology.structured.pipeline import SourceError, pg_database_for, validate_source_name
+    from ontology.config import SOURCE_NAME_MAX_LEN
+    from ontology.structured.pipeline import SourceError, pg_database_for, validate_source_name
 
-    assert SOURCE_NAME_MAX_LEN == 63 - len("autoontology_src_") == 46
+    assert SOURCE_NAME_MAX_LEN == 63 - len("ontology_src_") == 50
     a = "a" * SOURCE_NAME_MAX_LEN
     assert validate_source_name(a) == a
     assert len(pg_database_for(a)) == 63
     with pytest.raises(SourceError, match=f"at most {SOURCE_NAME_MAX_LEN}"):
         validate_source_name(a + "b")
     with pytest.raises(ValueError, match="63"):
-        validate_pg_database_name("autoontology_src_" + a + "b")
+        validate_pg_database_name("ontology_src_" + a + "b")
 
 
 def test_remove_revalidates_before_drop(isolated_env, monkeypatch):
     """A store row carrying an overlong pg_database (registered before the limit) is never
     passed to DROP DATABASE."""
-    from autoontology.store.db import Store
-    from autoontology.structured import remove
+    from ontology.store.db import Store
+    from ontology.structured import remove
 
     settings = Settings.from_env()
     store = Store.for_home(settings.home)
     src = store.add_source(
-        name="x", kind="files", locator="{}", pg_database="autoontology_src_" + "a" * 50
+        name="x", kind="files", locator="{}", pg_database="ontology_src_" + "a" * 51
     )
     executed = []
 
@@ -262,7 +262,7 @@ def test_remove_revalidates_before_drop(isolated_env, monkeypatch):
         def database_id_by_name(self, db):
             return None
 
-    import autoontology.engine.client as client_mod
+    import ontology.engine.client as client_mod
 
     monkeypatch.setattr(client_mod, "BackendClient", _Client)
     with pytest.raises(remove.RemoveError, match="63"):
@@ -272,52 +272,50 @@ def test_remove_revalidates_before_drop(isolated_env, monkeypatch):
 
 
 def test_catalog_database_may_not_use_the_source_prefix(isolated_env, monkeypatch):
-    """POSTGRES_DATABASE=autoontology_src_demo would make the files source ``demo`` load
+    """POSTGRES_DATABASE=ontology_src_demo would make the files source ``demo`` load
     into (and ``source rm demo --drop-db`` drop) the catalog database itself."""
-    monkeypatch.setenv("POSTGRES_DATABASE", "autoontology_src_demo")
+    monkeypatch.setenv("POSTGRES_DATABASE", "ontology_src_demo")
     with pytest.raises(ValueError, match="reserved for per-source databases"):
         Settings.from_env()
     with pytest.raises(ValueError, match="POSTGRES_DATABASE"):
-        Settings(home=isolated_env, postgres_database="autoontology_src_demo")
+        Settings(home=isolated_env, postgres_database="ontology_src_demo")
 
 
 def _catalog_named_like_a_source(isolated_env):
     settings = Settings(home=isolated_env)
-    object.__setattr__(settings, "postgres_database", "autoontology_src_demo")  # bypass
+    object.__setattr__(settings, "postgres_database", "ontology_src_demo")  # bypass
     return settings
 
 
 def test_source_database_writes_refuse_the_catalog(isolated_env, monkeypatch, tmp_path):
-    from autoontology.config import assert_source_database
-    from autoontology.structured import loaders
+    from ontology.config import assert_source_database
+    from ontology.structured import loaders
 
     settings = _catalog_named_like_a_source(isolated_env)
     called = []
     monkeypatch.setattr(pg, "connect", lambda *a, **k: called.append(a))
     monkeypatch.setattr(pg, "database_exists", lambda *a, **k: called.append(a) or True)
     with pytest.raises(ValueError, match="catalog database"):
-        assert_source_database(settings, "autoontology_src_demo")
+        assert_source_database(settings, "ontology_src_demo")
     with pytest.raises(ValueError, match="not a per-source database"):
-        assert_source_database(settings, "autoontology")
-    assert assert_source_database(settings, "autoontology_src_other") == "autoontology_src_other"
+        assert_source_database(settings, "ontology")
+    assert assert_source_database(settings, "ontology_src_other") == "ontology_src_other"
     with pytest.raises(ValueError, match="catalog database"):
-        loaders.ensure_database(settings, "autoontology_src_demo")
+        loaders.ensure_database(settings, "ontology_src_demo")
     csv = tmp_path / "a.csv"
     csv.write_text("id,name\n1,x\n")
     with pytest.raises(ValueError, match="catalog database"):
-        loaders.load_files_to_postgres([csv], "autoontology_src_demo", settings)
+        loaders.load_files_to_postgres([csv], "ontology_src_demo", settings)
     assert called == []
 
 
 def test_remove_refuses_to_drop_the_catalog_database(isolated_env, monkeypatch):
-    from autoontology.store.db import Store
-    from autoontology.structured import remove
+    from ontology.store.db import Store
+    from ontology.structured import remove
 
     settings = _catalog_named_like_a_source(isolated_env)
     store = Store.for_home(settings.home)
-    src = store.add_source(
-        name="demo", kind="files", locator="{}", pg_database="autoontology_src_demo"
-    )
+    src = store.add_source(name="demo", kind="files", locator="{}", pg_database="ontology_src_demo")
     executed = []
     monkeypatch.setattr(pg, "connect", lambda *a, **k: executed.append(a))
     with pytest.raises(remove.RemoveError, match="catalog database"):

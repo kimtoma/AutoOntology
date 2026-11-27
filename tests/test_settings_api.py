@@ -12,11 +12,11 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from autoontology.config import Settings
-from autoontology.engine import restart as restart_mod
-from autoontology.web import app as web
-from autoontology.web import settings_api
-from autoontology.web.runs import WORKSPACE
+from ontology.config import Settings
+from ontology.engine import restart as restart_mod
+from ontology.web import app as web
+from ontology.web import settings_api
+from ontology.web.runs import WORKSPACE
 from tests.test_providers_cli import fakes  # noqa: F401 - fixture
 
 API = "/api/settings"
@@ -27,11 +27,9 @@ NEW_KEY = "sk-test-NEWSECRET-77aa12bb90"
 @pytest.fixture
 def envfile(isolated_env, monkeypatch, fakes):  # noqa: F811
     path = isolated_env / "settings.env"
-    path.write_text(
-        "# my settings\nAUTOONTOLOGY_CHAT_PROVIDER=claude\n# keep me\nPOSTGRES_PORT=5432\n"
-    )
+    path.write_text("# my settings\nONTOLOGY_CHAT_PROVIDER=claude\n# keep me\nPOSTGRES_PORT=5432\n")
     path.chmod(0o600)
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(path))
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(path))
     return path
 
 
@@ -52,7 +50,7 @@ def stubs(monkeypatch):
     def no_ollama(*a, **k):
         raise httpx.ConnectError("refused")
 
-    from autoontology.engine import ollama
+    from ontology.engine import ollama
 
     monkeypatch.setattr(ollama, "list_models", no_ollama)
     return state
@@ -65,7 +63,7 @@ def _client():
 def test_get_reports_the_selection_with_origins_and_no_key(envfile, stubs):
     envfile.write_text(
         envfile.read_text()
-        + f"AUTOONTOLOGY_OPENAI_API_KEY={KEY}\nAUTOONTOLOGY_OPENAI_BASE_URL=https://api.test/v1/\n"
+        + f"ONTOLOGY_OPENAI_API_KEY={KEY}\nONTOLOGY_OPENAI_BASE_URL=https://api.test/v1/\n"
     )
     res = _client().get(API)
     assert res.status_code == 200, res.text
@@ -92,19 +90,19 @@ def test_get_reports_the_selection_with_origins_and_no_key(envfile, stubs):
 
 
 def test_shell_keys_are_locked_and_refused(envfile, stubs, monkeypatch):
-    monkeypatch.setenv("AUTOONTOLOGY_CODEX_MODEL", "gpt-5.5")
+    monkeypatch.setenv("ONTOLOGY_CODEX_MODEL", "gpt-5.5")
     c = _client()
     body = c.get(API).json()
-    assert body["locked_keys"] == ["AUTOONTOLOGY_CODEX_MODEL"]
-    assert body["origins"]["AUTOONTOLOGY_CODEX_MODEL"] == "shell"
+    assert body["locked_keys"] == ["ONTOLOGY_CODEX_MODEL"]
+    assert body["origins"]["ONTOLOGY_CODEX_MODEL"] == "shell"
     res = c.put(API, json={"chat_provider": "codex", "chat_model": "gpt-6-astra"})
     assert res.status_code == 400 and res.json()["error"] == "shell_override"
-    assert res.json()["key"] == "AUTOONTOLOGY_CODEX_MODEL"
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()  # nothing written
+    assert res.json()["key"] == "ONTOLOGY_CODEX_MODEL"
+    assert "ONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()  # nothing written
     # the shell's own value is fine (nothing to write for it)
     res = c.put(API, json={"chat_provider": "codex", "chat_model": "gpt-5.5"})
     assert res.status_code == 200, res.text
-    assert res.json()["written"] == ["AUTOONTOLOGY_CHAT_PROVIDER"]
+    assert res.json()["written"] == ["ONTOLOGY_CHAT_PROVIDER"]
 
 
 def test_put_writes_env_with_a_private_backup_and_flags_the_restart(envfile, stubs):
@@ -112,15 +110,15 @@ def test_put_writes_env_with_a_private_backup_and_flags_the_restart(envfile, stu
     res = c.put(API, json={"chat_provider": "codex", "chat_model": "gpt-5.5"})
     assert res.status_code == 200, res.text
     out = res.json()
-    assert out["written"] == ["AUTOONTOLOGY_CHAT_PROVIDER", "AUTOONTOLOGY_CODEX_MODEL"]
+    assert out["written"] == ["ONTOLOGY_CHAT_PROVIDER", "ONTOLOGY_CODEX_MODEL"]
     assert out["restart_required"] is True and out["backup"].startswith("settings.env.bak-")
     text = envfile.read_text()
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=codex" in text and "AUTOONTOLOGY_CODEX_MODEL=gpt-5.5" in text
+    assert "ONTOLOGY_CHAT_PROVIDER=codex" in text and "ONTOLOGY_CODEX_MODEL=gpt-5.5" in text
     assert "# my settings" in text and "# keep me" in text and "POSTGRES_PORT=5432" in text
     assert stat.S_IMODE(envfile.stat().st_mode) == 0o600
     backup = envfile.with_name(out["backup"])
     assert stat.S_IMODE(backup.stat().st_mode) == 0o600
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in backup.read_text()
+    assert "ONTOLOGY_CHAT_PROVIDER=claude" in backup.read_text()
     body = c.get(API).json()
     assert body["chat"]["provider"] == "codex" and body["chat"]["model"] == "gpt-5.5"
     assert body["running"]["chat_provider"] == "claude" and body["restart_required"] is True
@@ -128,8 +126,8 @@ def test_put_writes_env_with_a_private_backup_and_flags_the_restart(envfile, stu
     assert c.get("/api/status").json()["providers"]["chat_provider"] == "claude"
     # an empty model removes the line (= the provider's default)
     res = c.put(API, json={"chat_model": ""})
-    assert res.json()["written"] == ["AUTOONTOLOGY_CODEX_MODEL"]
-    assert "AUTOONTOLOGY_CODEX_MODEL" not in envfile.read_text()
+    assert res.json()["written"] == ["ONTOLOGY_CODEX_MODEL"]
+    assert "ONTOLOGY_CODEX_MODEL" not in envfile.read_text()
     assert c.get(API).json()["chat"]["model"] == "gpt-6-astra"
     # saving what is already saved writes nothing
     res = c.put(API, json={"chat_provider": "codex"})
@@ -140,7 +138,7 @@ def test_put_validates_the_candidate(envfile, stubs):
     c = _client()
     res = c.put(API, json={"chat_provider": "openai", "chat_model": "gpt-x"})
     assert res.status_code == 400 and res.json()["error"] == "invalid_settings"
-    assert "AUTOONTOLOGY_OPENAI_BASE_URL is not set" in res.json()["problems"]
+    assert "ONTOLOGY_OPENAI_BASE_URL is not set" in res.json()["problems"]
     for bad in (
         {"chat_model": "bad model; rm"},
         {"openai_base_url": "ftp://x"},
@@ -150,7 +148,7 @@ def test_put_validates_the_candidate(envfile, stubs):
     ):
         res = c.put(API, json=bad)
         assert res.status_code == 400, (bad, res.text)
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()
+    assert "ONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()
 
 
 def test_openai_key_is_saved_only_to_env_and_never_echoed(envfile, stubs, tmp_path):
@@ -182,8 +180,8 @@ def test_openai_key_is_saved_only_to_env_and_never_echoed(envfile, stubs, tmp_pa
         res = c.put(API, json=candidate)
         texts.append(res.text)
         assert res.status_code == 200, res.text
-        assert "AUTOONTOLOGY_OPENAI_API_KEY" in res.json()["written"]
-        assert f"AUTOONTOLOGY_OPENAI_API_KEY={KEY}" in envfile.read_text()
+        assert "ONTOLOGY_OPENAI_API_KEY" in res.json()["written"]
+        assert f"ONTOLOGY_OPENAI_API_KEY={KEY}" in envfile.read_text()
         got = c.get(API)
         texts.append(got.text)
         assert got.json()["openai"]["api_key_set"] is True
@@ -191,7 +189,7 @@ def test_openai_key_is_saved_only_to_env_and_never_echoed(envfile, stubs, tmp_pa
         # an empty key keeps the saved one; a new key replaces it; clear removes it
         res = c.put(API, json={"openai_base_url": "http://127.0.0.1:9/v2", "api_key": ""})
         texts.append(res.text)
-        assert f"AUTOONTOLOGY_OPENAI_API_KEY={KEY}" in envfile.read_text()
+        assert f"ONTOLOGY_OPENAI_API_KEY={KEY}" in envfile.read_text()
         res = c.put(API, json={"api_key": NEW_KEY})
         texts.append(res.text)
         assert NEW_KEY in envfile.read_text() and KEY not in envfile.read_text()
@@ -199,7 +197,7 @@ def test_openai_key_is_saved_only_to_env_and_never_echoed(envfile, stubs, tmp_pa
         texts.append(res.text)
         res = c.put(API, json={"clear_api_key": True})
         texts.append(res.text)
-        assert "AUTOONTOLOGY_OPENAI_API_KEY" not in envfile.read_text()
+        assert "ONTOLOGY_OPENAI_API_KEY" not in envfile.read_text()
         texts.append(c.get(API).text)
         res = c.put(API, json={"api_key": f"{KEY} x"})  # invalid: refused without echo
         texts.append(res.text)
@@ -232,7 +230,7 @@ def test_test_endpoint_pongs_the_candidate_without_applying_it(envfile, stubs, f
         "provider": "ollama",
     }
     assert "codex_home" in fakes()[-1]  # the codex CLI answered
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()
+    assert "ONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()
     assert c.get(API).json()["restart_required"] is False
     # a store holding 1024-d vectors and a 768-d candidate
     stubs["vectors"] = {"rows": 42, "dimension": 1024}
@@ -260,9 +258,9 @@ def test_put_refuses_an_embedding_dimension_change_without_consent(envfile, stub
     assert res.status_code == 409 and res.json()["error"] == "embedding_dimension_changed"
     assert res.json()["dimension"] == 768 and res.json()["stored_dimension"] == 1024
     assert "source rm <name> --drop-db" in res.json()["detail"]
-    assert "AUTOONTOLOGY_OLLAMA_EMBED_MODEL" not in envfile.read_text()
+    assert "ONTOLOGY_OLLAMA_EMBED_MODEL" not in envfile.read_text()
     res = c.put(API, json={"embed_model": "nomic-embed-text", "confirm_reingest": True})
-    assert res.status_code == 200 and res.json()["written"] == ["AUTOONTOLOGY_OLLAMA_EMBED_MODEL"]
+    assert res.status_code == 200 and res.json()["written"] == ["ONTOLOGY_OLLAMA_EMBED_MODEL"]
     # same dimension: no consent needed; no stored vectors: not even probed
     stubs["dims"] = 1024
     assert c.put(API, json={"embed_model": "bge-m3-alt"}).status_code == 200
@@ -286,7 +284,7 @@ def test_settings_routes_are_behind_the_local_guard(envfile, stubs):
             path, json={"chat_provider": "codex"}, headers={"origin": "http://evil.example"}
         )
         assert res.status_code == 403 and res.json()["error"] == "cross_origin", path
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()
+    assert "ONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()
 
 
 # --- restart -------------------------------------------------------------------------
@@ -380,11 +378,11 @@ class FakeSupervisor:
 
 
 def test_helper_restarts_with_the_current_env_file(envfile, isolated_env, monkeypatch):
-    from autoontology.config import unload_env
+    from ontology.config import unload_env
 
     home = Settings.from_env().home
     unload_env()  # the helper is a fresh process: nothing loaded from .env yet
-    envfile.write_text("AUTOONTOLOGY_CHAT_PROVIDER=codex\n")
+    envfile.write_text("ONTOLOGY_CHAT_PROVIDER=codex\n")
     sup = FakeSupervisor()
     seen = {}
 
@@ -431,19 +429,19 @@ def test_helper_refuses_a_concurrent_restart(envfile, isolated_env):
 
 
 def test_helper_env_drops_derived_and_dotenv_copied_values(isolated_env, monkeypatch):
-    from autoontology.config import load_env
+    from ontology.config import load_env
 
     envfile = isolated_env / "h.env"
-    envfile.write_text("AUTOONTOLOGY_OPENAI_CHAT_MODEL=from-dotenv\n")
-    monkeypatch.setenv("AUTOONTOLOGY_ENV_FILE", str(envfile))
+    envfile.write_text("ONTOLOGY_OPENAI_CHAT_MODEL=from-dotenv\n")
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(envfile))
     monkeypatch.setenv("REASONING_MODEL", "openai/derived")
-    monkeypatch.setenv("AUTOONTOLOGY_DERIVED_ENV", "REASONING_MODEL")
+    monkeypatch.setenv("ONTOLOGY_DERIVED_ENV", "REASONING_MODEL")
     monkeypatch.setenv("MY_SHELL_KEY", "kept")
     load_env()
     env = restart_mod.helper_env()
-    assert "REASONING_MODEL" not in env and "AUTOONTOLOGY_DERIVED_ENV" not in env
-    assert "AUTOONTOLOGY_OPENAI_CHAT_MODEL" not in env and env["MY_SHELL_KEY"] == "kept"
-    assert env["AUTOONTOLOGY_ENV_FILE"] == str(envfile)
+    assert "REASONING_MODEL" not in env and "ONTOLOGY_DERIVED_ENV" not in env
+    assert "ONTOLOGY_OPENAI_CHAT_MODEL" not in env and env["MY_SHELL_KEY"] == "kept"
+    assert env["ONTOLOGY_ENV_FILE"] == str(envfile)
 
 
 def test_spawned_helper_is_detached_and_logs_to_restart_log(isolated_env, monkeypatch):
@@ -451,10 +449,10 @@ def test_spawned_helper_is_detached_and_logs_to_restart_log(isolated_env, monkey
     logs/restart.log, the cleaned environment."""
     settings = Settings.from_env()
     monkeypatch.setenv("REASONING_MODEL", "openai/derived")
-    monkeypatch.setenv("AUTOONTOLOGY_DERIVED_ENV", "REASONING_MODEL")
+    monkeypatch.setenv("ONTOLOGY_DERIVED_ENV", "REASONING_MODEL")
     script = (
         "import json, os, sys\n"
-        "from autoontology.engine import restart\n"
+        "from ontology.engine import restart\n"
         "rid = sys.argv[sys.argv.index('--id') + 1]\n"
         "run = os.path.join(sys.argv[sys.argv.index('--home') + 1], 'run')\n"
         "print(f'[{rid}] helper here', flush=True)\n"
@@ -585,7 +583,7 @@ def test_the_key_reaches_only_its_endpoint_and_no_log(envfile, monkeypatch, open
     """The real network path (router passthrough + upstream embed_texts) with DEBUG logs."""
     url, seen = openai_stub
     monkeypatch.setattr(settings_api, "vector_state", lambda s: {"rows": 0, "dimension": None})
-    from autoontology.engine import ollama
+    from ontology.engine import ollama
 
     monkeypatch.setattr(ollama, "list_models", lambda *a, **k: set())
     c = _client()

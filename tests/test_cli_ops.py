@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""UI/CLI parity commands (``autoontology/cli_ops.py``): the offline ones over a fake build's
+"""UI/CLI parity commands (``ontology/cli_ops.py``): the offline ones over a fake build's
 store, the HTTP ones against the real app (TestClient) or an ``httpx.MockTransport``."""
 
 from __future__ import annotations
@@ -13,14 +13,14 @@ import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from autoontology import cli_ops
-from autoontology.cli import app
-from autoontology.config import Settings
-from autoontology.engine.apply import run_apply
-from autoontology.i18n_catalog import en, ko
-from autoontology.store.db import Store
-from autoontology.web import app as web
-from autoontology.web.runs import run_log_path
+from ontology import cli_ops
+from ontology.cli import app
+from ontology.config import Settings
+from ontology.engine.apply import run_apply
+from ontology.i18n_catalog import en, ko
+from ontology.store.db import Store
+from ontology.web import app as web
+from ontology.web.runs import run_log_path
 from tests.test_align import ClientWriter
 from tests.test_build import env  # noqa: F401 - the build fixture
 from tests.test_decisions import OpsJudge, _no_models, _rows, ops  # noqa: F401
@@ -221,7 +221,7 @@ def test_runs_cancel_accepted(monkeypatch, isolated_env):
 def test_http_commands_exit_2_when_the_service_is_down(isolated_env, args):
     res = runner.invoke(app, args)
     assert res.exit_code == 2, res.output
-    assert "start it with `uv run autoontology up`" in res.output
+    assert "start it with `uv run onto up`" in res.output
     assert "Traceback" not in res.output
 
 
@@ -277,7 +277,7 @@ def test_sources_freshness_table(two_revisions):
 
 
 def test_samples_list_and_load_with_conflict_and_replace(isolated_env, tmp_path, monkeypatch):
-    from autoontology.structured import remove
+    from ontology.structured import remove
 
     removed = []
 
@@ -295,7 +295,7 @@ def test_samples_list_and_load_with_conflict_and_replace(isolated_env, tmp_path,
     other = tmp_path / "other"
     other.mkdir()
     (other / "x.csv").write_text("a\n1\n")
-    from autoontology.structured import pipeline
+    from ontology.structured import pipeline
 
     settings = Settings.from_env()
     store = Store.for_home(settings.home)
@@ -310,7 +310,7 @@ def test_samples_list_and_load_with_conflict_and_replace(isolated_env, tmp_path,
     assert removed == ["quick"]
     assert re.search(r"^quick\s+files\s+replaced", out, re.M)
     assert re.search(r"^quick-docs\s+documents\s+created", out, re.M)
-    assert "next: `uv run autoontology build`" in out
+    assert "next: `uv run onto build`" in out
     again = json.loads(_ok(["samples", "load", "quickstart", "--json"]).output)
     assert {s["action"] for s in again["sources"]} == {"kept"}
     unknown = runner.invoke(app, ["samples", "load", "nope"])
@@ -447,8 +447,8 @@ def test_playground_sql_without_a_structured_source_says_why(isolated_env, monke
     body = {"error": "no_structured_source", "detail": "this project has no built source"}
     _mock(monkeypatch, lambda r: httpx.Response(400, json=body))
     res = runner.invoke(app, ["playground", "sql", "몇 개?"])
-    assert res.exit_code == 1 and "add one and run `uv run autoontology build`" in res.output
-    monkeypatch.setenv("AUTOONTOLOGY_LANG", "ko")
+    assert res.exit_code == 1 and "add one and run `uv run onto build`" in res.output
+    monkeypatch.setenv("ONTOLOGY_LANG", "ko")
     res = runner.invoke(app, ["playground", "sql", "몇 개?"])
     assert res.exit_code == 1 and "빌드된 정형 데이터 소스" in res.output
     res = runner.invoke(app, ["playground", "sql", "몇 개?", "--json"])
@@ -576,7 +576,7 @@ def test_playground_sql_tabulates_upstreams_result_envelope(isolated_env, monkey
 
 
 def test_sql_rows_shapes():
-    from autoontology.cli_ops import _sql_rows
+    from ontology.cli_ops import _sql_rows
 
     assert _sql_rows(['[{"a":1}]', '[{"a":2,"b":"x"}]']) == (["a", "b"], [[1, None], [2, "x"]])
     assert _sql_rows('[{"n": 3}]') == (["n"], [[3]])
@@ -643,9 +643,9 @@ def test_settings_set_reads_the_key_from_stdin_only(envfile, stubs, caplog):  # 
     assert res.exit_code == 0, res.output
     assert KEY not in res.output and KEY not in " ".join(args) and KEY not in caplog.text
     text = envfile.read_text()
-    assert f"AUTOONTOLOGY_OPENAI_API_KEY={KEY}" in text
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=openai" in text and "# keep me" in text
-    assert "AUTOONTOLOGY_OPENAI_API_KEY" in res.output and "settings restart --wait" in res.output
+    assert f"ONTOLOGY_OPENAI_API_KEY={KEY}" in text
+    assert "ONTOLOGY_CHAT_PROVIDER=openai" in text and "# keep me" in text
+    assert "ONTOLOGY_OPENAI_API_KEY" in res.output and "settings restart --wait" in res.output
     shown = _ok(["settings", "show", "--json"]).output
     assert KEY not in shown
     body = json.loads(shown)
@@ -666,7 +666,7 @@ def test_settings_set_refusals(envfile, stubs, monkeypatch):  # noqa: F811
     assert both.exit_code == 2
     bad = runner.invoke(app, ["settings", "set", "--chat-provider", "gemini"])
     assert bad.exit_code == 2 and "invalid_settings" in bad.output
-    monkeypatch.setenv("AUTOONTOLOGY_CODEX_MODEL", "gpt-5.5")
+    monkeypatch.setenv("ONTOLOGY_CODEX_MODEL", "gpt-5.5")
     shell = runner.invoke(
         app, ["settings", "set", "--chat-provider", "codex", "--chat-model", "x-1"]
     )
@@ -677,14 +677,14 @@ def test_settings_set_refusals(envfile, stubs, monkeypatch):  # noqa: F811
     dim = runner.invoke(app, ["settings", "set", "--embed-model", "other-embed"])
     assert dim.exit_code == 1 and "embedding_dimension_changed" in dim.output
     _ok(["settings", "set", "--embed-model", "other-embed", "--confirm-reingest"])
-    assert "AUTOONTOLOGY_OLLAMA_EMBED_MODEL=other-embed" in envfile.read_text()
+    assert "ONTOLOGY_OLLAMA_EMBED_MODEL=other-embed" in envfile.read_text()
 
 
 def test_settings_test_pongs_without_saving(envfile, stubs, fakes):  # noqa: F811
     res = _ok(["settings", "test", "--chat-provider", "codex"])
     assert re.search(r"^chat\s+OK\s+codex gpt-6-astra\s+'pong'", res.output, re.M)
     assert "embedding  OK   ollama bge-m3  dimension 1024" in res.output
-    assert "AUTOONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()
+    assert "ONTOLOGY_CHAT_PROVIDER=claude" in envfile.read_text()
     stubs["embed_error"] = "refused"
     failed = runner.invoke(app, ["settings", "test", "--json"])
     assert failed.exit_code == 1 and json.loads(failed.stdout)["embed"]["ok"] is False
@@ -753,10 +753,10 @@ def test_korean_help(monkeypatch):
     import sys
 
     out = subprocess.run(
-        [sys.executable, "-m", "autoontology", "settings", "set", "--help"],
+        [sys.executable, "-m", "ontology", "settings", "set", "--help"],
         capture_output=True,
         text=True,
-        env={**__import__("os").environ, "AUTOONTOLOGY_LANG": "ko", "COLUMNS": "200"},
+        env={**__import__("os").environ, "ONTOLOGY_LANG": "ko", "COLUMNS": "200"},
         check=True,
     ).stdout
     assert "표준 입력" in out and "--api-key-stdin" in out
@@ -858,7 +858,7 @@ NEW_COMMANDS = [
 _HELP_SCRIPT = """
 import json, sys
 from typer.testing import CliRunner
-from autoontology.cli import app
+from ontology.cli import app
 bad = {}
 for args in json.loads(sys.argv[1]):
     out = CliRunner().invoke(app, [*args, "--help"], env={"COLUMNS": "80"}).output
@@ -879,7 +879,7 @@ def test_help_never_truncates_at_80_columns(lang):
         [sys.executable, "-c", _HELP_SCRIPT, json.dumps(NEW_COMMANDS)],
         capture_output=True,
         text=True,
-        env={**os.environ, "AUTOONTOLOGY_LANG": lang, "COLUMNS": "80"},
+        env={**os.environ, "ONTOLOGY_LANG": lang, "COLUMNS": "80"},
         check=True,
     ).stdout
     assert json.loads(out) == {}
@@ -891,7 +891,7 @@ def test_settings_set_and_test_go_through_the_running_service(isolated_env, monk
             return httpx.Response(
                 200,
                 json={
-                    "written": ["AUTOONTOLOGY_OPENAI_API_KEY"],
+                    "written": ["ONTOLOGY_OPENAI_API_KEY"],
                     "backup": None,
                     "restart_required": True,
                 },
@@ -985,7 +985,7 @@ def test_exports_zip_to_a_file_or_a_directory(exports, tmp_path):
     existing = tmp_path / "dl"
     existing.mkdir()
     _ok(["exports", "zip", "r0002", "--out", str(existing)])
-    assert zipfile.is_zipfile(existing / "autoontology-r0002.zip")
+    assert zipfile.is_zipfile(existing / "ontology-r0002.zip")
     missing = tmp_path / "nope"
     res = runner.invoke(app, ["exports", "zip", "2", "--out", f"{missing}/"])
     assert res.exit_code == 2 and not missing.exists()
@@ -1013,7 +1013,7 @@ def test_json_error_envelope_when_the_service_is_down(isolated_env, args):
     res = runner.invoke(app, args)
     assert res.exit_code == 2
     body = json.loads(res.stdout)
-    assert body["error"] == "service_down" and "uv run autoontology up" in body["detail"]
+    assert body["error"] == "service_down" and "uv run onto up" in body["detail"]
 
 
 def test_json_error_envelope_for_api_and_usage_errors(exports, monkeypatch):
@@ -1065,7 +1065,7 @@ def test_agent_tokens_create_list_rotate_revoke(isolated_env):
     out = _ok(["agent", "tokens", "create", "cursor", "--revision", "1", "--expires-days", "30"])
     token = re.search(r"aok_[A-Za-z0-9_-]+", out.output)[0]
     assert out.output.count(token) == 1 and "only once" in out.output
-    db = sqlite3.connect(Path(settings.home) / "autoontology.db")
+    db = sqlite3.connect(Path(settings.home) / "ontology.db")
     assert db.execute("SELECT token_hash, revision_pin FROM agent_tokens").fetchall() == [
         (hashlib.sha256(token.encode()).hexdigest(), 1)
     ]
@@ -1091,7 +1091,7 @@ def test_agent_tokens_create_list_rotate_revoke(isolated_env):
 
 
 def test_agent_usage(isolated_env):
-    from autoontology.store.agent_tokens import AgentTokens
+    from ontology.store.agent_tokens import AgentTokens
 
     settings = Settings.from_env()
     tokens = AgentTokens(Store.for_home(settings.home))
@@ -1106,11 +1106,12 @@ def test_agent_usage(isolated_env):
     assert empty.usage(1)["total"] == 2
 
 
-def test_ao_is_a_short_alias_of_the_autoontology_command():
+def test_onto_is_a_short_alias_of_the_ontology_command():
     import tomllib
 
     root = Path(__file__).resolve().parent.parent
     scripts = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "scripts"
     ]
-    assert scripts["ao"] == scripts["autoontology"] == "autoontology.cli:app"
+    assert scripts["onto"] == scripts["ontology"] == "ontology.cli:app"
+    assert set(scripts) == {"ontology", "onto"}  # `ao` and `autoontology` are gone

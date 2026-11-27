@@ -19,12 +19,12 @@ import sqlite3
 
 import pytest
 
-from autoontology.logic import actions, registry, workflows
-from autoontology.logic.actions import Caller
-from autoontology.objects import service
-from autoontology.objects.reader import ObjectError
-from autoontology.store import db
-from autoontology.store.db import Store
+from ontology.logic import actions, registry, workflows
+from ontology.logic.actions import Caller
+from ontology.objects import service
+from ontology.objects.reader import ObjectError
+from ontology.store import db
+from ontology.store.db import Store
 from tests.logic_fixtures import INV
 from tests.test_actions import (  # noqa: F401 - the setup fixture
     ACTION,
@@ -224,7 +224,7 @@ def test_token_creator_cannot_approve_their_agents_proposal(setup):  # noqa: F81
 
 
 def test_v12_backfills_requested_for(tmp_path):
-    from autoontology.store.accounts import Accounts
+    from ontology.store.accounts import Accounts
 
     store = Store(tmp_path / "s.db")
     store.migrate()
@@ -250,8 +250,8 @@ def test_v12_backfills_requested_for(tmp_path):
         conn.execute("ALTER TABLE action_runs DROP COLUMN requested_for")
         conn.execute("ALTER TABLE logic_defs DROP COLUMN function_pins_json")
         conn.execute("DELETE FROM schema_version WHERE version >= 12")
-    assert store.migrate() == 12 == db.MIGRATIONS[-1][0]
-    assert store.migrate() == 12  # idempotent
+    assert store.migrate() == 13 == db.MIGRATIONS[-1][0]
+    assert store.migrate() == 13  # idempotent
     assert runs.get(direct.id).requested_for == "o@x.io"
     assert runs.get(agent.id).requested_for == "ed@x.io"
     assert runs.get(orphan.id).requested_for == ""
@@ -380,7 +380,7 @@ def test_editors_run_only_manual_workflows(aenv):  # noqa: F811
 def test_mailer_folds_line_breaks_in_the_subject(monkeypatch):
     import smtplib
 
-    from autoontology.web.mailer import Mailer
+    from ontology.web.mailer import Mailer
 
     sent = []
 
@@ -401,7 +401,7 @@ def test_mailer_folds_line_breaks_in_the_subject(monkeypatch):
             sent.append(message)
 
     monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
-    m = Mailer(host="smtp.example", port=25, sender="ao@example.com", starttls=False)
+    m = Mailer(host="smtp.example", port=25, sender="onto@example.com", starttls=False)
     assert m.send("a@x.io", "[독촉]\r\nBcc: evil@x.io\nmore", "body") is True
     assert sent[0]["Subject"] == "[독촉] Bcc: evil@x.io more"
     assert sent[0]["Bcc"] is None

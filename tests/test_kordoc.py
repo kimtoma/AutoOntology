@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from autoontology.unstructured import kordoc
+from ontology.unstructured import kordoc
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 
@@ -86,7 +86,7 @@ def test_node_too_old(tmp_path, monkeypatch):
 
 
 def test_parse_chunks_offline_and_skips_malformed(engine, tmp_path, caplog):
-    caplog.set_level("INFO", "autoontology.kordoc")
+    caplog.set_level("INFO", "ontology.kordoc")
     chunks = kordoc.parse_chunks(engine, tmp_path / "규정.hwp")
     assert [c.id for c in chunks] == ["c0001", "c0002", "c0003"]
     assert chunks[1].breadcrumb == ("제1장 총칙",) and chunks[1].page == 2
