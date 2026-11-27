@@ -1,4 +1,4 @@
-# AutoOntology guide for domain experts
+# Ontology guide for domain experts
 
 **English** | [한국어](GUIDE.ko.md)
 
@@ -34,13 +34,13 @@ prerequisites, installs everything, configures the Claude provider (your own Cla
 no API key), builds the quickstart sample set and gives you the UI URL. Behind the prompt
 is [`scripts/bootstrap.sh`](../scripts/bootstrap.sh); the repository's
 [`CLAUDE.md`](../CLAUDE.md) / [`AGENTS.md`](../AGENTS.md) and the project skill
-[`setup-autoontology`](../.claude/skills/setup-autoontology/SKILL.md) tell the agent how to
+[`setup-ontology`](../.claude/skills/setup-ontology/SKILL.md) tell the agent how to
 handle each outcome.
 
 **Claude Code in the terminal.** Start `claude` in your home folder and paste:
 
 ```text
-Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
+Clone https://github.com/kimtoma/ontology into ~/ontology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
 ```
 
 `--yes` makes it non-interactive: it installs uv with the official installer if it is
@@ -52,7 +52,7 @@ terminal then. A measured run from an empty folder took 9 min 34 s (Apple M4 Mac
 In Korean:
 
 ```text
-https://github.com/kimtoma/AutoOntology 를 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
+https://github.com/kimtoma/ontology 를 ~/ontology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
 ```
 
 **Claude desktop app.** Open the **Code** tab (Claude Code in the desktop app), choose
@@ -62,17 +62,17 @@ uses the `claude` command-line tool, so install Claude Code (CLI) and log in wit
 auth login` on that computer even if you use the desktop app. Cowork has not been tested
 for this setup and may not be able to reach Docker, Postgres or Ollama on your computer.
 
-Already cloned? Open Claude Code in the repository and type `/setup-autoontology`, or run
+Already cloned? Open Claude Code in the repository and type `/setup-ontology`, or run
 `scripts/bootstrap.sh --yes --provider claude` yourself. `--dry-run` prints the plan
 without changing anything; `--provider codex|ollama|openai`, `--set hanbit`, `--no-demo`
 and `--lang ko` change the defaults. The script is safe to run again in the same folder (a second checkout on the same
-Postgres replaces the first one's sample databases, `autoontology_src_quick*`). Ports
-given as `AUTOONTOLOGY_PORT`/`BACKEND_PORT` in the shell are saved into `.env`. Its exit code
+Postgres replaces the first one's sample databases, `ontology_src_quick*`). Ports
+given as `ONTOLOGY_PORT`/`BACKEND_PORT` in the shell are saved into `.env`. Its exit code
 says what to do next: 3 means the provider CLI is not logged in, 4 names a missing
 prerequisite (Docker or your own Postgres via `POSTGRES_*`, Ollama for the embeddings, uv,
 git) with its install hint.
 
-**Claude Enterprise (and Team, Pro, Max).** No API key is needed: AutoOntology calls the
+**Claude Enterprise (and Team, Pro, Max).** No API key is needed: Ontology calls the
 `claude` CLI you are logged in to. Only the claude.ai login is supported; Claude Code set
 up through Amazon Bedrock, Google Vertex AI or an API key reports `loggedIn: false` here.
 
@@ -86,21 +86,21 @@ up through Amazon Bedrock, Google Vertex AI or an API key reports `loggedIn: fal
 - Usage counts against your organization's plan limits like any other Claude Code use;
   the quickstart build made 139 calls in our measured run, the full hanbit sample about 520.
 - If your administrator restricts Claude Code, the login or the calls fail; `uv run
-  autoontology doctor` shows the `chat provider` row with the remedy.
+  onto doctor` shows the `chat provider` row with the remedy.
 
 **Without Claude Code**, run the same script directly. Read it first
 ([`scripts/bootstrap.sh`](../scripts/bootstrap.sh)); piping a script from the internet into
 `bash` runs whatever it contains:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/bootstrap.sh | bash -s -- --yes --provider claude
+curl -fsSL https://raw.githubusercontent.com/kimtoma/ontology/main/scripts/bootstrap.sh | bash -s -- --yes --provider claude
 ```
 
-It clones into `./AutoOntology` (change it with `--dir`).
+It clones into `./ontology` (change it with `--dir`).
 
 ## 1. What you get in 10 minutes
 
-You type six short commands. AutoOntology checks your computer, writes its settings file, loads a
+You type six short commands. Ontology checks your computer, writes its settings file, loads a
 small sample company ("한빛상사", a fictional Korean trading company: three tables of
 customers, contracts and invoices plus five policy documents), asks a language model to
 read all of it, and shows you one combined map of the business: which concepts exist
@@ -145,7 +145,7 @@ Type each "how to check" command; if it prints a version, you have it.
 
 | You need | What it is for | How to check | How to get it |
 |---|---|---|---|
-| Python 3.12 and uv | Runs AutoOntology. uv installs the right Python by itself. | `uv --version` | https://docs.astral.sh/uv/ (one command) |
+| Python 3.12 and uv | Runs Ontology. uv installs the right Python by itself. | `uv --version` | https://docs.astral.sh/uv/ (one command) |
 | git | Downloads the project. | `git --version` | Xcode command line tools (macOS) or your package manager |
 | Docker **or** Postgres 17 with pgvector | The database that holds your tables and the engine's catalog. Docker starts the right one with one command. | `docker --version` or `psql --version` | https://docs.docker.com/get-docker/, or `brew install postgresql@17 pgvector` |
 | **One** model provider: Ollama, a Claude subscription, a ChatGPT subscription, or an OpenAI-compatible API key | The language model that reads your data. Section 4 helps you choose. | `ollama list` / `claude auth status` / `codex login status` | https://ollama.com, https://claude.com/claude-code, https://developers.openai.com/codex |
@@ -173,7 +173,7 @@ The times come from the rehearsals described in the README ("Sample sets"). A bu
 one model call per document chunk plus a few hundred short judging calls, so the time
 grows with the amount of document text, not with the number of table rows.
 
-Log in once, as the same user that runs AutoOntology:
+Log in once, as the same user that runs Ontology:
 
 ```
 claude auth login        # Claude: or start `claude` and type /login; check with `claude auth status`
@@ -182,14 +182,14 @@ ollama serve             # Ollama: start it if `ollama list` says it cannot conn
 ```
 
 For an OpenAI-compatible API, open `.env` in a text editor after `init` and add the line
-`AUTOONTOLOGY_OPENAI_API_KEY=...` yourself. Never paste a key into a chat window or a
+`ONTOLOGY_OPENAI_API_KEY=...` yourself. Never paste a key into a chat window or a
 command that is saved in your shell history.
 
 You can also do all of this later from the web UI: the **Settings** page (the gear in the
 sidebar) lets you pick the provider and model, type the API key into a password field
 (stored only in `.env`, never shown again; backups show it as `***`), **Test** the choice and **Save and restart**.
 The login itself (`claude auth login`, `codex login`) still has to be typed once in a
-terminal on the computer that runs AutoOntology.
+terminal on the computer that runs Ontology.
 
 ## 5. The 10-minute path
 
@@ -197,37 +197,37 @@ Open a terminal and type these commands one at a time. The comments say what eac
 prints.
 
 ```
-git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git
-cd AutoOntology
+git clone --recurse-submodules https://github.com/kimtoma/ontology.git
+cd ontology
 docker compose up -d
 uv sync
-uv run autoontology init
-uv run autoontology demo
+uv run onto init
+uv run onto demo
 ```
 
-**`git clone ...` and `cd AutoOntology`** download the project and the NVIDIA engine it
-builds on into a folder named `AutoOntology`, then move into it. Every later command runs
+**`git clone ...` and `cd ontology`** download the project and the NVIDIA engine it
+builds on into a folder named `ontology`, then move into it. Every later command runs
 in this folder.
 
 **`docker compose up -d`** starts a Postgres database in the background and prints
-`Container autoontology-db-1 Started`. If you already run Postgres 17 with pgvector,
+`Container ontology-db-1 Started`. If you already run Postgres 17 with pgvector,
 skip it and put your server's `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER` and
 `POSTGRES_PASSWORD` into a file named `.env` in this folder instead.
 
 **`uv sync`** installs Python and every library into `.venv`. The first time it downloads
 a few hundred megabytes; it ends with `Installed N packages`.
 
-**`uv run autoontology init`** asks a few questions and writes `.env`. It prints seven
+**`uv run onto init`** asks a few questions and writes `.env`. It prints seven
 numbered steps:
 
 ```
 [1/7] Postgres
-  ok    database autoontology (exists) on localhost:5432 as autoontology; extensions: pg_trgm 1.6, vector 0.8.7
+  ok    database ontology (exists) on localhost:5432 as ontology; extensions: pg_trgm 1.6, vector 0.8.7
 
 [2/7] Chat provider
   PROVIDER  FOUND  LOGGED IN  NOTE
   ollama    yes    yes        http://localhost:11434 has openai/qwen3:8b, bge-m3
-  openai    no     no         set AUTOONTOLOGY_OPENAI_BASE_URL in .env
+  openai    no     no         set ONTOLOGY_OPENAI_BASE_URL in .env
   claude    yes    yes        logged in (claude.ai, max)
   codex     yes    yes        logged in (ChatGPT)
   Chat provider [claude]:
@@ -244,14 +244,14 @@ model with one test call:
 models: openai/qwen3:8b answers 'pong' with completion_tokens 2 (thinking off); embeddings bge-m3
 ```
 
-The last line is `next: uv run autoontology demo` (with `--set hanbit` for any
+The last line is `next: uv run onto demo` (with `--set hanbit` for any
 provider except Ollama, because the larger sample is quick there). `init` took 7 s (Ollama)
 and 9 s (Claude) in our rehearsals once the tools were installed; installing
 kordoc the first time adds about a minute (estimate). `init --yes` answers every question with the
 suggested value, and `--provider claude` (or `ollama`, `codex`, `openai`) picks the
 provider without asking.
 
-**`uv run autoontology demo`** starts the two background services, registers the sample
+**`uv run onto demo`** starts the two background services, registers the sample
 set as sources (`quick` for the tables, `quick-docs` for the documents), shows how long the
 first build should take with each provider, builds, exports and opens the web UI. While it
 builds it prints one line per step:
@@ -282,13 +282,13 @@ set it also shows the expected time for your provider:
 When everything is done, all five steps are ticked (the screenshot at the top of this
 guide), and from then on the start page is the **Overview** (chapter 8). The checklist
 stays under **Settings → Setup guide**. If the demo stops halfway (a closed laptop, a usage limit), run
-`uv run autoontology demo --resume`: finished steps are kept.
+`uv run onto demo --resume`: finished steps are kept.
 
 **Switch the model later.** Open **Settings** in the sidebar, choose another provider (for
 example Claude instead of Ollama), press **Test** to see it answer, then **Save and
-restart**. The page restarts AutoOntology (about 5 seconds) and reconnects by itself; the
-Status page then shows the new provider. From a terminal, `uv run autoontology provider use
-claude` followed by `uv run autoontology restart` does the same.
+restart**. The page restarts Ontology (about 5 seconds) and reconnects by itself; the
+Status page then shows the new provider. From a terminal, `uv run onto provider use
+claude` followed by `uv run onto restart` does the same.
 
 ## 6. Bring your own data
 
@@ -320,7 +320,7 @@ alignment with the tables.
 - `.doc` is read without extra tools, text and tables only (no images, text boxes or
   footnotes). Encrypted files fail with "save as .docx".
 - A CSV in a documents source is read as one table section of at most 200 rows
-  (`AUTOONTOLOGY_DOC_TABLE_MAX_ROWS`). A CSV with real data belongs in a table source.
+  (`ONTOLOGY_DOC_TABLE_MAX_ROWS`). A CSV with real data belongs in a table source.
 
 **Images and scans** (PNG, JPG/JPEG, WEBP, and scanned PDFs):
 
@@ -329,8 +329,8 @@ alignment with the tables.
 - OCR reads printed Korean and English text, numbers and simple tables. It does not read
   handwriting, very small or blurred print, or the meaning of a chart (it reads the axis
   labels and numbers, not the trend). Letters can be misread (`ID` sometimes becomes `D`).
-- Optional: set `AUTOONTOLOGY_VISION_MODEL=gemma4:e4b` in `.env` (and run
-  `uv run autoontology setup`) to have a local vision model describe each image before its
+- Optional: set `ONTOLOGY_VISION_MODEL=gemma4:e4b` in `.env` (and run
+  `uv run onto setup`) to have a local vision model describe each image before its
   OCR text. This helps with charts and diagrams; it adds about 45 seconds per image.
 
 ### Add a source
@@ -339,8 +339,8 @@ Give each source a short name: lower-case letters, digits and `_` (documents may
 `-`), for example `sales`, `sales-docs`. Three ways:
 
 - **A folder on this computer** (best for many files; nothing is copied):
-  `uv run autoontology source add ~/data/sales --name sales` for tables, and
-  `uv run autoontology source add ~/data/policies --name sales-docs --kind documents` for
+  `uv run onto source add ~/data/sales --name sales` for tables, and
+  `uv run onto source add ~/data/policies --name sales-docs --kind documents` for
   documents. Add `--recursive` to include subfolders. In the web UI: **Sources → Add
   source → Folder**.
 - **Upload** (best for a handful of files): **Sources → Add source → Upload**. The dialog
@@ -348,12 +348,12 @@ Give each source a short name: lower-case letters, digits and `_` (documents may
   file is selected ("Remove N unsupported" removes them). Uploads are limited to 200 MB per
   request.
 - **A database URL** (tables only; PostgreSQL, also MySQL and Snowflake when the engine
-  has their driver): `uv run autoontology source add postgresql://user@host/dbname --name
+  has their driver): `uv run onto source add postgresql://user@host/dbname --name
   erp`, or **Sources → Add source → DB URL**. The database is read where it is; nothing is
-  copied into AutoOntology.
+  copied into Ontology.
 
-Then build: `uv run autoontology build`, or **Build → Start**. Export with
-`uv run autoontology export` or the **Export** button.
+Then build: `uv run onto build`, or **Build → Start**. Export with
+`uv run onto export` or the **Export** button.
 
 ### When to split sources
 
@@ -423,7 +423,7 @@ Moving dots on a link mean an accepted *same* match.
   (searching, trying queries, submitting), so the page shows how long it has been running.
   The engine answers in English: a Korean question gets the answer in Korean, translated by
   your chat model, with the English original one click away
-  (`AUTOONTOLOGY_SQL_TRANSLATE=0` turns this off).
+  (`ONTOLOGY_SQL_TRANSLATE=0` turns this off).
 - **SPARQL**: run read-only queries on the ontology itself. The examples menu has ready
   queries: Classes, Synonyms per Term, Aligned concepts, Relations and their evidence,
   Business rules, Concepts per document, Property domain/range, Unaligned concepts.
@@ -443,7 +443,7 @@ Each export is a folder `exports/r<revision>/`. Who uses which file:
 
 `validation.json` says `"ok": true` when the bundle passed its checks. The **Exports**
 page previews every file and downloads it; **Download all (zip)** on a revision saves its
-whole folder as one `autoontology-r<revision>.zip`.
+whole folder as one `ontology-r<revision>.zip`.
 
 ![Exports page](screenshots/exports.png)
 
@@ -456,8 +456,8 @@ scope may also submit actions, under the rules of chapter 10. Each agent gets it
 token:
 
 ```bash
-uv run autoontology agent tokens create claude-code      # copy the aok_... token it prints
-claude mcp add --transport http autoontology http://127.0.0.1:7800/mcp \
+uv run onto agent tokens create claude-code      # copy the aok_... token it prints
+claude mcp add --transport http ontology http://127.0.0.1:7800/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
@@ -480,7 +480,7 @@ or leaves the project. The README's
 
 The first build is the beginning. Your organisation keeps writing documents and changing
 tables, and the models keep proposing; a person decides what becomes part of the shared
-ontology. AutoOntology is built for that cycle:
+ontology. Ontology is built for that cycle:
 
 ```
 add or change sources -> build changed sources -> review -> apply -> export
@@ -537,7 +537,7 @@ page (and the notice on the Overview) says how many wait; **Apply** writes a new
 from them: no model call, under a second on the quickstart sample (about a minute on a
 large ontology, estimate). With nothing pending (a decision undone meanwhile) it writes no
 revision and says "Nothing to apply". The Overview then shows the new revision and what changed.
-`uv run autoontology apply` does the same from a terminal.
+`uv run onto apply` does the same from a terminal.
 
 On the **Ontology** page, the revision menu opens any earlier revision, and **Changed in
 r{n}** lists what that revision added, changed, removed and merged. A concept's sheet says
@@ -549,52 +549,52 @@ Nobody has to press the buttons. A nightly cron entry (`crontab -e`) that builds
 changed and applies the decisions made during the day:
 
 ```bash
-0 2 * * * cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
+0 2 * * * cd /path/to/ontology && uv run onto build --resume && uv run onto apply
 ```
 
 `build --resume` keeps every step whose inputs did not change, and `apply` writes no
 revision when no decision waits, so a quiet night costs almost nothing. `build` exits 1 on
 a partial run, so `apply` is skipped then. People keep reviewing during the day, in the
-browser or with `uv run autoontology review list` and `review accept <id>`.
+browser or with `uv run onto review list` and `review accept <id>`.
 
 ### The same from a terminal
 
 Everything the web UI does has a command, for scripts and for people who prefer a terminal.
 Add `--json` to any of them for the same data the page shows. Commands marked *service*
-need `uv run autoontology up`; the others read the local data and work with it down.
+need `uv run onto up`; the others read the local data and work with it down.
 
 | Page | Commands |
 |---|---|
-| Overview | `uv run autoontology ontology`, `ontology diff`, `review list`, `source freshness`, `runs` |
-| Review | `uv run autoontology review list [--category C] [--page P]`, `review accept <id>` / `reject` / `acknowledge` / `undo`, `apply` |
-| Sources | `uv run autoontology source add` / `list` / `rm`, `source freshness`, `samples list`, `samples load <set>` |
-| Build | `uv run autoontology build [--source S] [--resume]`, `runs`, `runs show <id>` *(service)*, `runs logs <id>`, `runs logs <id> --follow` *(service)*, `runs cancel <id>` *(service)* |
-| Ontology | `uv run autoontology ontology revisions`, `ontology concepts [-q TEXT]`, `ontology concept <id>`, `ontology diff --from R --to R` |
-| Graph | `uv run autoontology ontology graph [--layer L] [--out graph.json]` |
-| Playground *(service)* | `uv run autoontology playground chat "질문"`, `playground sql "질문" --source S`, `playground sparql --file q.rq` (`--examples` lists the page's examples), `playground index --rebuild` |
-| Exports | `uv run autoontology export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F`, `exports zip <rev> --out F` |
-| Status | `uv run autoontology status`, `doctor`, `provider status` |
-| Settings | `uv run autoontology settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(service)* |
-| Connect | `uv run autoontology agent tokens create <name> [--revision R] [--expires-days 30\|90] [--scope propose\|execute] [--action NAME]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage`, `skill export [-o F]` |
-| Objects | `uv run autoontology object types [--status S]`, `object bind <type> [--key K] [--title T]`, `object list <type> [-q TEXT] [--filter col=value]`, `object get <type> <key>` (a type by table, label, `term-…` or `ot_…`) |
-| Logic | `uv run autoontology logic list [--kind K] [--status S]`, `logic show <kind> <name>`, `logic validate -f F`, `logic apply -f F`, `logic test <name> --key K [--param p=v]` (or `-f F`), `logic activate <kind> <name>`, `logic retire <kind> <name>`, `logic extract [--wait]`, `logic candidates [--ready] [--status S]`, `logic accept <id> [-f F] [--note N]`, `logic reject <id> [--note N]` |
-| Actions and approvals | `uv run autoontology action list [--type T]`, `action preview <name> <key> [--param p=v]`, `action run <name> <key> [--param p=v] [--yes] [--idempotency-key K]`, `action runs [--status S] [--action A] [--key K]`, `action approve <run>`, `action reject <run> [--note N]`, `action revert <run> [--force]` |
-| Workflows | `uv run autoontology workflow list`, `workflow run <name> [--wait]`, `workflow runs [--status S] [--workflow W]`, `workflow show <run>`, `workflow cancel <run>` |
-| Accounts | `uv run ao user create <email> [--admin]`, `user list`, `user disable\|enable <email>`, `user link <email> --purpose magic\|reset\|invite`, `member list`, `member add <email> --role R`, `member role <email> R`, `member remove <email>`, `audit` (chapter 9) |
-| Projects | `uv run autoontology project list`, `project show [slug]`, `project create <slug> --name N`, `project rename <slug> [--name N] [--slug S]`, `project archive <slug>`, `project unarchive <slug>` |
+| Overview | `uv run onto ontology`, `ontology diff`, `review list`, `source freshness`, `runs` |
+| Review | `uv run onto review list [--category C] [--page P]`, `review accept <id>` / `reject` / `acknowledge` / `undo`, `apply` |
+| Sources | `uv run onto source add` / `list` / `rm`, `source freshness`, `samples list`, `samples load <set>` |
+| Build | `uv run onto build [--source S] [--resume]`, `runs`, `runs show <id>` *(service)*, `runs logs <id>`, `runs logs <id> --follow` *(service)*, `runs cancel <id>` *(service)* |
+| Ontology | `uv run onto ontology revisions`, `ontology concepts [-q TEXT]`, `ontology concept <id>`, `ontology diff --from R --to R` |
+| Graph | `uv run onto ontology graph [--layer L] [--out graph.json]` |
+| Playground *(service)* | `uv run onto playground chat "질문"`, `playground sql "질문" --source S`, `playground sparql --file q.rq` (`--examples` lists the page's examples), `playground index --rebuild` |
+| Exports | `uv run onto export`, `exports list`, `exports show <rev> [file]`, `exports get <rev> <file> --out F`, `exports zip <rev> --out F` |
+| Status | `uv run onto status`, `doctor`, `provider status` |
+| Settings | `uv run onto settings show`, `settings test --chat-provider claude`, `settings set ... [--api-key-stdin]`, `settings restart --wait` *(service)* |
+| Connect | `uv run onto agent tokens create <name> [--revision R] [--expires-days 30\|90] [--scope propose\|execute] [--action NAME]`, `agent tokens list`, `agent tokens rotate <id>`, `agent tokens revoke <id>`, `agent usage`, `skill export [-o F]` |
+| Objects | `uv run onto object types [--status S]`, `object bind <type> [--key K] [--title T]`, `object list <type> [-q TEXT] [--filter col=value]`, `object get <type> <key>` (a type by table, label, `term-…` or `ot_…`) |
+| Logic | `uv run onto logic list [--kind K] [--status S]`, `logic show <kind> <name>`, `logic validate -f F`, `logic apply -f F`, `logic test <name> --key K [--param p=v]` (or `-f F`), `logic activate <kind> <name>`, `logic retire <kind> <name>`, `logic extract [--wait]`, `logic candidates [--ready] [--status S]`, `logic accept <id> [-f F] [--note N]`, `logic reject <id> [--note N]` |
+| Actions and approvals | `uv run onto action list [--type T]`, `action preview <name> <key> [--param p=v]`, `action run <name> <key> [--param p=v] [--yes] [--idempotency-key K]`, `action runs [--status S] [--action A] [--key K]`, `action approve <run>`, `action reject <run> [--note N]`, `action revert <run> [--force]` |
+| Workflows | `uv run onto workflow list`, `workflow run <name> [--wait]`, `workflow runs [--status S] [--workflow W]`, `workflow show <run>`, `workflow cancel <run>` |
+| Accounts | `uv run onto user create <email> [--admin]`, `user list`, `user disable\|enable <email>`, `user link <email> --purpose magic\|reset\|invite`, `member list`, `member add <email> --role R`, `member role <email> R`, `member remove <email>`, `audit` (chapter 9) |
+| Projects | `uv run onto project list`, `project show [slug]`, `project create <slug> --name N`, `project rename <slug> [--name N] [--slug S]`, `project archive <slug>`, `project unarchive <slug>` |
 
 Every command works on the default project unless you name another one before it:
-`uv run autoontology -p contracts build` (or set `AUTOONTOLOGY_PROJECT=contracts` once).
+`uv run onto -p contracts build` (or set `ONTOLOGY_PROJECT=contracts` once).
 
 The API key is never a command-line argument: `settings set --api-key-stdin` reads it from
 the terminal without showing it (or from a pipe, e.g. a password manager's output).
 
 ## 9. Sign-in and accounts
 
-A local installation has no sign-in. With the default `AUTOONTOLOGY_AUTH=off`, everyone who
+A local installation has no sign-in. With the default `ONTOLOGY_AUTH=off`, everyone who
 can reach the service (this computer, and your tailnet if you set that up) may do
 everything, and decisions are recorded as `local` or the tailnet login. When a team shares
-one installation, its administrator sets `AUTOONTOLOGY_AUTH=accounts` (the README's
+one installation, its administrator sets `ONTOLOGY_AUTH=accounts` (the README's
 [Accounts](../README.md#accounts) section has the setup). From then on everybody signs in
 with their own account and gets a role in each project. This chapter is what each person
 sees then; with accounts off none of it appears.
@@ -605,10 +605,10 @@ sees then; with accounts off none of it appears.
   passed on by hand). Type the password you want twice (at least 12 characters) and press
   **Set password and sign in**. An invitation link works once, for 7 days.
 - **After that**: open the address of the installation. When you are signed out it shows
-  **Sign in to AutoOntology**; enter your email and password and press **Sign in**. You
+  **Sign in to Ontology**; enter your email and password and press **Sign in**. You
   land on the page you asked for.
 - A sign-in lasts 12 hours (the administrator can change this with
-  `AUTOONTOLOGY_SESSION_HOURS`); then you sign in again.
+  `ONTOLOGY_SESSION_HOURS`); then you sign in again.
 - **Email me a sign-in link** appears on the sign-in page only when the installation can
   send mail (SMTP is configured). Type your email and press it: if the address has an
   account, a link arrives that works once, for 15 minutes. Opening it shows a **Continue to
@@ -685,15 +685,15 @@ Treat these links like passwords: whoever has one can enter that account. Send t
 person only, never to a shared channel or document.
 
 The same from a terminal on the server (the CLI acts as an admin and is recorded as `cli`;
-`ao --as <email> ...` records your email instead):
+`onto --as <email> ...` records your email instead):
 
 ```bash
-uv run ao user create colleague@example.com --name "Colleague"   # prints the invitation link
-uv run ao user list
-uv run ao user link colleague@example.com --purpose reset         # or magic, invite
-uv run ao user disable colleague@example.com                      # enable undoes it
-uv run ao -p contracts member add colleague@example.com --role reviewer
-uv run ao -p contracts member list                                # role <email> R, remove <email>
+uv run onto user create colleague@example.com --name "Colleague"   # prints the invitation link
+uv run onto user list
+uv run onto user link colleague@example.com --purpose reset         # or magic, invite
+uv run onto user disable colleague@example.com                      # enable undoes it
+uv run onto -p contracts member add colleague@example.com --role reviewer
+uv run onto -p contracts member list                                # role <email> R, remove <email>
 ```
 
 ### Audit log
@@ -704,7 +704,7 @@ undos, sources and samples, settings changes and restarts, and project changes, 
 the person, the project and the client address. Owners read their project's log from the
 Members page (**Audit log**, `/ui/p/<project>/audit`); admins read everything under
 **Users → Audit log** (`/ui/users/audit`). Filter by action and by email; **Load more**
-fetches older entries. From a terminal: `uv run ao audit [--project P] [--user EMAIL]
+fetches older entries. From a terminal: `uv run onto audit [--project P] [--user EMAIL]
 [--action A]`.
 
 ## 10. An ontology that acts
@@ -717,11 +717,11 @@ ontology itself: the system proposes, a person confirms, and only what is confir
 
 Two promises hold throughout:
 
-- **Your source data is never changed.** An action writes its values to AutoOntology's own
+- **Your source data is never changed.** An action writes its values to Ontology's own
   edit layer, beside the source row. Pages show the edited value on top, with the source
   value next to it, and every applied action can be reverted.
 - **No code runs.** Functions and conditions are written in a small expression language
-  that AutoOntology checks against your ontology before it saves anything. A definition
+  that Ontology checks against your ontology before it saves anything. A definition
   that names a column the data does not have is refused (or marked broken later), never
   run on a guess.
 
@@ -746,11 +746,11 @@ termination review, needs an owner's approval) and the workflow `연체독촉` (
 Each table of a built structured source becomes a **proposed object type**. They wait on
 the **Review** page under **Object types**. Each card shows the table, the proposed key
 (the primary key, or a column named like `…ID` that is unique and never empty) with
-"unique on the source" once AutoOntology checked it, the title column, and the columns.
+"unique on the source" once Ontology checked it, the title column, and the columns.
 A title is proposed only from a name-like column (`계약명`, `name`, `title` ...); when
 there is none the key is the title, so an invoice is shown as `INV-20200003`.
 
-**Accept** binds the type and makes it active: AutoOntology checks on the source that the
+**Accept** binds the type and makes it active: Ontology checks on the source that the
 key really is unique and never empty, and refuses otherwise. To choose another key or title,
 open the **Objects** page and press **Key and title**. Accepting and binding need the owner
 role (with accounts on, chapter 9).
@@ -812,8 +812,8 @@ Empty values stay empty (a sum with an empty value is empty), so wrap them in `c
 check a paid invoice, an unpaid one and one without a payment amount. **Save draft** stores
 a version; **Activate** makes it count (functions: editor role). Every save and status change
 is kept under **Versions**, and an older version can be loaded back into the editor.
-**Retire** switches a definition off. From a terminal, `ao logic apply -f
-samples/quickstart/logic/functions.yaml` saves all five as drafts and `ao logic activate
+**Retire** switches a definition off. From a terminal, `onto logic apply -f
+samples/quickstart/logic/functions.yaml` saves all five as drafts and `onto logic activate
 function 연체일수` activates one.
 
 ### Run an action with a preview
@@ -883,9 +883,9 @@ steps:
 ```
 
 - **Schedule**: the service checks every minute and fires each slot once, in the time zone
-  `AUTOONTOLOGY_TZ` (for example `Asia/Seoul`; default: the computer's). After downtime the
+  `ONTOLOGY_TZ` (for example `Asia/Seoul`; default: the computer's). After downtime the
   latest missed slot runs once (if it is at most 6 hours old); older ones are not caught up.
-  `AUTOONTOLOGY_WORKFLOWS=off` in `.env` switches scheduled and after-action triggers off;
+  `ONTOLOGY_WORKFLOWS=off` in `.env` switches scheduled and after-action triggers off;
   the Workflows tab then says so and workflows run only with **Run now**.
 - **Run now** starts one by hand: an editor may run a workflow with `manual: true`, other
   workflows only an owner; one run at a time (while a run is going, **Run now** says so).
@@ -936,9 +936,9 @@ an AI agent can load as an Agent Skill:
   fields), functions, actions (parameters, preconditions, approval, agent policy),
   workflows, and the procedure an agent must follow (find the object, read it, compute with
   functions, preview, submit only when asked, never assume approval, report the run id);
-- `mcp.json`: the connection to this server with `{{AUTOONTOLOGY_URL}}` and `<token>` as
+- `mcp.json`: the connection to this server with `{{ONTOLOGY_URL}}` and `<token>` as
   placeholders. No token is ever in the zip: create one on **Connect** and fill it in;
-- `definitions/`: the active definitions as YAML, ready for `ao logic apply -f`.
+- `definitions/`: the active definitions as YAML, ready for `onto logic apply -f`.
 
 Exporting the same definitions again gives an identical file. What an agent may do still
 depends on its token: **Read** changes nothing, **Propose** submits runs that wait for a
@@ -947,10 +947,10 @@ same approval rules.
 
 ## 11. When results look wrong
 
-**Rebuild or resume?** `uv run autoontology build --resume` continues the last build and
+**Rebuild or resume?** `uv run onto build --resume` continues the last build and
 keeps every step whose inputs did not change (files, kordoc and OCR availability, the
 model). Use it after an interruption, a usage limit or after installing kordoc. A plain
-`uv run autoontology build` runs every step again but reuses the stored results of
+`uv run onto build` runs every step again but reuses the stored results of
 everything that did not change (documents, extracted chunks, judgments), so it makes model
 calls only for what is new; it always saves a new revision. `build --source sales-docs`
 rebuilds only that source (matching and the snapshot still cover all sources).
@@ -980,9 +980,9 @@ If too little is matched, give the Term the business name: describe it in a docu
 ("계약(Contracts)은 ...") or name the column the way people say it. If unrelated
 documents pull concepts together, put them in separate documents sources.
 
-**Switch provider.** `uv run autoontology provider use claude` (or `codex`, `ollama`,
-`openai`), then restart with `uv run autoontology down && uv run autoontology up`, then
-`uv run autoontology build`. `uv run autoontology provider test` checks the model first.
+**Switch provider.** `uv run onto provider use claude` (or `codex`, `ollama`,
+`openai`), then restart with `uv run onto down && uv run onto up`, then
+`uv run onto build`. `uv run onto provider test` checks the model first.
 
 **Limits of small local models.** `qwen3:8b` on a laptop takes one to two minutes per
 document chunk, finds fewer concepts, and its judgments are more often `related` than
@@ -991,51 +991,51 @@ keep data local; use a subscription or a larger endpoint for the best ontology.
 
 ## 12. Troubleshooting
 
-`uv run autoontology doctor` checks everything and prints a REMEDY column; `init` prints
+`uv run onto doctor` checks everything and prints a REMEDY column; `init` prints
 `fix:` lines. The commands below are the ones doctor and init suggest, with a few extra
-steps added (with `AUTOONTOLOGY_LANG=ko` their messages are in Korean; the commands stay the
+steps added (with `ONTOLOGY_LANG=ko` their messages are in Korean; the commands stay the
 same).
 
 | Symptom | Cause | What to type |
 |---|---|---|
-| `.env` WARN "missing: using the built-in defaults" | No settings file yet | `uv run autoontology init` |
-| `init stopped: Postgres is not reachable`, or doctor `postgres` FAIL | The database is not running, or `.env` points elsewhere | `docker compose up -d`, then `uv run autoontology init` again; with your own Postgres set `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` in `.env` |
+| `.env` WARN "missing: using the built-in defaults" | No settings file yet | `uv run onto init` |
+| `init stopped: Postgres is not reachable`, or doctor `postgres` FAIL | The database is not running, or `.env` points elsewhere | `docker compose up -d`, then `uv run onto init` again; with your own Postgres set `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` in `.env` |
 | `docker compose up -d` fails on port 5432 | Another Postgres already uses the port | Set `POSTGRES_PORT=5433` in `.env` first, or use that Postgres |
-| doctor `database autoontology` FAIL "missing", or `alembic` WARN | The catalog is not prepared | `uv run autoontology setup` |
-| doctor `extension vector` FAIL | The Postgres server has no pgvector | `brew install pgvector` (or the `postgresql-17-pgvector` package), or use `docker compose`; then `uv run autoontology setup` |
-| `setup`: permission denied to create database | The Postgres user cannot create databases | `ALTER USER <name> CREATEDB;` in `psql`, or create the `autoontology` database yourself |
-| `init stopped: the claude CLI is not logged in`, doctor `chat provider` FAIL | Not logged in as this user | `claude auth login` (or `codex login`), then `uv run autoontology init` again |
-| doctor `chat provider` FAIL "install the claude CLI and log in" | The CLI is not installed, or `claude` on PATH is a wrapper | Install it; or set `AUTOONTOLOGY_CLAUDE_BIN=/path/to/claude` (`AUTOONTOLOGY_CODEX_BIN` for codex) in `.env` |
-| `init stopped: the openai provider needs a base URL` | `--yes` with openai and no URL | Set `AUTOONTOLOGY_OPENAI_BASE_URL` in `.env`, or run `init` without `--yes` |
-| `init stopped: ... needs a chat model name` / `openai embeddings need a model name` | `--yes` with openai and no model | Pass `--chat-model`, or set `AUTOONTOLOGY_OPENAI_CHAT_MODEL` / `AUTOONTOLOGY_OPENAI_EMBED_MODEL` in `.env` |
+| doctor `database ontology` FAIL "missing", or `alembic` WARN | The catalog is not prepared | `uv run onto setup` |
+| doctor `extension vector` FAIL | The Postgres server has no pgvector | `brew install pgvector` (or the `postgresql-17-pgvector` package), or use `docker compose`; then `uv run onto setup` |
+| `setup`: permission denied to create database | The Postgres user cannot create databases | `ALTER USER <name> CREATEDB;` in `psql`, or create the `ontology` database yourself |
+| `init stopped: the claude CLI is not logged in`, doctor `chat provider` FAIL | Not logged in as this user | `claude auth login` (or `codex login`), then `uv run onto init` again |
+| doctor `chat provider` FAIL "install the claude CLI and log in" | The CLI is not installed, or `claude` on PATH is a wrapper | Install it; or set `ONTOLOGY_CLAUDE_BIN=/path/to/claude` (`ONTOLOGY_CODEX_BIN` for codex) in `.env` |
+| `init stopped: the openai provider needs a base URL` | `--yes` with openai and no URL | Set `ONTOLOGY_OPENAI_BASE_URL` in `.env`, or run `init` without `--yes` |
+| `init stopped: ... needs a chat model name` / `openai embeddings need a model name` | `--yes` with openai and no model | Pass `--chat-model`, or set `ONTOLOGY_OPENAI_CHAT_MODEL` / `ONTOLOGY_OPENAI_EMBED_MODEL` in `.env` |
 | `warn  your shell sets KEY=..., which wins over .env` | A variable in your shell profile overrides `.env` | `unset KEY` and remove it from your shell profile |
-| `init stopped during setup` | The line above it names the failing part | Fix that, then `uv run autoontology init` again (safe to repeat) |
+| `init stopped during setup` | The line above it names the failing part | Fix that, then `uv run onto init` again (safe to repeat) |
 | doctor `ollama` FAIL, or `warn  Ollama is not answering` | Ollama is not running | `ollama serve` (install from https://ollama.com) |
-| doctor `ollama` FAIL "models missing", or chat model `openai/qwen3:8b` not found | The models or the alias are not pulled | `uv run autoontology setup` (or `setup --force-alias`) |
-| doctor `model profile` FAIL/WARN | A provider value in `.env` is missing or not a known model | Set the `AUTOONTOLOGY_OPENAI_*` / `_CLAUDE_*` / `_CODEX_*` values (see `.env.example`); for Ollama use an `openai/<name>` alias |
-| doctor `chat endpoint` FAIL "not bare JSON: schema not enforced" | Ollama ignores the answer format | Keep `AUTOONTOLOGY_OLLAMA_NO_THINK` on (the default) and upgrade Ollama |
-| doctor `chat no-think` FAIL | The Ollama chat alias still "thinks" before answering | `uv run autoontology setup --force-alias` |
-| doctor `chat endpoint` FAIL | The model did not answer the test call | `uv run autoontology provider test`, then the remedy it prints; for openai check `AUTOONTOLOGY_OPENAI_BASE_URL` / `API_KEY` / `CHAT_MODEL` |
-| doctor `embedding endpoint` FAIL | The embedding model is not reachable | Check `EMBED_*` / `AUTOONTOLOGY_EMBED_PROVIDER` in `.env` and that Ollama is up |
-| doctor `vector tables` FAIL "the embedder emits N dimensions" | You changed the embedding model after building | Restore the old embedding model, or remove every source (`uv run autoontology source rm <name>`) and empty the `vdb` vector tables, then build again |
+| doctor `ollama` FAIL "models missing", or chat model `openai/qwen3:8b` not found | The models or the alias are not pulled | `uv run onto setup` (or `setup --force-alias`) |
+| doctor `model profile` FAIL/WARN | A provider value in `.env` is missing or not a known model | Set the `ONTOLOGY_OPENAI_*` / `_CLAUDE_*` / `_CODEX_*` values (see `.env.example`); for Ollama use an `openai/<name>` alias |
+| doctor `chat endpoint` FAIL "not bare JSON: schema not enforced" | Ollama ignores the answer format | Keep `ONTOLOGY_OLLAMA_NO_THINK` on (the default) and upgrade Ollama |
+| doctor `chat no-think` FAIL | The Ollama chat alias still "thinks" before answering | `uv run onto setup --force-alias` |
+| doctor `chat endpoint` FAIL | The model did not answer the test call | `uv run onto provider test`, then the remedy it prints; for openai check `ONTOLOGY_OPENAI_BASE_URL` / `API_KEY` / `CHAT_MODEL` |
+| doctor `embedding endpoint` FAIL | The embedding model is not reachable | Check `EMBED_*` / `ONTOLOGY_EMBED_PROVIDER` in `.env` and that Ollama is up |
+| doctor `vector tables` FAIL "the embedder emits N dimensions" | You changed the embedding model after building | Restore the old embedding model, or remove every source (`uv run onto source rm <name>`) and empty the `vdb` vector tables, then build again |
 | doctor `node` WARN | Node.js 20+ is missing | Install Node.js 20+ (only needed for HWP/PDF/DOCX/PPTX/XLSX documents) |
-| doctor `kordoc` WARN, or build warns "N document(s) need kordoc and were skipped" | The document reader is not installed | `uv run autoontology tools install-kordoc`, then `uv run autoontology build --resume` |
-| doctor `kordoc` WARN "installed with --omit-optional" | PDF and OCR support was left out | `uv run autoontology tools install-kordoc --force` |
-| doctor `ocr models` WARN, or build warns "N image(s) or scanned PDF(s) need the OCR models" | The OCR models are not downloaded | `uv run autoontology tools install-kordoc`, then `uv run autoontology build --resume` |
-| doctor `vision model` FAIL | `AUTOONTOLOGY_VISION_MODEL` is set but Ollama is down or the model is not pulled | `ollama serve`, then `uv run autoontology setup` |
-| doctor `port ...` FAIL "in use", or `up` says a port is in use | Another program uses 7800 or 3101 | Stop it, or set `AUTOONTOLOGY_PORT` / `BACKEND_PORT` in `.env` (for example 7820 and 3121) |
-| doctor `upstream connections` WARN "database gone", or ingest fails with `PoolTimeout` | A leftover connection points at a deleted database | `uv run autoontology tools prune-connections` (with the services up) |
-| doctor `upstream connections` WARN "no source in this checkout" | Another copy of AutoOntology shares the database server | Nothing, if that copy is in use; otherwise `uv run autoontology tools prune-connections --include-unowned` |
-| `demo stopped: source ... was kept` | A source with a sample name holds other data | `uv run autoontology demo --replace` (deletes that source's database), or remove it with `uv run autoontology source rm <name>` |
-| Build calls fail with 429 `usage_limit` | Your Claude or ChatGPT plan limit is reached | Wait for the reset, then `uv run autoontology demo --resume` (or `build --resume`); or switch provider |
+| doctor `kordoc` WARN, or build warns "N document(s) need kordoc and were skipped" | The document reader is not installed | `uv run onto tools install-kordoc`, then `uv run onto build --resume` |
+| doctor `kordoc` WARN "installed with --omit-optional" | PDF and OCR support was left out | `uv run onto tools install-kordoc --force` |
+| doctor `ocr models` WARN, or build warns "N image(s) or scanned PDF(s) need the OCR models" | The OCR models are not downloaded | `uv run onto tools install-kordoc`, then `uv run onto build --resume` |
+| doctor `vision model` FAIL | `ONTOLOGY_VISION_MODEL` is set but Ollama is down or the model is not pulled | `ollama serve`, then `uv run onto setup` |
+| doctor `port ...` FAIL "in use", or `up` says a port is in use | Another program uses 7800 or 3101 | Stop it, or set `ONTOLOGY_PORT` / `BACKEND_PORT` in `.env` (for example 7820 and 3121) |
+| doctor `upstream connections` WARN "database gone", or ingest fails with `PoolTimeout` | A leftover connection points at a deleted database | `uv run onto tools prune-connections` (with the services up) |
+| doctor `upstream connections` WARN "no source in this checkout" | Another copy of Ontology shares the database server | Nothing, if that copy is in use; otherwise `uv run onto tools prune-connections --include-unowned` |
+| `demo stopped: source ... was kept` | A source with a sample name holds other data | `uv run onto demo --replace` (deletes that source's database), or remove it with `uv run onto source rm <name>` |
+| Build calls fail with 429 `usage_limit` | Your Claude or ChatGPT plan limit is reached | Wait for the reset, then `uv run onto demo --resume` (or `build --resume`); or switch provider |
 | A document fails with `DOC_PARSE_FAILED` or `DOC_ENCRYPTED` | An unreadable or protected `.doc` | Save it as `.docx` and add it again |
-| A document fails with `FILE_TOO_LARGE` | Over 50 MB of text (`AUTOONTOLOGY_DOC_MAX_BYTES`) | Split the file, or raise the limit in `.env` |
-| `/ui/` answers 503 `ui_not_built` | The web UI files are missing (a source archive) | `uv run autoontology tools build-ui` (needs Node and pnpm) |
-| A build seems stuck | Local models are slow | `uv run autoontology runs` shows the step and chunk counts; logs are in `data/logs/` |
+| A document fails with `FILE_TOO_LARGE` | Over 50 MB of text (`ONTOLOGY_DOC_MAX_BYTES`) | Split the file, or raise the limit in `.env` |
+| `/ui/` answers 503 `ui_not_built` | The web UI files are missing (a source archive) | `uv run onto tools build-ui` (needs Node and pnpm) |
+| A build seems stuck | Local models are slow | `uv run onto runs` shows the step and chunk counts; logs are in `data/logs/` |
 | "Wrong email or password." or "Too many attempts. Try again in N seconds." (accounts on) | A typo, or too many failed attempts within a minute (HTTP 429) | Wait a minute and try again; if you forgot the password, ask an administrator for a reset link |
 | The sign-in page keeps coming back | The sign-in expired (after 12 hours by default), or the browser blocks cookies (some private windows) | Sign in again; allow cookies for the site |
-| "That sign-in link is invalid, used or expired." | Links work once: sign-in and reset links for 15 minutes, invitations for 7 days; a newer link replaces an older one | Ask for a new link (an administrator: **Users → Create sign-in link**, or `uv run ao user link <email> --purpose reset`) |
-| No **Email me a sign-in link** on the sign-in page | The installation has no outgoing mail (`AUTOONTOLOGY_SMTP_*`) | Sign in with the password, or get a link from an administrator |
+| "That sign-in link is invalid, used or expired." | Links work once: sign-in and reset links for 15 minutes, invitations for 7 days; a newer link replaces an older one | Ask for a new link (an administrator: **Users → Create sign-in link**, or `uv run onto user link <email> --purpose reset`) |
+| No **Email me a sign-in link** on the sign-in page | The installation has no outgoing mail (`ONTOLOGY_SMTP_*`) | Sign in with the password, or get a link from an administrator |
 | A project is missing, or "You are not in any project yet" | You are not a member of it | Ask its owner or an administrator to add you (**Members**) |
 | A button is greyed out, or "Your role (...) cannot do this" / "You do not have permission (...)" | Your role in this project does not include that action (chapter 9, Roles) | Ask a project owner for a higher role |
 | "A precondition does not hold: ..." (`precondition_failed`) when running or approving an action | The object does not meet the action's precondition now (for example the invoice was paid meanwhile) | Usually right: check the values on the object page. An approval that hits it turns the run **Failed**; submit again once the object qualifies |
@@ -1043,40 +1043,40 @@ same).
 | `ambiguous_object_type` with a list of candidates | The name fits two object types (two tables with the same label) | Name the type by its table (`invoices`, `public.invoices`) or by `term-…` |
 | A definition shows **Broken** with a reason | A build or source change removed a column, link or object type it uses, or a function or action it uses is no longer active | When the column comes back it recovers by itself; otherwise edit it on the Logic page, **Save draft** and **Activate** again |
 | An object type shows **Broken** | Its table or key/title column is gone from the latest build or the source | Bring the table back and rebuild, or choose another key with **Key and title** |
-| Workflow runs fail with "..., who activated workflow ..., is no longer an owner of the project: an owner must activate it again" (or "is not an active user") | Accounts on: the owner who activated the workflow was disabled or lost the owner role, and a workflow acts with its activator's role | An owner presses **Retire**, then **Activate** on the Logic page, or runs `ao logic activate workflow <name>` (on an already active workflow it records the owner as the new activator) |
-| Scheduled workflows never run | `AUTOONTOLOGY_WORKFLOWS=off` (the Workflows tab says so), the service was down for more than 6 hours, the workflow is not active, or the time zone is not the one you expect | Set `AUTOONTOLOGY_WORKFLOWS=on` (or remove it) and `AUTOONTOLOGY_TZ=Asia/Seoul` in `.env`, then `uv run autoontology down && uv run autoontology up`; meanwhile **Run now** or `ao workflow run <name>` |
+| Workflow runs fail with "..., who activated workflow ..., is no longer an owner of the project: an owner must activate it again" (or "is not an active user") | Accounts on: the owner who activated the workflow was disabled or lost the owner role, and a workflow acts with its activator's role | An owner presses **Retire**, then **Activate** on the Logic page, or runs `onto logic activate workflow <name>` (on an already active workflow it records the owner as the new activator) |
+| Scheduled workflows never run | `ONTOLOGY_WORKFLOWS=off` (the Workflows tab says so), the service was down for more than 6 hours, the workflow is not active, or the time zone is not the one you expect | Set `ONTOLOGY_WORKFLOWS=on` (or remove it) and `ONTOLOGY_TZ=Asia/Seoul` in `.env`, then `uv run onto down && uv run onto up`; meanwhile **Run now** or `onto workflow run <name>` |
 
 ## 13. FAQ
 
 **Is my data private?** With Ollama for chat and embeddings, nothing leaves your computer:
 the services listen only on 127.0.0.1 and reject other machines. With a Claude or ChatGPT
 subscription or an API, the prompts (table and column names, a few sample values, document
-text) go to that provider under your account's terms. AutoOntology never sends or logs your
+text) go to that provider under your account's terms. Ontology never sends or logs your
 login tokens (for codex it only links your `auth.json` into a private folder and copies a
 refreshed token back).
 
 **Can I open it from my laptop?** Yes, from devices on your own Tailscale network: run
 `tailscale serve --bg --https=8444 http://127.0.0.1:7800` on the computer that runs
-AutoOntology, set `AUTOONTOLOGY_TAILSCALE_HOSTS` (and optionally
-`AUTOONTOLOGY_TAILSCALE_LOGINS`) in `.env`, and restart with `down && up`. The README's
+Ontology, set `ONTOLOGY_TAILSCALE_HOSTS` (and optionally
+`ONTOLOGY_TAILSCALE_LOGINS`) in `.env`, and restart with `down && up`. The README's
 "Remote access over Tailscale" section has the details. With accounts on, your tailnet login
 signs you in as the user with the same email. Never use `tailscale funnel`, which
 would put it on the public internet.
 
 **Can several people work in one installation?** Yes. Run it on one computer that everyone
 reaches (over Tailscale, or behind a gateway the administrator sets up), switch accounts on
-(`AUTOONTOLOGY_AUTH=accounts`) and invite people with a role per project (chapter 9). Members
+(`ONTOLOGY_AUTH=accounts`) and invite people with a role per project (chapter 9). Members
 of a project see the same sources and ontology; one person's accept, reject or apply changes
 it for everyone, and one build, export or apply runs at a time across the installation.
 
 **Can I change the model or enter an API key from my laptop?** Yes: open **Settings** in
 the web UI (also over Tailscale; with accounts on, admins only). The key is sent once to the computer that runs
-AutoOntology, written only to its `.env` (readable by its owner alone) and never shown,
+Ontology, written only to its `.env` (readable by its owner alone) and never shown,
 logged or sent back. The service and the engine must restart to use another model; the
 page does that for you (**Save and restart**) or tells you to run
-`uv run autoontology restart`. If you switch to an embedding model with another dimension,
+`uv run onto restart`. If you switch to an embedding model with another dimension,
 the page asks first: a build cannot re-embed while the old vectors exist, so you then remove
-every source (`uv run autoontology source rm <name> --drop-db`) and add it again, or keep
+every source (`uv run onto source rm <name> --drop-db`) and add it again, or keep
 the previous model (see the troubleshooting table, "vector tables").
 
 **What does it cost?** The software is free (MIT licence). Ollama is free. A subscription
@@ -1095,7 +1095,7 @@ downloaded the models and kordoc once. kordoc always runs offline; only
 **Korean and English mixed?** Yes. Column names, documents and questions can be in either
 language or both. Concept names stay in the language of the source (Korean names stay
 Korean in the exports). The web UI and the onboarding commands speak English and Korean:
-the globe menu in the header switches the UI, and `AUTOONTOLOGY_LANG=ko` (or a Korean
+the globe menu in the header switches the UI, and `ONTOLOGY_LANG=ko` (or a Korean
 system locale) switches the commands.
 
 **Large files?** Tables of hundreds of thousands of rows are fine: rows are loaded into
@@ -1107,8 +1107,8 @@ very large folders into several sources. Native text documents are capped at 50 
 default in recent Hangul versions) is the safer choice; if an old binary HWP fails, open
 it in Hangul and save it as HWPX or PDF.
 
-**Where are my files kept?** The registered folders are read in place. AutoOntology keeps
+**Where are my files kept?** The registered folders are read in place. Ontology keeps
 its own data in `data/` (sources, runs, extracted concepts, snapshots) and the exports in
 `exports/`, both inside the project folder. Tables are loaded into Postgres databases named
-`autoontology_src_<source>`. `uv run autoontology source rm <name> --drop-db` removes a
+`ontology_src_<source>`. `uv run onto source rm <name> --drop-db` removes a
 source and its database.

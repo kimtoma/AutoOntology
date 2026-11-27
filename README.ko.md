@@ -1,8 +1,8 @@
-# AutoOntology
+# Ontology
 
 [English](README.md) | **한국어**
 
-AutoOntology는 표와 문서를 함께 읽어 **하나의 온톨로지**를 만듭니다. 스프레드시트, 데이터베이스
+Ontology는 표와 문서를 함께 읽어 **하나의 온톨로지**를 만듭니다. 스프레드시트, 데이터베이스
 내보내기 파일이나 Postgres 데이터베이스, 그리고 그것을 설명하는 규정, 매뉴얼, 회의록, 발표 자료,
 스캔본(HWP/HWPX, PDF, Word, PowerPoint, Excel, Markdown, HTML, OCR을 거친 이미지)을 지정하면
 됩니다. 양쪽에서 비즈니스 개념을 찾고, 문서 개념을 표의 용어(Term)에 매칭한 뒤, 버전이 매겨진
@@ -29,11 +29,11 @@ pgvector와 원하는 모델로 내 컴퓨터에서 실행됩니다. 모델은 �
 ## 빠른 시작
 
 ```
-git clone --recurse-submodules https://github.com/kimtoma/AutoOntology.git && cd AutoOntology
+git clone --recurse-submodules https://github.com/kimtoma/ontology.git && cd ontology
 docker compose up -d            # or point POSTGRES_* in .env at your own Postgres 17 + pgvector
 uv sync
-uv run autoontology init        # checks what is installed, picks a model, writes .env, runs setup
-uv run autoontology demo        # builds the quickstart sample set, exports it and opens the web UI
+uv run onto init        # checks what is installed, picks a model, writes .env, runs setup
+uv run onto demo        # builds the quickstart sample set, exports it and opens the web UI
 ```
 
 필요한 것은 [uv](https://docs.astral.sh/uv/)가 있는 Python 3.12, Docker 또는
@@ -59,13 +59,13 @@ uv run autoontology demo        # builds the quickstart sample set, exports it a
 
 ```
 cp .env.example .env            # then edit the provider settings
-uv run autoontology setup       # add --docs for HWP/PDF/DOCX/PPTX/XLSX and image OCR via kordoc
-uv run autoontology up
-uv run autoontology source add samples/quickstart/structured --name quick
-uv run autoontology source add samples/quickstart/documents --name quick-docs --kind documents
-uv run autoontology build
-uv run autoontology export
-uv run autoontology ui
+uv run onto setup       # add --docs for HWP/PDF/DOCX/PPTX/XLSX and image OCR via kordoc
+uv run onto up
+uv run onto source add samples/quickstart/structured --name quick
+uv run onto source add samples/quickstart/documents --name quick-docs --kind documents
+uv run onto build
+uv run onto export
+uv run onto ui
 ```
 
 - `up`은 엔진 백엔드(:3101)와 서비스(:7800)를 둘 다 백그라운드로 시작합니다. `down`은 둘을
@@ -73,7 +73,7 @@ uv run autoontology ui
 - kordoc이 없으면(`--docs` 없이 `setup`) `build`는 샘플 문서 중 `.pdf`, `.hwp`, `.docx`를
   건너뛰고, 그 파일 이름과 설치 명령을 담은 경고를 출력한 뒤 그래도 성공(종료 코드 0)으로
   끝납니다. kordoc 사용 가능 여부가 문서 소스의 지문(fingerprint)에 포함되므로,
-  `uv run autoontology tools install-kordoc` 후 다음 `build`(또는 `build --resume`)가 그 문서를
+  `uv run onto tools install-kordoc` 후 다음 `build`(또는 `build --resume`)가 그 문서를
   읽습니다.
 - `export`는 자신이 쓴 폴더를 출력합니다(예: `exports/r0001/`). `ui`는
   http://127.0.0.1:7800/ui/ 를 엽니다.
@@ -84,8 +84,8 @@ uv run autoontology ui
 
 웹 UI는 영어와 한국어를 지원합니다. 헤더의 지구본 메뉴에서 고르거나 `/ui/?lang=ko`로 열면
 됩니다. 고른 언어는 브라우저에 저장되며, 고르지 않았다면 브라우저 언어를 따릅니다. 온보딩
-명령(`init`, `demo`, `provider`, `setup`, `doctor`)은 `AUTOONTOLOGY_LANG=ko`(셸 또는 `.env`)를
-설정하거나 로캘(`LANG`, `LC_ALL`)이 한국어이면 한국어로 출력하고, `AUTOONTOLOGY_LANG=en`이면
+명령(`init`, `demo`, `provider`, `setup`, `doctor`)은 `ONTOLOGY_LANG=ko`(셸 또는 `.env`)를
+설정하거나 로캘(`LANG`, `LC_ALL`)이 한국어이면 한국어로 출력하고, `ONTOLOGY_LANG=en`이면
 영어로 출력합니다. 명령어와 오류 코드는 두 언어에서 같습니다.
 
 ## 프롬프트 한 번으로 시작하기
@@ -96,13 +96,13 @@ uv run autoontology ui
 세트를 빌드한 뒤 UI 주소를 알려 줍니다. 프롬프트 뒤에서 도는 것은
 [`scripts/bootstrap.sh`](scripts/bootstrap.sh)이고, 저장소의 [`CLAUDE.md`](CLAUDE.md) /
 [`AGENTS.md`](AGENTS.md)와 프로젝트 스킬
-[`setup-autoontology`](.claude/skills/setup-autoontology/SKILL.md)가 결과별 대처법을
+[`setup-ontology`](.claude/skills/setup-ontology/SKILL.md)가 결과별 대처법을
 에이전트에게 알려 줍니다.
 
 **터미널의 Claude Code.** 홈 폴더에서 `claude`를 실행하고 다음을 붙여 넣습니다.
 
 ```text
-https://github.com/kimtoma/AutoOntology 를 ~/AutoOntology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
+https://github.com/kimtoma/ontology 를 ~/ontology 에 클론하고 그 폴더에서 `scripts/bootstrap.sh --yes --provider claude --lang ko` 를 실행해 줘. 약 10분 걸리니 백그라운드로 실행하고 끝날 때까지 기다려 줘. 끝나면 출력된 UI 주소를 열고 무엇이 만들어졌는지 한국어로 설명해 줘.
 ```
 
 `--yes`는 묻지 않고 진행합니다. uv가 없으면 공식 설치 스크립트로 설치하고, `init`의 기본값을
@@ -113,7 +113,7 @@ mini, 2026-10-29, uv 캐시 있음, quickstart 빌드만 547초).
 영어로는:
 
 ```text
-Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
+Clone https://github.com/kimtoma/ontology into ~/ontology and run `scripts/bootstrap.sh --yes --provider claude` there. It takes about 10 minutes: run it in the background and wait for it to finish. Then open the UI URL it prints and tell me what was built.
 ```
 
 **Claude 데스크톱 앱.** **Code** 탭(데스크톱 앱 안의 Claude Code)을 열고, 작업 폴더로 홈
@@ -123,16 +123,16 @@ Clone https://github.com/kimtoma/AutoOntology into ~/AutoOntology and run `scrip
 로그인해 두어야 합니다. Cowork에서는 시험해 보지 않았고, 내 컴퓨터의 Docker·Postgres·Ollama에
 접근하지 못할 수 있습니다.
 
-이미 클론했다면 저장소에서 Claude Code를 열고 `/setup-autoontology`를 입력하거나,
+이미 클론했다면 저장소에서 Claude Code를 열고 `/setup-ontology`를 입력하거나,
 `scripts/bootstrap.sh --yes --provider claude`를 직접 실행합니다. `--dry-run`은 아무것도
 바꾸지 않고 계획만 출력하고, `--provider codex|ollama|openai`, `--set hanbit`,
 `--no-demo`, `--lang ko`로 기본값을 바꿉니다. 같은 폴더에서는 여러 번 실행해도 안전합니다(같은 Postgres를 쓰는 두 번째 체크아웃은 첫 번째
-체크아웃의 샘플 데이터베이스 `autoontology_src_quick*`를 교체합니다). 셸에서
-`AUTOONTOLOGY_PORT`/`BACKEND_PORT`로 준 포트는 `.env`에 저장됩니다. 종료 코드가 다음 할
+체크아웃의 샘플 데이터베이스 `ontology_src_quick*`를 교체합니다). 셸에서
+`ONTOLOGY_PORT`/`BACKEND_PORT`로 준 포트는 `.env`에 저장됩니다. 종료 코드가 다음 할
 일을 알려 줍니다. 3은 제공자 CLI에 로그인되어 있지 않다는 뜻이고, 4는 빠진 사전 조건(Docker
 또는 `POSTGRES_*`로 지정한 내 Postgres, 임베딩용 Ollama, uv, git)과 설치 방법을 출력합니다.
 
-**Claude Enterprise(그리고 Team, Pro, Max).** API 키가 필요 없습니다. AutoOntology는
+**Claude Enterprise(그리고 Team, Pro, Max).** API 키가 필요 없습니다. Ontology는
 로그인되어 있는 `claude` CLI를 호출합니다. claude.ai 로그인만 지원하며, Amazon Bedrock,
 Google Vertex AI, API 키로 설정한 Claude Code는 여기서 `loggedIn: false`로 나옵니다.
 
@@ -144,7 +144,7 @@ Google Vertex AI, API 키로 설정한 Claude Code는 여기서 `loggedIn: false
   모두 내 컴퓨터에 남습니다.
 - 사용량은 다른 Claude Code 사용과 똑같이 조직 플랜 한도에 포함됩니다. quickstart 빌드는 실측에서
   호출 139번, hanbit 전체 샘플은 약 520번이었습니다.
-- 관리자가 Claude Code 사용을 제한했다면 로그인이나 호출이 실패합니다. `uv run autoontology
+- 관리자가 Claude Code 사용을 제한했다면 로그인이나 호출이 실패합니다. `uv run ontology
   doctor`의 `chat provider` 행에 해결 방법이 나옵니다.
 
 **Claude Code가 없다면** 같은 스크립트를 직접 실행합니다. 먼저
@@ -152,17 +152,17 @@ Google Vertex AI, API 키로 설정한 Claude Code는 여기서 `loggedIn: false
 파이프하면 그 안의 내용이 그대로 실행됩니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/bootstrap.sh | bash -s -- --yes --provider claude
+curl -fsSL https://raw.githubusercontent.com/kimtoma/ontology/main/scripts/bootstrap.sh | bash -s -- --yes --provider claude
 ```
 
-`./AutoOntology`에 클론합니다(`--dir`로 바꿀 수 있습니다).
+`./ontology`에 클론합니다(`--dir`로 바꿀 수 있습니다).
 
 ## 모델 제공자 고르기
 
 채팅 제공자는 표를 컴파일하고, 문서 개념을 추출하고, 매칭을 판정하는 모델입니다. 임베딩(비슷한
 개념 찾기)에는 항상 Ollama의 `bge-m3`(1.2 GB)나 OpenAI 호환 임베딩 엔드포인트를 씁니다.
 
-| 제공자 | `AUTOONTOLOGY_CHAT_PROVIDER` | 비용 | 데이터가 컴퓨터 밖으로 나감 | quickstart / hanbit 첫 빌드 | 준비 방법 |
+| 제공자 | `ONTOLOGY_CHAT_PROVIDER` | 비용 | 데이터가 컴퓨터 밖으로 나감 | quickstart / hanbit 첫 빌드 | 준비 방법 |
 |---|---|---|---|---|---|
 | Ollama, 로컬 `qwen3:8b` | `ollama`(기본값) | 무료 | 아니요 | 46분 / 4~5시간(추정) | Ollama 설치, 모델은 `init`이 받음 |
 | Claude 구독(Claude Code CLI) | `claude` | 요금제 사용 한도 안에서 | 예, Anthropic으로 | 8~11분 / 37분 | `claude auth login` |
@@ -171,10 +171,10 @@ curl -fsSL https://raw.githubusercontent.com/kimtoma/AutoOntology/main/scripts/b
 
 시간은 2026-10-29에 Apple M4 Mac mini(16 GB)에서 새로 클론한 상태로 측정했습니다
 ([샘플 세트](#샘플-세트) 참고). "추정"은 직접 실행하지 않은 값입니다.
-`uv run autoontology provider status`는 모든 제공자(사용 가능 여부, 로그인, 모델, 마지막 테스트,
+`uv run onto provider status`는 모든 제공자(사용 가능 여부, 로그인, 모델, 마지막 테스트,
 해야 할 일)를 보여 주고, `provider test`는 테스트 호출을 한 번 하며, `provider use <name>`은
-`.env`의 제공자를 바꿉니다(이후 `uv run autoontology restart` 또는
-`uv run autoontology down && uv run autoontology up`으로 재시작).
+`.env`의 제공자를 바꿉니다(이후 `uv run onto restart` 또는
+`uv run onto down && uv run onto up`으로 재시작).
 
 ### 설정 페이지
 
@@ -184,48 +184,48 @@ Claude 구독, Codex/ChatGPT 구독, OpenAI 호환 API)와 모델, 임베딩 제
 API라면 기본 URL과 API 키를 고릅니다. **테스트**는 적용하지 않고 선택을 확인합니다(테스트 호출
 1회와 임베딩 1회). **저장 후 재시작**은 `.env`에 기록하고(다른 줄은 유지, 처음부터 권한 0600, 옆에 권한
 0600 백업 `.env.bak-<시각>`을 남기되 비밀 값은 `***`로 기록, 그대로 두려면
-`AUTOONTOLOGY_ENV_BACKUP_SECRETS=1`) 서비스와 엔진 백엔드를 재시작합니다. 페이지가 기다렸다가 다시 연결하며, Apple M4 Mac mini에서
+`ONTOLOGY_ENV_BACKUP_SECRETS=1`) 서비스와 엔진 백엔드를 재시작합니다. 페이지가 기다렸다가 다시 연결하며, Apple M4 Mac mini에서
 약 5~6초 걸렸습니다.
 
 - **재시작이 필요합니다**: 엔진은 시작할 때 한 번만 모델 엔드포인트를 읽으므로 제공자 변경은 두
-  프로세스가 재시작해야 적용됩니다. `uv run autoontology up`으로 시작한 서비스라면 페이지가
-  재시작하고, 아니면 `uv run autoontology restart`(또는 `down`과 `up`)를 직접 실행하세요. 빌드,
+  프로세스가 재시작해야 적용됩니다. `uv run onto up`으로 시작한 서비스라면 페이지가
+  재시작하고, 아니면 `uv run onto restart`(또는 `down`과 `up`)를 직접 실행하세요. 빌드,
   내보내기, 업로드, 테스트, 플레이그라운드 요청이 진행 중이면 거절합니다.
 - **API 키**는 테스트와 저장 요청에서만 받고 `.env`에만 저장하며, 다시 표시하거나 로그에 남기거나
   응답으로 돌려주지 않습니다(페이지에는 "저장됨 ✓"만 보이고, 새 키를 입력하면 교체, 삭제도 가능).
   저장된 키는 자기 엔드포인트로만 보냅니다: 기본 URL을 다른 호스트로 바꾸면 그 엔드포인트의 키를
   입력해야 합니다(400 `key_required`).
-- **로그인은 서버에서**: `claude auth login` / `codex login`은 AutoOntology를 실행하는 컴퓨터의
+- **로그인은 서버에서**: `claude auth login` / `codex login`은 Ontology를 실행하는 컴퓨터의
   터미널에서 한 번 해야 합니다. 페이지는 각 CLI의 설치와 로그인 여부를 보여 줍니다.
 - 서비스의 셸 환경에 설정된 값은 `.env`보다 우선하며, 페이지에서는 읽기 전용으로 표시됩니다.
 - 차원이 다른 임베딩 모델로 바꾸려면 확인이 필요합니다: 기존 벡터가 있는 동안에는 빌드가 다시
-  임베딩할 수 없으므로 모든 소스를 제거(`uv run autoontology source rm <name> --drop-db`)하고 다시
+  임베딩할 수 없으므로 모든 소스를 제거(`uv run onto source rm <name> --drop-db`)하고 다시
   추가하거나, 이전 모델을 유지하세요([문제 해결](#문제-해결) 참고).
 
 ### Claude 또는 ChatGPT 구독 쓰기
 
-AutoOntology는 이미 로그인해 둔 `claude`(Claude Code) 또는 `codex`(Codex CLI) 명령줄 도구로
+Ontology는 이미 로그인해 둔 `claude`(Claude Code) 또는 `codex`(Codex CLI) 명령줄 도구로
 채팅 호출을 보낼 수 있습니다. 그러면 API 키 대신 Claude 또는 ChatGPT 구독을 씁니다.
-AutoOntology는 호출마다 CLI를 하위 프로세스로 실행하며, 로그인 토큰을 보내거나 기록하지 않습니다.
+Ontology는 호출마다 CLI를 하위 프로세스로 실행하며, 로그인 토큰을 보내거나 기록하지 않습니다.
 codex의 경우 로그인 파일을 전용 codex 홈에 링크만 하고, codex가 그곳에서 토큰을 갱신하면 그
 파일을 내 `auth.json`으로 다시 복사합니다(모드 0600, 원자적 교체).
 
-1. AutoOntology를 실행할 사용자로 CLI를 설치하고 한 번 로그인합니다.
+1. Ontology를 실행할 사용자로 CLI를 설치하고 한 번 로그인합니다.
    - Claude: `claude auth login`(또는 `claude`를 실행하고 `/login` 입력). `claude auth
      status`가 `loggedIn: true`를 보여야 합니다.
    - ChatGPT: `codex login`(ChatGPT 계정 선택). `codex login status`가
      `Logged in using ChatGPT`를 보여야 합니다.
-2. `.env`에서 선택하고 재시작합니다(`uv run autoontology down && uv run autoontology up`).
+2. `.env`에서 선택하고 재시작합니다(`uv run onto down && uv run onto up`).
 
    ```
-   AUTOONTOLOGY_CHAT_PROVIDER=claude          # or codex
-   # AUTOONTOLOGY_CLAUDE_MODEL=claude-sonnet-5-5
-   # AUTOONTOLOGY_CODEX_MODEL=gpt-6-astra
+   ONTOLOGY_CHAT_PROVIDER=claude          # or codex
+   # ONTOLOGY_CLAUDE_MODEL=claude-sonnet-5-5
+   # ONTOLOGY_CODEX_MODEL=gpt-6-astra
    # If `claude` / `codex` on PATH is a wrapper or shim, name the real binary:
-   # AUTOONTOLOGY_CLAUDE_BIN=/path/to/claude
-   # AUTOONTOLOGY_CODEX_BIN=/path/to/codex
+   # ONTOLOGY_CLAUDE_BIN=/path/to/claude
+   # ONTOLOGY_CODEX_BIN=/path/to/codex
    ```
-3. 확인합니다. `uv run autoontology doctor`는 `chat provider` 행(CLI가 없거나 로그아웃되어
+3. 확인합니다. `uv run onto doctor`는 `chat provider` 행(CLI가 없거나 로그아웃되어
    있으면 로그인 명령과 함께 FAIL)과 `chat endpoint` 행(테스트 호출 한 번)을 보여 줍니다.
    서비스가 켜져 있으면 `curl -X POST http://127.0.0.1:7800/api/providers/test`가 같은 테스트를
    서비스를 거쳐 실행합니다.
@@ -239,13 +239,13 @@ codex의 경우 로그인 파일을 전용 codex 홈에 링크만 하고, codex�
   429 `usage_limit`로 응답합니다. 초기화를 기다리거나 제공자를 바꾸세요. quickstart 빌드는
   호출 139번(2026-10-29 실측), hanbit 전체 샘플은 약 520번입니다.
 - **임베딩에는 여전히 Ollama나 OpenAI 호환 엔드포인트가 필요합니다**
-  (`AUTOONTOLOGY_EMBED_PROVIDER=ollama`와 `bge-m3`가 기본값, 또는 `openai`). 이때 `setup`은
+  (`ONTOLOGY_EMBED_PROVIDER=ollama`와 `bge-m3`가 기본값, 또는 `openai`). 이때 `setup`은
   임베딩 모델만 받습니다.
 - **스트리밍은 없습니다.** `stream: true` 요청은 답 전체를 청크 하나로 받습니다.
 - 각 호출은 도구, MCP 서버, 설정 파일, `@file` 언급, 사용자 개인 지침을 모두 끈 상태로 빈 임시
   디렉터리에서 실행됩니다. codex는 내 `auth.json`만 링크한 전용 `CODEX_HOME`으로 실행됩니다.
-  동시에 실행되는 호출은 최대 `AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT`(2)개이고, 각 호출은
-  `AUTOONTOLOGY_PROVIDER_TIMEOUT_S`(120초) 안에 끝나야 합니다.
+  동시에 실행되는 호출은 최대 `ONTOLOGY_PROVIDER_MAX_INFLIGHT`(2)개이고, 각 호출은
+  `ONTOLOGY_PROVIDER_TIMEOUT_S`(120초) 안에 끝나야 합니다.
 
 ### OpenAI 호환 API 쓰기
 
@@ -253,20 +253,20 @@ codex의 경우 로그인 파일을 전용 codex 홈에 링크만 하고, codex�
 됩니다. 예시는 NVIDIA의 호스팅 엔드포인트를 쓰며, 모델 id는 자리표시자입니다.
 
 ```
-AUTOONTOLOGY_CHAT_PROVIDER=openai
-AUTOONTOLOGY_OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1
-AUTOONTOLOGY_OPENAI_API_KEY=your-api-key-here
-AUTOONTOLOGY_OPENAI_CHAT_MODEL=<chat model id from build.nvidia.com>
+ONTOLOGY_CHAT_PROVIDER=openai
+ONTOLOGY_OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1
+ONTOLOGY_OPENAI_API_KEY=your-api-key-here
+ONTOLOGY_OPENAI_CHAT_MODEL=<chat model id from build.nvidia.com>
 # keep local embeddings (bge-m3 via Ollama) ...
-AUTOONTOLOGY_EMBED_PROVIDER=ollama
+ONTOLOGY_EMBED_PROVIDER=ollama
 # ... or embed through the same endpoint:
-# AUTOONTOLOGY_EMBED_PROVIDER=openai
-# AUTOONTOLOGY_OPENAI_EMBED_MODEL=<embedding model id>
+# ONTOLOGY_EMBED_PROVIDER=openai
+# ONTOLOGY_OPENAI_EMBED_MODEL=<embedding model id>
 ```
 
-그다음 `uv run autoontology doctor`로 설정을 확인하고 `down` / `up`으로 다시 시작합니다. 두
+그다음 `uv run onto doctor`로 설정을 확인하고 `down` / `up`으로 다시 시작합니다. 두
 제공자를 모두 `openai`로 설정하면 `setup`은 Ollama를 완전히 건너뜁니다. 모델 id는 엔드포인트가
-아는 이름 그대로 적으세요. 엔진에 필요한 `openai/` 접두사는 AutoOntology가 붙이고 라우터에서
+아는 이름 그대로 적으세요. 엔진에 필요한 `openai/` 접두사는 Ontology가 붙이고 라우터에서
 다시 떼어 냅니다. 임베딩 차원은 첫 소스를 적재(ingest)한 시점에 고정됩니다(문제 해결 참고).
 
 ## 샘플 세트
@@ -309,15 +309,15 @@ Ollama의 `bge-m3`):
 | structured | `.csv` `.tsv` `.parquet` `.pq` `.json` `.jsonl` `.ndjson` `.sqlite` `.sqlite3` `.db` | DuckDB / sqlite3 | 파일마다 표 하나(SQLite는 표마다 하나). |
 | structured | `.xlsx` `.xlsm` `.xls` | openpyxl / python-calamine | 시트마다 표 하나(`<file>_<sheet>`, 시트가 하나면 `<file>`). 첫 행이 헤더입니다. |
 | documents | `.md` `.markdown` `.txt` `.html` `.htm` | 기본 리더 | 제목 트리. 본문은 UTF-8 또는 CP949. |
-| documents | `.csv` `.tsv` | 기본 리더 | 표 섹션 하나. 첫 행이 헤더이며, 최대 `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS`행까지 담고 그 뒤에는 "… N more rows (M total)" 줄이 붙습니다. |
+| documents | `.csv` `.tsv` | 기본 리더 | 표 섹션 하나. 첫 행이 헤더이며, 최대 `ONTOLOGY_DOC_TABLE_MAX_ROWS`행까지 담고 그 뒤에는 "… N more rows (M total)" 줄이 붙습니다. |
 | documents | `.doc` | 기본 리더(olefile) | Word 97-2003 본문과 표, 이미지는 제외. 암호화되었거나 읽을 수 없는 파일은 해결 방법(`.docx`로 저장)과 함께 실패합니다. |
 | documents | `.hwp` `.hwpx` `.hml` `.hwpml` `.pdf` `.docx` `.pptx` `.xls` `.xlsx` | kordoc | Node.js 20 이상과 `tools install-kordoc`이 필요합니다. PDF는 `--ocr`로 실행되어 스캔한 페이지도 인식합니다. |
-| documents | `.png` `.jpg` `.jpeg` `.webp` | kordoc OCR | OCR 모델이 필요합니다(`tools install-kordoc`). `AUTOONTOLOGY_VISION_MODEL`을 설정하면 Ollama 비전 모델이 OCR 텍스트 앞에 "이미지 설명" 섹션을 붙입니다. |
+| documents | `.png` `.jpg` `.jpeg` `.webp` | kordoc OCR | OCR 모델이 필요합니다(`tools install-kordoc`). `ONTOLOGY_VISION_MODEL`을 설정하면 Ollama 비전 모델이 OCR 텍스트 앞에 "이미지 설명" 섹션을 붙입니다. |
 
 OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 kordoc이 필요한 문서처럼 경고로
-처리됩니다. 빌드는 성공하고, `uv run autoontology tools install-kordoc` 후 다음 빌드가 그 파일을
+처리됩니다. 빌드는 성공하고, `uv run onto tools install-kordoc` 후 다음 빌드가 그 파일을
 읽습니다. 텍스트 레이어도 있는 PDF 안의 스캔 페이지는 그때까지 텍스트를 내지 않습니다. 나중에
-`AUTOONTOLOGY_VISION_MODEL`을 설정하면 이미 저장된 이미지를 다시 읽어 설명을 붙입니다.
+`ONTOLOGY_VISION_MODEL`을 설정하면 이미 저장된 이미지를 다시 읽어 설명을 붙입니다.
 
 ## 빌드가 하는 일
 
@@ -337,7 +337,7 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
                                                            (TTL, JSON-LD, GraphML, Ossie, OKF)
 ```
 
-`uv run autoontology build`(또는 웹 UI의 **빌드 시작**)는 등록된 모든 소스를 한 번의 실행으로
+`uv run onto build`(또는 웹 UI의 **빌드 시작**)는 등록된 모든 소스를 한 번의 실행으로
 처리하고 스냅샷 하나를 저장합니다. 각 단계의 소요 시간은 CLI와 빌드 페이지에 실시간으로
 표시됩니다.
 
@@ -349,9 +349,9 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
    원문 그대로의 근거를 추출합니다. 통합(consolidate) 단계는 임베딩 유사도와 LLM 병합 판정으로
    청크와 문서를 가로지르는 중복을 병합합니다.
 3. **매칭.** 매칭 대상 문서 개념(entity, metric, attribute)마다 임베딩 코사인으로 상위 5개 용어를
-   찾습니다(하한 `AUTOONTOLOGY_ALIGN_MIN_SIM`). LLM 판정자는 `same`, `broader`, `narrower`,
+   찾습니다(하한 `ONTOLOGY_ALIGN_MIN_SIM`). LLM 판정자는 `same`, `broader`, `narrower`,
    `related`, `none` 중 하나를 신뢰도, 이유와 함께 반환하며, 판정은 fail-closed로 검증됩니다.
-4. **동일성 정책 `identity-v2.2`.** `same` 판정은 신뢰도가 max(`AUTOONTOLOGY_ALIGN_MIN_CONF`,
+4. **동일성 정책 `identity-v2.2`.** `same` 판정은 신뢰도가 max(`ONTOLOGY_ALIGN_MIN_CONF`,
    0.90) 이상이고, **동시에** 개념의 별칭(이름, 영문 이름, 동의어) 하나가 통째로 용어의 신뢰할 수
    있는 별칭과 정확히 일치할 때만 수용됩니다. 별칭은 NFKC 정규화, 대소문자 접기, 공백 제거 후
    비교합니다. 3자보다 긴 라틴 문자 별칭은 영어 단수형으로도 일치합니다(`Contracts` = `Contract`,
@@ -367,7 +367,7 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
    용어의 하위 클래스로 만들고(개념이 용어를 extends), `narrower` 판정은 용어를 개념의 하위
    클래스로 만들며(용어가 개념을 extends), `related`는 `related_to`(`skos:related`) 링크가
    됩니다. 나머지 entity, metric, attribute 개념은 각자 클래스가 되고, 규칙과 절차는
-   `ao:BusinessRule`과 `ao:Process`의 개체가 됩니다. 모든 노드에는 출처(origin)가 붙습니다:
+   `onto:BusinessRule`과 `onto:Process`의 개체가 됩니다. 모든 노드에는 출처(origin)가 붙습니다:
    `document`, `structured`(문서가 건드리지 않은 용어), `aligned`(접힌 개념이 있거나 수용된 매칭
    공리가 있는 용어).
 6. **스냅샷.** 병합된 모델은 새 리비전과 함께 `ontology_snapshots`에 JSON으로 저장됩니다. UI,
@@ -392,17 +392,17 @@ OCR 모델이 없어 건너뛴 이미지와 이미지로만 된(스캔) PDF는 k
 ## 실행 가능한 온톨로지
 
 온톨로지가 업무가 *무엇인지*를 말한다면, 실행 계층은 사람과 에이전트가 사람이 확정한 규칙대로
-그 위에서 *행동*하게 합니다. 원칙은 AutoOntology의 나머지 부분과 같습니다. **모델이 제안하고,
+그 위에서 *행동*하게 합니다. 원칙은 Ontology의 나머지 부분과 같습니다. **모델이 제안하고,
 사람이 확정하고, 확정된 정의만 실행합니다.** 빌드 위에 네 층이 올라갑니다.
 
 | 층 | 무엇인가 | 어디서 |
 |---|---|---|
-| **개체** | 소스 테이블 하나에 연결된 클래스가 *개체 유형*이 됩니다. 행 하나가 개체이고, 키 컬럼·제목 컬럼과 다른 유형으로 가는 링크(외래 키)가 있습니다. 빌드마다 제안되고 **검토**(분류 *개체 유형*)에서 확정합니다. | **개체** 페이지, `ao object`, `GET /api/objects/...` |
-| **펑션** | 개체 하나의 계산값과 예/아니오 판정. 작은 식 언어로 씁니다(코드는 실행되지 않음): `청구금액 - coalesce(수납금액, 0)`, `수납상태 != "완납" and 연체일수() > 0`. | **로직** 페이지, `ao logic`, 에이전트 도구 `call_function` |
-| **액션** | 사람(또는 에이전트)이 개체 하나에 하는 변경: 입력값, 실행 전 조건, 효과(컬럼이나 독촉 단계 같은 *운영 속성*을 `set`), 알림, 실행할 수 있는 역할, 승인(`none`, `reviewer`, `owner`; 식이 참일 때만(`when`)도 가능), 에이전트 정책(`none`, `propose`, `execute`). | 개체 페이지 버튼, `ao action`, 에이전트 도구 `preview_action` / `submit_action` |
-| **워크플로** | 일정(`daily 02:00`, `hourly`, `weekly MON 09:00`), `on_action` 트리거 또는 수동 실행으로 한 유형의 개체를(`where` 조건이 참인 것만) 돌며 각 개체에 `if` / `action` / `notify` 단계를 실행합니다. | **로직** 페이지(워크플로 탭), `ao workflow` |
+| **개체** | 소스 테이블 하나에 연결된 클래스가 *개체 유형*이 됩니다. 행 하나가 개체이고, 키 컬럼·제목 컬럼과 다른 유형으로 가는 링크(외래 키)가 있습니다. 빌드마다 제안되고 **검토**(분류 *개체 유형*)에서 확정합니다. | **개체** 페이지, `onto object`, `GET /api/objects/...` |
+| **펑션** | 개체 하나의 계산값과 예/아니오 판정. 작은 식 언어로 씁니다(코드는 실행되지 않음): `청구금액 - coalesce(수납금액, 0)`, `수납상태 != "완납" and 연체일수() > 0`. | **로직** 페이지, `onto logic`, 에이전트 도구 `call_function` |
+| **액션** | 사람(또는 에이전트)이 개체 하나에 하는 변경: 입력값, 실행 전 조건, 효과(컬럼이나 독촉 단계 같은 *운영 속성*을 `set`), 알림, 실행할 수 있는 역할, 승인(`none`, `reviewer`, `owner`; 식이 참일 때만(`when`)도 가능), 에이전트 정책(`none`, `propose`, `execute`). | 개체 페이지 버튼, `onto action`, 에이전트 도구 `preview_action` / `submit_action` |
+| **워크플로** | 일정(`daily 02:00`, `hourly`, `weekly MON 09:00`), `on_action` 트리거 또는 수동 실행으로 한 유형의 개체를(`where` 조건이 참인 것만) 돌며 각 개체에 `if` / `action` / `notify` 단계를 실행합니다. | **로직** 페이지(워크플로 탭), `onto workflow` |
 
-**소스는 절대 쓰지 않습니다.** 액션의 효과는 AutoOntology의 수정 기록 계층(SQLite)에 쌓이고,
+**소스는 절대 쓰지 않습니다.** 액션의 효과는 Ontology의 수정 기록 계층(SQLite)에 쌓이고,
 개체를 읽을 때 소스 행 위에 덮어 보여 줍니다. 적용된 실행은 모두 되돌릴 수 있습니다. 수정한 뒤
 소스 값이 바뀌면 개체 페이지에 *충돌*로 표시됩니다. 외부 시스템에 다시 쓰는 기능은 이번 릴리스에
 없습니다.
@@ -425,18 +425,18 @@ quickstart 샘플 세트에는 청구수납규정(제6조 연체 판정, 제7조
 `samples/quickstart/logic/`에 들어 있습니다.
 
 ```bash
-uv run ao demo --set quickstart --no-open          # 먼저 빌드
-uv run ao object types                              # 검토에서 제안을 확정하거나:
-uv run ao object bind invoices && uv run ao object bind contracts && uv run ao object bind customers
-uv run ao logic apply -f samples/quickstart/logic/functions.yaml
-for f in 미수금 연체일수 연체여부 남은일수 미수청구건수; do uv run ao logic activate function $f; done
-uv run ao logic apply -f samples/quickstart/logic/actions.yaml
-uv run ao logic activate action 독촉단계기록          # owner
-uv run ao action preview 독촉단계기록 INV-20200003 --param 단계=2
-uv run ao logic apply -f samples/quickstart/logic/workflows.yaml
-uv run ao logic activate workflow 연체독촉            # owner, 매일 02:00 실행
-uv run ao workflow run 연체독촉 --wait                 # 또는 지금
-uv run ao action runs --status pending_approval     # 4단계는 owner 승인 대기
+uv run onto demo --set quickstart --no-open          # 먼저 빌드
+uv run onto object types                              # 검토에서 제안을 확정하거나:
+uv run onto object bind invoices && uv run onto object bind contracts && uv run onto object bind customers
+uv run onto logic apply -f samples/quickstart/logic/functions.yaml
+for f in 미수금 연체일수 연체여부 남은일수 미수청구건수; do uv run onto logic activate function $f; done
+uv run onto logic apply -f samples/quickstart/logic/actions.yaml
+uv run onto logic activate action 독촉단계기록          # owner
+uv run onto action preview 독촉단계기록 INV-20200003 --param 단계=2
+uv run onto logic apply -f samples/quickstart/logic/workflows.yaml
+uv run onto logic activate workflow 연체독촉            # owner, 매일 02:00 실행
+uv run onto workflow run 연체독촉 --wait                 # 또는 지금
+uv run onto action runs --status pending_approval     # 4단계는 owner 승인 대기
 ```
 
 - 펑션 `미수금`, `연체일수`(데이터에 지급기한 컬럼이 없어 청구일 + 30일을 지급기한으로 가정),
@@ -448,7 +448,7 @@ uv run ao action runs --status pending_approval     # 4단계는 owner 승인 �
 
 #### 승인
 
-승인이 필요한 실행은 `pending_approval`로 기다립니다(**검토 → 승인 대기**, `ao action runs
+승인이 필요한 실행은 `pending_approval`로 기다립니다(**검토 → 승인 대기**, `onto action runs
 --status pending_approval`). 승인할 때 현재 데이터와 현재 버전의 액션으로 실행 전 조건을 다시
 평가하며, 조건이 더는 맞지 않으면 적용 대신 실패합니다. 승인할 수 있는 사람은 실행의 승인
 역할(`reviewer` 또는 `owner`)입니다. 계정 모드에서는 자기 요청을 스스로 승인할 수 없습니다(4-eyes,
@@ -463,18 +463,18 @@ uv run ao action runs --status pending_approval     # 4단계는 owner 승인 �
 #### 워크플로
 
 서비스는 스케줄러(스레드 하나, 60초마다)를 돌려 일정이 있는 활성 워크플로의 차례가 된 슬롯을
-`AUTOONTOLOGY_TZ`(기본: 시스템 시간대) 기준으로 실행합니다. 서비스가 멈춰 있었다면 놓친 가장
+`ONTOLOGY_TZ`(기본: 시스템 시간대) 기준으로 실행합니다. 서비스가 멈춰 있었다면 놓친 가장
 최근 슬롯 하나만(6시간 이내) 한 번 실행하고 그보다 오래된 것은 채우지 않으며, 스케줄러가 둘이어도
 슬롯은 한 번만 실행됩니다. 액션에 승인이 필요하면 그 개체의 단계가 일시정지되고, 승인이 결정되면
 이어서 실행됩니다(거절: 그 개체는 건너뜀). 같은 액션이 이미 승인을 기다리는 개체에는 다시 제출하지
 않습니다(*이미 대기 중*으로 집계). 실행은 워크플로를 활성화한 사람의 역할로 동작합니다. 계정
 모드에서 그 사람이 비활성화되었거나 더는 owner가 아니면, owner가 워크플로를 다시 활성화할 때까지
-실행이 실패합니다(`activator_not_allowed`). `AUTOONTOLOGY_WORKFLOWS=off`는 일정과 `on_action`
+실행이 실패합니다(`activator_not_allowed`). `ONTOLOGY_WORKFLOWS=off`는 일정과 `on_action`
 트리거를 멈춥니다(수동 실행은 되고, 일시정지된 실행도 이어집니다).
 
 #### 문서에서 로직 추출
 
-`ao logic extract`(또는 **로직 → 문서에서 추출**)는 `logic` 실행을 시작합니다. 빌드가 문서에서
+`onto logic extract`(또는 **로직 → 문서에서 추출**)는 `logic` 실행을 시작합니다. 빌드가 문서에서
 찾은 규칙·절차 개념과 검증된 근거 인용, 개체 유형, 기존 정의를 채팅 모델에 보내고, 모델이 펑션·
 액션·워크플로를 제안합니다. 제안은 모두 온톨로지에 대해 검증됩니다. 통과한 것은 *바로 쓸 수
 있음*, 나머지는 오류와 함께 남습니다(*수정 필요*, 예: 데이터에 없는 지급기한 컬럼). **검토 →
@@ -484,15 +484,15 @@ uv run ao action runs --status pending_approval     # 4단계는 owner 승인 �
 
 #### 에이전트용 스킬
 
-**연결 → 스킬 내보내기**(`ao skill export`, `GET /api/logic/skill.zip`)는 활성 정의를 Agent
+**연결 → 스킬 내보내기**(`onto skill export`, `GET /api/logic/skill.zip`)는 활성 정의를 Agent
 Skill(에이전트가 읽는 폴더, `SKILL.md`가 중심)로 내려받습니다.
 
 ```
-autoontology-<project>/
+ontology-<project>/
   SKILL.md                    front matter(name, description) + 개체 유형, 펑션, 액션,
                               워크플로, 단계별 절차와 예시
-  mcp.json                    MCP 서버: {{AUTOONTOLOGY_URL}}/mcp, Bearer <token>
-  definitions/functions.yaml  활성 스펙(ao logic apply -f로 읽음)
+  mcp.json                    MCP 서버: {{ONTOLOGY_URL}}/mcp, Bearer <token>
+  definitions/functions.yaml  활성 스펙(onto logic apply -f로 읽음)
   definitions/actions.yaml
   definitions/workflows.yaml
 ```
@@ -507,15 +507,15 @@ autoontology-<project>/
 
 1. **소스 추가·변경.** 소스 폴더에 새 파일을 넣거나 데이터베이스를 바꿉니다. **개요**가 소스마다
    신선도를 쉬운 말로 보여 줍니다("파일 3개 추가, 1개 변경").
-2. **변경분 반영 빌드.** 개요의 버튼(또는 `autoontology build --resume`)이 바뀐 것만 다시 빌드하고
+2. **변경분 반영 빌드.** 개요의 버튼(또는 `onto build --resume`)이 바뀐 것만 다시 빌드하고
    나머지 단계는 그대로 둡니다.
 3. **검토.** 모델이 제안하고 사람이 확인합니다. **검토** 페이지(사이드바에 대기 수가 표시됨)는
    사람의 확인을 기다리는 항목을 분류합니다: *제안*(모델은 표의 용어와 같은 뜻이라고 보지만 정책이
    스스로 합치지 않은 문서 개념), *관계*(관련·상위·하위), *미정렬* 개념, 용어에서 빠진 *동의어*,
    바뀐 *소스*. 수락(같음·관련·더 좁음·더 넓음 중 선택), 거절, 독립 유지(미정렬), 되돌리기를 할 수 있고, `j`/`k`로
-   이동하고 `a`/`r`로 결정합니다. 명령줄에서는 `autoontology review list`, `review accept <id>`,
+   이동하고 `a`/`r`로 결정합니다. 명령줄에서는 `onto review list`, `review accept <id>`,
    `review reject <id>`.
-4. **적용.** 배너의 **적용**(또는 `autoontology apply`)이 결정을 새 리비전에 반영합니다: 결정,
+4. **적용.** 배너의 **적용**(또는 `onto apply`)이 결정을 새 리비전에 반영합니다: 결정,
    병합, 스냅샷 순서이며 모델 호출이 없습니다(quickstart 세트에서 1초 미만). 결정은 이후 빌드에서도
    유지되며 align 판정이 덮어쓰지 않습니다. 대기 중인 결정이 없으면 리비전을 만들지 않습니다
    (`--force`로 강제). **병합됨** 탭에는 모델이 스스로 합친 개념이 있어 잘못된 병합을 거절할 수
@@ -527,7 +527,7 @@ autoontology-<project>/
 매일 밤:
 
 ```bash
-cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
+cd /path/to/ontology && uv run onto build --resume && uv run onto apply
 ```
 
 ![검토 페이지](docs/screenshots/review.ko.png)
@@ -541,11 +541,11 @@ r2, ...), 검토 결정, 내보내기(`exports/<slug>/r<rev>/`), 플레이그라
 동작합니다.
 
 ```bash
-uv run ao project create contracts --name "계약"        # 슬러그: a-z, 0-9, '-', 2-24자 (r+숫자 불가)
-uv run ao -p contracts source add ./data/contracts --name contracts
-uv run ao -p contracts build && uv run ao -p contracts export
-uv run ao project list                                  # 리비전, 소스 수, 마지막 빌드
-export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를 준 것과 같음
+uv run onto project create contracts --name "계약"        # 슬러그: a-z, 0-9, '-', 2-24자 (r+숫자 불가)
+uv run onto -p contracts source add ./data/contracts --name contracts
+uv run onto -p contracts build && uv run onto -p contracts export
+uv run onto project list                                  # 리비전, 소스 수, 마지막 빌드
+export ONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를 준 것과 같음
 ```
 
 프로젝트는 이름을 바꿀 수 있고(`project rename <slug> --name N --slug S`; 새 슬러그는 내보내기 폴더도
@@ -559,26 +559,26 @@ export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를
 ### 아키텍처
 
 ```
-                 browser (/ui/)                  autoontology CLI
+                 browser (/ui/)                  ontology CLI
                        |                                |
                        v                                v
   +--------------------------------------------------------------------------+
-  | AutoOntology service  127.0.0.1:7800   (FastAPI, autoontology.web)       |
+  | Ontology service  127.0.0.1:7800   (FastAPI, ontology.web)       |
   |   /api  REST + SSE   /api/playground   /ui  React app   /v1 model router |
-  |   in-process: build pipeline, SQLite store (data/autoontology.db),       |
+  |   in-process: build pipeline, SQLite store (data/ontology.db),       |
   |               exporters (RDF, GraphML, Ossie, OKF), SPARQL (rdflib)      |
   +--------------------------------------------------------------------------+
         | HTTP /api/...         | imports auto_ontology        | /v1/chat/completions
         v                       v  (ingest, compile, vectors)  v
   +-----------------------+   +-----------------------+   +-------------------------+
   | NVIDIA Auto Ontology  |   | Postgres 17+pgvector  |   | Ollama :11434, an       |
-  | backend 127.0.0.1:3101|-->| autoontology (catalog)|   | OpenAI-compatible API,  |
-  | (vendor/auto-ontology)|   | autoontology_src_<n>  |   | or the claude / codex   |
+  | backend 127.0.0.1:3101|-->| ontology (catalog)|   | OpenAI-compatible API,  |
+  | (vendor/auto-ontology)|   | ontology_src_<n>  |   | or the claude / codex   |
   |                       |   |                       |   | CLI (chat only)         |
   +-----------------------+   +-----------------------+   +-------------------------+
 ```
 
-엔진은 수정하지 않은 git 서브모듈입니다(NVIDIA Auto Ontology `c96048c`, 1.3.x). AutoOntology는 연결, 내보내기, 자연어→SQL은 HTTP로
+엔진은 수정하지 않은 git 서브모듈입니다(NVIDIA Auto Ontology `c96048c`, 1.3.x). Ontology는 연결, 내보내기, 자연어→SQL은 HTTP로
 엔진을 호출하고, 적재, 시맨틱 컴파일, 벡터 테이블은 엔진을 프로세스 안에서 import해 실행합니다.
 백엔드와 서비스 모두 채팅 호출을 서비스의 `/v1` 라우터로 보내고, 라우터가 이를 Ollama,
 설정된 OpenAI 호환 엔드포인트, 또는 로그인된 `claude` / `codex` CLI로 전달합니다. 자세한 내용은
@@ -586,56 +586,56 @@ export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를
 
 ### CLI 레퍼런스
 
-`ao`는 `autoontology`의 짧은 별칭입니다. 아래 모든 명령을 `ao …`로도 실행할 수 있습니다(예: `uv run ao ontology concepts -q 계약 --json`).
+`onto`는 `ontology`의 짧은 별칭입니다. 아래 모든 명령을 `onto …`로도 실행할 수 있습니다(예: `uv run onto ontology concepts -q 계약 --json`).
 
-명령 앞의 `--project SLUG`(`-p`, 또는 `AUTOONTOLOGY_PROJECT`)는 아래 모든 명령이 다룰 프로젝트를
-고릅니다(`uv run ao -p contracts runs`). 없으면 기본 프로젝트입니다. `doctor`와 `status`는 설치
+명령 앞의 `--project SLUG`(`-p`, 또는 `ONTOLOGY_PROJECT`)는 아래 모든 명령이 다룰 프로젝트를
+고릅니다(`uv run onto -p contracts runs`). 없으면 기본 프로젝트입니다. `doctor`와 `status`는 설치
 전체를 보며 프로젝트 목록을 함께 보여 줍니다.
 
 | 명령 | 하는 일 |
 |---|---|
-| `autoontology init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | 단계별 설정: Postgres 확인(`docker compose up -d` 후 재시도), 채팅 제공자·임베딩·문서 감지와 선택, `.env` 작성(다른 줄은 유지, 기존 파일은 백업), `setup` 실행. `.env`에 이미 있는 제공자·임베딩 선택은 유지합니다(추천은 힌트로만 표시). `--yes`는 아무것도 묻지 않으며, Postgres가 꺼져 있거나 고른 CLI가 로그인되지 않았으면 해결 방법과 함께 종료 코드 2로 끝납니다. |
-| `autoontology demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | 서비스 시작(`autoontology_src_*` 데이터베이스가 사라진 업스트림 연결은 정리하고, 살아 있지만 이 체크아웃의 소스가 소유하지 않은 연결은 다른 체크아웃이 카탈로그를 공유할 수 있으므로 알리기만 함), 샘플 세트 소스 등록(이미 등록된 것은 유지, 같은 이름에 다른 데이터를 가진 소스는 데이터베이스와 추출된 개념이 삭제되므로 확인을 받거나 `--replace`일 때만 교체), 제공자별 예상 빌드 시간 출력, 단계별 시간과 함께 빌드, 내보내기, 웹 UI 열기. |
-| `autoontology provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M] [--embed ollama\|openai] [--embed-model M] [--base-url URL] [--openai-chat-model M]` | 모든 채팅 제공자 표시(사용 가능, 로그인, 모델, 마지막 테스트, 해결 방법), 테스트 호출 한 번, 또는 `.env`의 제공자 전환(셸 변수가 파일보다 우선하면 경고, API 키는 명령줄로 받지 않음). |
-| `autoontology setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | 멱등 준비 작업: 카탈로그 데이터베이스와 `vector`, `pg_trgm` 확장을 만들고, 마이그레이션을 실행하고, Ollama 모델(설정했다면 `AUTOONTOLOGY_VISION_MODEL`도)을 받아 `openai/qwen3:8b` 별칭을 만들며, `--docs`를 주면 kordoc과 OCR 모델을 설치합니다(`--skip-ocr-models`는 모델을 뺍니다). |
-| `autoontology doctor [--skip-models]` | Postgres, pgvector, 마이그레이션, 모델 엔드포인트, 벡터 테이블, 포트, (서비스가 켜져 있으면) 고아 업스트림 연결을 점검합니다. |
-| `autoontology up` / `down` / `status` | 엔진 백엔드와 서비스를 시작, 중지하거나 상태를 보여 줍니다. |
-| `autoontology restart [--only backend]` | 서비스와 백엔드를 재시작해 둘 다 현재 `.env`를 읽게 합니다(설정 페이지가 저장 후 하는 일). `down` + `up`처럼 진행 중인 빌드를 기다리지 않습니다(설정 페이지는 그때 거절). |
-| `autoontology ui [--no-browser]` | 웹 UI URL을 출력하고 엽니다. |
-| `autoontology source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | 소스를 등록합니다. 정형 소스는 `autoontology_src_<name>`에 적재됩니다. |
-| `autoontology source list` | 소스 목록을 보여 줍니다. |
-| `autoontology source rm N [--drop-db] [--force]` | 소스를 제거합니다. `--drop-db`는 그 데이터베이스도 삭제합니다. 문서 소스라면 먼저 그 소스의 매칭이 업스트림 용어에 추가한 동의어를 지웁니다(수동 별칭, 다른 소스의 별칭, 다른 소스의 수용된 `same` 매칭이 여전히 덮는 별칭은 유지). 이 작업에는 엔진 데이터베이스가 필요하며, 실패하면 `--force`를 주지 않는 한 소스를 유지합니다. `--force`로도 업스트림 연결을 지우지 못하면(백엔드 꺼짐) `--drop-db`는 데이터베이스를 남기고, 나중에 `tools prune-connections <database> --include-unowned --drop-db`를 실행하라고 안내합니다. |
-| `autoontology build [--source N ...] [--resume]` | 모든 소스를 스냅샷 하나로 빌드합니다. `--source`는 지정한 소스만 다시 빌드합니다(align, merge, snapshot은 여전히 전체를 대상으로 합니다). `--resume`은 최근 빌드를 이어 가며, 입력이 바뀌지 않은 단계는 유지합니다([빌드 이어 가기](#빌드-이어-가기) 참고). |
-| `autoontology ontology [--revision R] [--json]` | 스냅샷(기본: 최신)의 리비전, 소스, 개수를 보여 줍니다. |
-| `autoontology ontology revisions [--limit N]` / `diff [--from R] [--to R]` | 리비전 목록, 두 리비전 사이의 변경 사항(기본: 직전 -> 최신). |
-| `autoontology ontology concepts [-q TEXT] [--kind K] [--origin structured\|document\|aligned] [--source S] [--revision R] [--page P] [--size N]` | 개념 목록·검색, 페이지 단위(온톨로지 페이지의 표). |
-| `autoontology ontology concept <id> [--revision R]` | 개념 하나: 정의, 동의어, 거절된 별칭, 정렬과 상태, 근거 인용, 검토 결정. |
-| `autoontology ontology graph [--layer all\|structured\|documents\|aligned] [--evidence] [--revision R] [--out FILE]` | 그래프 페이지의 노드와 엣지(`--out`은 JSON을 파일로 저장). |
-| `autoontology review list [--category C] [--status pending\|decided\|all] [--page P] [--size N] [--json]` | 검토 대기 항목(제안, 관계, 미정렬, 동의어, 바뀐 소스)을 페이지 단위로 보여 줍니다. |
-| `autoontology review accept <id> [--relation same\|related\|narrower\|broader] [--term T] [--note N]` / `reject <id>` / `acknowledge <id>` / `undo <id>` | 항목 하나에 대한 사람의 결정을 기록하거나 지웁니다. |
-| `autoontology apply [--force]` | 대기 중인 결정을 새 리비전에 반영합니다(결정, 병합, 스냅샷). 모델을 호출하지 않습니다. 대기 중인 결정이 없으면 리비전을 만들지 않습니다(`--force`는 강제로 만듦). |
-| `autoontology runs [--limit N] [--json]` | 최근 실행과 그 단계들을 보여 줍니다. |
-| `autoontology runs show <id>` / `logs <id> [--follow]` / `cancel <id>` | 실행 하나의 단계와 진행 상황, 로그(비밀 마스킹; `--follow`는 실행이 끝날 때까지 실시간 이벤트를 받음), 취소. `show`, `logs --follow`, `cancel`은 서비스(`up`)가 필요하며, 없으면 종료 코드 2로 끝납니다. |
-| `autoontology source freshness` | 마지막 빌드 이후 바뀐 소스와 그 이유(`sources freshness`도 가능). |
-| `autoontology samples list` / `load <set> [--replace]` | 샘플 세트 목록; 빌드 없이 세트의 소스를 등록(같은 이름에 다른 데이터를 가진 소스는 `--replace`일 때만 교체). |
-| `autoontology exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` / `zip <rev> --out FILE` | 내보내기 폴더 목록; 리비전의 파일 목록 또는 텍스트 파일 출력(예: `ossie/validation.json`, `okf/validation.json`); 파일 저장; 리비전 폴더 전체를 zip 하나로 저장(`--out`이 디렉터리면 `autoontology-r0003.zip`). |
-| `autoontology playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F\|--examples [--limit N]` / `index [--rebuild]` | 실행 중인 서비스로 플레이그라운드 사용: 인용과 함께 스트리밍되는 RAG 답변, 자연어 SQL 에이전트, 최신 스냅샷에 대한 SPARQL, 채팅 인덱스. |
-| `autoontology settings show` / `test [...]` / `set [...]` / `restart [--wait]` | 설정 페이지: 현재 선택과 각 값의 출처(키는 표시 안 함), 후보 테스트(채팅 pong과 임베딩 차원), `.env` 저장(`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; 키는 표준 입력으로만), 서비스 자체 재시작. |
-| `autoontology agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90] [--scope read\|propose\|execute] [--action NAME]` / `rotate <id>` / `revoke <id>` | 외부 에이전트용 베어러 토큰([외부 에이전트 연결](#외부-에이전트-연결) 참고): `create`와 `rotate`는 토큰을 한 번만 출력합니다(저장되는 것은 SHA-256뿐이고, 교체하면 이전 토큰은 즉시 멈춤). `revoke`는 토큰의 호출 기록을 남깁니다. `--revision`은 토큰을 스냅샷 하나에 고정합니다. `--scope propose`는 에이전트가 항상 승인을 기다리는 액션을 제출하게 하고, `--scope execute`(owner)는 각 액션의 승인 규칙대로 실행하게 합니다. `--action`은 이 범위를 지정한 액션으로 제한합니다. |
-| `autoontology agent usage [--days N]` | 도구별·토큰별(MCP와 REST)·날짜별 에이전트 호출. |
-| `autoontology export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/<프로젝트 슬러그>/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
-| `autoontology tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
-| `autoontology tools build-ui` | 웹 UI를 `autoontology/web/static/dist`로 다시 빌드합니다(pnpm 필요). |
-| `autoontology tools status` | 사용 중인 kordoc 엔진과 Node 바이너리를 보여 줍니다. |
-| `autoontology tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | 데이터베이스가 사라진 `autoontology_src_*` 업스트림 연결을 지웁니다. 데이터베이스는 있지만 이 체크아웃의 소스가 소유하지 않은 연결은 목록에만 나오고 `--include-unowned`일 때만 지웁니다(카탈로그를 공유하는 다른 체크아웃이 쓸 수 있음). 그때 `--drop-db`는 그 데이터베이스도 삭제합니다. |
-| `autoontology project list [--no-archived]` / `show [SLUG]` / `create <slug> [--name N] [--description D]` / `rename <slug> [--name N] [--slug S] [--description D]` / `archive <slug>` / `unarchive <slug>` | 프로젝트 목록(최신 리비전, 소스 수, 마지막 빌드, 상태), 하나 보기(기본: `--project`, 없으면 기본 프로젝트), 만들기, 이름·설명·슬러그 변경(새 슬러그는 `exports/<slug>/`도 옮김, 실행 중이면 409), 보관(읽기 전용, 목록에서 숨김)과 되돌리기. 변경은 서비스가 켜져 있으면 서비스를 거칩니다. |
-| `autoontology object types [--status S]` / `bind <type> [--key K] [--title T]` / `list <type> [-q TEXT] [--filter col=value] [--limit N] [--offset N]` / `get <type> <key>` | 개체 유형(proposed, active, broken, retired), 직접 연결(키·제목을 소스에서 확인, 유형이 active가 됨), 개체 검색, 개체 하나(수정 기록·충돌·링크 포함). `<type>`은 id, 클래스 이름, 라벨 또는 테이블입니다. |
-| `autoontology logic list [--kind K] [--status S]` / `show <kind> <name>` / `apply -f FILE` / `validate -f FILE` / `test [NAME] [-f FILE] --key K [--param p=v]` / `activate <kind> <name>` / `retire <kind> <name>` | 펑션·액션·워크플로 정의: 목록, 이력과 함께 하나 보기, 파일의 스펙을 초안으로 저장, 저장 없이 검사, 펑션을 개체에 평가, 활성화(펑션: editor, 액션·워크플로: owner), 은퇴. |
-| `autoontology logic extract [--wait]` / `candidates [--ready] [--status S]` / `accept <id> [-f FILE] [--note N]` / `reject <id>` | 문서의 규칙에서 정의 제안(`logic` 실행, 채팅 모델 사용), 제안 목록, 초안으로 수락(또는 수정한 스펙), 거절. |
-| `autoontology action list [--type T]` / `preview <name> <key> [--param p=v]` / `run <name> <key> [--param p=v] [--yes] [--idempotency-key K]` / `runs [--status S] [--action A] [--key K]` / `approve <run>` / `reject <run>` / `revert <run> [--force]` | 액션: 무엇을 할지 미리보기(아무것도 저장 안 함), 실행(미리보기를 보여 주고 먼저 물음), 실행 목록, 대기 중인 실행 결정, 적용된 실행 되돌리기. |
-| `autoontology workflow list` / `run <name> [--wait]` / `runs [--status S] [--workflow W]` / `show <run>` / `cancel <run>` | 워크플로: 트리거와 다음 슬롯, 지금 실행, 실행 목록, 실행 하나(개체와 액션 실행), 열린 실행 취소. |
-| `autoontology skill export [-o FILE\|DIR]` | 활성 정의를 Agent Skill zip(`SKILL.md`, `mcp.json`, `definitions/`)으로 저장합니다. |
-| `autoontology version` | 버전을 출력합니다. |
+| `onto init [--provider ollama\|claude\|codex\|openai] [--chat-model M] [--docs/--no-docs] [--vision-model M] [--yes] [--env PATH]` | 단계별 설정: Postgres 확인(`docker compose up -d` 후 재시도), 채팅 제공자·임베딩·문서 감지와 선택, `.env` 작성(다른 줄은 유지, 기존 파일은 백업), `setup` 실행. `.env`에 이미 있는 제공자·임베딩 선택은 유지합니다(추천은 힌트로만 표시). `--yes`는 아무것도 묻지 않으며, Postgres가 꺼져 있거나 고른 CLI가 로그인되지 않았으면 해결 방법과 함께 종료 코드 2로 끝납니다. |
+| `onto demo [--set quickstart\|hanbit] [--no-open] [--resume] [--replace]` | 서비스 시작(`ontology_src_*` 데이터베이스가 사라진 업스트림 연결은 정리하고, 살아 있지만 이 체크아웃의 소스가 소유하지 않은 연결은 다른 체크아웃이 카탈로그를 공유할 수 있으므로 알리기만 함), 샘플 세트 소스 등록(이미 등록된 것은 유지, 같은 이름에 다른 데이터를 가진 소스는 데이터베이스와 추출된 개념이 삭제되므로 확인을 받거나 `--replace`일 때만 교체), 제공자별 예상 빌드 시간 출력, 단계별 시간과 함께 빌드, 내보내기, 웹 UI 열기. |
+| `onto provider status` / `test [--provider P]` / `use <ollama\|claude\|codex\|openai> [--chat-model M] [--embed ollama\|openai] [--embed-model M] [--base-url URL] [--openai-chat-model M]` | 모든 채팅 제공자 표시(사용 가능, 로그인, 모델, 마지막 테스트, 해결 방법), 테스트 호출 한 번, 또는 `.env`의 제공자 전환(셸 변수가 파일보다 우선하면 경고, API 키는 명령줄로 받지 않음). |
+| `onto setup [--docs] [--skip-models] [--force-alias] [--skip-ocr-models]` | 멱등 준비 작업: 카탈로그 데이터베이스와 `vector`, `pg_trgm` 확장을 만들고, 마이그레이션을 실행하고, Ollama 모델(설정했다면 `ONTOLOGY_VISION_MODEL`도)을 받아 `openai/qwen3:8b` 별칭을 만들며, `--docs`를 주면 kordoc과 OCR 모델을 설치합니다(`--skip-ocr-models`는 모델을 뺍니다). |
+| `onto doctor [--skip-models]` | Postgres, pgvector, 마이그레이션, 모델 엔드포인트, 벡터 테이블, 포트, (서비스가 켜져 있으면) 고아 업스트림 연결을 점검합니다. |
+| `onto up` / `down` / `status` | 엔진 백엔드와 서비스를 시작, 중지하거나 상태를 보여 줍니다. |
+| `onto restart [--only backend]` | 서비스와 백엔드를 재시작해 둘 다 현재 `.env`를 읽게 합니다(설정 페이지가 저장 후 하는 일). `down` + `up`처럼 진행 중인 빌드를 기다리지 않습니다(설정 페이지는 그때 거절). |
+| `onto ui [--no-browser]` | 웹 UI URL을 출력하고 엽니다. |
+| `onto source add <path\|db-url> --name N [--kind structured\|documents] [--recursive]` | 소스를 등록합니다. 정형 소스는 `ontology_src_<name>`에 적재됩니다. |
+| `onto source list` | 소스 목록을 보여 줍니다. |
+| `onto source rm N [--drop-db] [--force]` | 소스를 제거합니다. `--drop-db`는 그 데이터베이스도 삭제합니다. 문서 소스라면 먼저 그 소스의 매칭이 업스트림 용어에 추가한 동의어를 지웁니다(수동 별칭, 다른 소스의 별칭, 다른 소스의 수용된 `same` 매칭이 여전히 덮는 별칭은 유지). 이 작업에는 엔진 데이터베이스가 필요하며, 실패하면 `--force`를 주지 않는 한 소스를 유지합니다. `--force`로도 업스트림 연결을 지우지 못하면(백엔드 꺼짐) `--drop-db`는 데이터베이스를 남기고, 나중에 `tools prune-connections <database> --include-unowned --drop-db`를 실행하라고 안내합니다. |
+| `onto build [--source N ...] [--resume]` | 모든 소스를 스냅샷 하나로 빌드합니다. `--source`는 지정한 소스만 다시 빌드합니다(align, merge, snapshot은 여전히 전체를 대상으로 합니다). `--resume`은 최근 빌드를 이어 가며, 입력이 바뀌지 않은 단계는 유지합니다([빌드 이어 가기](#빌드-이어-가기) 참고). |
+| `onto ontology [--revision R] [--json]` | 스냅샷(기본: 최신)의 리비전, 소스, 개수를 보여 줍니다. |
+| `onto ontology revisions [--limit N]` / `diff [--from R] [--to R]` | 리비전 목록, 두 리비전 사이의 변경 사항(기본: 직전 -> 최신). |
+| `onto ontology concepts [-q TEXT] [--kind K] [--origin structured\|document\|aligned] [--source S] [--revision R] [--page P] [--size N]` | 개념 목록·검색, 페이지 단위(온톨로지 페이지의 표). |
+| `onto ontology concept <id> [--revision R]` | 개념 하나: 정의, 동의어, 거절된 별칭, 정렬과 상태, 근거 인용, 검토 결정. |
+| `onto ontology graph [--layer all\|structured\|documents\|aligned] [--evidence] [--revision R] [--out FILE]` | 그래프 페이지의 노드와 엣지(`--out`은 JSON을 파일로 저장). |
+| `onto review list [--category C] [--status pending\|decided\|all] [--page P] [--size N] [--json]` | 검토 대기 항목(제안, 관계, 미정렬, 동의어, 바뀐 소스)을 페이지 단위로 보여 줍니다. |
+| `onto review accept <id> [--relation same\|related\|narrower\|broader] [--term T] [--note N]` / `reject <id>` / `acknowledge <id>` / `undo <id>` | 항목 하나에 대한 사람의 결정을 기록하거나 지웁니다. |
+| `onto apply [--force]` | 대기 중인 결정을 새 리비전에 반영합니다(결정, 병합, 스냅샷). 모델을 호출하지 않습니다. 대기 중인 결정이 없으면 리비전을 만들지 않습니다(`--force`는 강제로 만듦). |
+| `onto runs [--limit N] [--json]` | 최근 실행과 그 단계들을 보여 줍니다. |
+| `onto runs show <id>` / `logs <id> [--follow]` / `cancel <id>` | 실행 하나의 단계와 진행 상황, 로그(비밀 마스킹; `--follow`는 실행이 끝날 때까지 실시간 이벤트를 받음), 취소. `show`, `logs --follow`, `cancel`은 서비스(`up`)가 필요하며, 없으면 종료 코드 2로 끝납니다. |
+| `onto source freshness` | 마지막 빌드 이후 바뀐 소스와 그 이유(`sources freshness`도 가능). |
+| `onto samples list` / `load <set> [--replace]` | 샘플 세트 목록; 빌드 없이 세트의 소스를 등록(같은 이름에 다른 데이터를 가진 소스는 `--replace`일 때만 교체). |
+| `onto exports list` / `show <rev> [PATH]` / `get <rev> <PATH> --out FILE` / `zip <rev> --out FILE` | 내보내기 폴더 목록; 리비전의 파일 목록 또는 텍스트 파일 출력(예: `ossie/validation.json`, `okf/validation.json`); 파일 저장; 리비전 폴더 전체를 zip 하나로 저장(`--out`이 디렉터리면 `ontology-r0003.zip`). |
+| `onto playground chat "<question>" [--conversation ID] [--top-k N]` / `sql "<question>" [--source S]` / `sparql <QUERY>\|--file F\|--examples [--limit N]` / `index [--rebuild]` | 실행 중인 서비스로 플레이그라운드 사용: 인용과 함께 스트리밍되는 RAG 답변, 자연어 SQL 에이전트, 최신 스냅샷에 대한 SPARQL, 채팅 인덱스. |
+| `onto settings show` / `test [...]` / `set [...]` / `restart [--wait]` | 설정 페이지: 현재 선택과 각 값의 출처(키는 표시 안 함), 후보 테스트(채팅 pong과 임베딩 차원), `.env` 저장(`--chat-provider`, `--chat-model`, `--embed-provider`, `--embed-model`, `--base-url`, `--api-key-stdin`, `--clear-api-key`, `--confirm-reingest`; 키는 표준 입력으로만), 서비스 자체 재시작. |
+| `onto agent tokens list` / `create <name> [--revision R] [--expires-days 30\|90] [--scope read\|propose\|execute] [--action NAME]` / `rotate <id>` / `revoke <id>` | 외부 에이전트용 베어러 토큰([외부 에이전트 연결](#외부-에이전트-연결) 참고): `create`와 `rotate`는 토큰을 한 번만 출력합니다(저장되는 것은 SHA-256뿐이고, 교체하면 이전 토큰은 즉시 멈춤). `revoke`는 토큰의 호출 기록을 남깁니다. `--revision`은 토큰을 스냅샷 하나에 고정합니다. `--scope propose`는 에이전트가 항상 승인을 기다리는 액션을 제출하게 하고, `--scope execute`(owner)는 각 액션의 승인 규칙대로 실행하게 합니다. `--action`은 이 범위를 지정한 액션으로 제한합니다. |
+| `onto agent usage [--days N]` | 도구별·토큰별(MCP와 REST)·날짜별 에이전트 호출. |
+| `onto export [--revision R] [--format all\|rdf\|ossie\|okf] [--out DIR]` | 스냅샷을 `exports/<프로젝트 슬러그>/r<rev>/`(또는 `DIR/r<rev>/`)에 씁니다. |
+| `onto tools install-kordoc [--version V] [--omit-optional] [--force] [--skip-ocr-models]` | npm으로 kordoc을 `<home>/kordoc`에 설치한 뒤, OCR 모델(PP-OCRv5 korean, 약 18 MB)을 kordoc 모델 캐시에 내려받습니다. kordoc 호출 중 네트워크를 쓸 수 있는 것은 이것뿐입니다. 다시 실행하면 빠진 모델을 받습니다. |
+| `onto tools build-ui` | 웹 UI를 `ontology/web/static/dist`로 다시 빌드합니다(pnpm 필요). |
+| `onto tools status` | 사용 중인 kordoc 엔진과 Node 바이너리를 보여 줍니다. |
+| `onto tools prune-connections [NAME ...] [--dry-run] [--include-unowned [--drop-db]]` | 데이터베이스가 사라진 `ontology_src_*` 업스트림 연결을 지웁니다. 데이터베이스는 있지만 이 체크아웃의 소스가 소유하지 않은 연결은 목록에만 나오고 `--include-unowned`일 때만 지웁니다(카탈로그를 공유하는 다른 체크아웃이 쓸 수 있음). 그때 `--drop-db`는 그 데이터베이스도 삭제합니다. |
+| `onto project list [--no-archived]` / `show [SLUG]` / `create <slug> [--name N] [--description D]` / `rename <slug> [--name N] [--slug S] [--description D]` / `archive <slug>` / `unarchive <slug>` | 프로젝트 목록(최신 리비전, 소스 수, 마지막 빌드, 상태), 하나 보기(기본: `--project`, 없으면 기본 프로젝트), 만들기, 이름·설명·슬러그 변경(새 슬러그는 `exports/<slug>/`도 옮김, 실행 중이면 409), 보관(읽기 전용, 목록에서 숨김)과 되돌리기. 변경은 서비스가 켜져 있으면 서비스를 거칩니다. |
+| `onto object types [--status S]` / `bind <type> [--key K] [--title T]` / `list <type> [-q TEXT] [--filter col=value] [--limit N] [--offset N]` / `get <type> <key>` | 개체 유형(proposed, active, broken, retired), 직접 연결(키·제목을 소스에서 확인, 유형이 active가 됨), 개체 검색, 개체 하나(수정 기록·충돌·링크 포함). `<type>`은 id, 클래스 이름, 라벨 또는 테이블입니다. |
+| `onto logic list [--kind K] [--status S]` / `show <kind> <name>` / `apply -f FILE` / `validate -f FILE` / `test [NAME] [-f FILE] --key K [--param p=v]` / `activate <kind> <name>` / `retire <kind> <name>` | 펑션·액션·워크플로 정의: 목록, 이력과 함께 하나 보기, 파일의 스펙을 초안으로 저장, 저장 없이 검사, 펑션을 개체에 평가, 활성화(펑션: editor, 액션·워크플로: owner), 은퇴. |
+| `onto logic extract [--wait]` / `candidates [--ready] [--status S]` / `accept <id> [-f FILE] [--note N]` / `reject <id>` | 문서의 규칙에서 정의 제안(`logic` 실행, 채팅 모델 사용), 제안 목록, 초안으로 수락(또는 수정한 스펙), 거절. |
+| `onto action list [--type T]` / `preview <name> <key> [--param p=v]` / `run <name> <key> [--param p=v] [--yes] [--idempotency-key K]` / `runs [--status S] [--action A] [--key K]` / `approve <run>` / `reject <run>` / `revert <run> [--force]` | 액션: 무엇을 할지 미리보기(아무것도 저장 안 함), 실행(미리보기를 보여 주고 먼저 물음), 실행 목록, 대기 중인 실행 결정, 적용된 실행 되돌리기. |
+| `onto workflow list` / `run <name> [--wait]` / `runs [--status S] [--workflow W]` / `show <run>` / `cancel <run>` | 워크플로: 트리거와 다음 슬롯, 지금 실행, 실행 목록, 실행 하나(개체와 액션 실행), 열린 실행 취소. |
+| `onto skill export [-o FILE\|DIR]` | 활성 정의를 Agent Skill zip(`SKILL.md`, `mcp.json`, `definitions/`)으로 저장합니다. |
+| `onto version` | 버전을 출력합니다. |
 
 표를 출력하는 명령은 모두 `--json`(웹 API 응답 본문)도 받습니다. `ontology` 아래 명령,
 `source freshness`, `samples`, `exports`, `agent`, `settings show|test|set`, `runs logs`(`--follow` 없이)는
@@ -679,7 +679,7 @@ export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를
 | `POST /api/settings/restart` | 202 `{restart_id, previous_pid}`: 분리된 헬퍼가 서비스와 백엔드를 재시작합니다. 409 `run_active`, `restart_in_progress`, `not_supervised`(`up`으로 시작하지 않은 서비스). |
 | `GET /api/settings/restart/{id}` | 그 재시작의 상태(`running`, `done`, `failed`), 오류와 로그 끝부분. 새 서비스가 응답합니다. |
 | `GET /api/samples` | `samples/`의 샘플 세트(`quickstart`, `hanbit`): `[{set, path, sources: [{name, kind, path, files, bytes, formats}], registered, durations}]`. `durations`는 채팅 제공자별 예상 첫 빌드 시간 `{provider: {text, measured}}`입니다. |
-| `POST /api/samples/load` | `{"set": "quickstart"}`: 그 세트의 소스를 `autoontology demo`와 똑같이 등록합니다(`action`: `created`, `kept`, `replaced`와 함께 반환). 모르는 세트나 JSON 객체가 아닌 본문은 400, 실행이 진행 중이면 409, 샘플 이름의 소스가 다른 데이터를 가지고 있으면 본문에 `"replace": true`가 없는 한 409 `sample_conflict`(`conflicts`에 서로 다른 위치). |
+| `POST /api/samples/load` | `{"set": "quickstart"}`: 그 세트의 소스를 `onto demo`와 똑같이 등록합니다(`action`: `created`, `kept`, `replaced`와 함께 반환). 모르는 세트나 JSON 객체가 아닌 본문은 400, 실행이 진행 중이면 409, 샘플 이름의 소스가 다른 데이터를 가지고 있으면 본문에 `"replace": true`가 없는 한 409 `sample_conflict`(`conflicts`에 서로 다른 위치). |
 | `GET /api/sources` | 소스 목록. |
 | `POST /api/sources` | 소스 추가: JSON `{name, kind: files\|database\|documents, locator, recursive?}` 또는 multipart 업로드. |
 | `DELETE /api/sources/{name}` | 소스 제거(`?drop_db=true`는 데이터베이스도 삭제, `&force=true`는 `source rm --force`처럼 엔진의 그래프 삭제나 별칭 정리가 실패하거나 끝나지 않아도 로컬에서 제거). 문서 소스는 `source rm`과 마찬가지로 먼저 업스트림 용어에서 그 소스가 추가한 별칭을 지웁니다. |
@@ -736,8 +736,8 @@ export AUTOONTOLOGY_PROJECT=contracts                   # 모든 명령에 -p를
 있습니다. 둘 다 `localhost`에서도 베어러 토큰이 필요합니다.
 
 ```bash
-uv run autoontology agent tokens create claude-code          # aok_...를 한 번만 출력
-claude mcp add --transport http autoontology http://127.0.0.1:7800/mcp \
+uv run onto agent tokens create claude-code          # aok_...를 한 번만 출력
+claude mcp add --transport http ontology http://127.0.0.1:7800/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
@@ -746,7 +746,7 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 ```json
 {
   "mcpServers": {
-    "autoontology": {
+    "ontology": {
       "type": "http",
       "url": "http://127.0.0.1:7800/mcp",
       "headers": { "Authorization": "Bearer <token>" }
@@ -782,7 +782,7 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 
 토큰이 없거나 틀렸거나 폐기·만료되었으면 401 `{"error": "unauthorized"}`로 답합니다.
 `--revision R`로 만든 토큰은 모든 호출을 그 리비전으로 답하고 다른 리비전은 거부합니다(403
-`revision_pinned`). 토큰마다 분당 120회까지 요청할 수 있고(`AUTOONTOLOGY_AGENT_RATE_PER_MIN`,
+`revision_pinned`). 토큰마다 분당 120회까지 요청할 수 있고(`ONTOLOGY_AGENT_RATE_PER_MIN`,
 넘으면 429와 `Retry-After`), 요청 본문은 1 MB까지입니다(413). 도구 호출은 모두 기록되며
 (`agent usage`), 토큰은 로그에 남지 않고 SHA-256만 저장됩니다. 서비스의 Host·교차 출처 검사도
 그대로 적용됩니다. 웹 UI의 **연결** 페이지(`/ui/connect`)는 터미널 없이 같은 일을 합니다. 이
@@ -801,13 +801,13 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 
 ### 내보내기 형식
 
-`autoontology export`는 아래 파일을 모두 `exports/r<rev:04d>/`에 쓰고, 함께 `export.json`을
+`onto export`는 아래 파일을 모두 `exports/r<rev:04d>/`에 쓰고, 함께 `export.json`을
 씁니다. `export.json`은 워크스페이스, 리비전, 각 형식을 어느 내보내기 실행이 썼는지, 그리고
 내보내기가 쓴 모든 파일의 `files` 목록을 기록하는 마커입니다.
 
 | 파일 | 형식 | 내용 |
 |---|---|---|
-| `ontology.ttl` | [RDF 1.1 Turtle](https://www.w3.org/TR/turtle/) | 용어와 문서 개념의 OWL 클래스, 객체·데이터타입 속성, 개체(규칙, 절차), `rdfs:subClassOf`와 `skos:related` 공리, `skos:altLabel` 동의어, 인용이 담긴 근거 노드. 모두 `ao:` 네임스페이스(`AUTOONTOLOGY_BASE_IRI`) 아래에 있습니다. 파싱 왕복 검사를 거칩니다. |
+| `ontology.ttl` | [RDF 1.1 Turtle](https://www.w3.org/TR/turtle/) | 용어와 문서 개념의 OWL 클래스, 객체·데이터타입 속성, 개체(규칙, 절차), `rdfs:subClassOf`와 `skos:related` 공리, `skos:altLabel` 동의어, 인용이 담긴 근거 노드. 모두 `onto:` 네임스페이스(`ONTOLOGY_BASE_IRI`) 아래에 있습니다. 파싱 왕복 검사를 거칩니다. |
 | `ontology.jsonld` | [JSON-LD 1.1](https://www.w3.org/TR/json-ld11/) | 같은 그래프의 JSON-LD 표현. |
 | `ontology.graphml` | [GraphML](http://graphml.graphdrawing.org/specification.html) | 문자열 속성을 가진 노드와 엣지. Gephi, yEd, networkx용. 엣지 id는 `e0`, `e1`, ...이며 파일 전체에서 고유합니다. |
 | `ossie/semantic_model.yaml`, `ossie/ontology.yaml`, `ossie/mapping.yaml` | [Apache Ossie](https://github.com/apache/ossie) spec 0.2.0.dev0 | 정형 소스들의 데이터셋을 하나로 병합한 시맨틱 모델, 통합 온톨로지(용어와 문서 개념은 `EntityType`, 컬럼·문서 관계는 서술문 포함, 하위 클래스 공리는 `extends`), 데이터셋이 키를 선언한 용어의 객체 매핑. `validation.json`에는 JSON 스키마 결과, 구조 검사, 엔진 Ossie 변환기를 통한 왕복 결과가 담깁니다. |
@@ -852,69 +852,70 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 ### 설정
 
 `.env.example`을 `.env`로 복사합니다. 모든 값에는 기본값이 있습니다. 우선순위는 셸 환경, `.env`,
-내장 기본값 순입니다.
+내장 기본값 순입니다. 0.3.0 이전 이름(`AUTOONTOLOGY_*`)도 `ONTOLOGY_*` 이름이 비어 있으면 경고와 함께
+읽지만, 새 이름으로 바꿔 주세요.
 
 | 변수 | 기본값 | 의미 |
 |---|---|---|
-| `AUTOONTOLOGY_HOME` | `<repo>/data` | 데이터 디렉터리: SQLite 저장소, 로그, PID 파일, kordoc, 업로드. |
-| `AUTOONTOLOGY_EXPORTS_DIR` | `<repo>/exports` | 내보내기 루트(리비전마다 `r<rev>/` 폴더 하나). |
-| `AUTOONTOLOGY_ENV_FILE` | `<repo>/.env` | 읽을 `.env`(셸에서 설정). |
-| `AUTOONTOLOGY_WORKSPACE` | `default` | 이 홈이 빌드하는 온톨로지 하나의 이름. |
-| `AUTOONTOLOGY_BASE_IRI` | `http://example.com/autoontology#` | 발급하는 모든 IRI의 네임스페이스(접두사 `ao:`). |
-| `AUTOONTOLOGY_PORT` | `7800` | 서비스 포트(UI, `/api`, `/v1`). |
+| `ONTOLOGY_HOME` | `<repo>/data` | 데이터 디렉터리: SQLite 저장소, 로그, PID 파일, kordoc, 업로드. |
+| `ONTOLOGY_EXPORTS_DIR` | `<repo>/exports` | 내보내기 루트(리비전마다 `r<rev>/` 폴더 하나). |
+| `ONTOLOGY_ENV_FILE` | `<repo>/.env` | 읽을 `.env`(셸에서 설정). |
+| `ONTOLOGY_WORKSPACE` | `default` | 이 홈이 빌드하는 온톨로지 하나의 이름. |
+| `ONTOLOGY_BASE_IRI` | `http://example.com/ontology#` | 발급하는 모든 IRI의 네임스페이스(접두사 `onto:`). |
+| `ONTOLOGY_PORT` | `7800` | 서비스 포트(UI, `/api`, `/v1`). |
 | `BACKEND_PORT` | `3101` | 엔진 백엔드 포트. |
-| `INGESTION_SERVICE_URL` | 자동 계산 | 항상 `AUTOONTOLOGY_PORT`에서 계산되며, 직접 설정한 값은 덮어씁니다. |
-| `APP_URL` | 설정 안 됨 | 엔진 자체 웹 프런트엔드만 읽는 값이며, AutoOntology는 그 프런트엔드를 실행하지 않습니다. |
-| `AUTOONTOLOGY_UPLOAD_MAX_MB` | `200` | 웹 UI 요청당 업로드 한도. |
-| `AUTOONTOLOGY_ENV_BACKUP_SECRETS` | 꺼짐 | `1`이면 `init`, `provider use`, 설정 페이지가 쓰는 `.env.bak-*` 백업에 비밀 값(키, 비밀번호, 토큰)을 그대로 남깁니다. 기본값은 `***`. |
-| `AUTOONTOLOGY_GRAPH_MAX_NODES` | `1500` | 그래프 뷰가 받는 최대 노드 수(연결이 많은 노드를 남깁니다). |
-| `AUTOONTOLOGY_DEBUG` | `0` | `1`이면 예상하지 못한 CLI 오류의 전체 트레이스백을 출력합니다. |
-| `AUTOONTOLOGY_LOCK_TIMEOUT_S` | `300` | 벡터 테이블 설정을 감싸는 Postgres 권고 잠금(advisory lock)의 최대 대기 시간. |
-| `AUTOONTOLOGY_STORE_LOCK_TIMEOUT_S` | `120` | SQLite 저장소 잠금의 최대 총 대기 시간. |
+| `INGESTION_SERVICE_URL` | 자동 계산 | 항상 `ONTOLOGY_PORT`에서 계산되며, 직접 설정한 값은 덮어씁니다. |
+| `APP_URL` | 설정 안 됨 | 엔진 자체 웹 프런트엔드만 읽는 값이며, Ontology는 그 프런트엔드를 실행하지 않습니다. |
+| `ONTOLOGY_UPLOAD_MAX_MB` | `200` | 웹 UI 요청당 업로드 한도. |
+| `ONTOLOGY_ENV_BACKUP_SECRETS` | 꺼짐 | `1`이면 `init`, `provider use`, 설정 페이지가 쓰는 `.env.bak-*` 백업에 비밀 값(키, 비밀번호, 토큰)을 그대로 남깁니다. 기본값은 `***`. |
+| `ONTOLOGY_GRAPH_MAX_NODES` | `1500` | 그래프 뷰가 받는 최대 노드 수(연결이 많은 노드를 남깁니다). |
+| `ONTOLOGY_DEBUG` | `0` | `1`이면 예상하지 못한 CLI 오류의 전체 트레이스백을 출력합니다. |
+| `ONTOLOGY_LOCK_TIMEOUT_S` | `300` | 벡터 테이블 설정을 감싸는 Postgres 권고 잠금(advisory lock)의 최대 대기 시간. |
+| `ONTOLOGY_STORE_LOCK_TIMEOUT_S` | `120` | SQLite 저장소 잠금의 최대 총 대기 시간. |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | `localhost` / `5432` | Postgres 서버. |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` | `autoontology` / `autoontology` | Postgres 자격 증명. 이 사용자에게 데이터베이스 생성 권한이 있어야 합니다. |
-| `POSTGRES_DATABASE` | `autoontology` | 카탈로그 데이터베이스. 소스 데이터베이스 이름은 `autoontology_src_<source>`이며, AutoOntology는 다른 이름을 모두 거부합니다. 카탈로그 이름은 `autoontology_src_`로 시작할 수 없으며(소스 데이터베이스용으로 예약), 그런 값은 설정을 읽을 때 거부됩니다. |
-| `AUTOONTOLOGY_CHAT_PROVIDER` | `ollama` | `ollama`, `openai`(임의의 OpenAI 호환 엔드포인트), `claude` 또는 `codex`(로그인된 CLI, 위 참고). |
-| `AUTOONTOLOGY_EMBED_PROVIDER` | `ollama` | `ollama` 또는 `openai`. |
-| `AUTOONTOLOGY_OLLAMA_ENDPOINT` | `http://localhost:11434/v1` | Ollama의 OpenAI 호환 엔드포인트. |
-| `AUTOONTOLOGY_OLLAMA_CHAT_MODEL` | `openai/qwen3:8b` | 채팅 모델: `setup`이 만드는 `qwen3:8b`의 별칭(`num_ctx` 16384, 사고 모드 끔). `openai/` 접두사는 별칭 이름의 일부입니다. |
-| `AUTOONTOLOGY_OLLAMA_EMBED_MODEL` | `bge-m3` | 임베딩 모델(1024차원). |
-| `AUTOONTOLOGY_OLLAMA_NO_THINK` | `1` | 라우터가 `reasoning_effort: none`을 추가해 Ollama가 JSON 스키마를 강제하게 합니다. |
-| `AUTOONTOLOGY_OPENAI_BASE_URL` | 설정 안 됨 | `/v1`을 포함한 기본 URL. |
-| `AUTOONTOLOGY_OPENAI_API_KEY` | 설정 안 됨 | API 키(모든 곳에서 마스킹). |
-| `AUTOONTOLOGY_OPENAI_CHAT_MODEL` | 설정 안 됨 | 엔드포인트가 아는 채팅 모델 id. |
-| `AUTOONTOLOGY_OPENAI_EMBED_MODEL` | 설정 안 됨 | 임베딩 모델 id(`AUTOONTOLOGY_EMBED_PROVIDER=openai`일 때). |
-| `AUTOONTOLOGY_OPENAI_TIMEOUT_S` | `180` | 라우터 openai 패스스루의 요청 전체 타임아웃. |
-| `AUTOONTOLOGY_CLAUDE_BIN` / `AUTOONTOLOGY_CODEX_BIN` | PATH의 `claude` / `codex` | claude / codex 제공자가 실행하는 CLI. |
-| `AUTOONTOLOGY_CLAUDE_MODEL` | `claude-sonnet-5-5` | `claude-opus-5-5`, `claude-fable-5-1`, `claude-haiku-5-5`, `sonnet`, `opus`, `fable`, `haiku`도 됩니다. |
-| `AUTOONTOLOGY_CODEX_MODEL` | `gpt-6-astra` | `gpt-5.5`도 됩니다. |
-| `AUTOONTOLOGY_CODEX_REASONING_EFFORT` | 설정 안 됨 | 설정하면 codex에 `model_reasoning_effort`로 전달합니다. |
-| `AUTOONTOLOGY_PROVIDER_TIMEOUT_S` | `120` | claude/codex 요청 하나의 기한(슬롯 대기, 호출, 스키마 재질문 한 번 포함). |
-| `AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT` | `2` | 서비스 안에서 동시에 실행되는 claude/codex 호출 수. |
-| `AUTOONTOLOGY_SCHEMA_VALIDATION_TIMEOUT_S` | `2` | 답 하나를 JSON 스키마로 검증하는 데 주는 시간(별도 프로세스에서 실행). |
-| `LLM_INVOKE_TIMEOUT_S` / `LLM_MAX_INFLIGHT` / `SEMANTIC_LLM_MAX_INFLIGHT` | `180` / `2` / `1` | 엔진 LLM 한도. ollama 채팅 제공자일 때 직접 설정하지 않으면 적용됩니다(claude/codex: `2 x AUTOONTOLOGY_PROVIDER_TIMEOUT_S + 30` / `2` / `2`). |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` | `ontology` / `ontology` | Postgres 자격 증명. 이 사용자에게 데이터베이스 생성 권한이 있어야 합니다. |
+| `POSTGRES_DATABASE` | `ontology` | 카탈로그 데이터베이스. 소스 데이터베이스 이름은 `ontology_src_<source>`이며, Ontology는 다른 이름을 모두 거부합니다. 카탈로그 이름은 `ontology_src_`로 시작할 수 없으며(소스 데이터베이스용으로 예약), 그런 값은 설정을 읽을 때 거부됩니다. |
+| `ONTOLOGY_CHAT_PROVIDER` | `ollama` | `ollama`, `openai`(임의의 OpenAI 호환 엔드포인트), `claude` 또는 `codex`(로그인된 CLI, 위 참고). |
+| `ONTOLOGY_EMBED_PROVIDER` | `ollama` | `ollama` 또는 `openai`. |
+| `ONTOLOGY_OLLAMA_ENDPOINT` | `http://localhost:11434/v1` | Ollama의 OpenAI 호환 엔드포인트. |
+| `ONTOLOGY_OLLAMA_CHAT_MODEL` | `openai/qwen3:8b` | 채팅 모델: `setup`이 만드는 `qwen3:8b`의 별칭(`num_ctx` 16384, 사고 모드 끔). `openai/` 접두사는 별칭 이름의 일부입니다. |
+| `ONTOLOGY_OLLAMA_EMBED_MODEL` | `bge-m3` | 임베딩 모델(1024차원). |
+| `ONTOLOGY_OLLAMA_NO_THINK` | `1` | 라우터가 `reasoning_effort: none`을 추가해 Ollama가 JSON 스키마를 강제하게 합니다. |
+| `ONTOLOGY_OPENAI_BASE_URL` | 설정 안 됨 | `/v1`을 포함한 기본 URL. |
+| `ONTOLOGY_OPENAI_API_KEY` | 설정 안 됨 | API 키(모든 곳에서 마스킹). |
+| `ONTOLOGY_OPENAI_CHAT_MODEL` | 설정 안 됨 | 엔드포인트가 아는 채팅 모델 id. |
+| `ONTOLOGY_OPENAI_EMBED_MODEL` | 설정 안 됨 | 임베딩 모델 id(`ONTOLOGY_EMBED_PROVIDER=openai`일 때). |
+| `ONTOLOGY_OPENAI_TIMEOUT_S` | `180` | 라우터 openai 패스스루의 요청 전체 타임아웃. |
+| `ONTOLOGY_CLAUDE_BIN` / `ONTOLOGY_CODEX_BIN` | PATH의 `claude` / `codex` | claude / codex 제공자가 실행하는 CLI. |
+| `ONTOLOGY_CLAUDE_MODEL` | `claude-sonnet-5-5` | `claude-opus-5-5`, `claude-fable-5-1`, `claude-haiku-5-5`, `sonnet`, `opus`, `fable`, `haiku`도 됩니다. |
+| `ONTOLOGY_CODEX_MODEL` | `gpt-6-astra` | `gpt-5.5`도 됩니다. |
+| `ONTOLOGY_CODEX_REASONING_EFFORT` | 설정 안 됨 | 설정하면 codex에 `model_reasoning_effort`로 전달합니다. |
+| `ONTOLOGY_PROVIDER_TIMEOUT_S` | `120` | claude/codex 요청 하나의 기한(슬롯 대기, 호출, 스키마 재질문 한 번 포함). |
+| `ONTOLOGY_PROVIDER_MAX_INFLIGHT` | `2` | 서비스 안에서 동시에 실행되는 claude/codex 호출 수. |
+| `ONTOLOGY_SCHEMA_VALIDATION_TIMEOUT_S` | `2` | 답 하나를 JSON 스키마로 검증하는 데 주는 시간(별도 프로세스에서 실행). |
+| `LLM_INVOKE_TIMEOUT_S` / `LLM_MAX_INFLIGHT` / `SEMANTIC_LLM_MAX_INFLIGHT` | `180` / `2` / `1` | 엔진 LLM 한도. ollama 채팅 제공자일 때 직접 설정하지 않으면 적용됩니다(claude/codex: `2 x ONTOLOGY_PROVIDER_TIMEOUT_S + 30` / `2` / `2`). |
 | `KORDOC_CLI` | 설정 안 됨 | 다른 kordoc 설치 사용(`dist/cli.js` 경로). |
 | `KORDOC_NODE` | PATH의 `node` | kordoc용 Node 바이너리. |
-| `AUTOONTOLOGY_KORDOC_TIMEOUT` | `300` | 문서당 초(kordoc은 항상 오프라인으로 실행). |
-| `AUTOONTOLOGY_DOC_TABLE_MAX_ROWS` | `200` | CSV/TSV 문서가 담는 행 수. |
-| `AUTOONTOLOGY_DOC_MAX_BYTES` | `52428800`(50 MB) | 기본 리더가 받아들이는 CSV/TSV, 텍스트, Markdown, HTML, `.doc` 문서의 최대 크기. 이보다 큰 파일은 `FILE_TOO_LARGE`로 실패합니다. |
-| `AUTOONTOLOGY_SQL_TRANSLATE` | `1` | 플레이그라운드 SQL: 한국어 질문에 영어로 답하면 채팅 프로바이더가 한국어로 옮깁니다(한 번 호출, 30초 제한, 원문 유지. 1500자를 넘는 답이나 토큰 한도에서 잘린 번역은 영어로 둡니다). `0`이면 끕니다. |
-| `AUTOONTOLOGY_SQL_MAX_TOOL_CALLS` | `12` | 엔진의 ReAct SQL 에이전트가 질문 하나에 쓸 수 있는 도구 호출 수(호출마다 전체 대화를 다시 보내는 채팅 호출). 엔진의 `TEXT_TO_SQL_REACT_MAX_TOOL_CALLS`(엔진 기본값 24)로 넘기며, 그 값을 직접 설정했다면 그대로 둡니다. |
-| `AUTOONTOLOGY_SQL_CONCURRENCY` | `2` | 서비스에서 동시에 실행되는 플레이그라운드 SQL 질문 수. 초과하면 429 `sql_busy`로 답합니다. |
-| `AUTOONTOLOGY_SAMPLES_DIR` | `<repo>/samples` | `demo`와 `/api/samples`가 쓰는 샘플 세트 폴더. |
-| `AUTOONTOLOGY_LANG` | 한국어 로캘이면 `ko`, 아니면 `en` | CLI 메시지 언어(`en` 또는 `ko`). 웹 UI는 따로 바꿉니다. |
-| `AUTOONTOLOGY_VISION_MODEL` | 설정 안 됨 | 이미지 문서를 OCR 텍스트 앞에서 설명하는 Ollama 비전 모델(예: `gemma4:e4b`). `setup`이 받습니다. 설정하지 않으면 OCR 텍스트만 씁니다. |
-| `AUTOONTOLOGY_CHUNK_TOKENS` / `_CHUNK_OVERLAP_TOKENS` / `_CHUNK_PACK_TOKENS` | `1200` / `100` / `400` | 청크 크기, 섹션을 나눌 때의 겹침, 작은 이웃 섹션을 묶는 한도(tiktoken `cl100k_base` 토큰). |
-| `AUTOONTOLOGY_LLM_WORKERS` | ollama면 `1`, 그 외 `3` | 병렬 청크 추출 호출 수. |
-| `AUTOONTOLOGY_EXTRACT_MODE` | `auto` | 추출 출력 방식: `auto`, `structured`, `json`. |
-| `AUTOONTOLOGY_MERGE_THRESHOLD` | `0.80` | 두 개념을 병합 판정에 보내는 임베딩 코사인 기준. |
-| `AUTOONTOLOGY_MERGE_MAX_JUDGE` | `100` | 통합 한 번당 최대 병합 판정 호출 수. |
-| `AUTOONTOLOGY_ALIGN_MIN_SIM` | `0.55` | 후보 용어 코사인 하한. |
-| `AUTOONTOLOGY_ALIGN_MIN_CONF` | `0.7` | 판정을 적용하는 데 필요한 신뢰도(`same`은 0.90도 필요, 위 참고). |
-| `AUTOONTOLOGY_ALIGN_ALLOW_METRIC_SAME` | `0` | `1`이면 metric 개념도 용어와 `same`으로 판정될 수 있습니다. |
-| `AUTOONTOLOGY_WORKFLOWS` | `on` | `off`이면 일정과 `on_action` 워크플로 트리거를 멈춥니다(수동 실행은 되고, 일시정지된 실행도 이어짐). |
-| `AUTOONTOLOGY_TZ` | 시스템 시간대 | 워크플로 일정을 읽는 IANA 시간대(예: `Asia/Seoul`). |
-| `AUTOONTOLOGY_INTEGRATION` | `0` | `1`이면 통합 테스트를 실행합니다(실제 Postgres와 Ollama, 셸에서 설정). |
+| `ONTOLOGY_KORDOC_TIMEOUT` | `300` | 문서당 초(kordoc은 항상 오프라인으로 실행). |
+| `ONTOLOGY_DOC_TABLE_MAX_ROWS` | `200` | CSV/TSV 문서가 담는 행 수. |
+| `ONTOLOGY_DOC_MAX_BYTES` | `52428800`(50 MB) | 기본 리더가 받아들이는 CSV/TSV, 텍스트, Markdown, HTML, `.doc` 문서의 최대 크기. 이보다 큰 파일은 `FILE_TOO_LARGE`로 실패합니다. |
+| `ONTOLOGY_SQL_TRANSLATE` | `1` | 플레이그라운드 SQL: 한국어 질문에 영어로 답하면 채팅 프로바이더가 한국어로 옮깁니다(한 번 호출, 30초 제한, 원문 유지. 1500자를 넘는 답이나 토큰 한도에서 잘린 번역은 영어로 둡니다). `0`이면 끕니다. |
+| `ONTOLOGY_SQL_MAX_TOOL_CALLS` | `12` | 엔진의 ReAct SQL 에이전트가 질문 하나에 쓸 수 있는 도구 호출 수(호출마다 전체 대화를 다시 보내는 채팅 호출). 엔진의 `TEXT_TO_SQL_REACT_MAX_TOOL_CALLS`(엔진 기본값 24)로 넘기며, 그 값을 직접 설정했다면 그대로 둡니다. |
+| `ONTOLOGY_SQL_CONCURRENCY` | `2` | 서비스에서 동시에 실행되는 플레이그라운드 SQL 질문 수. 초과하면 429 `sql_busy`로 답합니다. |
+| `ONTOLOGY_SAMPLES_DIR` | `<repo>/samples` | `demo`와 `/api/samples`가 쓰는 샘플 세트 폴더. |
+| `ONTOLOGY_LANG` | 한국어 로캘이면 `ko`, 아니면 `en` | CLI 메시지 언어(`en` 또는 `ko`). 웹 UI는 따로 바꿉니다. |
+| `ONTOLOGY_VISION_MODEL` | 설정 안 됨 | 이미지 문서를 OCR 텍스트 앞에서 설명하는 Ollama 비전 모델(예: `gemma4:e4b`). `setup`이 받습니다. 설정하지 않으면 OCR 텍스트만 씁니다. |
+| `ONTOLOGY_CHUNK_TOKENS` / `_CHUNK_OVERLAP_TOKENS` / `_CHUNK_PACK_TOKENS` | `1200` / `100` / `400` | 청크 크기, 섹션을 나눌 때의 겹침, 작은 이웃 섹션을 묶는 한도(tiktoken `cl100k_base` 토큰). |
+| `ONTOLOGY_LLM_WORKERS` | ollama면 `1`, 그 외 `3` | 병렬 청크 추출 호출 수. |
+| `ONTOLOGY_EXTRACT_MODE` | `auto` | 추출 출력 방식: `auto`, `structured`, `json`. |
+| `ONTOLOGY_MERGE_THRESHOLD` | `0.80` | 두 개념을 병합 판정에 보내는 임베딩 코사인 기준. |
+| `ONTOLOGY_MERGE_MAX_JUDGE` | `100` | 통합 한 번당 최대 병합 판정 호출 수. |
+| `ONTOLOGY_ALIGN_MIN_SIM` | `0.55` | 후보 용어 코사인 하한. |
+| `ONTOLOGY_ALIGN_MIN_CONF` | `0.7` | 판정을 적용하는 데 필요한 신뢰도(`same`은 0.90도 필요, 위 참고). |
+| `ONTOLOGY_ALIGN_ALLOW_METRIC_SAME` | `0` | `1`이면 metric 개념도 용어와 `same`으로 판정될 수 있습니다. |
+| `ONTOLOGY_WORKFLOWS` | `on` | `off`이면 일정과 `on_action` 워크플로 트리거를 멈춥니다(수동 실행은 되고, 일시정지된 실행도 이어짐). |
+| `ONTOLOGY_TZ` | 시스템 시간대 | 워크플로 일정을 읽는 IANA 시간대(예: `Asia/Seoul`). |
+| `ONTOLOGY_INTEGRATION` | `0` | `1`이면 통합 테스트를 실행합니다(실제 Postgres와 Ollama, 셸에서 설정). |
 
 엔진 자체의 모델 변수(`DEFAULT_MODELS_*`, `REASONING_*`, `NON_REASONING_*`, `EMBED_*`,
 `RERANK_*`)는 제공자 설정에서 계산됩니다. 직접 설정한 값은 덮어씁니다.
@@ -959,7 +960,7 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
   v3 이전에 기록된 별칭 레코드에는 소스가 없으므로, `source rm`은 그 레코드가 추가한 동의어를
   지우지 않습니다. 필요하면 엔진에서 직접 지우세요.
 - **엔진 1.3(`c96048c`)으로 업데이트할 때:** `git submodule update --init`과 `uv sync` 뒤에
-  `uv run autoontology setup`을 한 번 실행하세요. 엔진의 새 카탈로그 마이그레이션 세 개(용어 패밀리,
+  `uv run onto setup`을 한 번 실행하세요. 엔진의 새 카탈로그 마이그레이션 세 개(용어 패밀리,
   컬럼 고유값 비율과 고유값)를 적용합니다(그 전까지 `doctor`는 `alembic` WARN을 보여 줍니다).
   컴파일은 용어가 없는 테이블만 다루므로, 이전 엔진이 만든 용어(예: 한글로만 된 테이블 이름의 빈
   용어 이름)는 그 소스를 처음부터 다시 빌드할 때까지 남습니다(`source rm <이름> --drop-db`,
@@ -970,7 +971,7 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 ## 보안 참고
 
 - 서비스와 엔진 백엔드는 `127.0.0.1`에 바인딩됩니다. 로컬이 아닌 `Host`나 교차 사이트
-  `Origin`을 가진 요청은 거부합니다. **`AUTOONTOLOGY_AUTH=accounts`가 아니면 인증이
+  `Origin`을 가진 요청은 거부합니다. **`ONTOLOGY_AUTH=accounts`가 아니면 인증이
   없습니다**([계정](#계정) 참고). 두 포트 모두 외부에 노출하지 말고, 공개 프록시 뒤에 두지 마세요.
 - 문서 텍스트는 신뢰하지 않는 입력으로 다룹니다. 구분된 프롬프트 블록 안에 인용하고, 모델 출력은
   스키마로 검증하며(fail-closed), OKF 번들은 추출한 텍스트의 Markdown과 HTML을 이스케이프합니다.
@@ -979,12 +980,12 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 - 계정이 꺼져 있으면 외부 에이전트 경로(`/mcp`, `/agent/v1`)만 인증이 있습니다(계정을 켜면
   나머지 경로는 모두 로그인이 필요합니다). 외부 에이전트 경로는 항상 베어러 토큰이 필요하고,
   읽기 전용이며, 토큰마다 요청 수가 제한됩니다. 토큰은 비밀번호처럼 다루고
-  `autoontology agent tokens rotate` / `revoke`로 교체하거나 폐기하세요.
+  `onto agent tokens rotate` / `revoke`로 교체하거나 폐기하세요.
 - API 키는 로그, 상태 응답, 업스트림에서 전달되는 오류 본문에서 마스킹됩니다.
-- 데이터베이스 이름은 `autoontology`와 `autoontology_src_*`로 제한되므로, 공유 Postgres 서버의
+- 데이터베이스 이름은 `ontology`와 `ontology_src_*`로 제한되므로, 공유 Postgres 서버의
   다른 데이터베이스는 절대 건드리지 않습니다.
 - `docker-compose.yml`은 Postgres를 `127.0.0.1`에만 게시하며, 기본 자격 증명
-  (`autoontology` / `autoontology`)은 로컬 사용용입니다. 바꾸려면 처음 `docker compose up -d`를
+  (`ontology` / `ontology`)은 로컬 사용용입니다. 바꾸려면 처음 `docker compose up -d`를
   실행하기 전에 `.env`의 `POSTGRES_USER`와 `POSTGRES_PASSWORD`를 설정하세요(Compose도 같은
   `.env`를 읽습니다). 비밀번호는 데이터 볼륨이 처음 만들어질 때 고정됩니다. 기존 볼륨이라면
   `psql`에서 `ALTER USER ... PASSWORD ...`를 실행하거나, `docker compose down -v`로 볼륨을 다시
@@ -993,7 +994,7 @@ JSON(`mcpServers`)으로 설정하는 클라이언트에서는 같은 서버를 
 ### Tailscale로 원격 접속
 
 내 [Tailscale](https://tailscale.com) 네트워크(tailnet)의 다른 기기에서 UI를 열려면,
-`tailscale serve`가 HTTPS를 로컬 서비스로 전달하게 합니다(기본 포트 7800, `AUTOONTOLOGY_PORT`를
+`tailscale serve`가 HTTPS를 로컬 서비스로 전달하게 합니다(기본 포트 7800, `ONTOLOGY_PORT`를
 바꿨다면 그 값):
 
 ```bash
@@ -1004,12 +1005,12 @@ tailscale serve status          # https://<machine>.<tailnet>.ts.net:8444 -> 127
 그다음 `.env`에 호스트 이름(그리고 필요하면 허용할 로그인)을 넣고 다시 시작합니다:
 
 ```bash
-AUTOONTOLOGY_TAILSCALE_HOSTS=box.example.ts.net
-AUTOONTOLOGY_TAILSCALE_LOGINS=you@example.com   # 선택; 비우면 tailnet의 누구나
+ONTOLOGY_TAILSCALE_HOSTS=box.example.ts.net
+ONTOLOGY_TAILSCALE_LOGINS=you@example.com   # 선택; 비우면 tailnet의 누구나
 ```
 
 ```bash
-uv run autoontology down && uv run autoontology up
+uv run onto down && uv run onto up
 ```
 
 다른 기기에서 `https://box.example.ts.net:8444/ui/`를 엽니다. 공유를 멈추려면
@@ -1020,47 +1021,47 @@ uv run autoontology down && uv run autoontology up
 `Tailscale-User-Login` 신원 헤더가 있을 때만 받습니다. `tailscale serve`는 이 헤더를 tailnet
 클라이언트에만 붙이고 공개 Funnel 트래픽에는 붙이지 않으므로, 인터넷에 노출된 요청은 거부됩니다
 (`tailscale_identity_required`, tailscaled가 Funnel 트래픽으로 표시한 요청도 마찬가지).
-`AUTOONTOLOGY_TAILSCALE_LOGINS`에 없는 로그인은 `access_denied`를 받습니다. 태그 기기(사용자 대신
+`ONTOLOGY_TAILSCALE_LOGINS`에 없는 로그인은 `access_denied`를 받습니다. 태그 기기(사용자 대신
 ACL 태그로 로그인한 서버)는 신원 헤더가 없으므로 같은 방식으로 거부됩니다. 사용자 계정으로 로그인한
 기기에서 UI를 여세요. 그 호스트 이름에서도 교차 출처 쓰기는 계속 거부됩니다.
 `/api/status`의 `remote`에 호스트 이름이 나옵니다(로그인은 나오지 않습니다).
-**AutoOntology에는 `tailscale funnel`을 절대 쓰지 마세요.** 자체 인증이 없습니다.
+**Ontology에는 `tailscale funnel`을 절대 쓰지 마세요.** 자체 인증이 없습니다.
 
 신원 헤더를 믿는 근거는 네트워크에서 tailnet `Host`를 보낼 수 있는 것이 tailscaled뿐이라는
 점입니다. 하지만 이 컴퓨터의 어떤 프로세스든 `127.0.0.1`에 접속해 그 `Host`와 원하는
-`Tailscale-User-Login`을 보낼 수 있습니다. 따라서 `AUTOONTOLOGY_TAILSCALE_HOSTS`를 설정하면 모든
+`Tailscale-User-Login`을 보낼 수 있습니다. 따라서 `ONTOLOGY_TAILSCALE_HOSTS`를 설정하면 모든
 로컬 프로세스(와 모든 로컬 사용자 계정)가 tailnet 신원을 사칭할 수 있고, 계정 모드에서는 그
 이메일의 사용자로 로그인됩니다. 믿을 수 없는 사람이나 소프트웨어와 함께 쓰는 컴퓨터에서는
-`AUTOONTOLOGY_TAILSCALE_HOSTS`를 설정하지 마세요.
+`ONTOLOGY_TAILSCALE_HOSTS`를 설정하지 마세요.
 
 ### 계정
 
-기본값(`AUTOONTOLOGY_AUTH=off`)에서는 계정이 없습니다. 서비스에 닿는 사람은 누구나 모든 것을 할
-수 있습니다. `AUTOONTOLOGY_AUTH=accounts`로 켜면 이메일과 비밀번호(12자 이상) 또는 1회용 링크로
+기본값(`ONTOLOGY_AUTH=off`)에서는 계정이 없습니다. 서비스에 닿는 사람은 누구나 모든 것을 할
+수 있습니다. `ONTOLOGY_AUTH=accounts`로 켜면 이메일과 비밀번호(12자 이상) 또는 1회용 링크로
 로그인하고 세션 쿠키(HttpOnly, SameSite=Strict, Path=/, Domain 없음, 유효 시간
-`AUTOONTOLOGY_SESSION_HOURS` 기본 12시간)를 받습니다. 로컬이 아닌 호스트, `X-Forwarded-Proto:
-https` 뒤, https `AUTOONTOLOGY_PUBLIC_URL`에서는 Secure이고 이름이 `__Host-ao_session`입니다
+`ONTOLOGY_SESSION_HOURS` 기본 12시간)를 받습니다. 로컬이 아닌 호스트, `X-Forwarded-Proto:
+https` 뒤, https `ONTOLOGY_PUBLIC_URL`에서는 Secure이고 이름이 `__Host-onto_session`입니다
 (브라우저가 형제 서브도메인이나 평문 http에서 온 이런 쿠키를 거부하므로 다른 사이트가 세션을 심을
-수 없음). 평문 http 로컬 사용에서는 `ao_session`입니다. 서비스 앞의 게이트웨이는 `Cookie`
-헤더(`__Host-ao_session`)를 그대로 전달해야 합니다. 설정된 tailnet 호스트에서는 Tailscale
+수 없음). 평문 http 로컬 사용에서는 `onto_session`입니다. 서비스 앞의 게이트웨이는 `Cookie`
+헤더(`__Host-onto_session`)를 그대로 전달해야 합니다. 설정된 tailnet 호스트에서는 Tailscale
 로그인과 이메일이 같은 사용자로 로그인됩니다.
 
 계정 기능을 켜기 전에 서버에서 첫 관리자를 만드세요. 비밀번호 없이 만들면 관리자가 비밀번호를
 정할 1회용 초대 링크(7일 유효)를 출력합니다.
 
 ```bash
-uv run ao user create you@example.com --name "You" --admin
-# 또는: printf '%s\n' "$PASSWORD" | uv run ao user create you@example.com --admin --password-stdin
+uv run onto user create you@example.com --name "You" --admin
+# 또는: printf '%s\n' "$PASSWORD" | uv run onto user create you@example.com --admin --password-stdin
 ```
 
-그다음 `AUTOONTOLOGY_AUTH=accounts`와, 사람들이 여는 대표 https 주소로
-`AUTOONTOLOGY_PUBLIC_URL`을 설정하고(초대·로그인 링크가 그 주소를 가리키고 Secure 쿠키도 이 값에
-달려 있음. 계정 모드인데 비어 있거나 https가 아니면 `ao doctor`가 경고) 다시 시작합니다. 다른 명령: `ao user list [--json]`,
-`ao user disable|enable <email>`(비활성화하면 바로 로그아웃), `ao user link <email>
+그다음 `ONTOLOGY_AUTH=accounts`와, 사람들이 여는 대표 https 주소로
+`ONTOLOGY_PUBLIC_URL`을 설정하고(초대·로그인 링크가 그 주소를 가리키고 Secure 쿠키도 이 값에
+달려 있음. 계정 모드인데 비어 있거나 https가 아니면 `onto doctor`가 경고) 다시 시작합니다. 다른 명령: `onto user list [--json]`,
+`onto user disable|enable <email>`(비활성화하면 바로 로그아웃), `onto user link <email>
 [--purpose magic|reset|invite]`(메일이 없을 때 전달할 로그인 또는 비밀번호 재설정 링크).
 CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩니다.
 
-메일: `AUTOONTOLOGY_SMTP_HOST`, `_PORT`(587 STARTTLS, 465 TLS), `_USER`, `_PASSWORD`,
+메일: `ONTOLOGY_SMTP_HOST`, `_PORT`(587 STARTTLS, 465 TLS), `_USER`, `_PASSWORD`,
 `_FROM`을 설정하면 로그인 화면에서 로그인 링크(15분, 1회용)를 메일로 보낼 수 있습니다. 응답은
 주소에 계정이 있는지 알려 주지 않습니다. SMTP가 없으면 버튼이 숨겨집니다.
 
@@ -1076,7 +1077,7 @@ CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩�
 `X-Forwarded-For`의 첫 항목을 씁니다. 다른 헤더는 믿지 않습니다.
 로그인 링크는 두 단계입니다. `/auth/magic/<token>`을 열면 "로그인 계속" 버튼만 보이고(링크를
 미리 여는 메일 검사기가 링크를 써 버리지 않음), 버튼이 토큰을 `POST /api/auth/magic`으로 보내야
-로그인됩니다. SSO(OIDC)는 예정이며 `AUTOONTOLOGY_OIDC_*`는 예약되어 있습니다.
+로그인됩니다. SSO(OIDC)는 예정이며 `ONTOLOGY_OIDC_*`는 예약되어 있습니다.
 
 웹 UI에서는 로그인하지 않은 방문자가 `/ui/login`으로 가고, 로그인 후 원래 페이지로 돌아갑니다.
 초대·재설정 링크는 `/ui/invite#token=...`에서 비밀번호를 정합니다. 헤더의 계정 메뉴에서 비밀번호
@@ -1102,17 +1103,17 @@ CLI는 관리자로 동작하며 변경은 감사 로그에 `cli`로 기록됩�
 | admin | + 프로젝트 생성, 설정·재시작, 공급자 테스트, 사용자, 전체 감사 로그 |
 
 `GET /api/auth/me`는 프로젝트 슬러그별 `permissions`와 `installation_permissions`를 알려
-줍니다. 표는 `autoontology/web/projects.py`(`PROJECT_PERMISSIONS`)에 있습니다(실행 가능한
+줍니다. 표는 `ontology/web/projects.py`(`PROJECT_PERMISSIONS`)에 있습니다(실행 가능한
 온톨로지가 `objects.read`, `logic.read`, `functions.call`(viewer), `action.approve`(reviewer),
 `logic.edit`, `action.run`, `workflow.run`(editor), `objects.manage`, `logic.activate`(owner)를
 더합니다. `action.run`과 `action.approve`는 기본값이며 액션마다 `permission.min_role`과 승인
 역할이 정합니다). 프로젝트를 만든
-사람이 owner가 됩니다. 보관된 프로젝트의 플레이그라운드는 `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny`가
+사람이 owner가 됩니다. 보관된 프로젝트의 플레이그라운드는 `ONTOLOGY_ARCHIVED_PLAYGROUND=deny`가
 아니면 계속 답합니다.
 
 연결 토큰은 만든(또는 마지막으로 교체한) 사람을 기억합니다. 그 사람이 비활성화되거나 토큰의
 프로젝트 멤버가 아니게 되면 토큰도 멈춥니다. 만든 사람이 없는 토큰(계정 기능 이전이나 CLI로 만든
-것)은 누가 빠져도 계속 동작하므로, 토큰을 가진 사람이 떠나면 직접 폐기하세요(`ao -p <p> agent
+것)은 누가 빠져도 계속 동작하므로, 토큰을 가진 사람이 떠나면 직접 폐기하세요(`onto -p <p> agent
 tokens revoke <id>`).
 
 플레이그라운드 대화는 사용자가 아니라 프로젝트에 속합니다. 플레이그라운드를 쓸 수 있는 멤버는
@@ -1126,15 +1127,15 @@ tokens revoke <id>`).
   이메일과 비활성 계정 모두 같은 403 `admin_required_for_new_user`를 받으니 관리자에게 초대를
   요청하세요. 기존 사용자를 추가하면 그 주소에 계정이 있다는 것은 owner에게 드러납니다),
   `PATCH|DELETE /api/projects/<p>/members/<user_id>`(owner는 한 명
-  이상 남아야 함: 409 `last_owner`). CLI: `ao -p <p> member list|add <email> --role R|role <email> R|remove <email>`.
+  이상 남아야 함: 409 `last_owner`). CLI: `onto -p <p> member list|add <email> --role R|role <email> R|remove <email>`.
 - 사용자(관리자): `GET|POST /api/users`(`{email, name?, is_admin?}` -> `{user, invite_link,
   mail_sent}`), `PATCH /api/users/<id>`(`{name?, is_admin?, disabled?}`, 마지막 활성 관리자는
   유지: 409 `last_admin`), `POST /api/users/<id>/link {purpose}`(새 magic/reset/invite 링크).
 - 감사 로그: `GET /api/audit?project=&user=&action=&before_id=&limit=`(관리자: 전체, owner: 자기
   프로젝트이며 `project` 필수). 로그인, 사용자, 멤버, 연결 토큰, 빌드·내보내기·적용 시작, 검토
   결정, 설정 변경·재시작, 프로젝트 변경을 사용자·프로젝트·클라이언트 주소와 함께 기록합니다.
-  CLI: `ao audit [--project P] [--user E] [--action A] [--json]`. CLI는 신뢰된 관리자로
-  동작하며 `ao --as <email> ...`이면 그 사용자 이름으로 기록합니다.
+  CLI: `onto audit [--project P] [--user E] [--action A] [--json]`. CLI는 신뢰된 관리자로
+  동작하며 `onto --as <email> ...`이면 그 사용자 이름으로 기록합니다.
 
 #### 엔진 경로(`/v1`, `/ingest`)
 
@@ -1144,11 +1145,11 @@ tokens revoke <id>`).
 `<home>/run/internal.key`(0600)에 무작위 비밀을 두고 거기서 키를 만듭니다. 엔진은 그 키를
 `/v1`에 OpenAI API 키로 보내고, `/ingest`에는
 `INGESTION_SERVICE_URL=http://127.0.0.1:<port>/internal/<key>`로 접근하며, CLI·공급자
-테스트·플레이그라운드는 `X-AutoOntology-Internal`을 보냅니다. 그 밖에는 관리자 세션이 있어야
-합니다. `AUTOONTOLOGY_AUTH`를 바꾼 뒤에는 엔진이 새 키를 받도록 전부 다시 시작하세요
-(`ao down && ao up`). `internal.key`를 교체할 때(지우면 처음 쓸 때 새로 만듦)도 같습니다.
+테스트·플레이그라운드는 `X-Ontology-Internal`을 보냅니다. 그 밖에는 관리자 세션이 있어야
+합니다. `ONTOLOGY_AUTH`를 바꾼 뒤에는 엔진이 새 키를 받도록 전부 다시 시작하세요
+(`onto down && onto up`). `internal.key`를 교체할 때(지우면 처음 쓸 때 새로 만듦)도 같습니다.
 서비스·엔진·실행 중인 CLI 명령은 다시 시작할 때까지 예전에 만든 키를 씁니다. 이 파일은 읽을
-때마다 0600으로 되돌려집니다. 서비스 앞의 게이트웨이는 `X-AutoOntology-Internal`, `X-AutoOntology-As`,
+때마다 0600으로 되돌려집니다. 서비스 앞의 게이트웨이는 `X-Ontology-Internal`, `X-Ontology-As`,
 그리고 `/mcp`·`/agent/v1` 밖의 `Authorization`을 절대 전달하면 안 됩니다.
 
 취약점 신고 방법은 [SECURITY.md](SECURITY.md)를 보세요.
@@ -1160,25 +1161,25 @@ tokens revoke <id>`).
 
 | 증상 | 해결 |
 |---|---|
-| `up`이 포트가 사용 중이라고 함 | `.env`에서 `AUTOONTOLOGY_PORT`와/또는 `BACKEND_PORT`를 바꾸고(예: 7820과 3121) `up`을 다시 실행합니다. |
+| `up`이 포트가 사용 중이라고 함 | `.env`에서 `ONTOLOGY_PORT`와/또는 `BACKEND_PORT`를 바꾸고(예: 7820과 3121) `up`을 다시 실행합니다. |
 | `docker compose up -d`가 5432 포트에서 실패 | 로컬 Postgres가 이미 그 포트를 쓰고 있습니다. `docker compose up -d` 전에 `.env`에 `POSTGRES_PORT=5433`을 설정하거나, 그 Postgres를 직접 사용하세요. |
 | `setup`: `extension "vector" is not available` | 사용하는 Postgres에 pgvector를 설치하거나(`brew install pgvector`, 또는 `postgresql-17-pgvector` 패키지), pgvector가 포함된 `docker compose`를 사용하세요. |
-| `setup`: 데이터베이스 생성 권한 없음 | 사용자에게 `CREATEDB` 권한을 주거나, `autoontology` 데이터베이스를 직접 만드세요. |
-| 채팅 모델 `openai/qwen3:8b`를 찾을 수 없음 | `uv run autoontology setup`(또는 `setup --force-alias`)을 실행하세요. `openai/` 접두사는 Ollama 별칭 이름의 일부이며, `ollama list`에 보여야 합니다. |
+| `setup`: 데이터베이스 생성 권한 없음 | 사용자에게 `CREATEDB` 권한을 주거나, `ontology` 데이터베이스를 직접 만드세요. |
+| 채팅 모델 `openai/qwen3:8b`를 찾을 수 없음 | `uv run onto setup`(또는 `setup --force-alias`)을 실행하세요. `openai/` 접두사는 Ollama 별칭 이름의 일부이며, `ollama list`에 보여야 합니다. |
 | `doctor`의 "vector tables" FAIL: 임베더가 N차원을 출력 | 적재 후에 임베딩 모델을 바꿨습니다. 이전 `*_EMBED_MODEL`로 되돌리거나, 벡터 테이블이 비도록 모든 소스를 제거(`source rm`)하세요. 빈 테이블은 자동으로 다시 만들어집니다. |
-| `build`가 "N document(s) need kordoc and were skipped" 경고 | 실행은 그 문서 없이 성공했습니다. kordoc을 설치하고(`uv run autoontology tools install-kordoc`, Node 20 이상) `build` 또는 `build --resume`으로 읽으세요. |
-| `build`가 "N image(s) need the OCR models and were skipped" 경고 | `uv run autoontology tools install-kordoc`(모델 약 18 MB를 내려받음)을 실행한 뒤 `build` 또는 `build --resume`을 실행하세요. `doctor`의 `ocr models` 행에서 확인할 수 있습니다. |
-| `/ui/`가 503 `ui_not_built`를 반환 | 커밋된 UI가 없습니다(예: 소스 아카이브). `uv run autoontology tools build-ui`를 실행하세요(Node와 pnpm 필요). |
-| `doctor`의 "chat provider" FAIL: claude/codex 로그인 안 됨 | AutoOntology를 실행하는 사용자로 로그인한 뒤(`claude auth login` 또는 `codex login`) `down` / `up`을 실행하세요. PATH의 CLI가 shim이라면 `AUTOONTOLOGY_CLAUDE_BIN` / `AUTOONTOLOGY_CODEX_BIN`을 설정하세요. |
-| 빌드 호출이 429 `usage_limit`로 실패 | Claude 또는 ChatGPT 요금제 한도에 닿았습니다. 초기화를 기다린 뒤 `build --resume`을 실행하거나, `AUTOONTOLOGY_CHAT_PROVIDER`를 바꾸세요. |
-| 적재가 `PoolTimeout: couldn't get a connection after 30.00 sec`로 실패 | 업스트림 연결이 삭제된 `autoontology_src_*` 데이터베이스를 가리킵니다. 서비스를 켠 상태에서 `uv run autoontology tools prune-connections`를 실행하세요(`doctor`의 "upstream connections" 행에 나옵니다). |
-| 빌드가 멈춘 것 같음 | `uv run autoontology runs`를 실행하고 `data/logs/`를 읽어 보세요. `qwen3:8b`로는 청크 하나에 1~2분이 걸립니다. |
+| `build`가 "N document(s) need kordoc and were skipped" 경고 | 실행은 그 문서 없이 성공했습니다. kordoc을 설치하고(`uv run onto tools install-kordoc`, Node 20 이상) `build` 또는 `build --resume`으로 읽으세요. |
+| `build`가 "N image(s) need the OCR models and were skipped" 경고 | `uv run onto tools install-kordoc`(모델 약 18 MB를 내려받음)을 실행한 뒤 `build` 또는 `build --resume`을 실행하세요. `doctor`의 `ocr models` 행에서 확인할 수 있습니다. |
+| `/ui/`가 503 `ui_not_built`를 반환 | 커밋된 UI가 없습니다(예: 소스 아카이브). `uv run onto tools build-ui`를 실행하세요(Node와 pnpm 필요). |
+| `doctor`의 "chat provider" FAIL: claude/codex 로그인 안 됨 | Ontology를 실행하는 사용자로 로그인한 뒤(`claude auth login` 또는 `codex login`) `down` / `up`을 실행하세요. PATH의 CLI가 shim이라면 `ONTOLOGY_CLAUDE_BIN` / `ONTOLOGY_CODEX_BIN`을 설정하세요. |
+| 빌드 호출이 429 `usage_limit`로 실패 | Claude 또는 ChatGPT 요금제 한도에 닿았습니다. 초기화를 기다린 뒤 `build --resume`을 실행하거나, `ONTOLOGY_CHAT_PROVIDER`를 바꾸세요. |
+| 적재가 `PoolTimeout: couldn't get a connection after 30.00 sec`로 실패 | 업스트림 연결이 삭제된 `ontology_src_*` 데이터베이스를 가리킵니다. 서비스를 켠 상태에서 `uv run onto tools prune-connections`를 실행하세요(`doctor`의 "upstream connections" 행에 나옵니다). |
+| 빌드가 멈춘 것 같음 | `uv run onto runs`를 실행하고 `data/logs/`를 읽어 보세요. `qwen3:8b`로는 청크 하나에 1~2분이 걸립니다. |
 
 ## 개발
 
 ```bash
 uv run ruff check . && uv run ruff format --check . && uv run pytest -q   # unit tests
-AUTOONTOLOGY_INTEGRATION=1 uv run pytest -m integration                    # real PG + Ollama
+ONTOLOGY_INTEGRATION=1 uv run pytest -m integration                    # real PG + Ollama
 cd ui && pnpm install && pnpm lint && pnpm test && pnpm build
 ```
 
@@ -1190,12 +1191,12 @@ cd ui && pnpm install && pnpm lint && pnpm test && pnpm build
 
 ## 크레딧과 라이선스
 
-AutoOntology 자체 코드는 [MIT 라이선스](LICENSE)로 배포합니다. Copyright (c) 2026 kimtoma.
+Ontology 자체 코드는 [MIT 라이선스](LICENSE)로 배포합니다. Copyright (c) 2026 kimtoma.
 
-AutoOntology는 **NVIDIA Auto Ontology**(Apache-2.0) 위에 만들어졌으며, 이를 수정하지 않은 git
+Ontology는 **NVIDIA Auto Ontology**(Apache-2.0) 위에 만들어졌으며, 이를 수정하지 않은 git
 서브모듈로 포함합니다. **Apache Ossie** JSON 스키마(Apache-2.0)를 벤더링하고, 복사하지 않고
 참조만 하는 **Open Knowledge Format** 규격(Apache-2.0)을 따릅니다. **kordoc**(MIT, 실행 시
 설치하며 재배포하지 않음), **shadcn/ui** 컴포넌트(MIT), **rhwp**의 샘플 HWP 파일(MIT)을
-사용합니다. AutoOntology는 독립 프로젝트이며 NVIDIA, Apache 소프트웨어 재단, Google과 제휴하거나
+사용합니다. Ontology는 독립 프로젝트이며 NVIDIA, Apache 소프트웨어 재단, Google과 제휴하거나
 그들의 보증을 받지 않았습니다. [NOTICE.md](NOTICE.md)와
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 보세요.

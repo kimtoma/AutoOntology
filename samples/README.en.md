@@ -30,9 +30,9 @@ chunks (one to two minutes per chunk with a local `qwen3:8b`).
 Relations: `contracts.고객ID -> customers.고객ID`, `invoices.계약ID -> contracts.계약ID`.
 
 ```bash
-uv run autoontology source add samples/quickstart/structured --name quick
-uv run autoontology source add samples/quickstart/documents --name quick-docs --kind documents
-uv run autoontology build
+uv run onto source add samples/quickstart/structured --name quick
+uv run onto source add samples/quickstart/documents --name quick-docs --kind documents
+uv run onto build
 ```
 
 ## `hanbit/` — the full set
@@ -97,7 +97,7 @@ customers and contracts are members of the three sales teams.
 | `사업수행계획서.hwp` | HWP | 17 sections | 10 | the rhwp HWP sample (same file as in `quickstart`) |
 
 `.md`, `.txt`, `.html`, `.csv` and `.doc` are read without Node; the rest need kordoc
-(`uv run autoontology tools install-kordoc`).
+(`uv run onto tools install-kordoc`).
 
 ### `images/` (OCR)
 
@@ -116,13 +116,13 @@ Example OCR output: `물류센터창고현황판 2026-09-30기준 | 제품코드
 ### Registering
 
 ```bash
-uv run autoontology source add samples/hanbit/structured --name hanbit
-uv run autoontology source add samples/hanbit/documents --name hanbit-docs --kind documents
-uv run autoontology source add samples/hanbit/images --name hanbit-images --kind documents
-uv run autoontology build
+uv run onto source add samples/hanbit/structured --name hanbit
+uv run onto source add samples/hanbit/documents --name hanbit-docs --kind documents
+uv run onto source add samples/hanbit/images --name hanbit-images --kind documents
+uv run onto build
 ```
 
-The structured data goes into the Postgres database `autoontology_src_hanbit`.
+The structured data goes into the Postgres database `ontology_src_hanbit`.
 
 ### Regenerating
 

@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes how AutoOntology is put together: its processes, its data flow,
+This document describes how Ontology is put together: its processes, its data flow,
 where state lives, how model calls are routed, and where to extend it. The user-facing
 overview is in the [README](../README.md).
 
@@ -8,21 +8,21 @@ overview is in the [README](../README.md).
 
 | Component | Where | Port | Role |
 |---|---|---|---|
-| AutoOntology service | `autoontology/web` (FastAPI, uvicorn) | `127.0.0.1:7800` (`AUTOONTOLOGY_PORT`) | REST API under `/api`, SSE run logs, the playground, the web UI under `/ui`, sign-in (`/api/auth`, `/auth/magic`), the outside-agent surfaces (`/mcp`, `/agent/v1`), the `/v1` model router, and the `/ingest` shims the engine calls back. |
+| Ontology service | `ontology/web` (FastAPI, uvicorn) | `127.0.0.1:7800` (`ONTOLOGY_PORT`) | REST API under `/api`, SSE run logs, the playground, the web UI under `/ui`, sign-in (`/api/auth`, `/auth/magic`), the outside-agent surfaces (`/mcp`, `/agent/v1`), the `/v1` model router, and the `/ingest` shims the engine calls back. |
 | Engine backend | `vendor/auto-ontology` (NVIDIA Auto Ontology, git submodule) | `127.0.0.1:3101` (`BACKEND_PORT`) | Connections, catalog, semantic model, exports and NL-to-SQL, over HTTP `/api/...`. |
-| CLI | `autoontology/cli.py` (typer), `autoontology/onboarding.py` | none | Runs `build` and `export` in-process; `up`/`down` supervise the two servers; `init`, `demo` and `provider` drive the onboarding. |
-| Postgres 17 + pgvector | `docker compose` or your own server | `5432` | The engine's catalog and vectors (`autoontology`) and one database per file source (`autoontology_src_<name>`; `autoontology_src_<slug_>__<name>` in a project other than the default one). |
-| SQLite store | `<AUTOONTOLOGY_HOME>/autoontology.db` | none | Everything AutoOntology owns: projects, sources, runs, documents, concepts, alignments, snapshots, playground, agent tokens, (schema v9) accounts and the audit log, and (v10/v11) object types, logic definitions, action runs, the edit layer and workflow runs. |
+| CLI | `ontology/cli.py` (typer), `ontology/onboarding.py` | none | Runs `build` and `export` in-process; `up`/`down` supervise the two servers; `init`, `demo` and `provider` drive the onboarding. |
+| Postgres 17 + pgvector | `docker compose` or your own server | `5432` | The engine's catalog and vectors (`ontology`) and one database per file source (`ontology_src_<name>`; `ontology_src_<slug_>__<name>` in a project other than the default one). |
+| SQLite store | `<ONTOLOGY_HOME>/ontology.db` | none | Everything Ontology owns: projects, sources, runs, documents, concepts, alignments, snapshots, playground, agent tokens, (schema v9) accounts and the audit log, and (v10/v11) object types, logic definitions, action runs, the edit layer and workflow runs. A home last used before the rename to Ontology (0.3.0) holds `autoontology.db`: it is renamed to `ontology.db` (with `-wal`/`-shm`) on first open, and schema v13 rewrites the recorded `autoontology_src_*` database names to `ontology_src_*`. |
 | Model providers | Ollama (`:11434`), an OpenAI-compatible URL, or the user's `claude` / `codex` CLI (chat only) | none | Chat (extraction, judges, playground, engine compile) and embeddings. |
-| kordoc (optional) | `<AUTOONTOLOGY_HOME>/kordoc` (npm, Node 20 or newer); OCR models in kordoc's model cache | none | Reads HWP/HWPX/PDF/DOCX/PPTX/XLS/XLSX into Markdown and OCRs images and scanned PDFs (PP-OCRv5 korean), run offline as a subprocess with an argv list. |
+| kordoc (optional) | `<ONTOLOGY_HOME>/kordoc` (npm, Node 20 or newer); OCR models in kordoc's model cache | none | Reads HWP/HWPX/PDF/DOCX/PPTX/XLS/XLSX into Markdown and OCRs images and scanned PDFs (PP-OCRv5 korean), run offline as a subprocess with an argv list. |
 
-`autoontology up` starts both servers as background processes (`engine/supervisor.py`),
+`onto up` starts both servers as background processes (`engine/supervisor.py`),
 binds them to 127.0.0.1, writes PID files under `<home>/run/` and logs under
 `<home>/logs/`, and waits for their health endpoints. The service rejects requests whose
 `Host` is not local or whose `Origin` is cross-site. A tailnet hostname listed in
-`AUTOONTOLOGY_TAILSCALE_HOSTS` (forwarded by `tailscale serve`) is accepted only with the
-`Tailscale-User-Login` identity header, optionally limited to `AUTOONTOLOGY_TAILSCALE_LOGINS`.
-With `AUTOONTOLOGY_AUTH=accounts` a sign-in gate runs after this guard (see
+`ONTOLOGY_TAILSCALE_HOSTS` (forwarded by `tailscale serve`) is accepted only with the
+`Tailscale-User-Login` identity header, optionally limited to `ONTOLOGY_TAILSCALE_LOGINS`.
+With `ONTOLOGY_AUTH=accounts` a sign-in gate runs after this guard (see
 [Accounts and permissions](#accounts-and-permissions)).
 
 ## Projects
@@ -31,7 +31,7 @@ One installation holds several projects (schema v8, `store/db.py`). Each has its
 sources, runs, review decisions, revisions (r1, r2, ... per project), exports,
 playground index and conversations, and outside-agent tokens. Rows from before projects
 belong to the default project (`prj_default`), whose slug is the workspace's
-(`AUTOONTOLOGY_WORKSPACE`, slugified) and can be renamed. A slug is
+(`ONTOLOGY_WORKSPACE`, slugified) and can be renamed. A slug is
 `^[a-z][a-z0-9-]{1,23}$`; ids (`prj_<hex>`) never change.
 
 - **Store.** `Store.project(ref)` returns a `ProjectStore`: every read and write is
@@ -39,8 +39,8 @@ belong to the default project (`prj_default`), whose slug is the workspace's
   belonging to another project reads as missing. It stands in for a `Store` wherever the
   engine takes one, so a build of a project aligns, merges and snapshots only that
   project's sources.
-- **Databases.** A source of the default project keeps `autoontology_src_<name>`; a new
-  source of another project gets `autoontology_src_<slug_>__<name>` (the name budget is
+- **Databases.** A source of the default project keeps `ontology_src_<name>`; a new
+  source of another project gets `ontology_src_<slug_>__<name>` (the name budget is
   `46 - len(slug) - 2`). A database belongs to one project: registering the same external
   database in a second project is refused.
 - **Exports** live in `exports/<slug>/r<rev:04d>/`. Legacy `exports/rNNNN` folders move
@@ -63,27 +63,27 @@ belong to the default project (`prj_default`), whose slug is the workspace's
   (`/api/status`, `/api/providers/test`, `/api/settings`) and the management routes
   (`/api/projects`) have no project. The outside-agent surfaces (`/mcp`, `/agent/v1`)
   take the project from the bearer token.
-- **CLI.** `--project/-p SLUG` (or `AUTOONTOLOGY_PROJECT`) before the command selects the
+- **CLI.** `--project/-p SLUG` (or `ONTOLOGY_PROJECT`) before the command selects the
   project: store commands use its `ProjectStore`, API commands call its canonical routes.
 
 ## Accounts and permissions
 
-Sign-in is off by default (`AUTOONTOLOGY_AUTH=off`): every caller past the Host/Origin
+Sign-in is off by default (`ONTOLOGY_AUTH=off`): every caller past the Host/Origin
 guard is a synthetic admin named after the tailnet login or `local`, exactly as before
-accounts. `AUTOONTOLOGY_AUTH=accounts` turns on users, sessions, project memberships and
+accounts. `ONTOLOGY_AUTH=accounts` turns on users, sessions, project memberships and
 the audit log (schema v9; `store/accounts.py`, `web/auth.py`, `web/accounts_api.py`,
 `web/mailer.py`).
 
 **Who is asking** (`auth.AuthService.resolve`, cached per request by `current_user`):
 
-1. the CLI's local key (`X-AutoOntology-Internal`, see below): an admin named `cli`, or the
-   user named by `X-AutoOntology-As` (`ao --as <email>`) for audit attribution;
+1. the CLI's local key (`X-Ontology-Internal`, see below): an admin named `cli`, or the
+   user named by `X-Ontology-As` (`onto --as <email>`) for audit attribution;
 2. the session cookie: a random id whose SHA-256 is the `sessions` row. The cookie is
    `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Domain`, `Max-Age` =
-   `AUTOONTOLOGY_SESSION_HOURS` (default 12, 1 to 720). It is `Secure` and named
-   `__Host-ao_session` when `AUTOONTOLOGY_PUBLIC_URL` is https, the proxy sends
+   `ONTOLOGY_SESSION_HOURS` (default 12, 1 to 720). It is `Secure` and named
+   `__Host-onto_session` when `ONTOLOGY_PUBLIC_URL` is https, the proxy sends
    `X-Forwarded-Proto: https` or the `Host` is not local; plain-http local use gets
-   `ao_session`. A Secure request reads only the `__Host-` name. Every login issues a new id
+   `onto_session`. A Secure request reads only the `__Host-` name. Every login issues a new id
    and ends the session it replaces; logout clears both names;
 3. the Tailscale identity header on a configured tailnet hostname, mapped to the active
    user with that email;
@@ -118,13 +118,13 @@ guard, which is what stops login CSRF):
 - The client IP is the socket peer, or the first `X-Forwarded-For` entry when the peer is
   loopback (the local gateway); no other header is trusted.
 
-Links point at `AUTOONTOLOGY_PUBLIC_URL` (else the request's base URL); `ao doctor` warns
+Links point at `ONTOLOGY_PUBLIC_URL` (else the request's base URL); `onto doctor` warns
 when accounts are on and it is unset or not https. **Mail** (`web/mailer.py`, stdlib
-`smtplib`): `AUTOONTOLOGY_SMTP_HOST`, `_PORT` (587, STARTTLS by default; 465 TLS),
+`smtplib`): `ONTOLOGY_SMTP_HOST`, `_PORT` (587, STARTTLS by default; 465 TLS),
 `_USER`, `_PASSWORD`, `_FROM`, `_STARTTLS`; English and Korean templates by the request's
 `Accept-Language`. Without a host nothing is sent, `GET /api/auth/me` reports
 `magic_link_enabled: false` and the UI hides the button; admins copy links from
-`/ui/users` or `ao user link`. Neither the SMTP password nor a link is ever logged.
+`/ui/users` or `onto user link`. Neither the SMTP password nor a link is ever logged.
 
 **Where permissions are enforced.**
 
@@ -144,7 +144,7 @@ when accounts are on and it is unset or not https. **Mail** (`web/mailer.py`, st
 - Archived projects refuse writes (409 `project_archived`) except archive/unarchive,
   playground questions and the read-only POSTs (`/logic/validate`, `/logic/test`,
   `/logic/functions/{name}/test|call`, `/actions/{name}/preview`);
-  `AUTOONTOLOGY_ARCHIVED_PLAYGROUND=deny` refuses the playground questions too.
+  `ONTOLOGY_ARCHIVED_PLAYGROUND=deny` refuses the playground questions too.
 - Outside agents keep their bearer tokens; with accounts on a token stops working when
   its `created_by` user is disabled or no longer a member of the token's project (tokens
   without a creator keep working).
@@ -169,22 +169,22 @@ only its own door:
 |---|---|---|
 | `engine` | the engine, as its OpenAI API key (`Authorization: Bearer aoe-...`) | `/v1` only |
 | `ingest` | the engine, through `INGESTION_SERVICE_URL=http://127.0.0.1:<port>/internal/<key>` (it cannot add headers there); the middleware rewrites the path to `/ingest*` | `/ingest`, `/ingest/delete` only |
-| `local` | the CLI, the provider probe and the playground, as `X-AutoOntology-Internal` | everything, as the admin `cli` |
+| `local` | the CLI, the provider probe and the playground, as `X-Ontology-Internal` | everything, as the admin `cli` |
 
 Anyone else reaches `/v1` and `/ingest*` only with an admin session (403 otherwise); a
 wrong `/internal/<key>` is 404. No address or `Host` is trusted for this, because behind a
 local gateway every request arrives from 127.0.0.1 with a local `Host`, just like the
-engine's. Switching `AUTOONTOLOGY_AUTH` or rotating `internal.key` needs a full restart
-(`ao down && ao up`): each process keeps the keys it derived.
+engine's. Switching `ONTOLOGY_AUTH` or rotating `internal.key` needs a full restart
+(`onto down && onto up`): each process keeps the keys it derived.
 
 **Public deployment behind a gateway.** The service still binds to 127.0.0.1; a gateway on
 the same machine (or a tunnel to it) forwards to it. The Host/Origin guard still runs: the
 forwarded request carries a local `Host`, and a non-GET request's `Origin` must match it
-(or be absent). Set `AUTOONTOLOGY_PUBLIC_URL` to the https address people open (links and
-the Secure `__Host-ao_session` cookie depend on it) and send `X-Forwarded-For` /
+(or be absent). Set `ONTOLOGY_PUBLIC_URL` to the https address people open (links and
+the Secure `__Host-onto_session` cookie depend on it) and send `X-Forwarded-For` /
 `X-Forwarded-Proto`. Of the browser's credentials only the session cookie needs to cross
 the gateway. At the edge, block `/v1`, `/ingest` and `/internal`, and never forward
-`X-AutoOntology-Internal`, `X-AutoOntology-As` or, outside `/mcp` and `/agent/v1`,
+`X-Ontology-Internal`, `X-Ontology-As` or, outside `/mcp` and `/agent/v1`,
 `Authorization`.
 
 ## How the engine is embedded
@@ -192,22 +192,22 @@ the gateway. At the edge, block `/v1`, `/ingest` and `/internal`, and never forw
 The engine is pinned as an **unmodified** git submodule (`vendor/auto-ontology`, commit
 `c96048c`, package 1.3.0) and installed as an editable path dependency
 (`auto-ontology-server>=1.3.0`).
-AutoOntology uses it in two ways:
+Ontology uses it in two ways:
 
 - **Over HTTP** (`engine/client.py`): it creates and updates connections, reads the
   catalog and Terms, fetches the model export (`model.yaml`, the Ossie zip), and relays
   playground NL-to-SQL (`/api/chat/completions`). Every request carries the user header
-  `x-auto-ontology-user-id: autoontology`.
+  `x-auto-ontology-user-id: ontology`.
 - **In-process** (`engine/jobs.py`, `engine/upstream_semantic.py`): it runs ingest, the
   PII/rule replay and semantic compilation by importing `auto_ontology` directly, and it
   creates the pgvector tables at the embedder's dimension. The engine hard-codes 2048
-  dimensions; AutoOntology creates the tables first through the engine's own DDL.
+  dimensions; Ontology creates the tables first through the engine's own DDL.
 
-The engine reads its environment at import time, so AutoOntology prepares `os.environ`
+The engine reads its environment at import time, so Ontology prepares `os.environ`
 (Postgres settings, the expanded model triplets and `INGESTION_SERVICE_URL`) before the
 first import. With accounts on, the engine's OpenAI API key for `/v1` and its
 `INGESTION_SERVICE_URL` carry keys derived from `<home>/run/internal.key` (see
-[Accounts and permissions](#accounts-and-permissions)). Engine internals that AutoOntology depends on are pinned by tests
+[Accounts and permissions](#accounts-and-permissions)). Engine internals that Ontology depends on are pinned by tests
 (`tests/test_upstream_terms.py` and others), so a submodule bump that changes them fails
 loudly.
 
@@ -227,7 +227,7 @@ merge -> snapshot
 - **Structured path.**
   - `load` reads the files with DuckDB (CSV/TSV, Parquet, JSON, XLSX, SQLite) or
     python-calamine (XLS), normalizes column names and writes the tables into
-    `autoontology_src_<name>`. A database URL
+    `ontology_src_<name>`. A database URL
     source skips this step and is registered as is.
   - `register` creates or updates the engine connection.
   - `ingest` runs the engine's catalog ingest and embeds the catalog.
@@ -235,7 +235,7 @@ merge -> snapshot
     attributes and semantic foreign keys. Since engine 1.3 it also groups tables repeated
     under several prefixes into term families, attaches suspected FK columns that found no
     target, and ends with one LLM pass that writes a sentence onto every column attribute
-    (batches of 15 per Term and table). AutoOntology's snapshot keeps the column's own
+    (batches of 15 per Term and table). Ontology's snapshot keeps the column's own
     description first (a source comment or the compiler's column description, often
     Korean) and uses that engine sentence only for a column without one
     (`structured/semantic.py`).
@@ -243,7 +243,7 @@ merge -> snapshot
   - `read` uses the native readers (`.md`, `.txt`, `.html`, `.csv`/`.tsv` as one table
     section, Word 97-2003 `.doc` through olefile) or kordoc (with `--ocr` for PDFs; images
     are OCR'd) and produces section-aware chunks (tiktoken). With
-    `AUTOONTOLOGY_VISION_MODEL` set, an image first gets an "Image description" section
+    `ONTOLOGY_VISION_MODEL` set, an image first gets an "Image description" section
     from an Ollama vision model (`unstructured/vision.py`). Without kordoc, documents that
     need it are skipped with a run warning, not counted as failed; without the OCR models,
     images and image-only PDFs are skipped the same way. A source whose documents are all
@@ -265,7 +265,7 @@ merge -> snapshot
   v2.2 whose concept name is instance-like still folds on an export-only run (only its
   aliases are filtered) until the next align or `build --resume` re-applies the policy.
 - **Merge** (`ontology/model.py`). `MergedOntology` combines Terms, document concepts,
-  alignment axioms, relations and evidence into one model under `AUTOONTOLOGY_BASE_IRI`,
+  alignment axioms, relations and evidence into one model under `ONTOLOGY_BASE_IRI`,
   and gives every node an origin (`structured`, `document` or `aligned`).
 - **Snapshot.** The model is saved as JSON in `ontology_snapshots` with a new revision.
 
@@ -358,9 +358,9 @@ login header).
   `applied` lists it under `supported`, and `term_alias_additions` names its source), so
   rejecting that fold or removing its source later removes it. Rejection and `source rm`
   share this one ownership model (`engine/align.py`: `alias_supporters`,
-  `departing_aliases`, `hand_over_aliases`): the alias log records what AutoOntology wrote,
+  `departing_aliases`, `hand_over_aliases`): the alias log records what Ontology wrote,
   and who still supports a synonym is derived from the accepted folds of every documents
-  source when it is about to come off. A synonym AutoOntology never wrote stays. So the
+  source when it is about to come off. A synonym Ontology never wrote stays. So the
   Term's `skos:altLabel` and the concept's own class never both carry the name in RDF,
   Ossie or OKF. This runs in a build's align pass and in apply. What to take off is read
   from the rows themselves (`overlay.unfold_pending`): a row keeps the `applied` record of
@@ -371,7 +371,7 @@ login header).
   `OAxiom(accepted=True)`, which makes the Term `aligned`; a decided one also has
   `decided=True`. Every alignment axiom carries a status, `proposed`, `accepted` (by the
   judge) or `decided` (by a person):
-  - RDF: `ao:alignmentStatus` on the reified statement;
+  - RDF: `onto:alignmentStatus` on the reified statement;
   - OKF: the `is related to` / `is a kind of` lines;
   - Ossie: the `related_to` description.
   A decided axiom's rationale is the decision note followed by the judge's rationale. An
@@ -393,7 +393,7 @@ login header).
 
   ```
   # crontab: every night, rebuild what changed, then reflect the review decisions
-  30 2 * * * cd /path/to/AutoOntology && uv run autoontology build --resume && uv run autoontology apply
+  30 2 * * * cd /path/to/ontology && uv run onto build --resume && uv run onto apply
   ```
 - **Review inbox** (`web/review.py`, `/api/review`). Items come from three places:
   - the alignment rows: `al:` refused `same` proposals and `ax:` judge axioms with
@@ -425,7 +425,7 @@ login header).
   read once). The computation runs outside the cache lock, one at a time: a caller that
   arrives meanwhile waits for it and shares its result.
 
-### Playground (`autoontology/playground`)
+### Playground (`ontology/playground`)
 
 The scope is always the latest snapshot. The retrieval index (`elements.py`, `index.py`)
 embeds one text per Term, concept, rule, process, relation, axiom and evidence node. It is
@@ -434,9 +434,9 @@ quotes them inside a delimited context block and streams the answer with citatio
 is relayed to the engine, whose text-to-SQL is a ReAct agent since 1.3 (steps
 `react_sql_agent`, then `format_and_respond` or `unconstructable_sql_response`; up to
 `TEXT_TO_SQL_REACT_MAX_TOOL_CALLS` tool calls per question, each one chat call through
-the `/v1` router; the engine's default is 24, AutoOntology exports
-`AUTOONTOLOGY_SQL_MAX_TOOL_CALLS`, default 12, unless the user set the engine variable).
-At most `AUTOONTOLOGY_SQL_CONCURRENCY` (default 2) SQL streams run at once (429
+the `/v1` router; the engine's default is 24, Ontology exports
+`ONTOLOGY_SQL_MAX_TOOL_CALLS`, default 12, unless the user set the engine variable).
+At most `ONTOLOGY_SQL_CONCURRENCY` (default 2) SQL streams run at once (429
 `sql_busy`); a slot is released when the stream ends or the client leaves. The SSE events keep the `step` / `sql` / `result` /
 `error` shape; an answer that needs no query has `sql_code: ""` and
 `sql_response_from_db: null`. SPARQL (`sparql.py`) evaluates against the snapshot's Turtle
@@ -462,7 +462,7 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 | `concepts`, `relations`, `evidence` | Extracted and consolidated document knowledge. |
 | `term_embeddings` | Cached Term passage embeddings, by text hash and model. |
 | `alignments`, `alignment_previews` | Judge verdicts with the identity policy version, and dry-run proposals. |
-| `term_alias_additions`, `term_refresh_pending` | Synonyms AutoOntology added to Terms (with `source_id`, the documents source whose alignment added them, since v3; NULL on older rows), and Terms awaiting a refresh. `source rm` of a documents source removes that source's additions from the upstream Terms first. |
+| `term_alias_additions`, `term_refresh_pending` | Synonyms Ontology added to Terms (with `source_id`, the documents source whose alignment added them, since v3; NULL on older rows), and Terms awaiting a refresh. `source rm` of a documents source removes that source's additions from the upstream Terms first. |
 | `ontology_snapshots` | One row per revision of a project (surrogate `id`, per-project `revision`): the run, sources, counts and the full model JSON. |
 | `review_decisions` | A person's decision per review subject (alignment, alias, concept), who made it, and the revision that first reflected it (`applied_revision`). |
 | `playground_index`, `playground_index_meta` | The element vectors and the snapshot they were built from. |
@@ -481,8 +481,8 @@ parse. A keyword pre-filter and an algebra-level guard refuse `SERVICE`, `FROM` 
 | `audit_log` | Who did what: time, user (NULL for the CLI), project, action, target, JSON detail and client IP. No foreign keys. |
 
 The engine keeps its own state in Postgres: the catalog and semantic model tables in the
-`autoontology` database, the `vdb.*` vector tables, and each file source's data in
-`autoontology_src_<name>` (or `autoontology_src_<slug_>__<name>`).
+`ontology` database, the `vdb.*` vector tables, and each file source's data in
+`ontology_src_<name>` (or `ontology_src_<slug_>__<name>`).
 `config.validate_pg_database_name` refuses every other
 database name.
 
@@ -707,11 +707,11 @@ request already waits for approval, or the workflow changed meanwhile) and `fail
 
 **Scheduler** (`logic/scheduler.py`): a daemon thread started from the service's lifespan,
 ticking every 60 s over the non-archived projects: `reconcile` first, then -- when
-`AUTOONTOLOGY_WORKFLOWS` is `on` (default) -- the due slot of every active scheduled
-workflow (`daily HH:MM`, `hourly` at minute 0, `weekly MON HH:MM`) in `AUTOONTOLOGY_TZ`
+`ONTOLOGY_WORKFLOWS` is `on` (default) -- the due slot of every active scheduled
+workflow (`daily HH:MM`, `hourly` at minute 0, `weekly MON HH:MM`) in `ONTOLOGY_TZ`
 (an IANA zone) or the system zone. Only the most recent slot is considered: it fires when
 at most 6 h old and not older than the activation, so downtime fires the latest missed slot
-once and never backfills. With `AUTOONTOLOGY_WORKFLOWS=off` the thread only reconciles and
+once and never backfills. With `ONTOLOGY_WORKFLOWS=off` the thread only reconciles and
 `on_action` triggers are off; manual runs still work. A manual run (`POST
 /workflows/{name}/run`) needs `workflow.run` (editor) for a workflow with
 `trigger.manual: true` and `logic.activate` (owner) for any other, and is refused (409
@@ -721,7 +721,7 @@ workflow runs (`on_action` skips them, a start is 409 `project_archived`).
 
 ### Logic extraction
 
-A `logic` run (`POST /runs {kind: "logic"}`, `logic.edit`; `ao logic extract`) proposes
+A `logic` run (`POST /runs {kind: "logic"}`, `logic.edit`; `onto logic extract`) proposes
 definitions from the project's rule and process concepts (`logic/extract.py`), in four
 steps:
 
@@ -765,20 +765,20 @@ revision-pinned token may use them only while its pin is the latest revision.
 
 `logic/skills.py::build_skill` writes an Agent Skill bundle from a project's **active**
 definitions and active object types; `GET /logic/skill.zip` (`logic.read`, audited
-`skill.export` with the counts), `ao skill export [-o file.zip]` and the Connect page's
-"Export skill" button serve it. The zip holds one folder, `autoontology-<slug>/`:
+`skill.export` with the counts), `onto skill export [-o file.zip]` and the Connect page's
+"Export skill" button serve it. The zip holds one folder, `ontology-<slug>/`:
 
 | File | Content |
 |---|---|
 | `SKILL.md` | YAML front matter (`name`: lower-case letters, digits, hyphens, at most 64 characters; `description`: what it does and when to use it, at most 1024 characters) and an English body: purpose, the agent procedure (search → get → call_function → preview → submit, never assume approval, report run ids), object types, functions, actions (parameters, preconditions, approval, agent policy), workflows, examples. Korean names and labels are kept. |
-| `mcp.json` | The MCP server entry with placeholders only: `{{AUTOONTOLOGY_URL}}/mcp` and `Authorization: Bearer <token>`. A real token is never written. |
-| `definitions/{functions,actions,workflows}.yaml` | The active specs in the format `ao logic apply -f` reads (only kinds that have one). |
+| `mcp.json` | The MCP server entry with placeholders only: `{{ONTOLOGY_URL}}/mcp` and `Authorization: Bearer <token>`. A real token is never written. |
+| `definitions/{functions,actions,workflows}.yaml` | The active specs in the format `onto logic apply -f` reads (only kinds that have one). |
 
 The output is deterministic: definitions and entries are sorted, and every entry carries
 one timestamp, the latest `updated_at` of the active definitions (1980-01-01 when there is
 none), so re-exporting unchanged definitions gives identical bytes.
 
-## Formats (`autoontology/formats.py`)
+## Formats (`ontology/formats.py`)
 
 One module holds every supported extension: `STRUCTURED_SUFFIXES` (and the per-loader sets
 the structured loaders import), `DOCUMENT_NATIVE_SUFFIXES`, `DOCUMENT_KORDOC_SUFFIXES` and
@@ -787,7 +787,7 @@ the structured loaders import), `DOCUMENT_NATIVE_SUFFIXES`, `DOCUMENT_KORDOC_SUF
 UI derives its upload `accept` lists, hints and file-by-file preview from it (a copy in
 `ui/src/test/fixtures/formats.json` is checked against it by `tests/test_ui_formats_fixture.py`).
 
-## Onboarding (`autoontology/onboarding.py`)
+## Onboarding (`ontology/onboarding.py`)
 
 The logic behind `init`, `demo`, `provider` and the samples API, without prompts (the CLI
 in `cli.py` adds the questions and the output):
@@ -798,12 +798,12 @@ in `cli.py` adds the questions and the output):
   check `/api/status` uses). `recommend_provider` picks claude, then codex (when logged in),
   else ollama; `init` keeps a provider already chosen in `.env` or the shell.
 - `EnvFile` edits `.env` in place: it replaces an active line or the first commented
-  `# KEY=` line, else appends under one `# --- Set by autoontology init ---` block; every
+  `# KEY=` line, else appends under one `# --- Set by onto init ---` block; every
   other byte stays. Writes are atomic, keep the file mode (0600 for a new file) and copy
   the previous file to `.env.bak-<timestamp>` first. `describe_change` masks
   KEY/PASSWORD/TOKEN/SECRET values.
 - Sample sets: `SAMPLE_SETS` (`quickstart`, `hanbit`) is the allowlist under
-  `settings.samples_dir` (`AUTOONTOLOGY_SAMPLES_DIR`). A set's `structured/`, `documents/`
+  `settings.samples_dir` (`ONTOLOGY_SAMPLES_DIR`). A set's `structured/`, `documents/`
   and `images/` folders become the sources `<prefix>`, `<prefix>-docs` and
   `<prefix>-images`. `register_sample_set` keeps a source already registered with the same
   kind and path; a source of the same name holding other data is a `SampleConflict` unless
@@ -822,23 +822,23 @@ while a run is active, 409 `sample_conflict` with the conflicting locators).
 ## Provider routing
 
 The engine picks its LLM client by model name: only names starting with `openai/` use
-`ChatOpenAI`. AutoOntology therefore expands the provider settings
+`ChatOpenAI`. Ontology therefore expands the provider settings
 (`config.expand_model_profile`) into the engine's model triplets (`DEFAULT_MODELS_*`,
 `REASONING_*`, `NON_REASONING_*`, `RERANK_*`). Every chat triplet points at the service's
 own `/v1` router:
 
 ```
-engine / AutoOntology LLM call
+engine / Ontology LLM call
    model = "openai/qwen3:8b" or "openai/<model>"
           |
           v
   service /v1/chat/completions  (web/providers/router.py)
-     ollama provider: forwards to AUTOONTOLOGY_OLLAMA_ENDPOINT unchanged
+     ollama provider: forwards to ONTOLOGY_OLLAMA_ENDPOINT unchanged
                       (openai/qwen3:8b is the Ollama alias name) and adds
                       reasoning_effort: none so JSON schemas are enforced
      openai provider: strips one openai/ prefix, sets Authorization: Bearer
-                      <AUTOONTOLOGY_OPENAI_API_KEY>, forwards to
-                      AUTOONTOLOGY_OPENAI_BASE_URL
+                      <ONTOLOGY_OPENAI_API_KEY>, forwards to
+                      ONTOLOGY_OPENAI_BASE_URL
      claude provider: model openai/claude:<m> -> `claude -p ... --json-schema`
      codex provider:  model openai/chatgpt:<m> -> `codex exec ... --output-schema`
 ```
@@ -853,8 +853,8 @@ to the user's `auth.json` (a refreshed token is copied back atomically under a l
 (the engine is given `chatgpt:` because LangChain sends model names containing "codex" to
 `/v1/responses`; the router also accepts `codex:`); a prefix for a provider the service
 does not run is refused with 400 `provider_not_active`. Each request has one
-deadline (`AUTOONTOLOGY_PROVIDER_TIMEOUT_S`) covering the wait for one of
-`AUTOONTOLOGY_PROVIDER_MAX_INFLIGHT` slots, the call and at most one re-ask when the
+deadline (`ONTOLOGY_PROVIDER_TIMEOUT_S`) covering the wait for one of
+`ONTOLOGY_PROVIDER_MAX_INFLIGHT` slots, the call and at most one re-ask when the
 answer fails its JSON schema (422 after that); the schema is checked before any call and
 the answer is validated in a killable worker process (`schema_worker.py`). A client
 disconnect kills the CLI's process group (499). CLI failures map to OpenAI-style errors:
@@ -883,16 +883,16 @@ vectors (`jobs.vector_table_state`) needs `confirm_reingest`.
 `POST /api/settings/restart` refuses while anything runs (runs, claims, CLI runs, the
 playground, a provider test) or when the service was not started by `up` (its PID file
 must name this process), claims the workspace, writes `run/restart-<id>.json` and starts
-`python -m autoontology.engine.restart` detached: its own session (so `down`, which kills
+`python -m ontology.engine.restart` detached: its own session (so `down`, which kills
 the service's process group, does not kill it), stdio to `logs/restart.log`, and an
 environment without the keys this process derived or copied from `.env`
 (`restart.helper_env`). The helper takes `run/restart.lock`, re-reads `.env`, waits half a
 second for the 202 to leave, runs `Supervisor.down()` and `up()`, waits for the old pid to
 go, and records `done` (with the new service pid) or `failed` (masked error). The new
 service answers `GET /api/settings/restart/{id}`; the UI polls `/health/live`, then that
-record until a `done` comes from another pid. `autoontology restart` runs the same helper
+record until a `done` comes from another pid. `onto restart` runs the same helper
 in the foreground. `supervisor.child_env` lists every value it copies from `.env` in
-`AUTOONTOLOGY_DERIVED_ENV`, so children treat them as `.env` values, not shell values.
+`ONTOLOGY_DERIVED_ENV`, so children treat them as `.env` values, not shell values.
 `POSTGRES_*` and `INGESTION_SERVICE_URL` that came from built-in defaults (not from `.env`)
 stay in the children's env as if set in the shell, so a later `.env` change to them needs
 `down` + `up`. A record whose helper process is gone is marked `failed` ("interrupted")
@@ -904,7 +904,7 @@ another origin needs a new key (400 `key_required`).
 
 ## Web UI (`ui/`)
 
-A React app (Vite, TanStack Query, shadcn/ui) built into `autoontology/web/static/dist`
+A React app (Vite, TanStack Query, shadcn/ui) built into `ontology/web/static/dist`
 and served under `/ui/`; every non-asset `/ui/*` path gets `index.html`. `ui/src/lib/api.ts`
 is the only client of `/api`.
 
@@ -947,10 +947,10 @@ is the only client of `/api`.
 
 Two languages, English and Korean, with no extra dependency on either side.
 
-- **CLI** (`autoontology/i18n.py`): `msg(key, **kw)` looks the key up in
-  `autoontology/i18n_catalog/en.py` or `ko.py` (plain dicts with the same keys; a key
+- **CLI** (`ontology/i18n.py`): `msg(key, **kw)` looks the key up in
+  `ontology/i18n_catalog/en.py` or `ko.py` (plain dicts with the same keys; a key
   missing in Korean falls back to English) and fills `{name}` placeholders. The language
-  is `AUTOONTOLOGY_LANG` (shell, then `.env`), else `ko` when `LC_ALL` / `LC_MESSAGES` /
+  is `ONTOLOGY_LANG` (shell, then `.env`), else `ko` when `LC_ALL` / `LC_MESSAGES` /
   `LANG` starts with `ko`, else `en`. It covers the onboarding commands (`init`, `demo`,
   `provider`, `setup`, `source add/rm`), their `--help` texts and the doctor table.
   Commands, error codes, status words (OK/WARN/FAIL/SKIP), check names and details stay
@@ -967,7 +967,7 @@ Two languages, English and Korean, with no extra dependency on either side.
   `useT()` returns `t(key, vars?)` with `{name}` interpolation (`tx` fills placeholders with
   React nodes, `tn` picks `.one`/`.other`). Dates, numbers and durations go through `Intl`
   with the current language. The language comes from
-  `?lang=`, then `localStorage["autoontology.lang"]`, then `navigator.language` (`ko*`),
+  `?lang=`, then `localStorage["ontology.lang"]`, then `navigator.language` (`ko*`),
   else English; the header's globe menu switches it without a reload and updates
   `<html lang>`. Backend remedy commands and `detail` texts are shown verbatim.
 
@@ -988,4 +988,4 @@ language list, and add it to the parity tests (`tests/test_i18n.py`,
 | A model provider | `web/providers/` (a `PassthroughProvider`, or a `CLIProvider` for a CLI login), `router.py` (`Registry`, `split_model`), `config.py` (`CHAT_PROVIDERS`, `expand_model_profile`). |
 | A sample set | A folder `samples/<set>/{structured,documents,images}` and its name in `onboarding.SAMPLE_SETS` / `SAMPLE_PREFIXES` (and `DEMO_DURATIONS`). |
 | An expression builtin | `logic/expr.py` (a `_b_<name>` method of `_Compiler`: type check and evaluation), the extraction prompt's builtin list in `unstructured/prompts.py` (bump `LOGIC_PROMPT_VERSION`). |
-| A UI page | `ui/src/pages` (strings in `ui/src/i18n/en.ts` and `ko.ts`), then `uv run autoontology tools build-ui` and commit `autoontology/web/static/dist`. |
+| A UI page | `ui/src/pages` (strings in `ui/src/i18n/en.ts` and `ko.ts`), then `uv run onto tools build-ui` and commit `ontology/web/static/dist`. |

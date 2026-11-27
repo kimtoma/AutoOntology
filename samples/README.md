@@ -28,9 +28,9 @@
 관계: `contracts.고객ID → customers.고객ID`, `invoices.계약ID → contracts.계약ID`.
 
 ```bash
-uv run autoontology source add samples/quickstart/structured --name quick
-uv run autoontology source add samples/quickstart/documents --name quick-docs --kind documents
-uv run autoontology build
+uv run onto source add samples/quickstart/structured --name quick
+uv run onto source add samples/quickstart/documents --name quick-docs --kind documents
+uv run onto build
 ```
 
 ## `hanbit/` — 전체 세트
@@ -91,7 +91,7 @@ departments.부서코드       ◄── employees.부서코드, departments.상
 | `사업수행계획서.hwp` | HWP | 17섹션 | 10 | rhwp HWP 예제(`quickstart`와 같은 파일) |
 
 `.md`·`.txt`·`.html`·`.csv`·`.doc`는 Node 없이 읽고, 나머지는 kordoc이 필요합니다
-(`uv run autoontology tools install-kordoc`).
+(`uv run onto tools install-kordoc`).
 
 ### `images/` — 이미지(OCR)
 
@@ -110,13 +110,13 @@ OCR 결과 예: `물류센터창고현황판 2026-09-30기준 | 제품코드 | �
 ### 등록
 
 ```bash
-uv run autoontology source add samples/hanbit/structured --name hanbit
-uv run autoontology source add samples/hanbit/documents --name hanbit-docs --kind documents
-uv run autoontology source add samples/hanbit/images --name hanbit-images --kind documents
-uv run autoontology build
+uv run onto source add samples/hanbit/structured --name hanbit
+uv run onto source add samples/hanbit/documents --name hanbit-docs --kind documents
+uv run onto source add samples/hanbit/images --name hanbit-images --kind documents
+uv run onto build
 ```
 
-정형 데이터는 Postgres DB `autoontology_src_hanbit`에 들어갑니다.
+정형 데이터는 Postgres DB `ontology_src_hanbit`에 들어갑니다.
 
 ### 다시 만들기
 

@@ -1,11 +1,35 @@
 # Changelog
 
-All notable changes to AutoOntology. The format follows
+All notable changes to Ontology (named AutoOntology before 0.3.0). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/) (before 1.0, a minor version may change
 behaviour).
 
-## Unreleased
+## 0.3.0 - 2026-11-28
+
+### Renamed
+
+- **AutoOntology is now Ontology.** The repository moved to
+  https://github.com/kimtoma/ontology, the CLI is `ontology` with the short alias `onto`,
+  and every internal name follows. The engine keeps its name (NVIDIA Auto Ontology,
+  `vendor/auto-ontology`). Entries below this one keep the names of their time.
+
+  | What | Before | Now |
+  |---|---|---|
+  | Product name | AutoOntology | Ontology |
+  | Python package / distribution | `autoontology` | `ontology` |
+  | CLI | `autoontology`, `ao` | `ontology`, `onto` (`ao` removed, use `onto`) |
+  | Environment variables | `AUTOONTOLOGY_*` | `ONTOLOGY_*` (an unset `ONTOLOGY_X` still falls back to `AUTOONTOLOGY_X` from the shell or `.env`, with one deprecation warning per process) |
+  | Internal headers | `X-AutoOntology-Internal`, `X-AutoOntology-As` | `X-Ontology-Internal`, `X-Ontology-As` |
+  | Session cookies | `__Host-ao_session`, `ao_session` | `__Host-onto_session`, `onto_session` (existing sessions sign in again) |
+  | Browser storage keys | `autoontology.lang`, `autoontology.project`, `autoontology.sampleSet` | `ontology.lang`, `ontology.project`, `ontology.sampleSet` |
+  | Postgres databases | `autoontology`, `autoontology_src_<name>` | `ontology`, `ontology_src_<name>` (rename existing ones with `ALTER DATABASE ... RENAME`; store schema v13 rewrites the recorded names) |
+  | Default Postgres user/password | `autoontology` / `autoontology` | `ontology` / `ontology` |
+  | Docker Compose volume | `autoontology-pgdata` | `ontology-pgdata` (a new, empty volume: keep the old one with `POSTGRES_*` in `.env` or move its data) |
+  | Home store file | `<home>/autoontology.db` | `<home>/ontology.db` (renamed on first start, with `-wal`/`-shm`) |
+  | Default base IRI / RDF prefix | `http://example.com/autoontology#`, `ao:` | `http://example.com/ontology#`, `onto:` |
+  | Exported skill / MCP server name | `autoontology-<slug>` | `ontology-<slug>` |
+  | Project skill | `.claude/skills/setup-autoontology` | `.claude/skills/setup-ontology` |
 
 ### Added
 

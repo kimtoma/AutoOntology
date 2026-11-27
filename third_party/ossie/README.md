@@ -11,8 +11,8 @@
 | `ontology.json` | `ontology/ontology.json` (ontology, spec 0.2.0.dev0) |
 | `mapping.json` | `ontology/mapping.json` (standalone mapping document) |
 
-The exporter (`autoontology/export/ossie.py`) validates `exports/r<rev>/ossie/*.yaml`
+The exporter (`ontology/export/ossie.py`) validates `exports/r<rev>/ossie/*.yaml`
 against byte-identical copies shipped as package data in
-`autoontology/export/schemas/ossie/` (a test asserts the two copies match). The schemas'
+`ontology/export/schemas/ossie/` (a test asserts the two copies match). The schemas'
 remote `$ref`s (`https://raw.githubusercontent.com/apache/ossie/main/...`) are resolved to
 these local files; nothing is fetched over the network.
