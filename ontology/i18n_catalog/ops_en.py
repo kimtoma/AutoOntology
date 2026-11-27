@@ -87,7 +87,10 @@ MESSAGES: dict[str, str] = {
     ),
     "help.playground.sql.source": "Structured source to query (default: the first one).",
     "help.playground.sql.conversation": "Conversation UUID to continue.",
-    "help.playground.sparql": "Run a SPARQL query over the latest snapshot.",
+    "help.playground.sparql": (
+        "Run a SPARQL query over the latest snapshot. Prefixes owl, rdfs, rdf, skos, prov, "
+        "dcterms, xsd and onto (the ontology's own namespace) are predeclared."
+    ),
     "help.playground.sparql.query": "The query (or --file).",
     "help.playground.sparql.file": "Read the query from this file.",
     "help.playground.sparql.limit": "Maximum rows.",

@@ -19,6 +19,10 @@
   whose resident memory passes ``MAX_WORKER_RSS_MB`` exits (the query answers 413).
   Inside the worker the graph is read through a deadline-checking view as well, so a
   runaway graph scan stops by itself and the warm worker survives.
+* Prefixes: the file's own declarations plus ``onto`` -- and ``ao``, its name before
+  0.3.0 -- for the ontology's vocabulary, bound to the namespace that very revision uses
+  (:func:`vocabulary_namespace`), so a revision built with ``ao:`` and
+  ``http://example.com/autoontology#`` answers ``onto:`` queries too.
 * Results are bounded while evaluating: SELECT stops at ``limit + 1`` solutions (at most
   ``MAX_LIMIT`` = 500 rows, ``truncated`` without an exact total), CONSTRUCT/DESCRIBE stop
   at ``limit * 10`` triples.
@@ -38,6 +42,7 @@ from typing import Any
 
 import rdflib.plugins.sparql as rdflib_sparql
 from rdflib import BNode, Graph, Literal, URIRef
+from rdflib.namespace import OWL, RDF
 from rdflib.plugins.sparql import prepareQuery
 from rdflib.plugins.sparql.parser import expandUnicodeEscapes
 
@@ -55,6 +60,11 @@ MAX_WORKER_RSS_MB = 1024
 LOAD_TIMEOUT_S = 120.0
 #: Graphs kept parsed (by export run id).
 CACHE_SIZE = 2
+#: Prefixes predeclared for the ontology's own vocabulary: ``onto`` (the exporter's since
+#: 0.3.0) and ``ao`` (AutoOntology's before the rename), both bound to the namespace of
+#: the queried revision (one per query: rdflib keeps one prefix per namespace). Results
+#: shorten its IRIs with ``onto:``.
+VOCAB_PREFIXES = ("onto", "ao")
 #: Keywords refused anywhere outside strings, IRIs and comments.
 FORBIDDEN_KEYWORDS = ("SERVICE", "FROM", "LOAD")
 #: One left-to-right scan: whichever of string / IRI / comment / keyword starts first
@@ -223,8 +233,29 @@ def forbidden_keyword(query: str) -> str | None:
     return None
 
 
+_UNKNOWN_PREFIX_RE = re.compile(r"Unknown namespace prefix : (\S+)")
+
+
+def _prepare(query: str, init_ns: dict[str, Any]) -> Any:
+    """``prepareQuery`` with *init_ns* predeclared. rdflib keeps one prefix per namespace,
+    so ``onto`` and its alias ``ao`` cannot both be bound: a query that uses ``ao:``
+    (and finds no other ``ao`` binding) is prepared again with the vocabulary namespace
+    under ``ao`` instead of ``onto``."""
+    try:
+        return prepareQuery(query, initNs=init_ns)
+    except Exception as exc:
+        match = _UNKNOWN_PREFIX_RE.fullmatch(str(exc))
+        alias = match.group(1) if match else None
+        if alias not in VOCAB_PREFIXES or alias in init_ns or "onto" not in init_ns:
+            raise
+        renamed = {p: ns for p, ns in init_ns.items() if p != "onto"}
+        renamed[alias] = init_ns["onto"]
+        return prepareQuery(query, initNs=renamed)
+
+
 def check_query(query: str, init_ns: dict[str, Any] | None = None) -> Any:
-    """The prepared query (the graph's prefixes predeclared), or SparqlError(400) for a
+    """The prepared query (the graph's prefixes predeclared, ``ao`` as an alias of
+    ``onto``: :func:`_prepare`), or SparqlError(400) for a
     parse error or a forbidden keyword (SERVICE, FROM, LOAD)."""
     if len(query) > MAX_QUERY_CHARS:
         raise SparqlError(400, "sparql_too_long", f"query longer than {MAX_QUERY_CHARS} characters")
@@ -237,7 +268,7 @@ def check_query(query: str, init_ns: dict[str, Any] | None = None) -> Any:
             "ontology only (no federation, datasets or loading)",
         )
     try:
-        prepared = prepareQuery(query, initNs=init_ns or {})
+        prepared = _prepare(query, init_ns or {})
     except Exception as exc:  # noqa: BLE001 - pyparsing/rdflib raise various types
         raise SparqlError(400, "sparql_syntax", f"{type(exc).__name__}: {str(exc)[:400]}") from exc
     # defence in depth: the parsed algebra must not federate or name a dataset either
@@ -316,7 +347,7 @@ RSS_EXIT = 3
 
 
 def _worker_main(conn: Any, max_rss_mb: float) -> None:
-    """Worker process loop: ``("load", run_id, path)`` parses the Turtle file once per
+    """Worker process loop: ``("load", run_id, path, base)`` parses the Turtle file once per
     export; ``("query", query, limit, timeout_s)`` evaluates against it. Every reply is
     ``("ok", payload)`` or ``("err", status, code, message)``."""
     threading.Thread(target=_rss_watchdog, args=(max_rss_mb,), daemon=True).start()
@@ -330,7 +361,7 @@ def _worker_main(conn: Any, max_rss_mb: float) -> None:
             if message[0] == "load":
                 graph = None
                 try:
-                    graph = load_graph(Path(message[2]))
+                    graph = load_graph(Path(message[2]), message[3])
                 except Exception as exc:  # noqa: BLE001 - a broken export: 422
                     raise SparqlError(
                         422,
@@ -415,14 +446,14 @@ class SparqlRunner:
         #: pids of every worker started (tests: a killed worker is replaced)
         self.started_pids: list[int] = []
 
-    def graph(self, run_id: str, path: Path) -> Graph:
+    def graph(self, run_id: str, path: Path, base: str | None = None) -> Graph:
         with self._graphs_lock:
             cached = self._graphs.get(run_id)
             if cached is not None:
                 self._graphs.move_to_end(run_id)
                 return cached
         try:
-            graph = load_graph(path)
+            graph = load_graph(path, base)
         except Exception as exc:  # noqa: BLE001 - a broken export is the caller's 422
             raise SparqlError(
                 422, "sparql_bad_export", f"cannot parse {path.name}: {type(exc).__name__}"
@@ -478,9 +509,17 @@ class SparqlRunner:
                 worker.process.kill()
 
     def run_file(
-        self, run_id: str, path: Path, query: str, *, limit: int = DEFAULT_LIMIT
+        self,
+        run_id: str,
+        path: Path,
+        query: str,
+        *,
+        limit: int = DEFAULT_LIMIT,
+        base: str | None = None,
     ) -> dict[str, Any]:
-        """*query* against the Turtle file *path* (parsed graph cached by *run_id*)."""
+        """*query* against the Turtle file *path* (parsed graph cached by *run_id*).
+        *base*: the revision's stored base IRI, the vocabulary namespace when the file
+        declares no ``onto``/``ao`` prefix (:func:`vocabulary_namespace`)."""
         if len(query) > MAX_QUERY_CHARS:
             raise SparqlError(
                 400, "sparql_too_long", f"query longer than {MAX_QUERY_CHARS} characters"
@@ -493,7 +532,7 @@ class SparqlRunner:
                 "SPARQL queries need a Unix host: the worker memory cap uses the "
                 "`resource` module, which this platform lacks",
             )
-        graph = self.graph(run_id, path)
+        graph = self.graph(run_id, path, base)
         check_query(query, prefixes(graph))  # fast: refuse before any worker
         if not self._slots.acquire(blocking=False):
             raise SparqlError(
@@ -505,7 +544,7 @@ class SparqlRunner:
             worker = self._checkout(run_id)
             if worker.loaded != run_id:
                 worker.loaded = None
-                reply = worker.call(("load", run_id, str(path)), LOAD_TIMEOUT_S)
+                reply = worker.call(("load", run_id, str(path), base), LOAD_TIMEOUT_S)
                 if reply is None:
                     raise SparqlError(
                         504, "sparql_load_timeout", f"loading {path.name} took too long"
@@ -531,10 +570,35 @@ class SparqlRunner:
             self._slots.release()
 
 
-def load_graph(path: Path) -> Graph:
+def load_graph(path: Path, base: str | None = None) -> Graph:
+    """The parsed Turtle file, its vocabulary namespace bound to ``onto``
+    (:func:`vocabulary_namespace`; *base* the revision's stored base IRI)."""
     g = Graph()
     g.parse(path, format="turtle")
+    vocab = vocabulary_namespace(g, base)
+    if vocab:
+        # moves the namespace from a legacy ``ao`` binding to ``onto`` (results shorten
+        # with onto:); _prepare() accepts ``ao`` as its alias again
+        g.bind("onto", vocab, override=True, replace=True)
     return g
+
+
+def vocabulary_namespace(graph: Graph, base: str | None = None) -> str | None:
+    """The namespace of the ontology's own vocabulary in *graph*, the one its file
+    actually uses: the file's ``onto`` (0.3.0+) or ``ao`` (AutoOntology) prefix, else
+    *base* (the revision's stored base IRI), else the ``owl:Ontology`` IRI plus ``#``
+    (the exporter writes that IRI as the base without its ``#``)."""
+    bound = {prefix: str(ns) for prefix, ns in graph.namespaces()}
+    for prefix in VOCAB_PREFIXES:
+        if bound.get(prefix):
+            return bound[prefix]
+    if base:
+        return base
+    for iri in sorted(
+        str(s) for s in graph.subjects(RDF.type, OWL.Ontology) if isinstance(s, URIRef)
+    ):
+        return iri if iri.endswith(("#", "/")) else f"{iri}#"
+    return None
 
 
 def execute(graph: Graph, query: Any, limit: int) -> dict[str, Any]:
@@ -627,6 +691,8 @@ def _describe(graph: Graph, prepared: Any, limit: int) -> dict[str, Any]:
 
 
 def prefixes(graph: Graph) -> dict[str, str]:
+    """*graph*'s prefixes (``onto`` = its vocabulary namespace, bound by
+    :func:`load_graph`); :func:`check_query` accepts ``ao`` as its alias."""
     return {p: str(ns) for p, ns in graph.namespaces() if p}
 
 

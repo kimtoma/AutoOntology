@@ -656,7 +656,7 @@ def sparql_answer(
     key = snapshot_key(view, head)
     return mask(
         {
-            **runner.run_file(key, path, query, limit=limit),
+            **runner.run_file(key, path, query, limit=limit, base=model.base),
             "revision": head.revision,
             "ttl": path.name,
         }

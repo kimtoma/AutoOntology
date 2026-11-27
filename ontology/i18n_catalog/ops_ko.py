@@ -77,7 +77,10 @@ MESSAGES: dict[str, str] = {
     ),
     "help.playground.sql.source": "질의할 정형 소스 (기본: 첫 번째).",
     "help.playground.sql.conversation": "이어 갈 대화 UUID.",
-    "help.playground.sparql": "최신 스냅샷에 SPARQL 질의를 실행합니다.",
+    "help.playground.sparql": (
+        "최신 스냅샷에 SPARQL 질의를 실행합니다. owl, rdfs, rdf, skos, prov, dcterms, xsd, "
+        "onto(온톨로지 자체 네임스페이스) 접두사가 미리 선언되어 있습니다."
+    ),
     "help.playground.sparql.query": "질의 (또는 --file).",
     "help.playground.sparql.file": "이 파일에서 질의를 읽습니다.",
     "help.playground.sparql.limit": "최대 행 수.",

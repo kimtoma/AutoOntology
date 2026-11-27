@@ -378,6 +378,14 @@ behaviour).
 
 ### Fixed
 
+- **SPARQL `onto:` over revisions built before the rename.** An export written with
+  `@prefix ao: <http://example.com/autoontology#>` answered the Playground examples
+  (and any `onto:` query) with `Unknown namespace prefix : onto`: the console only
+  predeclared the file's own prefixes. The vocabulary namespace now comes from the
+  revision itself (its `onto`/`ao` prefix, else the stored base IRI, else the
+  `owl:Ontology` IRI) and is predeclared as `onto`, with `ao` as an alias, in the
+  Playground, `onto playground sparql` and the agent `sparql_query` tool; results
+  shorten its IRIs as `onto:`.
 - **Governance of the actionable ontology** (security review; schema v12). Activating an
   action or workflow pins the versions of the functions it uses (transitively); submit,
   approve and workflow runs refuse a changed function (409 `function_changed`), a broken

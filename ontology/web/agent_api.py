@@ -249,8 +249,9 @@ TOOL_SPECS: list[tuple[str, str, dict[str, Any], type[_Args]]] = [
     (
         "sparql_query",
         "Run a read-only SPARQL query (SELECT, ASK, CONSTRUCT, DESCRIBE) over the "
-        "snapshot's RDF/OWL graph. SERVICE, FROM and LOAD are refused; queries time out "
-        "and rows are capped.",
+        "snapshot's RDF/OWL graph. Prefixes owl, rdfs, rdf, skos, prov, dcterms, xsd "
+        "and onto (the ontology's own namespace; ao is an alias) are predeclared. "
+        "SERVICE, FROM and LOAD are refused; queries time out and rows are capped.",
         {
             "query": {"type": "string", "maxLength": MAX_QUERY_CHARS},
             "limit": {
