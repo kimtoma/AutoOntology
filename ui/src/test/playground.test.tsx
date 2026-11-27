@@ -10,7 +10,7 @@ import { mockFetch, renderPage } from "@/test/utils"
 
 const SOURCES = {
   sources: [
-    { name: "hanbit", kind: "files", locator: "/s", database: "autoontology_src_hanbit", built: true,
+    { name: "hanbit", kind: "files", locator: "/s", database: "ontology_src_hanbit", built: true,
       uploaded: false, created_at: "", last_run: null, active_run: null },
     { name: "hanbit-docs", kind: "documents", locator: "/d", database: null, built: false,
       uploaded: false, created_at: "", last_run: null, active_run: null, documents: 5, concepts: 85 },
@@ -204,12 +204,12 @@ describe("playground page", () => {
       ...BASE,
       "GET /playground/sparql/examples": { examples: [
         { id: "classes", title: "Classes", description: "All classes", query: "SELECT ?c WHERE { ?c a owl:Class }" }] },
-      "POST /playground/sparql": { type: "SELECT", columns: ["c"], rows: [["ao:term-1"], ["ao:term-2"]],
+      "POST /playground/sparql": { type: "SELECT", columns: ["c"], rows: [["onto:term-1"], ["onto:term-2"]],
                                    total: 2, truncated: false, triples: 10, revision: 2, ttl: "ontology.ttl" },
     })
     renderPage(<PlaygroundPage />, "/playground?tab=sparql")
     await userEvent.click(await screen.findByRole("button", { name: /Run/ }))
-    expect(await screen.findByText("ao:term-2")).toBeInTheDocument()
+    expect(await screen.findByText("onto:term-2")).toBeInTheDocument()
     expect(screen.getByText(/ontology.ttl/)).toBeInTheDocument()
     const body = JSON.parse(String(calls.find((c) => c.path === "/playground/sparql")!.init!.body))
     expect(Object.keys(body).sort()).toEqual(["limit", "query"])

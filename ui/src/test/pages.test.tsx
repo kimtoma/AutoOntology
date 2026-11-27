@@ -12,7 +12,7 @@ import { mockFetch, renderPage, renderRouted } from "@/test/utils"
 
 const SOURCES = {
   sources: [
-    { name: "hanbit", kind: "files", locator: "/data/structured", database: "autoontology_src_hanbit",
+    { name: "hanbit", kind: "files", locator: "/data/structured", database: "ontology_src_hanbit",
       built: true, uploaded: false, created_at: "2026-10-27T20:29:21Z",
       last_run: { id: "r1", kind: "build", status: "succeeded", finished_at: "2026-10-27T20:30:00Z" },
       active_run: null },
@@ -28,13 +28,13 @@ const STATUS = {
                embed_model: "bge-m3", openai_base_url: "" },
   checks: { backend: { status: "ok", detail: "http://127.0.0.1:3111" },
             postgres: { status: "error", detail: "OperationalError", remedy: "docker compose up -d" } },
-  doctor: "uv run autoontology doctor", upload_max_mb: 1, formats: FORMATS, ocr_ready: false,
+  doctor: "uv run onto doctor", upload_max_mb: 1, formats: FORMATS, ocr_ready: false,
   vision_model: null,
 }
 
 const ONTOLOGY = {
   revision: 2, created_at: "2026-10-28T11:11:30+00:00", run_id: "b", workspace: "default",
-  base_iri: "http://example.com/autoontology#",
+  base_iri: "http://example.com/ontology#",
   sources: [{ name: "hanbit", kind: "structured" }, { name: "hanbit-docs", kind: "documents" }],
   counts: { classes_structured: 3, classes_document: 58, individuals: 24, object_properties: 69,
             merged_concepts: 3, evidence: 304 },
@@ -57,7 +57,7 @@ describe("Sources page", () => {
     renderPage(<SourcesPage />)
     const table = await screen.findByRole("table")
     expect(within(table).getByText("hanbit")).toBeInTheDocument()
-    expect(within(table).getByText("autoontology_src_hanbit")).toBeInTheDocument()
+    expect(within(table).getByText("ontology_src_hanbit")).toBeInTheDocument()
     expect(table.querySelector("[data-source=hanbit] [data-kind=structured]")).not.toBeNull()
     expect(table.querySelector("[data-source=hanbit-docs] [data-kind=documents]")).not.toBeNull()
     expect(within(table).getAllByText("5 documents · 85 concepts").length).toBeGreaterThan(0)

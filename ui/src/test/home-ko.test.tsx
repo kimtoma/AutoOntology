@@ -29,7 +29,7 @@ const STATUS = {
     embed: { name: "ollama", model: "bge-m3" },
   },
   checks: { backend: { status: "ok", detail: "" }, postgres: { status: "ok", detail: "" } },
-  doctor: "uv run autoontology doctor", upload_max_mb: 200,
+  doctor: "uv run onto doctor", upload_max_mb: 200,
 }
 
 const ROUTES = {
@@ -65,7 +65,7 @@ describe("Home in Korean", () => {
     expect(within(models).getByText("claude auth login")).toBeInTheDocument()
     expect(screen.getByText("5단계 중 0단계 완료")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /단계별 가이드/ })).toHaveAttribute(
-      "href", "https://github.com/kimtoma/AutoOntology/blob/main/docs/GUIDE.ko.md")
+      "href", "https://github.com/kimtoma/ontology/blob/main/docs/GUIDE.ko.md")
     expect(document.documentElement.lang).toBe("ko")
     expect(localStorage.getItem(LANG_STORAGE_KEY)).toBe("ko")
     first.unmount()

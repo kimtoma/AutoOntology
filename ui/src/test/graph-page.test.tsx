@@ -42,7 +42,7 @@ it("falls back to the 2D canvas with a badge when WebGL is unavailable", async (
   expect(await screen.findByTestId("canvas-2d")).toHaveTextContent("2/1")
   expect(screen.getByText("2D fallback")).toBeInTheDocument()
   expect(screen.getByText(/Showing the 2 best-connected of 5 nodes/)).toBeInTheDocument()
-  await waitFor(() => expect(window.__autoontologyGraphStats).toMatchObject({
+  await waitFor(() => expect(window.__ontologyGraphStats).toMatchObject({
     nodes: 2, links: 1, renderer: "2d", layers: ["structured", "documents", "aligned"],
     origins: { aligned: 1, structured: 1 }, rings: 1,
   }))
@@ -62,7 +62,7 @@ it("forces the 2D canvas with ?renderer=2d and takes the layer from the URL", as
   await renderGraph("/graph?renderer=2d&layer=structured&evidence=1")
   expect(await screen.findByTestId("canvas-2d")).toHaveTextContent("2/1")
   expect(screen.getByText("2D view")).toBeInTheDocument()
-  await waitFor(() => expect(window.__autoontologyGraphStats?.layers).toEqual(["structured", "evidence"]))
+  await waitFor(() => expect(window.__ontologyGraphStats?.layers).toEqual(["structured", "evidence"]))
   expect(screen.getByRole("radio", { name: "Structured" })).toHaveAttribute("aria-checked", "true")
   // origin colours by default, with a legend entry per origin present
   expect(document.querySelector("[data-legend=aligned]")).not.toBeNull()

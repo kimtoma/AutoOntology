@@ -1,6 +1,6 @@
 /* Settings: choose, test and apply the chat and embedding providers (Ollama, the Claude or
    ChatGPT subscription CLIs, an OpenAI-compatible API with a base URL and a key). Saving writes
-   .env on the computer running AutoOntology; the engine reads its models at start-up, so the
+   .env on the computer running Ontology; the engine reads its models at start-up, so the
    service and the engine restart (a detached helper; this page waits for the new service). */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -148,7 +148,7 @@ function ChatDetails({ s, form, setForm }: { s: SettingsState; form: SettingsFor
         {!s.ollama.reachable && (
           <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs" data-hint="ollama">
             <p>{t("settings.ollama.start", { endpoint: s.ollama.endpoint })}</p>
-            <p className="mt-1"><Code>ollama serve</Code> · <Code>uv run autoontology setup</Code></p>
+            <p className="mt-1"><Code>ollama serve</Code> · <Code>uv run onto setup</Code></p>
           </div>
         )}
         <ModelInput id="settings-chat-model" label={t("settings.chatModel")} value={form.chatModels.ollama}
@@ -428,7 +428,7 @@ function SettingsBody() {
         )}
         {!s.supervised && (
           <p className="text-xs text-muted-foreground" id="settings-unsupervised">
-            {tx("settings.unsupervised", { up: <Code key="up">uv run autoontology up</Code> })}
+            {tx("settings.unsupervised", { up: <Code key="up">uv run onto up</Code> })}
           </p>
         )}
         <Card className="gap-4" id="settings-chat">

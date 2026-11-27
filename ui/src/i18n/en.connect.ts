@@ -74,7 +74,7 @@ export const enConnect = {
 
   "connect.once.title": "Token for “{name}”",
   "connect.once.rotatedTitle": "New token for “{name}”",
-  "connect.once.description": "Copy the token now. It is shown only this once; AutoOntology keeps only a hash.",
+  "connect.once.description": "Copy the token now. It is shown only this once; Ontology keeps only a hash.",
   "connect.once.warning": "This token will not be shown again. If you lose it, rotate the token.",
   "connect.once.token": "Token",
   "connect.once.snippets": "Add it to your agent",
@@ -113,8 +113,8 @@ export const enConnect = {
     "Download the active functions, actions and workflows as an Agent Skill: an agent that loads it knows your object types, rules and the safe order of tool calls (preview before submit, never assume approval).",
   "connect.skill.export": "Export skill",
   "connect.skill.md": "explains the object types, functions, actions, workflows and the procedure, in English.",
-  "connect.skill.mcp": "connects to this server: replace {{AUTOONTOLOGY_URL}} and <token> (a token is never included).",
-  "connect.skill.defs": "the active definitions as YAML (ao logic apply -f reads them).",
+  "connect.skill.mcp": "connects to this server: replace {{ONTOLOGY_URL}} and <token> (a token is never included).",
+  "connect.skill.defs": "the active definitions as YAML (onto logic apply -f reads them).",
 
   "connect.usage": "Usage",
   "connect.usage.hint": "Tool calls in the last {days} days.",

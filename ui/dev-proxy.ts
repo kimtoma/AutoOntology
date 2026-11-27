@@ -1,4 +1,4 @@
-/* Dev server (`pnpm dev`) proxy of /api and /v1 to the AutoOntology service.
+/* Dev server (`pnpm dev`) proxy of /api and /v1 to the Ontology service.
 
    The service refuses cross-origin writes (Origin must match Host). Behind the proxy the
    page's Origin is the dev server's, so exactly that Origin is rewritten to the service's

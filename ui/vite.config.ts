@@ -11,7 +11,7 @@ const THREE = /[\\/]node_modules[\\/](three|three-spritetext)[\\/]/
 
 const configure = (proxy: Parameters<typeof rewriteDevOrigin>[0]) => rewriteDevOrigin(proxy, DEV_PORT)
 
-// Built into autoontology/web/static/dist/ (committed) and served by FastAPI at /ui/.
+// Built into ontology/web/static/dist/ (committed) and served by FastAPI at /ui/.
 export default defineConfig({
   base: '/ui/',
   plugins: [react(), tailwindcss()],
@@ -23,7 +23,7 @@ export default defineConfig({
     ],
   },
   build: {
-    outDir: path.resolve(import.meta.dirname, '../autoontology/web/static/dist'),
+    outDir: path.resolve(import.meta.dirname, '../ontology/web/static/dist'),
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000,
     rolldownOptions: {

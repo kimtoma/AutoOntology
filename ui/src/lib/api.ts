@@ -1,6 +1,6 @@
-/* The one client for the AutoOntology REST API (/api/*). Errors are
+/* The one client for the Ontology REST API (/api/*). Errors are
    `{error, detail}` with a matching HTTP status; they surface as ApiError. The payloads
-   mirror autoontology/web/api.py, web/concepts.py, web/graph.py and web/playground_api.py. */
+   mirror ontology/web/api.py, web/concepts.py, web/graph.py and web/playground_api.py. */
 
 import { t, type MessageKey } from "@/i18n/core"
 import type { Formats } from "@/lib/formats"
@@ -76,7 +76,7 @@ function reportAuthError(err: ApiError): ApiError {
   return err
 }
 
-export const NETWORK_HINT = "Cannot reach the AutoOntology service (uv run autoontology up)"
+export const NETWORK_HINT = "Cannot reach the Ontology service (uv run onto up)"
 
 /* --- sources ------------------------------------------------------------------------------ */
 
@@ -572,14 +572,14 @@ export interface ServiceStatus {
   kordoc_available: boolean
   /** kordoc's OCR models are downloaded (images and scanned PDFs can be read) */
   ocr_ready?: boolean
-  /** AUTOONTOLOGY_VISION_MODEL (image captions), null when unset */
+  /** ONTOLOGY_VISION_MODEL (image captions), null when unset */
   vision_model?: string | null
-  /** every readable extension, by source family (autoontology/formats.py::describe) */
+  /** every readable extension, by source family (ontology/formats.py::describe) */
   formats?: Formats
   service_url: string
   checks: Record<string, StatusCheck>
   doctor: string
-  /** AUTOONTOLOGY_UPLOAD_MAX_MB: cap per upload request (all files together). */
+  /** ONTOLOGY_UPLOAD_MAX_MB: cap per upload request (all files together). */
   upload_max_mb?: number
 }
 
@@ -615,7 +615,7 @@ export interface SettingsState {
   restart_required: boolean
   restart_in_progress: boolean
   service_pid: number
-  /** started by `autoontology up` (only then can it restart itself) */
+  /** started by `onto up` (only then can it restart itself) */
   supervised: boolean
   restart_command: string
 }
@@ -850,7 +850,7 @@ export interface RunBrief {
   finished_at: string | null
 }
 
-/** One row of `GET /api/projects` (autoontology/web/projects.py::project_dict). */
+/** One row of `GET /api/projects` (ontology/web/projects.py::project_dict). */
 export interface Project {
   id: string
   slug: string

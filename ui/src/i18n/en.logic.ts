@@ -263,7 +263,7 @@ export const enLogic = {
   "logic.workflow.runNow": "Run now",
   "logic.workflow.starting": "Starting…",
   "logic.workflow.runFailed": "Could not start the workflow",
-  "logic.workflow.triggersOff": "Scheduled triggers are off on this service (AUTOONTOLOGY_WORKFLOWS=off): workflows run only by hand.",
+  "logic.workflow.triggersOff": "Scheduled triggers are off on this service (ONTOLOGY_WORKFLOWS=off): workflows run only by hand.",
   "logic.workflow.run": "Workflow run",
   "logic.workflow.paused": "Paused: some actions wait for approval. The run goes on once they are decided.",
   "logic.workflow.truncated": "Stopped at the object limit: not every matching object was processed.",

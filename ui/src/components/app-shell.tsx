@@ -98,14 +98,14 @@ function AppSidebar() {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild tooltip="AutoOntology">
+            <SidebarMenuButton size="lg" asChild tooltip="Ontology">
               <Link to="/" onClick={() => isMobile && setOpenMobile(false)}>
                 <span className="flex aspect-square size-8 items-center justify-center rounded-md
                                  bg-sidebar-primary text-sidebar-primary-foreground" aria-hidden>
                   ◇
                 </span>
                 <span className="grid flex-1 text-left leading-tight">
-                  <span className="font-semibold">AutoOntology</span>
+                  <span className="font-semibold">Ontology</span>
                   <span className="truncate text-xs text-muted-foreground">
                     {t("shell.tagline")}
                   </span>
@@ -158,7 +158,7 @@ function Crumbs() {
     <Breadcrumb>
       <BreadcrumbList>
         <BreadcrumbItem className="hidden sm:inline-flex">
-          <Link to="/" className="hover:text-foreground">AutoOntology</Link>
+          <Link to="/" className="hover:text-foreground">Ontology</Link>
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden sm:inline-flex" />
         {!unscoped && name && (

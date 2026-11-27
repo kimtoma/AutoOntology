@@ -25,7 +25,7 @@ export function AuthLayout({ children, id }: { children: ReactNode; id: string }
       <header className="flex items-center justify-between px-4 py-3">
         <span className="flex items-center gap-2 font-semibold">
           <span aria-hidden className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">◇</span>
-          AutoOntology
+          Ontology
         </span>
         <span className="flex items-center gap-1"><LangToggle /><ThemeToggle /></span>
       </header>

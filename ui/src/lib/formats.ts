@@ -1,4 +1,4 @@
-/* What a source can read, from `/api/status.formats` (autoontology/formats.py::describe):
+/* What a source can read, from `/api/status.formats` (ontology/formats.py::describe):
    the upload `accept` lists, the dialog hints and the per-file preview. Nothing here lists
    extensions itself except the advice for formats the service cannot read. */
 
@@ -99,7 +99,7 @@ function alternativeFor(ext: string): string {
   return t(`fmt.alt.${verb}`, { target: joinTargets(targets) })
 }
 
-export const KORDOC_INSTALL = "uv run autoontology tools install-kordoc"
+export const KORDOC_INSTALL = "uv run onto tools install-kordoc"
 
 /** The other family, as named in the advice ("add it as a Documents source"). */
 const OTHER_FAMILY: Record<Family, Family> = { structured: "documents", documents: "structured" }

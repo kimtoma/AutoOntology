@@ -1,5 +1,5 @@
 /* English strings of accounts: sign-in, invitation, the user menu, roles, members, users and
-   the audit log (only shown with AUTOONTOLOGY_AUTH=accounts). */
+   the audit log (only shown with ONTOLOGY_AUTH=accounts). */
 export const enAccounts = {
   "auth.forbidden": "You do not have permission ({permission})",
   "auth.denied": "Your role ({role}) cannot do this",
@@ -19,8 +19,8 @@ export const enAccounts = {
   "auth.role.editor.hint": "+ sources, builds, exports and agent tokens",
   "auth.role.owner.hint": "+ renames and archives the project, manages members, reads its audit log",
 
-  "auth.login.title": "Sign in to AutoOntology",
-  "auth.login.description": "Use the email and password of your AutoOntology account.",
+  "auth.login.title": "Sign in to Ontology",
+  "auth.login.description": "Use the email and password of your Ontology account.",
   "auth.login.email": "Email",
   "auth.login.password": "Password",
   "auth.login.submit": "Sign in",
@@ -37,7 +37,7 @@ export const enAccounts = {
 
   "auth.invite.title": "Choose your password",
   "auth.invite.title.reset": "Choose a new password",
-  "auth.invite.description": "You were invited to AutoOntology. Set a password to sign in.",
+  "auth.invite.description": "You were invited to Ontology. Set a password to sign in.",
   "auth.invite.description.reset": "Set a new password for your account. Your other sessions end.",
   "auth.invite.password": "New password",
   "auth.invite.confirm": "Confirm the password",

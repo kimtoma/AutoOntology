@@ -210,7 +210,7 @@ export const koExplore: Record<keyof typeof enExplore, string> = {
   "playground.sparql.example": "예제 쿼리",
   "playground.sparql.pick": "예제 쿼리 선택",
   "playground.sparql.label": "SPARQL 쿼리",
-  "playground.sparql.hint": "owl, rdfs, rdf, skos, prov, dcterms, xsd, ao 접두사가 선언되어 있습니다. SELECT, ASK, CONSTRUCT, DESCRIBE만 가능하며 제한 시간은 10초입니다. ⌘/Ctrl+Enter로 실행합니다.",
+  "playground.sparql.hint": "owl, rdfs, rdf, skos, prov, dcterms, xsd, onto 접두사가 선언되어 있습니다. SELECT, ASK, CONSTRUCT, DESCRIBE만 가능하며 제한 시간은 10초입니다. ⌘/Ctrl+Enter로 실행합니다.",
   "playground.sparql.run": "실행",
   "playground.sparql.result": "리비전 {rev} · {ttl} · 트리플 {triples}개 · 결과 {total}개",
   "playground.sparql.truncated": "(잘림)",

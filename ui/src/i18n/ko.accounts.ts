@@ -20,8 +20,8 @@ export const koAccounts: Record<keyof typeof enAccounts, string> = {
   "auth.role.editor.hint": "+ 소스, 빌드, 내보내기, 연결 토큰",
   "auth.role.owner.hint": "+ 프로젝트 이름 변경·보관, 멤버 관리, 감사 로그 보기",
 
-  "auth.login.title": "AutoOntology 로그인",
-  "auth.login.description": "AutoOntology 계정의 이메일과 비밀번호를 입력하세요.",
+  "auth.login.title": "Ontology 로그인",
+  "auth.login.description": "Ontology 계정의 이메일과 비밀번호를 입력하세요.",
   "auth.login.email": "이메일",
   "auth.login.password": "비밀번호",
   "auth.login.submit": "로그인",
@@ -38,7 +38,7 @@ export const koAccounts: Record<keyof typeof enAccounts, string> = {
 
   "auth.invite.title": "비밀번호 정하기",
   "auth.invite.title.reset": "새 비밀번호 정하기",
-  "auth.invite.description": "AutoOntology에 초대되었습니다. 로그인할 비밀번호를 정하세요.",
+  "auth.invite.description": "Ontology에 초대되었습니다. 로그인할 비밀번호를 정하세요.",
   "auth.invite.description.reset": "계정의 새 비밀번호를 정하세요. 다른 세션은 모두 로그아웃됩니다.",
   "auth.invite.password": "새 비밀번호",
   "auth.invite.confirm": "비밀번호 확인",

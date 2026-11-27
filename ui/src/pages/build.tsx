@@ -67,7 +67,7 @@ function BuildOptionsDialog({ open, sources, pending, onClose, onStart }: {
           <DialogHeader>
             <DialogTitle>{t("build.opts.title")}</DialogTitle>
             <DialogDescription>
-              {tx("build.opts.description", { cmd: <code key="cmd" className="rounded bg-muted px-1">uv run autoontology build</code> })}
+              {tx("build.opts.description", { cmd: <code key="cmd" className="rounded bg-muted px-1">uv run onto build</code> })}
             </DialogDescription>
           </DialogHeader>
           <fieldset className="grid gap-2">

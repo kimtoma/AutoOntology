@@ -4,8 +4,8 @@
 import { getLang, t, type MessageKey } from "@/i18n/core"
 import type { StepId } from "@/lib/checklist"
 
-export const GUIDE_URL = "https://github.com/kimtoma/AutoOntology/blob/main/docs/GUIDE.md"
-export const GUIDE_URL_KO = "https://github.com/kimtoma/AutoOntology/blob/main/docs/GUIDE.ko.md"
+export const GUIDE_URL = "https://github.com/kimtoma/ontology/blob/main/docs/GUIDE.md"
+export const GUIDE_URL_KO = "https://github.com/kimtoma/ontology/blob/main/docs/GUIDE.ko.md"
 
 /** The guide in the UI language. */
 export const guideUrl = () => (getLang() === "ko" ? GUIDE_URL_KO : GUIDE_URL)

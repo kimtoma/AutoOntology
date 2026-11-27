@@ -52,7 +52,7 @@ const STATUS = {
     embed: { name: "ollama", model: "bge-m3" },
   },
   checks: { backend: { status: "ok", detail: "" }, postgres: { status: "ok", detail: "" } },
-  doctor: "uv run autoontology doctor", upload_max_mb: 200,
+  doctor: "uv run onto doctor", upload_max_mb: 200,
 }
 
 const SOURCE = { name: "hanbit", kind: "files", locator: "/data/hanbit", database: null, built: true, uploaded: false,
@@ -399,7 +399,7 @@ describe("connect page in a project", () => {
     renderApp("/p/side/connect")
     expect(await screen.findByText('These tokens only read the "Side project" project.')).toBeInTheDocument()
     await waitFor(() => expect(document.getElementById("howto-claudeCode")).toHaveTextContent(
-      "claude mcp add --transport http autoontology-side"))
+      "claude mcp add --transport http ontology-side"))
     // the agent endpoint stays /mcp (the token picks the project)
     expect(document.getElementById("howto-claudeCode")).toHaveTextContent("/mcp --header")
     expect(calls.find((c) => c.path === "/agent/tokens")!.url).toBe("/api/projects/side/agent/tokens")

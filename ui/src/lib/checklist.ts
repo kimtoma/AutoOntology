@@ -87,15 +87,15 @@ export function loginCommand(status: ServiceStatus): { label: string; command: s
   if (name === "codex") return { label: t("provider.login.claude"), command: "codex login" }
   if (name === "ollama") {
     if (chat && !chat.available) return { label: t("provider.login.ollamaStart"), command: "ollama serve" }
-    return { label: t("provider.login.ollamaPull"), command: "uv run autoontology setup" }
+    return { label: t("provider.login.ollamaPull"), command: "uv run onto setup" }
   }
   if (name === "openai") {
-    return { label: t("provider.login.openai"), command: "uv run autoontology provider use openai" }
+    return { label: t("provider.login.openai"), command: "uv run onto provider use openai" }
   }
   return null
 }
 
-export const RESTART_COMMAND = "uv run autoontology down && uv run autoontology up"
+export const RESTART_COMMAND = "uv run onto down && uv run onto up"
 
 /** The sample set a build over *sourceNames* belongs to: every name is one of the set's
     sources (so its expected build time applies). undefined for any other mix. */
@@ -107,7 +107,7 @@ export function sampleSetFor(sourceNames: string[], sets: SampleSet[] | undefine
   })
 }
 
-export const LAST_SAMPLE_KEY = "autoontology.sampleSet"
+export const LAST_SAMPLE_KEY = "ontology.sampleSet"
 
 /** The expected build time of *set* with *provider*, e.g. "~5 min (estimate)". */
 export function expectedTime(set: SampleSet | undefined, provider: string | undefined): string | null {

@@ -45,7 +45,7 @@ const Graph2D = lazy(() => import("@/components/graph/graph-2d"))
 declare global {
   interface Window {
     /** node/link counts of what the canvas shows (read by the Playwright test) */
-    __autoontologyGraphStats?: {
+    __ontologyGraphStats?: {
       nodes: number; links: number; renderer: "3d" | "2d"; layers: string[]
       origins: Record<string, number>; rings: number
     }
@@ -208,13 +208,13 @@ export default function GraphPage() {
 
   useEffect(() => {
     if (!built) return
-    window.__autoontologyGraphStats = {
+    window.__ontologyGraphStats = {
       nodes: built.stats.nodes, links: built.stats.links, renderer: webgl ? "3d" : "2d",
       layers: [...layers], origins: originCounts(built.nodes),
       rings: built.nodes.filter((n) => n.ring).length,
     }
   }, [built, webgl, layers])
-  useEffect(() => () => { delete window.__autoontologyGraphStats }, [])
+  useEffect(() => () => { delete window.__ontologyGraphStats }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

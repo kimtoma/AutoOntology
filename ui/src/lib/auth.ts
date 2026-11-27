@@ -1,5 +1,5 @@
 /* Accounts: who is signed in and what they may do (`GET /api/auth/me`), the sign-in calls,
-   and the admin/owner APIs (users, members, audit log). With `AUTOONTOLOGY_AUTH=off` (the
+   and the admin/owner APIs (users, members, audit log). With `ONTOLOGY_AUTH=off` (the
    default) `me.auth` is "off" and every check here allows everything: the UI is the same as
    before accounts. The server stays the judge: a hidden button is a convenience, a refused
    request is 403 `forbidden` (see `setAuthErrorHandler` in api.ts). */
@@ -44,7 +44,7 @@ export interface Membership {
   permissions: string[]
 }
 
-/** `GET /api/auth/me` (autoontology/web/auth.py::AuthService.me). */
+/** `GET /api/auth/me` (ontology/web/auth.py::AuthService.me). */
 export interface Me {
   auth: "off" | "accounts"
   authenticated: boolean

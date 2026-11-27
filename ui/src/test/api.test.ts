@@ -66,7 +66,7 @@ describe("api client", () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch") }))
     const err = await api.status().catch((e) => e)
     expect(err).toMatchObject({ status: 0, code: "network" })
-    expect(err.message).toMatch(/uv run autoontology up/)
+    expect(err.message).toMatch(/uv run onto up/)
   })
 
   it("recognizes 404 no_snapshot", () => {

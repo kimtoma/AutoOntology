@@ -60,22 +60,22 @@ describe("connect helpers", () => {
   it("builds the endpoints and snippets from the origin and the token", () => {
     const ep = endpoints("http://127.0.0.1:7800/", TOOLS)
     expect(ep).toEqual({ mcp: "http://127.0.0.1:7800/mcp", rest: "http://127.0.0.1:7800/agent/v1",
-                         openapi: "http://127.0.0.1:7800/agent/v1/openapi.json", server: "autoontology" })
+                         openapi: "http://127.0.0.1:7800/agent/v1/openapi.json", server: "ontology" })
     expect(snippet("claudeCode", ep, RAW)).toBe(
-      `claude mcp add --transport http autoontology http://127.0.0.1:7800/mcp --header "Authorization: Bearer ${RAW}"`)
+      `claude mcp add --transport http ontology http://127.0.0.1:7800/mcp --header "Authorization: Bearer ${RAW}"`)
     expect(JSON.parse(snippet("desktop", ep, RAW))).toEqual({
-      mcpServers: { autoontology: { type: "http", url: "http://127.0.0.1:7800/mcp",
+      mcpServers: { ontology: { type: "http", url: "http://127.0.0.1:7800/mcp",
                                     headers: { Authorization: `Bearer ${RAW}` } } },
     })
     const curl = snippet("curl", ep, TOKEN_PLACEHOLDER, "q1")
     expect(curl).toContain(`curl -H "Authorization: Bearer <TOKEN>" "http://127.0.0.1:7800/agent/v1/concepts?q=q1&limit=5"`)
     expect(curl).toContain(`curl -X POST "http://127.0.0.1:7800/agent/v1/sparql"`)
     expect(toolParams(TOOLS.tools[0].inputSchema).map((p) => p.name)).toEqual(["query", "limit", "kind", "revision"])
-    // one MCP server per project: autoontology-<slug>
+    // one MCP server per project: ontology-<slug>
     const scoped = endpoints("http://127.0.0.1:7800", TOOLS, "contracts")
     expect(scoped.mcp).toBe("http://127.0.0.1:7800/mcp")
-    expect(snippet("claudeCode", scoped, RAW)).toContain("--transport http autoontology-contracts http://127.0.0.1:7800/mcp")
-    expect(Object.keys(JSON.parse(snippet("desktop", scoped, RAW)).mcpServers)).toEqual(["autoontology-contracts"])
+    expect(snippet("claudeCode", scoped, RAW)).toContain("--transport http ontology-contracts http://127.0.0.1:7800/mcp")
+    expect(Object.keys(JSON.parse(snippet("desktop", scoped, RAW)).mcpServers)).toEqual(["ontology-contracts"])
   })
 })
 
@@ -119,7 +119,7 @@ describe("Connect page", () => {
     expect(link.hasAttribute("download")).toBe(true)
     const card = document.querySelector("#connect-skill") as HTMLElement
     expect(within(card).getByText("SKILL.md")).toBeInTheDocument()
-    expect(within(card).getByText(/replace \{\{AUTOONTOLOGY_URL\}\} and <token>/)).toBeInTheDocument()
+    expect(within(card).getByText(/replace \{\{ONTOLOGY_URL\}\} and <token>/)).toBeInTheDocument()
     expect(card.textContent).not.toContain("aok_")
   })
 
@@ -157,7 +157,7 @@ describe("Connect page", () => {
     expect(within(once).getByText(RAW)).toBeInTheDocument()
     expect(within(once).getByText(/will not be shown again/)).toBeInTheDocument()
     expect(once.querySelector("#once-claudeCode")?.textContent).toBe(
-      `claude mcp add --transport http autoontology ${origin}/mcp --header "Authorization: Bearer ${RAW}"`)
+      `claude mcp add --transport http ontology ${origin}/mcp --header "Authorization: Bearer ${RAW}"`)
     await user.click(within(once).getByRole("tab", { name: "Claude Desktop / Cursor" }))
     expect(once.querySelector("#once-desktop")?.textContent).toContain(`"Authorization": "Bearer ${RAW}"`)
     await user.click(within(once).getByRole("tab", { name: "REST (curl)" }))

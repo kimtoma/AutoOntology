@@ -254,7 +254,7 @@ export const koLogic: Record<keyof typeof enLogic, string> = {
   "logic.workflow.runNow": "지금 실행",
   "logic.workflow.starting": "시작하는 중…",
   "logic.workflow.runFailed": "워크플로를 시작하지 못했습니다",
-  "logic.workflow.triggersOff": "이 서비스에서는 일정 트리거가 꺼져 있습니다(AUTOONTOLOGY_WORKFLOWS=off). 워크플로는 수동으로만 실행됩니다.",
+  "logic.workflow.triggersOff": "이 서비스에서는 일정 트리거가 꺼져 있습니다(ONTOLOGY_WORKFLOWS=off). 워크플로는 수동으로만 실행됩니다.",
   "logic.workflow.run": "워크플로 실행",
   "logic.workflow.paused": "일시정지: 일부 액션이 승인을 기다립니다. 결정되면 이어서 진행합니다.",
   "logic.workflow.truncated": "개체 수 상한에서 멈췄습니다. 조건에 맞는 개체를 모두 처리하지는 못했습니다.",

@@ -18,7 +18,7 @@ const status = (over: Partial<ServiceStatus["providers"]["chat"]> = {}, checks: 
     embed: { name: "ollama", model: "bge-m3" },
   },
   checks: { backend: { status: "ok" }, postgres: { status: "ok" }, ...checks },
-  doctor: "uv run autoontology doctor",
+  doctor: "uv run onto doctor",
 })
 const SOURCE = { name: "quick", kind: "files" } as Source
 const ONTOLOGY = { revision: 2 } as OntologySummary
@@ -77,7 +77,7 @@ describe("provider login commands", () => {
     expect(loginCommand(codex)?.command).toBe("codex login")
     const down = status({ name: "ollama", available: false })
     expect(loginCommand(down)?.command).toBe("ollama serve")
-    expect(loginCommand(status({ name: "ollama" }))?.command).toBe("uv run autoontology setup")
+    expect(loginCommand(status({ name: "ollama" }))?.command).toBe("uv run onto setup")
   })
 })
 

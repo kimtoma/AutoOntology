@@ -102,7 +102,7 @@ function DefRow({ def, onOpen, workflow, onRunWorkflow, onOpenWorkflowRun }: {
   )
 }
 
-/** "Every day at 02:00", "After 독촉단계기록", "Run by hand". */
+/** "Every day at 02:00", "After <action>", "Run by hand". */
 function triggerText(w: WorkflowInfo, t: ReturnType<typeof useT>): string {
   if (w.trigger.schedule) return t("logic.trigger.schedule.value", { value: w.trigger.schedule })
   if (w.trigger.on_action) return t("logic.trigger.on_action.value", { value: w.trigger.on_action })

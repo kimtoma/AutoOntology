@@ -79,7 +79,7 @@ const STATUS = {
     embed: { name: "ollama", model: "bge-m3" },
   },
   checks: { backend: { status: "ok", detail: "" }, postgres: { status: "ok", detail: "" } },
-  doctor: "uv run autoontology doctor", upload_max_mb: 200,
+  doctor: "uv run onto doctor", upload_max_mb: 200,
 }
 
 const SOURCE = { name: "hanbit", kind: "files", locator: "/data/hanbit", database: null, built: true, uploaded: false,
@@ -259,7 +259,7 @@ describe("signing in", () => {
     mockFetch(routes("editor", { "GET /sources": () => json(401, { error: "login_required", detail: "sign in first" }) }))
     renderApp("/p/main/sources")
     await waitFor(() => expect(where()).toBe("/login?next=%2Fp%2Fmain%2Fsources"))
-    expect(await screen.findByRole("heading", { name: "Sign in to AutoOntology" })).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Sign in to Ontology" })).toBeInTheDocument()
   })
 })
 
@@ -478,7 +478,7 @@ describe("members page", () => {
         const b = bodyOf(init)
         const m = member(b.email, b.role, { has_password: false })
         members = [...members, m]
-        return json(201, { member: m, created: true, mail_sent: false, invite_link: "https://ao.example/ui/invite#token=xyz&purpose=invite", expires_at: "2026-12-01T00:00:00Z" })
+        return json(201, { member: m, created: true, mail_sent: false, invite_link: "https://onto.example/ui/invite#token=xyz&purpose=invite", expires_at: "2026-12-01T00:00:00Z" })
       },
       "PATCH /members/id-lee": (_u: string, init?: RequestInit) => {
         members = members.map((m) => (m.email === "lee@example.com" ? { ...m, role: bodyOf(init).role } : m))
@@ -496,7 +496,7 @@ describe("members page", () => {
     await user.selectOptions(screen.getByLabelText("Role"), "editor")
     await user.click(screen.getByRole("button", { name: "Add" }))
     expect(await screen.findByText("Invitation link for new@example.com")).toBeInTheDocument()
-    expect(document.getElementById("member-invite-link")).toHaveTextContent("https://ao.example/ui/invite#token=xyz&purpose=invite")
+    expect(document.getElementById("member-invite-link")).toHaveTextContent("https://onto.example/ui/invite#token=xyz&purpose=invite")
     expect(screen.getByRole("button", { name: /Copy Invitation link/ })).toBeInTheDocument()
     const add = calls.find((c) => c.method === "POST" && c.path === "/members")!
     expect(add.project).toBe("main")
@@ -548,11 +548,11 @@ describe("users page", () => {
         const b = bodyOf(init)
         const u = userRow(b.email, { has_password: false, is_admin: !!b.is_admin })
         users = [...users, u]
-        return json(201, { user: u, invite_link: "https://ao.example/ui/invite#token=inv&purpose=invite", expires_at: "2026-12-01T00:00:00Z", mail_sent: false })
+        return json(201, { user: u, invite_link: "https://onto.example/ui/invite#token=inv&purpose=invite", expires_at: "2026-12-01T00:00:00Z", mail_sent: false })
       },
       "PATCH /users/u1": () => json(409, { error: "last_admin", detail: "keeps one admin" }),
       "POST /users/id-lee/link": (_u: string, init?: RequestInit) => ({
-        email: "lee@example.com", purpose: bodyOf(init).purpose, link: "https://ao.example/auth/magic/m1",
+        email: "lee@example.com", purpose: bodyOf(init).purpose, link: "https://onto.example/auth/magic/m1",
         expires_at: "2026-11-24T12:15:00Z", mail_sent: false,
       }),
     }))
@@ -582,7 +582,7 @@ describe("users page", () => {
     const linkDialog = await screen.findByRole("dialog")
     await user.selectOptions(within(linkDialog).getByLabelText("Kind of link"), "reset")
     await user.click(within(linkDialog).getByRole("button", { name: "Create link" }))
-    expect(await within(linkDialog).findByText("https://ao.example/auth/magic/m1")).toBeInTheDocument()
+    expect(await within(linkDialog).findByText("https://onto.example/auth/magic/m1")).toBeInTheDocument()
     expect(bodyOf(calls.find((c) => c.path.endsWith("/link"))!.init)).toEqual({ purpose: "reset", send: false })
   })
 

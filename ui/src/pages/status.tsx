@@ -102,9 +102,9 @@ export default function StatusPage() {
             <p className="text-sm break-keep text-muted-foreground">
               {tx("status.footer", {
                 doctor: <code key="doctor" className="rounded bg-muted px-1">{data.doctor}</code>,
-                up: <code key="up" className="rounded bg-muted px-1">uv run autoontology up</code>,
-                use: <code key="use" className="rounded bg-muted px-1">uv run autoontology provider use &lt;name&gt;</code>,
-                restart: <code key="restart" className="rounded bg-muted px-1">uv run autoontology down && uv run autoontology up</code>,
+                up: <code key="up" className="rounded bg-muted px-1">uv run onto up</code>,
+                use: <code key="use" className="rounded bg-muted px-1">uv run onto provider use &lt;name&gt;</code>,
+                restart: <code key="restart" className="rounded bg-muted px-1">uv run onto down && uv run onto up</code>,
               })}
             </p>
           </div>

@@ -33,7 +33,7 @@ function settings(over: Partial<SettingsState> = {}): SettingsState {
     restart_in_progress: false,
     service_pid: 100,
     supervised: true,
-    restart_command: "uv run autoontology restart",
+    restart_command: "uv run onto restart",
     ...over,
   }
 }
@@ -123,11 +123,11 @@ describe("Settings page", () => {
   })
 
   it("locks the keys the shell sets", async () => {
-    mockFetch({ "GET /settings": settings({ locked_keys: ["AUTOONTOLOGY_CHAT_PROVIDER"] }) })
+    mockFetch({ "GET /settings": settings({ locked_keys: ["ONTOLOGY_CHAT_PROVIDER"] }) })
     renderPage(<SettingsPage />)
     const radios = await screen.findAllByRole("radio", { name: /subscription|Ollama|OpenAI/ })
     expect(radios.filter((r) => r.closest("#settings-chat-providers")).every((r) => (r as HTMLInputElement).disabled)).toBe(true)
-    expect(document.querySelector("[data-locked=AUTOONTOLOGY_CHAT_PROVIDER]")).not.toBeNull()
+    expect(document.querySelector("[data-locked=ONTOLOGY_CHAT_PROVIDER]")).not.toBeNull()
   })
 
   it("tests the candidate without saving it", async () => {
@@ -162,7 +162,7 @@ describe("Settings page", () => {
         ? { chat: { provider: "codex", model: "gpt-6-astra", origin: ".env" }, service_pid: 200,
             running: { chat_provider: "codex", chat_model: "gpt-6-astra", embed_provider: "ollama", embed_model: "bge-m3" } }
         : {}),
-      "PUT /settings": { written: ["AUTOONTOLOGY_CHAT_PROVIDER"], backup: ".env.bak-1", restart_required: true },
+      "PUT /settings": { written: ["ONTOLOGY_CHAT_PROVIDER"], backup: ".env.bak-1", restart_required: true },
       "POST /settings/restart": () => { pid = 200; return { restart_id: "0123456789ab", previous_pid: 100 } },
       "GET /health/live": { status: "ok" },
       "GET /settings/restart/0123456789ab": () => ({ id: "0123456789ab", state: "done", service_pid: pid }),
@@ -193,7 +193,7 @@ describe("Settings page", () => {
                                                stored_dimension: 1024, rows: 120 }),
                               { status: 409, headers: { "content-type": "application/json" } })
         }
-        return { written: ["AUTOONTOLOGY_OLLAMA_EMBED_MODEL"], backup: null, restart_required: true }
+        return { written: ["ONTOLOGY_OLLAMA_EMBED_MODEL"], backup: null, restart_required: true }
       },
     })
     renderPage(<><SettingsPage /><Toaster /></>)
@@ -208,7 +208,7 @@ describe("Settings page", () => {
     expect(go).toBeDisabled()
     await user.click(within(dialog).getByRole("switch"))
     await user.click(go)
-    expect(await screen.findByText("Saved. Restart AutoOntology to apply it:")).toBeInTheDocument()
+    expect(await screen.findByText("Saved. Restart Ontology to apply it:")).toBeInTheDocument()
     const bodies = calls.filter((c) => c.method === "PUT").map((c) => bodyOf(c.init))
     expect(bodies).toEqual([{ embed_model: "bge-m3-v2" }, { embed_model: "bge-m3-v2", confirm_reingest: true }])
     expect(calls.some((c) => c.path === "/settings/restart")).toBe(false)
@@ -241,7 +241,7 @@ describe("Settings page", () => {
       "GET /settings": () => settings({ supervised: opts.supervised,
                                         chat: { provider: "openai", model: "gpt-x", origin: ".env" },
                                         openai: { ...openai, api_key_set: saved }, restart_required: saved }),
-      "PUT /settings": () => { saved = true; return { written: ["AUTOONTOLOGY_OPENAI_API_KEY"], backup: null, restart_required: true } },
+      "PUT /settings": () => { saved = true; return { written: ["ONTOLOGY_OPENAI_API_KEY"], backup: null, restart_required: true } },
       "POST /settings/restart": () => new Response(JSON.stringify({ error: "run_active", detail: "a build is running" }),
                                                    { status: 409, headers: { "content-type": "application/json" } }),
     })

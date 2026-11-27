@@ -9,19 +9,19 @@ import {
 export const CHAT_PROVIDERS: ChatProviderName[] = ["ollama", "claude", "codex", "openai"]
 export const EMBED_PROVIDERS: EmbedProviderName[] = ["ollama", "openai"]
 
-export const PROVIDER_VAR = "AUTOONTOLOGY_CHAT_PROVIDER"
-export const EMBED_PROVIDER_VAR = "AUTOONTOLOGY_EMBED_PROVIDER"
-export const BASE_URL_VAR = "AUTOONTOLOGY_OPENAI_BASE_URL"
-export const KEY_VAR = "AUTOONTOLOGY_OPENAI_API_KEY"
+export const PROVIDER_VAR = "ONTOLOGY_CHAT_PROVIDER"
+export const EMBED_PROVIDER_VAR = "ONTOLOGY_EMBED_PROVIDER"
+export const BASE_URL_VAR = "ONTOLOGY_OPENAI_BASE_URL"
+export const KEY_VAR = "ONTOLOGY_OPENAI_API_KEY"
 export const CHAT_MODEL_VAR: Record<ChatProviderName, string> = {
-  ollama: "AUTOONTOLOGY_OLLAMA_CHAT_MODEL",
-  openai: "AUTOONTOLOGY_OPENAI_CHAT_MODEL",
-  claude: "AUTOONTOLOGY_CLAUDE_MODEL",
-  codex: "AUTOONTOLOGY_CODEX_MODEL",
+  ollama: "ONTOLOGY_OLLAMA_CHAT_MODEL",
+  openai: "ONTOLOGY_OPENAI_CHAT_MODEL",
+  claude: "ONTOLOGY_CLAUDE_MODEL",
+  codex: "ONTOLOGY_CODEX_MODEL",
 }
 export const EMBED_MODEL_VAR: Record<EmbedProviderName, string> = {
-  ollama: "AUTOONTOLOGY_OLLAMA_EMBED_MODEL",
-  openai: "AUTOONTOLOGY_OPENAI_EMBED_MODEL",
+  ollama: "ONTOLOGY_OLLAMA_EMBED_MODEL",
+  openai: "ONTOLOGY_OPENAI_EMBED_MODEL",
 }
 
 export interface SettingsForm {

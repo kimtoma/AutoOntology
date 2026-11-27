@@ -80,7 +80,7 @@ export function useProjectNavigate() {
   return useCallback((to: string, options?: NavigateOptions) => navigate(path(to), options), [navigate, path])
 }
 
-export const LAST_PROJECT_KEY = "autoontology.project"
+export const LAST_PROJECT_KEY = "ontology.project"
 
 export function rememberProject(slug: string) {
   try { localStorage.setItem(LAST_PROJECT_KEY, slug) } catch { /* private mode */ }

@@ -30,8 +30,8 @@ const STATUS = (loggedIn: boolean) => ({
     embed: { name: "ollama", model: "bge-m3" },
   },
   checks: { backend: { status: "ok", detail: "http://127.0.0.1:3161" },
-            postgres: { status: "ok", detail: "localhost:5432/autoontology" } },
-  doctor: "uv run autoontology doctor", upload_max_mb: 200,
+            postgres: { status: "ok", detail: "localhost:5432/ontology" } },
+  doctor: "uv run onto doctor", upload_max_mb: 200,
 })
 
 const SAMPLES = [
@@ -63,12 +63,12 @@ describe("Home page", () => {
     await waitFor(() => expect(document.querySelector("[data-step=models]")?.getAttribute("data-state")).toBe("active"))
     const models = document.querySelector<HTMLElement>("[data-step=models]")!
     expect(within(models).getByText("claude auth login")).toBeInTheDocument()
-    expect(within(models).getByText("uv run autoontology down && uv run autoontology up")).toBeInTheDocument()
+    expect(within(models).getByText("uv run onto down && uv run onto up")).toBeInTheDocument()
     expect(within(models).getByText("Not logged in")).toBeInTheDocument()
     expect(document.querySelector("[data-step=sources]")?.getAttribute("data-state")).toBe("pending")
     expect(screen.getByText("0 of 5 done")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /step-by-step guide/ })).toHaveAttribute(
-      "href", "https://github.com/kimtoma/AutoOntology/blob/main/docs/GUIDE.md")
+      "href", "https://github.com/kimtoma/ontology/blob/main/docs/GUIDE.md")
   })
 
   it("tests the provider and explains a step in a popover", async () => {

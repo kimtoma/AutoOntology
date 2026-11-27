@@ -5,10 +5,10 @@
 import type { AgentToken, AgentTools, TokenScope } from "@/lib/api"
 
 export const TOKEN_PLACEHOLDER = "<TOKEN>"
-/** The server name agents see (`claude mcp add ... autoontology`). */
-export const SERVER_NAME = "autoontology"
+/** The server name agents see (`claude mcp add ... ontology`). */
+export const SERVER_NAME = "ontology"
 
-/** *server*: the MCP server name the snippets suggest (`autoontology-<project slug>`). */
+/** *server*: the MCP server name the snippets suggest (`ontology-<project slug>`). */
 export interface Endpoints { mcp: string; rest: string; openapi: string; server?: string }
 
 /** The suggested MCP server name of project *slug*: agents can add one per project. */

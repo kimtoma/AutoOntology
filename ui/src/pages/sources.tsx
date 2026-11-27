@@ -40,7 +40,7 @@ import {
   type Family, type Formats,
 } from "@/lib/formats"
 
-/** Server default of AUTOONTOLOGY_UPLOAD_MAX_MB when /status has not answered yet. */
+/** Server default of ONTOLOGY_UPLOAD_MAX_MB when /status has not answered yet. */
 const DEFAULT_UPLOAD_MAX_MB = 200
 
 export function KindBadge({ kind }: { kind: string }) {

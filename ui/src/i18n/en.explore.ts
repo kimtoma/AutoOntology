@@ -208,7 +208,7 @@ export const enExplore = {
   "playground.sparql.example": "Example query",
   "playground.sparql.pick": "Pick an example query",
   "playground.sparql.label": "SPARQL query",
-  "playground.sparql.hint": "Prefixes owl, rdfs, rdf, skos, prov, dcterms, xsd and ao are declared. SELECT, ASK, CONSTRUCT and DESCRIBE only, 10 s limit. ⌘/Ctrl+Enter runs.",
+  "playground.sparql.hint": "Prefixes owl, rdfs, rdf, skos, prov, dcterms, xsd and onto are declared. SELECT, ASK, CONSTRUCT and DESCRIBE only, 10 s limit. ⌘/Ctrl+Enter runs.",
   "playground.sparql.run": "Run",
   "playground.sparql.result": "Revision {rev} · {ttl} · {triples} triples · {total} results",
   "playground.sparql.truncated": "(truncated)",

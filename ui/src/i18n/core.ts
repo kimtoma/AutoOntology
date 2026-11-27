@@ -11,7 +11,7 @@ export const LANGS: readonly Lang[] = ["en", "ko"]
 export type MessageKey = keyof typeof en
 export type Vars = Record<string, string | number | null | undefined>
 
-export const LANG_STORAGE_KEY = "autoontology.lang"
+export const LANG_STORAGE_KEY = "ontology.lang"
 export const LANG_NAMES: Record<Lang, string> = { en: "English", ko: "한국어" }
 
 const DICTS: Record<Lang, Record<MessageKey, string>> = { en, ko }

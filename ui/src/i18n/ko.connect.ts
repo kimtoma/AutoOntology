@@ -73,7 +73,7 @@ export const koConnect: Record<keyof typeof enConnect, string> = {
 
   "connect.once.title": "“{name}” 토큰",
   "connect.once.rotatedTitle": "“{name}”의 새 토큰",
-  "connect.once.description": "지금 토큰을 복사하세요. 이번 한 번만 보이며 AutoOntology에는 해시만 남습니다.",
+  "connect.once.description": "지금 토큰을 복사하세요. 이번 한 번만 보이며 Ontology에는 해시만 남습니다.",
   "connect.once.warning": "이 토큰은 다시 보이지 않습니다. 잃어버리면 재발급하세요.",
   "connect.once.token": "토큰",
   "connect.once.snippets": "에이전트에 추가하기",
@@ -110,8 +110,8 @@ export const koConnect: Record<keyof typeof enConnect, string> = {
     "활성 펑션·액션·워크플로를 Agent Skill로 내려받습니다. 스킬을 읽은 에이전트는 개체 유형, 업무 규칙, 안전한 도구 호출 순서(제출 전 미리보기, 승인을 가정하지 않기)를 압니다.",
   "connect.skill.export": "스킬 내보내기",
   "connect.skill.md": "개체 유형·펑션·액션·워크플로와 작업 절차를 영어로 설명합니다.",
-  "connect.skill.mcp": "이 서버 연결 설정: {{AUTOONTOLOGY_URL}}과 <token>을 바꿔 넣으세요 (토큰은 들어 있지 않습니다).",
-  "connect.skill.defs": "활성 정의 YAML (ao logic apply -f로 다시 적용할 수 있음).",
+  "connect.skill.mcp": "이 서버 연결 설정: {{ONTOLOGY_URL}}과 <token>을 바꿔 넣으세요 (토큰은 들어 있지 않습니다).",
+  "connect.skill.defs": "활성 정의 YAML (onto logic apply -f로 다시 적용할 수 있음).",
 
   "connect.usage": "사용량",
   "connect.usage.hint": "최근 {days}일 동안의 도구 호출.",
