@@ -903,10 +903,12 @@ def _objects(env: _Env, object_key: str | None) -> Any:
 
 def _session(view: Any) -> ExitStack:
     """Connection reuse for one run: the store's (:meth:`Store.session`; a run makes
-    dozens of store calls per object). Every store call is still its own transaction."""
+    dozens of store calls per object) and the sources' (:func:`reader.source_session`).
+    Every store call and every source read is still its own transaction."""
     with ExitStack() as stack:
         session = getattr(root_store(view), "session", None)
         stack.enter_context(session() if callable(session) else nullcontext())
+        stack.enter_context(reader.source_session())
         return stack.pop_all()
 
 

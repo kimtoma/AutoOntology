@@ -536,6 +536,51 @@ def test_open_source_is_a_read_only_transaction_with_a_timeout(monkeypatch, stor
     assert conn.rolled_back and conn.closed
 
 
+def test_source_session_reuses_a_connection_with_a_fresh_read_only_transaction(monkeypatch, store):
+    """Inside :func:`reader.source_session` a source's connection is kept between reads,
+    but every read is still its own READ ONLY transaction with the timeout, rolled back;
+    a nested read gets its own connection; a failed read's connection is dropped."""
+    made: list[_Conn] = []
+
+    def connect(settings, source):
+        made.append(_Conn())
+        return made[-1]
+
+    monkeypatch.setattr(reader, "connect_source", connect)
+    settings = Settings.from_env()
+    source = type("S", (), {"name": "quickstart", "kind": "files", "id": "s1"})()
+    other = type("S", (), {"name": "other", "kind": "files", "id": "s2"})()
+    head = [
+        "SET TRANSACTION READ ONLY",
+        f"SET LOCAL statement_timeout = {reader.STATEMENT_TIMEOUT_MS}",
+    ]
+    with reader.source_session():
+        for _ in range(3):
+            with reader.open_source(settings, source) as be:
+                be.columns("public", "contracts")
+                with reader.open_source(settings, source) as nested:
+                    assert nested.conn is not be.conn
+        assert len(made) == 4  # one kept + three nested (closed)
+        kept = made[0]
+        assert not kept.closed and kept.rolled_back
+        assert kept.statements.count(head[0]) == 3 and kept.statements.count(head[1]) == 3
+        assert all(c.closed for c in made[1:])
+        with reader.open_source(settings, other):
+            pass
+        assert len(made) == 5  # another source: another connection
+        with pytest.raises(ObjectError):
+            with reader.open_source(settings, source) as be:
+                be.conn.execute("INSERT INTO contracts VALUES (1)")
+        assert kept.closed  # dropped after the failure
+        with reader.open_source(settings, source):
+            pass
+        assert len(made) == 6
+    assert all(c.closed for c in made)
+    with reader.open_source(settings, source):  # outside a session: closed every time
+        pass
+    assert made[-1].closed and len(made) == 7
+
+
 def test_open_source_refuses_non_postgres_and_reports_unreachable(monkeypatch, store):
     settings = Settings.from_env()
     mysql = type("S", (), {"name": "m", "kind": "database", "locator": "mysql://u:p@h/d"})()

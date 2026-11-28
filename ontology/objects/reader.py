@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -252,22 +253,123 @@ def connect_source(settings: Any, source: Any) -> Any:
     return psycopg.connect(**params, connect_timeout=CONNECT_TIMEOUT_S, autocommit=False)
 
 
+class _SourceSession:
+    """One thread's :func:`source_session`: an idle connection per source, and the
+    sources whose connection a read is using now (a nested read opens its own)."""
+
+    def __init__(self) -> None:
+        self.depth = 0
+        self.idle: dict[tuple[Any, ...], Any] = {}
+        self.busy: set[tuple[Any, ...]] = set()
+
+    def close_all(self) -> None:
+        for conn in self.idle.values():
+            _close_quietly(conn)
+        self.idle.clear()
+
+
+_sessions = threading.local()
+
+
+@contextmanager
+def source_session() -> Iterator[None]:
+    """Keep source connections open between reads in this thread for the ``with`` body (a
+    workflow run reads the same source for every object).
+
+    Only the connection is kept: every :func:`open_source` is still its own ``READ ONLY``
+    transaction with the statement timeout, always rolled back, and the connection sits
+    idle (no transaction) between reads. A read that fails drops its connection; a read
+    nested in another read of the same source gets its own. Re-entrant; closed at the
+    end of the outermost ``with``."""
+    state = getattr(_sessions, "state", None)
+    if state is None:
+        state = _sessions.state = _SourceSession()
+    state.depth += 1
+    try:
+        yield
+    finally:
+        state.depth -= 1
+        if state.depth == 0:
+            state.close_all()
+
+
+def _session_key(settings: Any, source: Any) -> tuple[Any, ...] | None:
+    try:
+        key = (
+            getattr(source, "id", None),
+            source.name,
+            source.kind,
+            getattr(source, "locator", None),
+            getattr(source, "pg_database", None),
+            getattr(settings, "postgres_host", None),
+            getattr(settings, "postgres_port", None),
+            getattr(settings, "postgres_user", None),
+            getattr(settings, "postgres_password", None),
+        )
+        hash(key)
+    except Exception:  # noqa: BLE001 - not kept, opened per read as outside a session
+        return None
+    return key
+
+
+def _reusable(conn: Any) -> bool:
+    """An open connection with no transaction (psycopg ``IDLE``)."""
+    if getattr(conn, "closed", False):
+        return False
+    info = getattr(conn, "info", None)
+    if info is None:
+        return True
+    try:
+        from psycopg.pq import TransactionStatus
+
+        return info.transaction_status == TransactionStatus.IDLE
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _close_quietly(conn: Any) -> None:
+    try:
+        conn.rollback()
+    except Exception:  # noqa: BLE001 - closing anyway
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 @contextmanager
 def open_source(settings: Any, source: Any) -> Iterator[PgBackend]:
     """A :class:`PgBackend` inside a ``READ ONLY`` transaction with a statement timeout,
-    always rolled back. An unreachable source is 503 ``source_unreachable``."""
+    always rolled back. An unreachable source is 503 ``source_unreachable``. Inside
+    :func:`source_session` the connection is reused (a new transaction per call)."""
     import psycopg
 
-    try:
-        conn = connect_source(settings, source)
-    except ObjectError:
-        raise
-    except (psycopg.Error, OSError, ValueError) as exc:
-        raise ObjectError(
-            503,
-            "source_unreachable",
-            f"cannot read source {source.name!r}: {type(exc).__name__}",
-        ) from exc
+    state = getattr(_sessions, "state", None)
+    key = _session_key(settings, source) if state is not None and state.depth > 0 else None
+    if key is not None and key in state.busy:  # type: ignore[union-attr]
+        key = None
+    conn = None
+    if key is not None:
+        conn = state.idle.pop(key, None)  # type: ignore[union-attr]
+        if conn is not None and not _reusable(conn):
+            _close_quietly(conn)
+            conn = None
+    if conn is None:
+        try:
+            conn = connect_source(settings, source)
+        except ObjectError:
+            raise
+        except (psycopg.Error, OSError, ValueError) as exc:
+            raise ObjectError(
+                503,
+                "source_unreachable",
+                f"cannot read source {source.name!r}: {type(exc).__name__}",
+            ) from exc
+    if key is not None:
+        state.busy.add(key)  # type: ignore[union-attr]
+    keep = False
     try:
         # the first statement of the transaction: everything after it is read only
         conn.execute("SET TRANSACTION READ ONLY")
@@ -286,8 +388,17 @@ def open_source(settings: Any, source: Any) -> Iterator[PgBackend]:
             raise ObjectError(
                 502, "source_error", f"the source refused the read: {type(exc).__name__}"
             ) from exc
+        keep = key is not None
     finally:
+        if key is not None:
+            state.busy.discard(key)  # type: ignore[union-attr]
         try:
             conn.rollback()
+        except Exception:
+            keep = False
+            raise
         finally:
-            conn.close()
+            if keep and state.depth > 0 and _reusable(conn):  # type: ignore[union-attr]
+                state.idle[key] = conn  # type: ignore[union-attr,index]
+            else:
+                conn.close()
