@@ -108,7 +108,7 @@ import logging
 import secrets
 import threading
 from collections.abc import Callable
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -121,7 +121,7 @@ from ontology.logic.specs import LogicContext, StepSpec, WorkflowSpec
 from ontology.objects import reader, service
 from ontology.objects.reader import ObjectError
 from ontology.store.actions import ActionRun
-from ontology.store.db import now_iso
+from ontology.store.db import now_iso, root_store
 from ontology.store.workflows import OPEN, UNCHANGED, RunActive, WorkflowRun
 
 logger = logging.getLogger("ontology.workflows")
@@ -901,6 +901,15 @@ def _objects(env: _Env, object_key: str | None) -> Any:
         offset += reader.MAX_PAGE
 
 
+def _session(view: Any) -> ExitStack:
+    """Connection reuse for one run: the store's (:meth:`Store.session`; a run makes
+    dozens of store calls per object). Every store call is still its own transaction."""
+    with ExitStack() as stack:
+        session = getattr(root_store(view), "session", None)
+        stack.enter_context(session() if callable(session) else nullcontext())
+        return stack.pop_all()
+
+
 def execute(
     settings: Any,
     view: Any,
@@ -910,6 +919,18 @@ def execute(
     when: dt.date | None = None,
 ) -> WorkflowRun | None:
     """Go through the objects of a ``running`` run that has not iterated yet."""
+    with _session(view):
+        return _execute(settings, view, run_id, mailer=mailer, when=when)
+
+
+def _execute(
+    settings: Any,
+    view: Any,
+    run_id: str,
+    *,
+    mailer: Any = None,
+    when: dt.date | None = None,
+) -> WorkflowRun | None:
     run = view.workflow_runs().get(run_id)
     if run is None or run.status != "running" or run.summary.get("iterated"):
         return run
@@ -995,22 +1016,23 @@ def run(
 ) -> WorkflowRun:
     """Fire workflow *name* and go through its objects in this thread (module
     docstring). A duplicate *fire_slot* returns the existing run untouched."""
-    created_run, created = start(
-        settings,
-        view,
-        name,
-        trigger=trigger,
-        fire_slot=fire_slot,
-        started_by=started_by,
-        object_key=object_key,
-        depth=depth,
-        user_id=user_id,
-        via=via,
-        ip=ip,
-    )
-    if not created:
-        return created_run
-    return execute(settings, view, created_run.id, mailer=mailer, when=when) or created_run
+    with _session(view):
+        created_run, created = start(
+            settings,
+            view,
+            name,
+            trigger=trigger,
+            fire_slot=fire_slot,
+            started_by=started_by,
+            object_key=object_key,
+            depth=depth,
+            user_id=user_id,
+            via=via,
+            ip=ip,
+        )
+        if not created:
+            return created_run
+        return execute(settings, view, created_run.id, mailer=mailer, when=when) or created_run
 
 
 def start_background(
@@ -1090,6 +1112,18 @@ def resume(
 ) -> WorkflowRun | None:
     """Resume the object paused on *action_run_id* once that run is decided (module
     docstring). Returns the workflow run, or None when nothing waited on it."""
+    with _session(view):
+        return _resume(settings, view, action_run_id, mailer=mailer, when=when)
+
+
+def _resume(
+    settings: Any,
+    view: Any,
+    action_run_id: str,
+    *,
+    mailer: Any = None,
+    when: dt.date | None = None,
+) -> WorkflowRun | None:
     action_run = view.action_runs().get(action_run_id)
     if action_run is None or not action_run.workflow_run_id:
         return None
@@ -1164,6 +1198,18 @@ def reconcile_run(
     when: dt.date | None = None,
 ) -> WorkflowRun | None:
     """Bring one open run up to date (module docstring)."""
+    with _session(view):
+        return _reconcile_run(settings, view, run_id, mailer=mailer, when=when)
+
+
+def _reconcile_run(
+    settings: Any,
+    view: Any,
+    run_id: str,
+    *,
+    mailer: Any = None,
+    when: dt.date | None = None,
+) -> WorkflowRun | None:
     run = view.workflow_runs().get(run_id)
     if run is None or not run.open:
         return run

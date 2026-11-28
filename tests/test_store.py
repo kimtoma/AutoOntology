@@ -269,3 +269,99 @@ def test_migration_v4_notes_the_legacy_description_records(tmp_path):
     assert described["t-conf"] == {LEGACY_BASELINE, "기준 설명"}
     assert described["t-old"] == {ANY_DESCRIPTION}
     assert legacy() == [("t-conf", "기준 설명", 1), ("t-old", None, 0)]
+
+
+def _count_connects(monkeypatch):
+    calls = []
+    real = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **kw: calls.append(1) or real(*a, **kw))
+    return calls
+
+
+def test_session_reuses_one_connection_per_mode(store, monkeypatch):
+    src = store.add_source(name="a", kind="files", locator="{}", pg_database="ontology_src_a")
+    calls = _count_connects(monkeypatch)
+    with store.session():
+        for _ in range(20):
+            assert store.get_source("a") == src
+            store.release_lease(store.acquire_leases(["a"], "build"))  # BEGIN IMMEDIATE
+    assert len(calls) <= 2
+    calls.clear()
+    store.get_source("a")
+    assert len(calls) == 1  # outside a session: a connection per call, as before
+
+
+def test_session_commits_every_call_and_keeps_no_transaction_open(store, tmp_path):
+    """Each call is still its own transaction: another connection sees a write at once
+    and can take the write lock between calls (the web service and scheduler share it)."""
+    with store.session():
+        store.add_source(name="a", kind="files", locator="{}", pg_database="ontology_src_a")
+        other = sqlite3.connect(store.path, isolation_level=None, timeout=0.2)
+        try:
+            assert other.execute("SELECT count(*) FROM sources").fetchone()[0] == 1
+            other.execute("BEGIN IMMEDIATE")  # no lock held by the session
+            other.execute("ROLLBACK")
+        finally:
+            other.close()
+        assert store.get_source("a") is not None
+
+
+def test_session_rolls_back_a_failed_call_and_goes_on(store):
+    with store.session():
+        with pytest.raises(RuntimeError):
+            with store._conn() as conn:
+                conn.execute(
+                    "INSERT INTO sources (id, name, kind, locator, created_at, updated_at, "
+                    "project_id) VALUES ('x', 'x', 'files', '{}', 'now', 'now', ?)",
+                    (store.default_project_id,),
+                )
+                raise RuntimeError("boom")
+        with pytest.raises(RuntimeError):
+            with store._immediate() as conn:
+                conn.execute(
+                    "INSERT INTO sources (id, name, kind, locator, created_at, updated_at, "
+                    "project_id) VALUES ('y', 'y', 'files', '{}', 'now', 'now', ?)",
+                    (store.default_project_id,),
+                )
+                raise RuntimeError("boom")
+        assert store.get_source("x") is None and store.get_source("y") is None
+        store.add_source(name="a", kind="files", locator="{}", pg_database="ontology_src_a")
+    assert store.get_source("a") is not None
+
+
+def test_session_nested_calls_get_their_own_connection(store, monkeypatch):
+    """A store call made while another call's connection is open (nesting) never shares
+    that connection's transaction: it opens its own, as outside a session."""
+    with store.session():
+        with store._conn() as outer:
+            with store._conn() as inner:
+                assert inner is not outer
+        with store._immediate() as imm:
+            with store._conn() as read:
+                assert read.execute("SELECT count(*) FROM sources").fetchone()[0] == 0
+            with store._conn() as read2:
+                assert read2 is read  # the deferred connection is free again
+        with store._immediate() as imm2:
+            assert imm2 is imm
+
+
+def test_session_is_per_thread(store):
+    import threading
+
+    store.add_source(name="a", kind="files", locator="{}", pg_database="ontology_src_a")
+    seen = []
+    with store.session():
+        with store._conn() as mine:
+            pass
+
+        def other():
+            with store._conn() as theirs:
+                seen.append(theirs is mine)
+            seen.append(store.get_source("a") is not None)
+
+        t = threading.Thread(target=other)
+        t.start()
+        t.join()
+        with store._conn() as again:
+            assert again is mine
+    assert seen == [False, True]

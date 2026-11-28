@@ -1411,8 +1411,46 @@ def _ensure_wal(conn: sqlite3.Connection) -> None:
     _retry_locked(apply, conn, "switching to WAL")
 
 
+class _SessionState:
+    """One thread's :meth:`Store.session`: an idle connection per mode, and the modes
+    whose connection a call is using right now (a nested call opens its own)."""
+
+    def __init__(self) -> None:
+        self.depth = 0
+        self.idle: dict[str, sqlite3.Connection] = {}
+        self.busy: set[str] = set()
+
+    def take(self, mode: str, opener: Callable[[], sqlite3.Connection]) -> sqlite3.Connection:
+        conn = self.idle.pop(mode, None) or opener()
+        self.busy.add(mode)
+        return conn
+
+    def give_back(self, mode: str, conn: sqlite3.Connection, *, keep: bool) -> None:
+        self.busy.discard(mode)
+        if keep and self.depth > 0:
+            self.idle[mode] = conn
+        else:
+            _close_quietly(conn)
+
+    def close_all(self) -> None:
+        for conn in self.idle.values():
+            _close_quietly(conn)
+        self.idle.clear()
+
+
+def _close_quietly(conn: sqlite3.Connection) -> None:
+    try:
+        if conn.in_transaction:
+            conn.rollback()
+    except sqlite3.Error:
+        pass
+    finally:
+        conn.close()
+
+
 class Store:
-    """Thin typed wrapper. Opens a short-lived connection per call (safe across threads)."""
+    """Thin typed wrapper. Opens a short-lived connection per call (safe across threads);
+    inside :meth:`session` a thread reuses its connections (still a transaction per call)."""
 
     def __init__(self, path: Path, *, default_project_slug: str | None = None) -> None:
         """Open (and migrate) the store. *default_project_slug* = the workspace name
@@ -1574,14 +1612,77 @@ class Store:
             conn.execute("UPDATE projects SET archived_at = NULL WHERE id = ?", (current.id,))
         return self._require_project(current.id)
 
+    # --- connections ----------------------------------------------------------
+
+    def _session_state(self) -> _SessionState | None:
+        """This thread's open :meth:`session` (None outside one)."""
+        local = self.__dict__.get("_sessions")
+        state = getattr(local, "state", None) if local is not None else None
+        return state if state is not None and state.depth > 0 else None
+
     @contextmanager
-    def _conn(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000)
+    def session(self) -> Iterator[Store]:
+        """Reuse this thread's store connections for the ``with`` body (a workflow run
+        makes thousands of store calls; opening a connection per call dominated it).
+
+        Only the connection is shared, never a transaction: every call still runs in its
+        own transaction and commits (or rolls back) when it returns, exactly as outside a
+        session, so other processes see each write at once and no lock is held between
+        calls. A call made while another call's connection is still open (nesting) gets
+        a connection of its own, as before; a connection that saw a SQLite error is
+        closed and replaced. Re-entrant; other threads are unaffected."""
+        local = self.__dict__.get("_sessions")
+        if local is None:
+            local = self.__dict__.setdefault("_sessions", threading.local())
+        state = getattr(local, "state", None)
+        if state is None:
+            state = local.state = _SessionState()
+        state.depth += 1
+        try:
+            yield self
+        finally:
+            state.depth -= 1
+            if state.depth == 0:
+                state.close_all()
+
+    def _open(self, *, autocommit: bool) -> sqlite3.Connection:
+        """A new store connection: busy timeout, WAL, foreign keys on."""
+        if autocommit:
+            conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
+        else:
+            conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000)
         conn.row_factory = sqlite3.Row
         try:
             conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-            _ensure_wal(conn)
+            if not autocommit:
+                _ensure_wal(conn)
             conn.execute("PRAGMA foreign_keys=ON")
+        except BaseException:
+            conn.close()
+            raise
+        return conn
+
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        state = self._session_state()
+        mode = "deferred"
+        if state is not None and mode not in state.busy:
+            conn = state.take(mode, lambda: self._open(autocommit=False))
+            ok = False
+            try:
+                with conn:  # one transaction per call
+                    yield conn
+                ok = not conn.in_transaction
+            except sqlite3.Error:
+                raise
+            except BaseException:
+                ok = not conn.in_transaction
+                raise
+            finally:
+                state.give_back(mode, conn, keep=ok)
+            return
+        conn = self._open(autocommit=False)
+        try:
             with conn:  # one transaction per call
                 yield conn
         finally:
@@ -1591,11 +1692,16 @@ class Store:
     def _immediate(self) -> Iterator[sqlite3.Connection]:
         """A connection inside ``BEGIN IMMEDIATE`` (write lock up front): check-then-write
         sequences in it are atomic across threads and processes."""
-        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
-        conn.row_factory = sqlite3.Row
+        state = self._session_state()
+        mode = "immediate"
+        shared = state is not None and mode not in state.busy
+        if shared:
+            assert state is not None
+            conn = state.take(mode, lambda: self._open(autocommit=True))
+        else:
+            conn = self._open(autocommit=True)
+        ok = False
         try:
-            conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-            conn.execute("PRAGMA foreign_keys=ON")
             _retry_locked(lambda: conn.execute("BEGIN IMMEDIATE"), conn, "write transaction")
             conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             try:
@@ -1605,8 +1711,18 @@ class Store:
                 if conn.in_transaction:
                     conn.execute("ROLLBACK")
                 raise
+            ok = True
+        except sqlite3.Error:
+            raise
+        except BaseException:
+            ok = not conn.in_transaction
+            raise
         finally:
-            conn.close()
+            if shared:
+                assert state is not None
+                state.give_back(mode, conn, keep=ok)
+            else:
+                conn.close()
 
     # --- schema ---------------------------------------------------------------
 

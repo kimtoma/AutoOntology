@@ -8,6 +8,7 @@ cancel and changed workflows."""
 from __future__ import annotations
 
 import sqlite3
+import threading
 
 import pytest
 
@@ -96,6 +97,26 @@ def _audit(view, prefix="workflow.") -> list[str]:
             "SELECT action FROM audit_log WHERE action LIKE ? ORDER BY id", (prefix + "%",)
         ).fetchall()
     return [r[0] for r in rows]
+
+
+def test_a_run_reuses_its_store_connections(env, monkeypatch):
+    """The runner's thread opens a handful of SQLite connections per run, not dozens per
+    object (the action notifications run on their own threads and are not counted)."""
+    settings, view, backend, _ = env
+    _activate(view, sample_workflow())
+    runner = threading.get_ident()
+    opened: list[int] = []
+    real = sqlite3.connect
+
+    def connect(*a, **kw):
+        if threading.get_ident() == runner:
+            opened.append(1)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    run = _run(settings, view)
+    assert run.summary["matched"] == 4 and run.summary["actions_applied"] == 3
+    assert len(opened) <= 4, len(opened)
 
 
 # --- the sample end to end ---------------------------------------------------------------
