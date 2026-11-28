@@ -573,6 +573,13 @@ def test_cli_logic_commands(client, monkeypatch, tmp_path):
     assert "no logic candidates" in ok(["logic", "candidates"])
     data = json.loads(ok(["logic", "extract", "--json"]))  # service down: runs here
     assert data["run"]["status"] == "succeeded"
+    with sqlite3.connect(store.path) as conn:  # audited like POST /runs {"kind": "logic"}
+        started = conn.execute(
+            "SELECT target, detail_json, project_id FROM audit_log WHERE action = 'run.start'"
+        ).fetchall()
+    assert [(r[0], json.loads(r[1]), r[2]) for r in started] == [
+        (data["run"]["id"], {"kind": "logic", "actor": "cli", "via": "cli"}, view.id)
+    ]
     assert data["run"]["params"]["counts"]["stored"] == 5
     listed = ok(["logic", "candidates"])
     assert "지급기한경과" in listed and "1 error(s)" in listed and "pending" in listed

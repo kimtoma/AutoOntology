@@ -495,6 +495,7 @@ def source_add(
             )
     else:
         _fail(msg("source.unknown_kind", kind=kind), code=2)
+    _audit_to(store)("source.add", target=src.name, detail={"kind": src.kind})
     typer.echo(msg("source.next_build"))
 
 
@@ -558,6 +559,7 @@ def source_rm(
         )
     except RemoveError as exc:
         _fail(str(exc))
+    _audit_to(store)("source.delete", target=src.name, detail={"drop_db": drop_db})
 
 
 @app.command()
@@ -587,7 +589,13 @@ def build(
     log_path = jobs.jobs_log_path(settings)
     jobs.setup_job_logging(settings, console=True)
     try:
-        result = run_build(store, settings, sources=source or None, resume=resume)
+        result = run_build(
+            _tracked(store, _run_detail("build", sources=source, resume=resume)),
+            settings,
+            sources=source or None,
+            resume=resume,
+            project=store.id,
+        )
     except (jobs.JobError, BackendError) as exc:
         hint = f"\nlog: {exc.log_path}" if getattr(exc, "log_path", None) else ""
         retry = "\nretry: uv run onto build --resume" if getattr(exc, "run_id", None) else ""
@@ -637,18 +645,17 @@ def apply_decisions(
     log_path = jobs.jobs_log_path(settings)
     jobs.setup_job_logging(settings, console=True)
     try:
-        result = run_apply(store, settings, force=force)
+        result = run_apply(
+            _tracked(store, _run_detail("apply", force=force)),
+            settings,
+            force=force,
+            project=store.id,
+        )
     except (jobs.JobError, BackendError) as exc:
         hint = f"\nlog: {exc.log_path}" if getattr(exc, "log_path", None) else ""
         _fail(f"apply failed: {exc}{hint}")
     except Exception as exc:  # noqa: BLE001 - one clean line; ONTOLOGY_DEBUG=1 re-raises
         _unexpected("apply", exc, log_path)
-    # audited like POST /runs {"kind": "apply"}
-    _audit_to(store)(
-        "run.start",
-        target=result.run_id,
-        detail={"kind": "apply"} | ({"force": True} if force else {}),
-    )
     run = store.get_run(result.run_id)
     applied = (run.params.get("decisions_applied") if run else 0) or 0
     if run is not None and run.params.get("skipped"):
@@ -751,6 +758,30 @@ def _audit_to(view):
         _cli_record(accounts, action, project_id=view.id, target=target, detail=detail)
 
     return audit
+
+
+def _run_detail(kind: str, **fields) -> dict:
+    """The ``run.start`` detail ``POST /runs`` records for the same request."""
+    sources = fields.pop("sources", None)
+    detail = {k: v for k, v in {"kind": kind, **fields}.items() if v not in (None, False)}
+    return detail | ({"sources": list(sources)} if sources else {})
+
+
+def _tracked(view, detail: dict):
+    """A store for a job run in this process (pass ``project=view.id``) that audits
+    ``run.start`` with *detail* as soon as the job creates (or resumes) its run, as
+    ``POST /runs`` does."""
+    from ontology.engine.build import is_top_step
+    from ontology.store.db import root_store
+    from ontology.web.runs import TrackingStore
+
+    audit = _audit_to(view)
+    return TrackingStore(
+        root_store(view).path,
+        lambda run_id: audit("run.start", target=run_id, detail=detail),
+        lambda: False,
+        is_top_step,
+    )
 
 
 def _decide(item_id: str, decision: str, relation, term, note: str) -> None:
@@ -951,7 +982,12 @@ def export(
     try:
         jobs.setup_job_logging(settings, console=True)
         result = export_job.run_export(
-            store, settings, revision=revision, out=Path(out) if out else None, format=format
+            _tracked(store, _run_detail("export", revision=revision, format=format)),
+            settings,
+            revision=revision,
+            out=Path(out) if out else None,
+            format=format,
+            project=store.id,
         )
     except (jobs.JobError, BackendError) as exc:
         hint = f"\nlog: {exc.log_path}" if getattr(exc, "log_path", None) else ""
@@ -1541,6 +1577,7 @@ def demo(
         )
     except (onboarding.SampleSetError, RemoveError, LoadError, JobError, ValueError) as exc:
         _fail(msg("demo.register_failed", error=exc))
+    _audit_to(store)("samples.load", target=set_name[:100])  # as POST /samples/load
 
     _step(3, total, msg("demo.step.build"))
     rows = onboarding.duration_rows(set_name, settings.chat_provider)

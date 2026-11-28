@@ -2584,7 +2584,9 @@ def _logic_local_run() -> dict[str, Any]:
     view = base._store(settings, write=True)
     jobs.setup_job_logging(settings, console=not _json_mode())
     try:
-        result = run_logic(view, settings)
+        result = run_logic(
+            base._tracked(view, base._run_detail("logic")), settings, project=view.id
+        )
     except jobs.JobError as exc:
         _error("run_not_started", str(exc), 1)
     run = view.get_run(result.run_id)

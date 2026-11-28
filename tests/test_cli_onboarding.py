@@ -328,6 +328,14 @@ def test_demo_asks_before_replacing_a_source(demo_env, isolated_env, monkeypatch
     res = runner.invoke(app, ["demo", "--no-open"], input="y\n")
     assert res.exit_code == 0, res.output
     assert removed == ["quick"]
+    # each registration is audited like POST /samples/load
+    from ontology.store.accounts import Accounts
+
+    loads = [e for e in Accounts(store).list_audit() if e["action"] == "samples.load"]
+    assert [(e["target"], e["actor"], e["detail"].get("via")) for e in loads] == [
+        ("quickstart", "cli", "cli")
+    ] * 2
+    assert {e["project_id"] for e in loads} == {store.project().id}
 
 
 def test_demo_replace_flag_skips_the_question(demo_env, isolated_env, monkeypatch):

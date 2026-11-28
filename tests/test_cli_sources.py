@@ -84,7 +84,7 @@ def test_build_passes_sources_and_resume(isolated_env, monkeypatch):
     calls = []
 
     def fake(store, settings, **kw):
-        calls.append(kw)
+        calls.append({k: v for k, v in kw.items() if k != "project"})
         return build_job.BuildResult(run_id="b1", status="succeeded", revision=3, counts={})
 
     monkeypatch.setattr(build_job, "run_build", fake)
@@ -268,3 +268,77 @@ def test_build_unexpected_error_is_one_line(isolated_env, monkeypatch):
     monkeypatch.setenv("ONTOLOGY_DEBUG", "1")
     res = runner.invoke(app, ["build"])
     assert isinstance(res.exception, KeyError)
+
+
+# --- audit: the entries the web routes write for the same change -------------------------
+
+
+def _audit(*actions):
+    from ontology.config import Settings
+    from ontology.store.accounts import Accounts
+    from ontology.store.db import Store
+
+    store = Store.for_home(Settings.from_env().home)
+    rows = reversed(Accounts(store).list_audit(limit=500))
+    return [r for r in rows if r["action"] in actions], store.project().id
+
+
+def test_cli_source_add_and_rm_are_audited(isolated_env, monkeypatch):
+    docs = Path(isolated_env) / "docs"
+    docs.mkdir()
+    (docs / "a.md").write_text("# A\n\ntext\n")
+    res = runner.invoke(app, ["source", "add", str(docs), "--name", "notes", "--kind", "documents"])
+    assert res.exit_code == 0, res.output
+    _rm_setup(isolated_env, monkeypatch, _RmClient())
+    assert runner.invoke(app, ["source", "rm", "demo"]).exit_code == 0
+    bad = runner.invoke(app, ["source", "rm", "nope"])  # refused: no entry
+    assert bad.exit_code == 1
+    rows, pid = _audit("source.add", "source.delete")
+    assert [(r["action"], r["target"], r["detail"]) for r in rows] == [
+        ("source.add", "notes", {"kind": "documents", "actor": "cli", "via": "cli"}),
+        ("source.add", "demo", {"kind": "files", "actor": "cli", "via": "cli"}),
+        ("source.delete", "demo", {"drop_db": False, "actor": "cli", "via": "cli"}),
+    ]
+    assert {r["project_id"] for r in rows} == {pid}
+
+
+def test_cli_build_audits_run_start_once_the_run_exists(isolated_env, monkeypatch):
+    _demo_source(isolated_env)
+    seen = []
+
+    def fake(store, settings, **kw):
+        run = store.create_run(kind="build", source_id=None, project_id=kw["project"])
+        seen.append(_audit("run.start")[0])  # written as soon as the run id exists
+        store.update_run(run.id, status="succeeded")
+        return build_job.BuildResult(run_id=run.id, status="succeeded", revision=1, counts={})
+
+    monkeypatch.setattr(build_job, "run_build", fake)
+    res = runner.invoke(app, ["build", "--resume", "--source", "demo"])
+    assert res.exit_code == 0, res.output
+    (row,) = seen[0]
+    assert row["detail"] == {
+        "kind": "build",
+        "resume": True,
+        "sources": ["demo"],
+        "actor": "cli",
+        "via": "cli",
+    }
+    rows, pid = _audit("run.start")
+    assert rows == [row] and row["project_id"] == pid and row["target"].startswith("20")
+
+
+def test_cli_export_audits_run_start(isolated_env, monkeypatch):
+    from ontology.engine import export_job
+
+    def fake(store, settings, **kw):
+        run = store.create_run(kind="export", source_id=None, project_id=kw["project"])
+        store.update_run(run.id, status="succeeded")
+        return jobs.RunResult(run_id=run.id, status="succeeded", details={})
+
+    monkeypatch.setattr(export_job, "run_export", fake)
+    res = runner.invoke(app, ["export", "--revision", "2", "--format", "rdf"])
+    assert res.exit_code == 0, res.output
+    rows, pid = _audit("run.start")
+    assert [(r["detail"], r["project_id"]) for r in rows] == [
+        ({"kind": "export", "revision": 2, "format": "rdf", "actor": "cli", "via": "cli"}, pid)
+    ]
