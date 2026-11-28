@@ -29,13 +29,15 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-import httpx
 import typer
 
 from ontology.i18n import msg
+
+if TYPE_CHECKING:  # httpx is imported on first use: ``onto version``/``--help`` skip it
+    import httpx
 
 
 class _Cli:
@@ -145,6 +147,8 @@ class _Caller:
 
     def raw(self, method: str, path: str, **kw: Any) -> httpx.Response:
         """The response of a successful call (an error answer raises :class:`CallError`)."""
+        import httpx
+
         try:
             resp = self.client.request(method, api_path(path, self.project), **kw)
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
@@ -159,6 +163,8 @@ class _Caller:
         return self.raw(method, path, **kw).json()
 
     def events(self, method: str, path: str, **kw: Any) -> Iterator[tuple[str, Any, str | None]]:
+        import httpx
+
         try:
             with self.client.stream(method, api_path(path, self.project), **kw) as resp:
                 if resp.status_code >= 400:
@@ -173,6 +179,8 @@ class _Caller:
 
 def http_client(settings: Any) -> httpx.Client:
     """The HTTP client of :class:`ServiceClient` (tests replace this function)."""
+    import httpx
+
     return httpx.Client(
         base_url=settings.service_url, timeout=httpx.Timeout(600.0, connect=5.0), trust_env=False
     )

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -325,12 +326,31 @@ def derived_env_keys(env: dict[str, str] | None = None) -> set[str]:
     return {k for k in raw.split(",") if k}
 
 
+#: Parsed ``.env`` files, keyed by path, each with the stat signature it was parsed at
+#: (``i18n.msg`` asks for the layer on every message, hundreds of times per command).
+_DOTENV_CACHE: dict[str, tuple[tuple[int, int, int, int], dict[str, str]]] = {}
+
+
 def dotenv_layer(env_file: Path | None = None) -> dict[str, str]:
-    """The ``.env`` file's own values (not what ``os.environ`` ended up with)."""
+    """The ``.env`` file's own values (not what ``os.environ`` ended up with).
+
+    Parsed once per file version: a rewrite, replacement or removal of the file (or
+    another ``ONTOLOGY_ENV_FILE``) is seen on the next call. Returns a fresh copy."""
     path = env_file or env_file_path()
-    if not path.is_file():
+    try:
+        st = path.stat()
+    except OSError:
         return {}
-    return with_legacy_env({k: v for k, v in dotenv_values(path).items() if v is not None})[0]
+    if not stat.S_ISREG(st.st_mode):
+        return {}
+    key = str(path)
+    sig = (st.st_ino, st.st_dev, st.st_mtime_ns, st.st_size)
+    hit = _DOTENV_CACHE.get(key)
+    if hit is not None and hit[0] == sig:
+        return dict(hit[1])
+    values = with_legacy_env({k: v for k, v in dotenv_values(path).items() if v is not None})[0]
+    _DOTENV_CACHE[key] = (sig, values)
+    return dict(values)
 
 
 def shell_value(name: str) -> str | None:

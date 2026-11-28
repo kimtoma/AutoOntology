@@ -82,6 +82,46 @@ def test_lang_from_dotenv(monkeypatch, tmp_path):
     assert i18n.current_lang() == "ko"
 
 
+def test_lang_follows_a_rewritten_dotenv(monkeypatch, tmp_path):
+    """The parsed .env is cached per process, yet a rewrite, a replacement or another
+    ONTOLOGY_ENV_FILE is seen on the next message."""
+    env = tmp_path / ".env"
+    env.write_text("ONTOLOGY_LANG=ko\n", encoding="utf-8")
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(env))
+    monkeypatch.delenv("ONTOLOGY_LANG", raising=False)
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+    assert i18n.current_lang() == "ko"
+    env.write_text("ONTOLOGY_LANG=en\n", encoding="utf-8")  # same size, in place
+    assert i18n.current_lang() == "en"
+    new = tmp_path / ".env.new"
+    new.write_text("ONTOLOGY_LANG=ko\n", encoding="utf-8")
+    os.replace(new, env)  # atomic replace, as the writers do
+    assert i18n.current_lang() == "ko"
+    env.unlink()
+    assert i18n.current_lang() == "en"
+    other = tmp_path / "other.env"
+    other.write_text("ONTOLOGY_LANG=ko\n", encoding="utf-8")
+    monkeypatch.setenv("ONTOLOGY_ENV_FILE", str(other))
+    assert i18n.current_lang() == "ko"
+    monkeypatch.setenv("ONTOLOGY_LANG", "en")  # the shell still wins
+    assert i18n.current_lang() == "en"
+
+
+def test_dotenv_layer_is_parsed_once_and_returns_a_copy(monkeypatch, tmp_path):
+    from ontology import config
+
+    env = tmp_path / ".env"
+    env.write_text("ONTOLOGY_LANG=ko\nONTOLOGY_PORT=7801\n", encoding="utf-8")
+    calls = []
+    real = config.dotenv_values
+    monkeypatch.setattr(config, "dotenv_values", lambda p: calls.append(p) or real(p))
+    first = config.dotenv_layer(env)
+    first["ONTOLOGY_PORT"] = "mutated"
+    for _ in range(50):
+        assert config.dotenv_layer(env)["ONTOLOGY_PORT"] == "7801"
+    assert len(calls) == 1
+
+
 def test_msg_formats_and_falls_back_to_english(monkeypatch):
     assert i18n.msg("init.chat_ok", "ko", provider="claude", model="m") == "  ok    채팅: claude m"
     monkeypatch.delitem(ko.MESSAGES, "init.chat_ok")
