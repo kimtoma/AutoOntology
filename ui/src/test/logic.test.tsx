@@ -10,7 +10,7 @@ import type {
   ActionInfo, ActionPreview, ActionRun, LogicDef, ObjectDetail, ObjectType, ReviewItem,
 } from "@/lib/api"
 import { AuthContext, OFF_ME, type Me } from "@/lib/auth"
-import { toYaml } from "@/lib/logic"
+import { toYaml, typeOf } from "@/lib/logic"
 import { ProjectContext } from "@/lib/project"
 import ConnectPage from "@/pages/connect"
 import LogicPage from "@/pages/logic"
@@ -180,6 +180,33 @@ const DECISION = (decision: "accept" | "reject", payload: Record<string, unknown
 })
 
 /* --- Objects ---------------------------------------------------------------------------------- */
+
+describe("typeOf", () => {
+  it("resolves a type the way the server does: id, class, label, then table or schema.table", () => {
+    const types = [INV, CUS, OLD]
+    expect(typeOf(types, "ot_inv")).toBe(INV)
+    expect(typeOf(types, "term-t-cus")).toBe(CUS)
+    expect(typeOf(types, "Invoice")).toBe(INV)
+    expect(typeOf(types, "invoice")).toBe(INV)
+    expect(typeOf(types, "invoices")).toBe(INV)
+    expect(typeOf(types, " public.invoices ")).toBe(INV)
+    expect(typeOf(types, "PUBLIC.Invoices")).toBe(INV)
+    expect(typeOf(types, "customers")).toBe(CUS)
+    expect(typeOf(types, "nope")).toBeUndefined()
+    expect(typeOf(types, "")).toBeUndefined()
+    expect(typeOf(undefined, "invoices")).toBeUndefined()
+  })
+
+  it("prefers a label to a table, live types to retired ones and is undefined when ambiguous", () => {
+    const named = { ...CUS, label: "invoices" }
+    expect(typeOf([INV, named], "invoices")).toBe(named)
+    const retired = { ...INV, id: "ot_inv2", name: "term-t-inv2", status: "retired" }
+    expect(typeOf([retired, INV], "invoices")).toBe(INV)
+    const proposed = { ...INV, id: "ot_inv3", name: "term-t-inv3", status: "proposed" }
+    expect(typeOf([proposed, INV], "invoices")).toBe(INV)
+    expect(typeOf([proposed, { ...proposed, id: "ot_inv4", name: "term-t-inv4" }], "invoices")).toBeUndefined()
+  })
+})
 
 describe("Objects page", () => {
   it("lists types (active first, proposed and broken with their reason) and a type's objects", async () => {

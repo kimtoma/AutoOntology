@@ -141,9 +141,37 @@ export function missingParams(params: ActionParam[], values: ParamValues): strin
 
 /* --- object types ------------------------------------------------------------------------------- */
 
-/** The object type a spec names (by label or class name). */
+/** The object type a spec names, resolved as the server does (ontology/objects/naming.py): by
+ *  id, class name, label (exactly, then ignoring case), then table or schema.table (exactly, then
+ *  ignoring case). The first step that matches decides; several matches drop retired types, then
+ *  keep active ones; still several is ambiguous (undefined). */
 export function typeOf(types: ObjectType[] | undefined, name: string): ObjectType | undefined {
-  return (types ?? []).find((ot) => ot.name === name || ot.label === name || ot.id === name)
+  const ref = (name ?? "").trim()
+  if (!ref || ref.length > 200) return undefined
+  const folded = ref.toLowerCase()
+  const qualified = (ot: ObjectType) => (ot.schema ? `${ot.schema}.${ot.table}` : ot.table)
+  const steps: ((ot: ObjectType) => boolean)[] = [
+    (ot) => !!ot.id && ot.id === ref,
+    (ot) => ot.name === ref,
+    (ot) => !!ot.label && ot.label === ref,
+    (ot) => !!ot.label && ot.label.toLowerCase() === folded,
+    (ot) => !!ot.table && (ot.table === ref || qualified(ot) === ref),
+    (ot) => !!ot.table && (ot.table.toLowerCase() === folded || qualified(ot).toLowerCase() === folded),
+  ]
+  for (const step of steps) {
+    let found = (types ?? []).filter(step)
+    if (!found.length) continue
+    if (found.length > 1) {
+      const live = found.filter((ot) => ot.status !== "retired")
+      found = live.length ? live : found
+    }
+    if (found.length > 1) {
+      const active = found.filter((ot) => ot.status === "active")
+      if (active.length) found = active
+    }
+    return found.length === 1 ? found[0] : undefined
+  }
+  return undefined
 }
 
 /** Active types first, then proposed, broken and retired; by label within each. */

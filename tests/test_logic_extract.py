@@ -596,6 +596,34 @@ def test_cli_logic_commands(client, monkeypatch, tmp_path):
     assert "lc_" in ok(["logic", "candidates", "--status", "decided"])
 
 
+def test_cli_review_accept_and_undo_of_logic_candidates(client):
+    """`onto review accept lg:...` saves the draft definition like the web decision."""
+    from typer.testing import CliRunner
+
+    from ontology.cli import app
+
+    c, store, view, runs, llm = client
+    run_id = c.post(f"{API}/runs", json={"kind": "logic"}).json()["run_id"]
+    runs.join(run_id, 30)
+    items = _items(c)
+    runner = CliRunner()
+    out = runner.invoke(app, ["review", "accept", items["연체일수"]["id"]])
+    assert out.exit_code == 0, out.output
+    d = c.get(f"{API}/logic/function/연체일수").json()["definition"]
+    assert (d["status"], d["origin"], d["version"]) == ("draft", "extracted", 1)
+    out = runner.invoke(app, ["review", "reject", items["미수금"]["id"]])
+    assert out.exit_code == 0, out.output
+    assert set(_items(c)) == {"지급기한경과", "독촉단계기록", "연체독촉"}
+    out = runner.invoke(app, ["review", "undo", items["연체일수"]["id"]])
+    assert out.exit_code == 0, out.output
+    assert c.get(f"{API}/logic/function/연체일수").json()["definition"]["status"] == "retired"
+    # the web path saves the next version of the same draft
+    resp = c.post(f"{API}/review/{items['연체일수']['id']}/decision", json={"decision": "accept"})
+    assert resp.status_code == 200, resp.text
+    again = c.get(f"{API}/logic/function/연체일수").json()["definition"]
+    assert (again["status"], again["version"]) == ("draft", 2)
+
+
 # --- roles --------------------------------------------------------------------------------
 
 

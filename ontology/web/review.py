@@ -586,3 +586,56 @@ class Inbox:
 
             return candidates.undo(scoped(self.store), subject, actor=actor)
         return self.decisions.delete(KIND_OF[category], subject)
+
+
+def decide_item(
+    inbox: Inbox,
+    settings: Any,
+    item_id: str,
+    *,
+    decision: str,
+    relation: str | None = None,
+    term_id: str | None = None,
+    note: str = "",
+    decided_by: str = "local",
+    spec: Any = None,
+) -> Decision:
+    """Decide *item_id* the same way from the web API and the CLI. An ``ob:`` item takes
+    effect at once (accept: the type is verified against its source and bound; reject:
+    retired) and is recorded only when that succeeds; an ``lg:`` item saves its draft
+    definition (see :meth:`Inbox.decide`)."""
+    if item_id.startswith("ob:"):
+        from ontology.objects import service as objects
+        from ontology.objects.reader import ObjectError
+
+        inbox.item(item_id)
+        if decision not in ("accept", "reject"):
+            raise ReviewError(400, "invalid_decision", "an objects item takes accept or reject")
+        if relation or term_id:
+            raise ReviewError(400, "invalid_request", "relation/term_id are for alignment items")
+        try:
+            otype = objects.decide(settings, scoped(inbox.store), item_id[3:], decision, decided_by)
+        except ObjectError as exc:
+            raise ReviewError(exc.status, exc.code, exc.message, **exc.extra) from exc
+        inbox.items[item_id]["object_type"] = otype.to_dict()
+    return inbox.decide(
+        item_id,
+        decision=decision,
+        relation=relation,
+        term_id=term_id,
+        note=note,
+        decided_by=decided_by,
+        spec=spec,
+    )
+
+
+def undo_item(inbox: Inbox, item_id: str, *, actor: str = "local") -> bool:
+    """Remove the decision on *item_id* (web API and CLI); an ``ob:`` item's type is a
+    proposal again. False when there was no decision."""
+    if not inbox.undo(item_id, actor=actor):
+        return False
+    if item_id.startswith("ob:"):
+        from ontology.objects import service as objects
+
+        objects.undo(scoped(inbox.store), item_id[3:])
+    return True

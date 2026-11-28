@@ -819,6 +819,55 @@ def test_review_lists_object_proposals_and_accept_binds_at_once(client, backend)
     assert "review.decide" in entries and "review.undo" in entries
 
 
+def test_cli_review_accept_reject_undo_of_objects_matches_the_web_path(client, backend):
+    """`onto review accept ob:...` binds the type like the web decision does (the same key
+    and title), reject retires it and undo makes it a proposal again."""
+    from typer.testing import CliRunner
+
+    from ontology.cli import app
+
+    c, settings, store = client
+    seed(store)
+    runner = CliRunner()
+
+    def ok(args):
+        out = runner.invoke(app, args)
+        assert out.exit_code == 0, out.output
+        return out.output
+
+    ok(["review", "accept", f"ob:{CON}"])
+    cli_type = store.project().object_types().get(CON)
+    assert cli_type.status == "active" and cli_type.key_checked
+    assert DecisionStore(store).get("object", CON).decision == "accept"
+    pending = c.get(f"{API}/review/pending-count").json()
+    assert pending["counts"]["objects"] == 2
+    assert c.get(f"{API}/objects/{CON}").json()["total"] == 3
+    ok(["review", "undo", f"ob:{CON}"])
+    assert store.project().object_types().get(CON).status == "proposed"
+    assert DecisionStore(store).get("object", CON) is None
+    # the web path binds the same key and title
+    resp = c.post(f"{API}/review/ob:{CON}/decision", json={"decision": "accept"})
+    assert resp.status_code == 200, resp.text
+    web_type = store.project().object_types().get(CON)
+    assert (web_type.key, web_type.title_column) == (cli_type.key, cli_type.title_column)
+    assert web_type.status == "active"
+    # reject retires; undo makes it a proposal again
+    ok(["review", "reject", f"ob:{INV}"])
+    assert store.project().object_types().get(INV).status == "retired"
+    ok(["review", "undo", f"ob:{INV}"])
+    assert store.project().object_types().get(INV).status == "proposed"
+    bad = runner.invoke(app, ["review", "acknowledge", f"ob:{CUS}"])
+    assert bad.exit_code == 1 and "invalid_decision" in bad.output
+    # a key that is not unique is refused and nothing is recorded
+    backend.tables["public.customers"]["rows"].append(
+        dict(backend.tables["public.customers"]["rows"][0])
+    )
+    bad = runner.invoke(app, ["review", "accept", f"ob:{CUS}"])
+    assert bad.exit_code == 1 and "key_not_unique" in bad.output
+    assert store.project().object_types().get(CUS).status == "proposed"
+    assert DecisionStore(store).get("object", CUS) is None
+
+
 def test_accepting_a_type_without_a_unique_key_is_refused(client, backend):
     c, settings, store = client
     seed(store)
