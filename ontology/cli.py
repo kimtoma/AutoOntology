@@ -662,6 +662,10 @@ def _inbox(settings, store, *, with_sources: bool = True):
     snaps = store.list_snapshots(2)
     models = [MergedOntology.from_dict(store.get_snapshot(s.revision).model) for s in snaps]
     rows = freshness(store, settings) if with_sources else []
+    if snaps:  # object type proposals, as the web inbox syncs them
+        from ontology.objects.binding import ensure_synced
+
+        ensure_synced(store, models[0], snaps[0].revision)
     return Inbox(store, models[0] if models else None, models[1] if len(models) > 1 else None, rows)
 
 
@@ -728,13 +732,15 @@ def review_list(
 
 
 def _decide(item_id: str, decision: str, relation, term, note: str) -> None:
-    from ontology.web.review import ReviewError
+    from ontology.web.review import ReviewError, decide_item
 
     settings = _settings()
     store = _store(settings, write=True)
     inbox = _inbox(settings, store, with_sources=False)
     try:
-        d = inbox.decide(
+        d = decide_item(
+            inbox,
+            settings,
             item_id,
             decision=decision,
             relation=relation,
@@ -745,24 +751,31 @@ def _decide(item_id: str, decision: str, relation, term, note: str) -> None:
     except ReviewError as exc:
         _fail(f"{exc.error}: {exc.detail}")
     rel = f" ({d.relation})" if d.relation else ""
+    if item_id.startswith(("ob:", "lg:")):  # takes effect at once, no apply run
+        typer.echo(f"{item_id}: {d.decision}{rel}")
+        return
     typer.echo(f"{item_id}: {d.decision}{rel}; run `uv run onto apply` to snapshot it")
 
 
 @review_app.command("accept")
 def review_accept(
-    item_id: str = typer.Argument(..., help="al:<id>, ax:<id> or alias:<term id>|<alias>"),
+    item_id: str = typer.Argument(
+        ..., help="al:<id>, ax:<id>, ob:<type>, lg:<candidate> or alias:<term id>|<alias>"
+    ),
     relation: str = typer.Option(None, "--relation", help="same | related | narrower | broader"),
     term: str = typer.Option(None, "--term", help="Term id (default: the item's)."),
     note: str = typer.Option("", "--note"),
 ) -> None:
-    """Accept an alignment proposal, an axiom or a rejected alias."""
+    """Accept an alignment proposal, an axiom, a rejected alias, an object type (bound at
+    once) or a logic candidate (saved as a draft definition)."""
     _decide(item_id, "accept", relation, term, note)
 
 
 @review_app.command("reject")
 def review_reject(
     item_id: str = typer.Argument(
-        ..., help="al:<id>, ax:<id>, fold:<id> or alias:<term id>|<alias>"
+        ...,
+        help="al:<id>, ax:<id>, fold:<id>, ob:<type>, lg:<candidate> or alias:<term id>|<alias>",
     ),
     note: str = typer.Option("", "--note"),
 ) -> None:
@@ -783,15 +796,19 @@ def review_acknowledge(
 @review_app.command("undo")
 def review_undo(item_id: str = typer.Argument(...)) -> None:
     """Remove the decision on an item (the align judge decides again)."""
-    from ontology.web.review import ReviewError
+    from ontology.web.review import ReviewError, undo_item
 
     settings = _settings()
     try:
-        removed = _inbox(settings, _store(settings, write=True), with_sources=False).undo(item_id)
+        inbox = _inbox(settings, _store(settings, write=True), with_sources=False)
+        removed = undo_item(inbox, item_id)
     except ReviewError as exc:
         _fail(f"{exc.error}: {exc.detail}")
     if not removed:
         _fail(f"no decision on {item_id}")
+    if item_id.startswith(("ob:", "lg:")):
+        typer.echo(f"{item_id}: decision removed")
+        return
     typer.echo(f"{item_id}: decision removed; run `uv run onto apply` to snapshot it")
 
 

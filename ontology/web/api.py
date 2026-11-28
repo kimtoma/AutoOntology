@@ -1031,28 +1031,18 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
     def review_decide(
         item_id: str, body: dict[str, Any], ctx: ProjectContext = Ctx
     ) -> dict[str, Any]:
+        from ontology.web.review import decide_item
+
         ctx.require(_decision_permission(item_id))
         try:
             req = DecisionIn.model_validate(body)
         except ValidationError as exc:
             raise ApiError(400, "invalid_request", _validation_text(exc)) from exc
         inbox = api.inbox(project=ctx.store)  # items and decisions of this project only
-        if item_id.startswith("ob:"):  # an object type: verified and bound at once
-            from ontology.objects import service as objects
-
-            _review(lambda: inbox.item(item_id))
-            if req.decision not in ("accept", "reject"):
-                raise ApiError(400, "invalid_decision", "an objects item takes accept or reject")
-            if req.relation or req.term_id:
-                raise ApiError(400, "invalid_request", "relation/term_id are for alignment items")
-            otype = object_call(
-                lambda: objects.decide(
-                    api.settings, ctx.store, item_id[3:], req.decision, ctx.actor
-                )
-            )
-            inbox.items[item_id]["object_type"] = otype.to_dict()
         decision = _review(
-            lambda: inbox.decide(
+            lambda: decide_item(
+                inbox,
+                api.settings,
                 item_id,
                 decision=req.decision,
                 relation=req.relation,
@@ -1094,14 +1084,12 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
 
     @router.delete("/review/{item_id:path}/decision")
     def review_undo(item_id: str, ctx: ProjectContext = Ctx) -> dict[str, Any]:
+        from ontology.web.review import undo_item
+
         ctx.require(_decision_permission(item_id))
         inbox = api.inbox(project=ctx.store)
-        if not _review(lambda: inbox.undo(item_id, actor=ctx.actor)):
+        if not _review(lambda: undo_item(inbox, item_id, actor=ctx.actor)):
             raise ApiError(404, "no_decision", f"no decision on {item_id[:80]!r}")
-        if item_id.startswith("ob:"):
-            from ontology.objects import service as objects
-
-            objects.undo(ctx.store, item_id[3:])  # a proposal again
         ctx.audit("review.undo", target=item_id[:300])
         return {"removed": item_id}
 
