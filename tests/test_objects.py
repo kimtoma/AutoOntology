@@ -866,6 +866,24 @@ def test_cli_review_accept_reject_undo_of_objects_matches_the_web_path(client, b
     assert bad.exit_code == 1 and "key_not_unique" in bad.output
     assert store.project().object_types().get(CUS).status == "proposed"
     assert DecisionStore(store).get("object", CUS) is None
+    # audited like the web route: one entry per decision, actor cli (web: local)
+    entries = [
+        (e["action"], e["target"], e["actor"], e["detail"].get("decision"), e["project_id"])
+        for e in reversed(
+            __import__("ontology.store.accounts", fromlist=["Accounts"])
+            .Accounts(store)
+            .list_audit()
+        )
+        if e["action"].startswith("review.")
+    ]
+    pid = store.project().id
+    assert entries == [
+        ("review.decide", f"ob:{CON}", "cli", "accept", pid),
+        ("review.undo", f"ob:{CON}", "cli", None, pid),
+        ("review.decide", f"ob:{CON}", "local", "accept", pid),
+        ("review.decide", f"ob:{INV}", "cli", "reject", pid),
+        ("review.undo", f"ob:{INV}", "cli", None, pid),
+    ]
 
 
 def test_accepting_a_type_without_a_unique_key_is_refused(client, backend):

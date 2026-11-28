@@ -35,6 +35,7 @@ it is rebuilt from the copy the decision stored (``payload.item``).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from ontology.store.alignments import AlignmentRecord, AlignmentStore
@@ -588,22 +589,29 @@ class Inbox:
         return self.decisions.delete(KIND_OF[category], subject)
 
 
+#: Records an audit entry: ``audit(action, target=..., detail=...)`` (the web route's
+#: ``ProjectContext.audit``, the CLI's entry by ``cli`` / ``--as``).
+Audit = Callable[..., None]
+
+
 def decide_item(
     inbox: Inbox,
     settings: Any,
     item_id: str,
     *,
     decision: str,
+    audit: Audit,
     relation: str | None = None,
     term_id: str | None = None,
     note: str = "",
     decided_by: str = "local",
     spec: Any = None,
 ) -> Decision:
-    """Decide *item_id* the same way from the web API and the CLI. An ``ob:`` item takes
-    effect at once (accept: the type is verified against its source and bound; reject:
-    retired) and is recorded only when that succeeds; an ``lg:`` item saves its draft
-    definition (see :meth:`Inbox.decide`)."""
+    """Decide *item_id* the same way from the web API and the CLI, and audit it once
+    (``logic.accept|reject`` for an ``lg:`` item, else ``review.decide``). An ``ob:`` item
+    takes effect at once (accept: the type is verified against its source and bound;
+    reject: retired) and is recorded only when that succeeds; an ``lg:`` item saves its
+    draft definition (see :meth:`Inbox.decide`)."""
     if item_id.startswith("ob:"):
         from ontology.objects import service as objects
         from ontology.objects.reader import ObjectError
@@ -618,7 +626,7 @@ def decide_item(
         except ObjectError as exc:
             raise ReviewError(exc.status, exc.code, exc.message, **exc.extra) from exc
         inbox.items[item_id]["object_type"] = otype.to_dict()
-    return inbox.decide(
+    recorded = inbox.decide(
         item_id,
         decision=decision,
         relation=relation,
@@ -627,15 +635,39 @@ def decide_item(
         decided_by=decided_by,
         spec=spec,
     )
+    if item_id.startswith("lg:"):
+        payload = recorded.payload
+        name = payload.get("def_name") or payload.get("name")
+        audit(
+            f"logic.{decision}",
+            target=f"{payload.get('kind')}:{name}"[:300],
+            detail={
+                "candidate": item_id[3:],
+                **(
+                    {"version": payload.get("version"), "edited": payload.get("edited")}
+                    if decision == "accept"
+                    else {}
+                ),
+            },
+        )
+    else:
+        audit(
+            "review.decide",
+            target=item_id[:300],
+            detail={"decision": decision, **({"relation": relation} if relation else {})},
+        )
+    return recorded
 
 
-def undo_item(inbox: Inbox, item_id: str, *, actor: str = "local") -> bool:
-    """Remove the decision on *item_id* (web API and CLI); an ``ob:`` item's type is a
-    proposal again. False when there was no decision."""
+def undo_item(inbox: Inbox, item_id: str, *, audit: Audit, actor: str = "local") -> bool:
+    """Remove the decision on *item_id* (web API and CLI) and audit ``review.undo``; an
+    ``ob:`` item's type is a proposal again. False (nothing audited) when there was no
+    decision."""
     if not inbox.undo(item_id, actor=actor):
         return False
     if item_id.startswith("ob:"):
         from ontology.objects import service as objects
 
         objects.undo(scoped(inbox.store), item_id[3:])
+    audit("review.undo", target=item_id[:300])
     return True

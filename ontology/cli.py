@@ -643,6 +643,12 @@ def apply_decisions(
         _fail(f"apply failed: {exc}{hint}")
     except Exception as exc:  # noqa: BLE001 - one clean line; ONTOLOGY_DEBUG=1 re-raises
         _unexpected("apply", exc, log_path)
+    # audited like POST /runs {"kind": "apply"}
+    _audit_to(store)(
+        "run.start",
+        target=result.run_id,
+        detail={"kind": "apply"} | ({"force": True} if force else {}),
+    )
     run = store.get_run(result.run_id)
     applied = (run.params.get("decisions_applied") if run else 0) or 0
     if run is not None and run.params.get("skipped"):
@@ -731,6 +737,22 @@ def review_list(
         )
 
 
+def _audit_to(view):
+    """``audit(action, target=..., detail=...)`` on project *view* by the CLI: actor
+    ``cli`` (``--as <email>``: that user), ``via: cli`` -- the entries the web routes
+    write for the same change."""
+    from ontology.cli_ops import _cli_record
+    from ontology.store.accounts import Accounts
+    from ontology.store.db import root_store
+
+    accounts = Accounts(root_store(view))
+
+    def audit(action: str, target: str = "", detail: dict | None = None) -> None:
+        _cli_record(accounts, action, project_id=view.id, target=target, detail=detail)
+
+    return audit
+
+
 def _decide(item_id: str, decision: str, relation, term, note: str) -> None:
     from ontology.web.review import ReviewError, decide_item
 
@@ -747,6 +769,7 @@ def _decide(item_id: str, decision: str, relation, term, note: str) -> None:
             term_id=term,
             note=(note or "").strip(),
             decided_by="local",
+            audit=_audit_to(store),
         )
     except ReviewError as exc:
         _fail(f"{exc.error}: {exc.detail}")
@@ -800,8 +823,9 @@ def review_undo(item_id: str = typer.Argument(...)) -> None:
 
     settings = _settings()
     try:
-        inbox = _inbox(settings, _store(settings, write=True), with_sources=False)
-        removed = undo_item(inbox, item_id)
+        store = _store(settings, write=True)
+        inbox = _inbox(settings, store, with_sources=False)
+        removed = undo_item(inbox, item_id, audit=_audit_to(store))
     except ReviewError as exc:
         _fail(f"{exc.error}: {exc.detail}")
     if not removed:

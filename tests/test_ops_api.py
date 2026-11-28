@@ -267,6 +267,87 @@ def test_cli_review_and_apply(ops, monkeypatch):  # noqa: F811
     assert runner.invoke(cli.app, ["review", "undo", item]).exit_code == 1
 
 
+def _audit_rows(store, *actions):
+    from ontology.store.accounts import Accounts
+    from ontology.store.db import root_store
+
+    rows = Accounts(root_store(store)).list_audit(limit=500)
+    return [r for r in reversed(rows) if not actions or r["action"] in actions]
+
+
+def test_cli_review_and_apply_write_the_audit_log(ops, monkeypatch):  # noqa: F811
+    """`onto review accept|reject|acknowledge|undo` and `onto apply` audit like the web
+    routes: the same action, target and detail; actor ``cli`` (or ``--as``), via cli."""
+    from typer.testing import CliRunner
+
+    from ontology import cli
+    from ontology.engine import align as align_job
+    from ontology.engine import apply as apply_job
+    from ontology.store.accounts import Accounts
+    from ontology.store.db import root_store
+
+    runner = CliRunner()
+    store = ops["store"]
+    project_id = store.project().id  # the default project
+    user = Accounts(root_store(store)).create_user("kim@example.com")
+    rows = _rows(ops)
+    item = f"al:{rows['수납'].concept_id}"
+    axiom = f"ax:{rows['청구서'].concept_id}"
+
+    def ok(args):
+        res = runner.invoke(cli.app, args)
+        assert res.exit_code == 0, res.output
+        return res.output
+
+    ok(["review", "accept", item, "--relation", "related"])
+    ok(["--as", "kim@example.com", "review", "reject", axiom])
+    ok(["review", "undo", axiom])
+    bad = runner.invoke(cli.app, ["review", "acknowledge", axiom])  # refused: no entry
+    assert bad.exit_code == 1
+    _no_models(monkeypatch)
+    monkeypatch.setattr(apply_job, "BackendClient", lambda url: ops["client"])
+    monkeypatch.setattr(align_job, "UpstreamTermWriter", lambda s, c, *_a, **_k: ClientWriter(c))
+    ok(["apply", "--force"])
+    got = _audit_rows(store, "review.decide", "review.undo", "run.start")
+    assert [(r["action"], r["target"]) for r in got[:3]] == [
+        ("review.decide", item),
+        ("review.decide", axiom),
+        ("review.undo", axiom),
+    ]
+    first, second, undo = got[:3]
+    assert first["detail"] == {
+        "decision": "accept",
+        "relation": "related",
+        "actor": "cli",
+        "via": "cli",
+    }
+    assert first["actor"] == "cli" and first["user_id"] is None
+    assert first["project_id"] == project_id
+    assert second["user_id"] == user.id and second["actor"] == "kim@example.com"
+    assert second["detail"] == {"decision": "reject", "via": "cli"}
+    assert undo["detail"] == {"actor": "cli", "via": "cli"}
+    run = got[3]
+    assert run["action"] == "run.start" and run["target"]
+    assert run["detail"] == {"kind": "apply", "force": True, "actor": "cli", "via": "cli"}
+    assert run["project_id"] == project_id
+    assert len(got) == 4
+
+
+def test_web_decision_writes_one_audit_entry(api):
+    c = api["api"]
+    rows = _rows(api)
+    item = f"al:{rows['수납'].concept_id}"
+    before = len(_audit_rows(api["store"]))
+    assert c.post(f"{API}/review/{item}/decision", json={"decision": "accept"}).status_code == 200
+    assert c.delete(f"{API}/review/{item}/decision").status_code == 200
+    got = _audit_rows(api["store"])[before:]
+    assert [(r["action"], r["target"]) for r in got] == [
+        ("review.decide", item),
+        ("review.undo", item),
+    ]
+    assert got[0]["detail"] == {"decision": "accept", "actor": "local"}
+
+
 def test_diff_of_models(monkeypatch):
     from ontology.ontology import model as merged
     from ontology.store.alignments import AlignmentRecord

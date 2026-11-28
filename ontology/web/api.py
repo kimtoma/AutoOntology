@@ -1050,36 +1050,12 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
                 note=req.note.strip(),
                 decided_by=ctx.actor,
                 spec=req.spec,
+                audit=ctx.audit,
             )
         )
         if item_id.startswith("lg:"):  # the item as it is now (its definition saved)
             inbox = api.inbox(project=ctx.store)
-            payload = decision.payload
-            ctx.audit(
-                f"logic.{req.decision}",
-                target=f"{payload.get('kind')}:{payload.get('def_name') or payload.get('name')}"[
-                    :300
-                ],
-                detail={
-                    "candidate": item_id[3:],
-                    **(
-                        {"version": payload.get("version"), "edited": payload.get("edited")}
-                        if req.decision == "accept"
-                        else {}
-                    ),
-                },
-            )
-            item = {**inbox.items[item_id], "decision": decision.to_dict()}
-            return {"item": item, "decision": decision.to_dict()}
         item = {**inbox.items[item_id], "decision": decision.to_dict()}
-        ctx.audit(
-            "review.decide",
-            target=item_id[:300],
-            detail={
-                "decision": req.decision,
-                **({"relation": req.relation} if req.relation else {}),
-            },
-        )
         return {"item": item, "decision": decision.to_dict()}
 
     @router.delete("/review/{item_id:path}/decision")
@@ -1088,9 +1064,8 @@ def project_routes(api: Api, ctx_dep: Any) -> APIRouter:
 
         ctx.require(_decision_permission(item_id))
         inbox = api.inbox(project=ctx.store)
-        if not _review(lambda: undo_item(inbox, item_id, actor=ctx.actor)):
+        if not _review(lambda: undo_item(inbox, item_id, audit=ctx.audit, actor=ctx.actor)):
             raise ApiError(404, "no_decision", f"no decision on {item_id[:80]!r}")
-        ctx.audit("review.undo", target=item_id[:300])
         return {"removed": item_id}
 
     @router.get("/ontology/revisions")

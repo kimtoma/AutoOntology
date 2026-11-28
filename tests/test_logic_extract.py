@@ -622,6 +622,30 @@ def test_cli_review_accept_and_undo_of_logic_candidates(client):
     assert resp.status_code == 200, resp.text
     again = c.get(f"{API}/logic/function/연체일수").json()["definition"]
     assert (again["status"], again["version"]) == ("draft", 2)
+    # the CLI audits like the web route (one entry each; the web one says local)
+    assert _audit(store) == [
+        ("logic.accept", "function:연체일수"),
+        ("logic.reject", "function:미수금"),
+        ("logic.accept", "function:연체일수"),
+    ]
+    with sqlite3.connect(store.path) as conn:
+        rows = conn.execute(
+            "SELECT action, target, detail_json, project_id FROM audit_log "
+            "WHERE action IN ('logic.accept', 'logic.reject', 'review.undo') ORDER BY id"
+        ).fetchall()
+    details = [json.loads(r[2]) for r in rows]
+    assert [r[0] for r in rows] == ["logic.accept", "logic.reject", "review.undo", "logic.accept"]
+    assert details[0] == {
+        "candidate": items["연체일수"]["id"][3:],
+        "version": 1,
+        "edited": False,
+        "actor": "cli",
+        "via": "cli",
+    }
+    assert details[1] == {"candidate": items["미수금"]["id"][3:], "actor": "cli", "via": "cli"}
+    assert rows[2][1] == items["연체일수"]["id"] and details[2] == {"actor": "cli", "via": "cli"}
+    assert details[3]["actor"] == "local" and "via" not in details[3]
+    assert {r[3] for r in rows} == {view.id}
 
 
 # --- roles --------------------------------------------------------------------------------
