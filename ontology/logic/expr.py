@@ -48,8 +48,11 @@ budget is the loader's).
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import math
 import re
+import threading
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -1375,16 +1378,94 @@ BUILTINS: tuple[str, ...] = tuple(
 )
 
 
+#: Compiled expressions by (text, parse limits, schema, type, parameter types): a
+#: workflow run checks the same few expressions for every object. An entry also keeps the
+#: function signatures its compile looked up and is used only while they are unchanged.
+#: Bounded (least recently used out); failed compiles are not kept.
+COMPILE_CACHE_SIZE = 1024
+_compile_cache: OrderedDict[tuple[Any, ...], tuple[Compiled, tuple[tuple[str, Any], ...]]] = (
+    OrderedDict()
+)
+_compile_lock = threading.Lock()
+
+
+def clear_compile_cache() -> None:
+    with _compile_lock:
+        _compile_cache.clear()
+
+
+def _fingerprint(value: Schema | TypeInfo) -> bytes:
+    """A digest of a schema's or type's content (both are built once and replaced, never
+    changed in place, so it is kept on the object)."""
+    found = value.__dict__.get("_expr_fingerprint")
+    if found is None:
+        found = hashlib.blake2b(repr(value).encode(), digest_size=16).digest()
+        value.__dict__["_expr_fingerprint"] = found
+    return found
+
+
+def _limits() -> tuple[int, ...]:
+    return (
+        MAX_SOURCE_CHARS,
+        MAX_STRING_CHARS,
+        MAX_NAME_CHARS,
+        MAX_NUMBER_CHARS,
+        MAX_DEPTH,
+        MAX_NODES,
+        MAX_LIST_ITEMS,
+        MAX_PATH,
+        MAX_CALL_DEPTH,
+    )
+
+
 def compile_expr(text: Any, scope: Scope) -> Compiled:
-    """*text* parsed and checked in *scope*; :class:`ExprError` when it does not."""
+    """*text* parsed and checked in *scope*; :class:`ExprError` when it does not.
+
+    Cached (:data:`COMPILE_CACHE_SIZE`): the same text in an equal scope is compiled
+    once. Limits per evaluation (steps, call depth, value sizes) apply on every run."""
     if isinstance(text, bool):
         text = "true" if text else "false"
     elif isinstance(text, (int, float)):
         text = str(text)
+    try:
+        key: tuple[Any, ...] | None = (
+            text,
+            _limits(),
+            _fingerprint(scope.schema),
+            _fingerprint(scope.type),
+            tuple(sorted(scope.params.items())),
+        )
+        hash(key)
+    except Exception:  # noqa: BLE001 - an odd scope (tests, duck types) is just not cached
+        key = None
+    if key is not None:
+        with _compile_lock:
+            hit = _compile_cache.get(key)
+            if hit is not None:
+                _compile_cache.move_to_end(key)
+        if hit is not None:
+            done, looked_up = hit
+            if all(scope.functions(name) == sig for name, sig in looked_up):
+                return Compiled(done.type, done.run, set(done.functions), set(done.links), text)
+    seen: dict[str, Any] = {}
+    lookup = scope.functions
+
+    def functions(name: str) -> FunctionSig | None:
+        sig = lookup(name)
+        seen.setdefault(name, sig)
+        return sig
+
+    scope = Scope(scope.schema, scope.type, scope.params, functions)
     node = parse(text)
     compiler = _Compiler(scope)
     kind, run = compiler.compile(node, scope)
-    return Compiled(kind, run, compiler.functions, compiler.links, text)
+    done = Compiled(kind, run, compiler.functions, compiler.links, text)
+    if key is not None:
+        with _compile_lock:
+            _compile_cache[key] = (done, tuple(seen.items()))
+            while len(_compile_cache) > COMPILE_CACHE_SIZE:
+                _compile_cache.popitem(last=False)
+    return Compiled(kind, run, set(done.functions), set(done.links), text)
 
 
 def to_json(value: Any) -> Any:

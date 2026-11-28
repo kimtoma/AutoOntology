@@ -152,6 +152,68 @@ def test_budget_exhaustion_and_huge_values():
         run("5 % 0")
 
 
+# --- compiled-expression cache -------------------------------------------------------------
+
+
+def _count_parses(monkeypatch) -> list[str]:
+    calls: list[str] = []
+    real = ex.parse
+    monkeypatch.setattr(ex, "parse", lambda text: calls.append(text) or real(text))
+    return calls
+
+
+def test_compile_cache_compiles_an_expression_once_per_scope(monkeypatch):
+    ex.clear_compile_cache()
+    calls = _count_parses(monkeypatch)
+    text = "청구금액 - coalesce(수납금액, 0) > 0"
+    first = ex.compile_expr(text, scope())
+    for _ in range(20):
+        again = ex.compile_expr(text, scope())  # a new, equal scope each time
+        assert again.type == first.type and again.run is first.run
+    assert len(calls) == 1
+    again.functions.add("mutated")  # callers get their own sets
+    assert "mutated" not in ex.compile_expr(text, scope()).functions
+    # the budget is still enforced at evaluation on a cached compile
+    with pytest.raises(ex.EvalError) as e:
+        run("1 + 1 + 1 + 1 + 1", step_budget=3)
+    with pytest.raises(ex.EvalError) as e:
+        run("1 + 1 + 1 + 1 + 1", step_budget=3)
+    assert e.value.code == "budget_exceeded"
+
+
+def test_compile_cache_does_not_leak_across_schemas():
+    """The same text against another schema (here: columns folded to lower case) or
+    another type, parameter types or function signatures is compiled afresh."""
+    ex.clear_compile_cache()
+    lower = _schema(lower=True)
+    upper = ex.compile_expr("청구ID", scope())
+    obj = ex.Obj(SCHEMA.types[INV], {"청구ID": "A", "청구id": "a"})
+    assert upper.evaluate(obj, ex.EvalContext(today=TODAY)) == "A"
+    folded = ex.compile_expr("청구ID", ex.Scope(lower, lower.types[INV]))
+    assert folded.evaluate(obj, ex.EvalContext(today=TODAY)) == "a"
+    assert ex.compile_expr("param.x + 1", scope(params={"x": "number"})).type == "number"
+    with pytest.raises(ex.ExprError):
+        ex.compile_expr("param.x + 1", scope(params={"x": "bool"}))
+    num = {"f": ex.FunctionSig("f", INV, "number")}
+    txt = {"f": ex.FunctionSig("f", INV, "text")}
+    assert ex.compile_expr("f()", scope(fns=num.get)).type == "number"
+    assert ex.compile_expr("f()", scope(fns=txt.get)).type == "text"
+    with pytest.raises(ex.ExprError):
+        ex.compile_expr("f()", scope(fns=lambda n: None))
+    with pytest.raises(ex.ExprError):
+        ex.compile_expr("청구금액", scope(CUS))  # another type: no such field
+
+
+def test_compile_cache_keeps_the_parse_limits(monkeypatch):
+    ex.clear_compile_cache()
+    text = " + ".join(["1"] * 30)
+    assert ex.compile_expr(text, scope()).type == "number"
+    monkeypatch.setattr(ex, "MAX_NODES", 10)
+    with pytest.raises(ex.ExprError) as e:
+        ex.compile_expr(text, scope())
+    assert e.value.code == "too_complex"
+
+
 # --- names and types ---------------------------------------------------------------------
 
 
